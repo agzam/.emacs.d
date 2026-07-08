@@ -1,0 +1,18 @@
+# Whitelist: only config is tracked. Everything else - elpaca repos/builds,
+# eln-cache, and the state files packages scatter around (history, recentf,
+# bookmarks, transient/, url/, eshell/, projectile*, tramp, ...) - is ignored.
+/*
+!/.gitignore
+!/early-init.el
+!/init.el
+!/lisp/
+!/modules/
+!/snippets/
+
+# Never track build artifacts or editor droppings, even inside tracked dirs.
+*.elc
+*.eln
+*~
+\#*\#
+.\#*
+.DS_Store

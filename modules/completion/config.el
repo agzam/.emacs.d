@@ -1,0 +1,724 @@
+;;; modules/completion/config.el --- vertico/corfu/consult stack -*- lexical-binding: t; -*-
+;;; Commentary:
+;; Port of ~/.doom.d/modules/custom/completion (+icons +minibuffer +childframe,
+;; flags inlined).  Deltas from the Doom original:
+;; - package! recipes became :ensure recipes; vertico/corfu ship their
+;;   extensions via :files, replacing the straight build-path load-path hack
+;; - corfu/vertico extensions and completion-preview use :ensure nil
+;; - autoload/*.el are verbatim copies, loaded eagerly before this file
+;;; Code:
+
+;;; * corfu
+
+(use-package corfu
+  :ensure (corfu :files (:defaults "extensions/*"))
+  :defer t
+  :hook
+  (doom-first-buffer . global-corfu-mode)
+  :config
+  (setq
+   corfu-separator ?\s
+   ;; On-demand only: never auto-pop the popup; summon with TAB or C-c p.
+   corfu-auto nil
+   corfu-auto-delay 3.0
+   corfu-preview-current nil ; Disable current candidate preview
+   corfu-on-exact-match 'insert
+   corfu-preview-current 'insert
+   corfu-quit-no-match 'separator
+   corfu-cycle t
+   corfu-auto-prefix 3
+   completion-cycle-threshold 1
+   tab-always-indent 'complete
+   corfu-count 9)
+
+  (add-hook! 'doom-init-modules-hook
+    (defun reset-lsp-completion-provider-h ()
+      (after! lsp-mode
+        (setq lsp-completion-provider :none))))
+
+  (defun lsp-completion-off-in-text-modes-h ()
+    (when (member major-mode '(text-mode org-mode markdown-mode
+                               message-mode git-commit-mode))
+      (lsp-completion-mode -1)))
+
+  (add-hook! 'lsp-completion-mode-hook
+    (defun init-orderless-lsp-completions-h ()
+      (setf (alist-get 'lsp-capf completion-category-defaults)
+            '((styles . (orderless flex)))))
+    (defun lsp-completion-off-in-text-modes-h ()
+      (when (and lsp-completion-mode
+                 (member major-mode '(text-mode org-mode markdown-mode
+                                      message-mode git-commit-mode)))
+        (lsp-completion-mode -1))))
+
+  (map! :map corfu-map
+        "<escape>" #'+corfu-quit-and-escape
+        "C-SPC"    #'corfu-insert-separator
+        "C-n"      #'corfu-next
+        "C-p"      #'corfu-previous
+        "C-/" #'+corfu-move-to-minibuffer
+        :i "C-u" nil) ; evil-collection bs
+
+  (map! :map (global-map corfu-map)
+        (:prefix ("C-c p" . "cape")
+                 "p"  #'completion-at-point
+                 "t"  #'complete-tag
+                 "d"  #'cape-dabbrev
+                 "h"  #'cape-history
+                 "f"  #'cape-file
+                 "k"  #'cape-keyword
+                 "s"  #'cape-symbol
+                 "a"  #'cape-abbrev
+                 "l"  #'cape-line
+                 "w"  #'cape-dict
+                 "_"  #'cape-tex
+                 "&"  #'cape-sgml
+                 "r"  #'cape-rfc1345))
+
+  ;; corfu-indexed like in Company, M+number - inserts the thing
+  (map! :map corfu-map
+        "M-0" (cmd! () (+corfu-insert-indexed 9))
+        "M-1" (cmd! () (+corfu-insert-indexed 0))
+        "M-2" (cmd! () (+corfu-insert-indexed 1))
+        "M-3" (cmd! () (+corfu-insert-indexed 2))
+        "M-4" (cmd! () (+corfu-insert-indexed 3))
+        "M-5" (cmd! () (+corfu-insert-indexed 4))
+        "M-6" (cmd! () (+corfu-insert-indexed 5))
+        "M-7" (cmd! () (+corfu-insert-indexed 6))
+        "M-8" (cmd! () (+corfu-insert-indexed 7))
+        "M-9" (cmd! () (+corfu-insert-indexed 8)))
+
+  (after! evil
+    (evil-make-overriding-map corfu-map)
+    (advice-add 'evil-escape-func :after 'corfu-quit))
+
+  (setq dabbrev-ignored-buffer-modes '(pdf-view-mode dired-mode ghostel-mode)))
+
+;;; * completion-preview (built-in)
+
+(use-package completion-preview
+  :ensure nil
+  :after corfu
+  :hook (doom-first-buffer . global-completion-preview-mode)
+  :config
+  (setopt completion-preview-minimum-symbol-length 3)
+  ;; Suppress the built-in "i out of n" cycling echo; the echo-area candidate
+  ;; list below (`completion-preview-echo-candidates') replaces it.
+  (setopt completion-preview-message-format nil)
+  ;; Defer to Corfu's sorter so the inline preview ranks like Corfu does.
+  (setq completion-preview-sort-function
+        (lambda (cands)
+          (if corfu-sort-function (funcall corfu-sort-function cands) cands)))
+  ;; Org rebinds letters to `org-self-insert-command' (and DEL to
+  ;; `org-delete-backward-char'); teach completion-preview to refresh on them.
+  (dolist (cmd '(org-self-insert-command org-delete-backward-char))
+    (add-to-list 'completion-preview-commands cmd))
+  (map! :map completion-preview-active-mode-map
+        ;; Accept the preview even where a major mode grabs <tab> (ECA, Org).
+        "<tab>" #'completion-preview-insert
+        "TAB"   #'completion-preview-insert
+        ;; Cycle candidates while a preview shows; the built-ins keep the
+        ;; preview alive across presses (a custom wrapper would not).
+        "M-/"   #'completion-preview-next-candidate
+        "M-?"   #'completion-preview-prev-candidate))
+
+(defun completion-preview-accept-or-slurp ()
+  "Accept the completion preview if one is shown, else `sp-forward-slurp-sexp'.
+Lets M-l double as an accept key without losing its slurp binding."
+  (interactive)
+  (if (bound-and-true-p completion-preview-active-mode)
+      (completion-preview-insert)
+    (call-interactively #'sp-forward-slurp-sexp)))
+
+(after! org
+  (defadvice! completion-preview-accept-or-metaright-a (orig-fn &rest args)
+    "Accept the completion preview if shown, else run ORIG-FN (`org-metaright')."
+    ;; evil-org's high-precedence insert map shadows our global M-l; advise
+    ;; the command itself instead of fighting keymap precedence.
+    :around #'org-metaright
+    (if (bound-and-true-p completion-preview-active-mode)
+        (completion-preview-insert)
+      (apply orig-fn args))))
+
+(defvar completion-preview-echo-max 5
+  "Maximum number of completion-preview candidates shown per echo-area page.")
+
+(defvar completion-preview--echo-shown nil
+  "Non-nil while the echo-area candidate list is on screen.")
+
+(defface completion-preview-echo-number '((t :foreground "orange"))
+  "Face for the index number shown before each echo-list candidate."
+  :group 'completion-preview)
+
+(defvar completion-preview-echo-number-height 1.1
+  "Height multiplier applied to the superscript echo-list index numbers.")
+
+(defconst completion-preview--superscripts ["⁰" "¹" "²" "³" "⁴" "⁵" "⁶" "⁷" "⁸" "⁹"]
+  "Superscript glyphs for digits 0-9.")
+
+(defun completion-preview--superscript (n)
+  "Return the natural number N rendered with superscript digits."
+  (mapconcat (lambda (c) (aref completion-preview--superscripts (- c ?0)))
+             (number-to-string n) ""))
+
+(defun completion-preview--echo-string ()
+  "Return the echo string for the current preview page, or nil when inactive.
+Shows the page of up to `completion-preview-echo-max' candidates containing
+the current one (highlighted), each prefixed with its 1-based on-page index."
+  (when (bound-and-true-p completion-preview--overlay)
+    (let* ((ov completion-preview--overlay)
+           (common (or (overlay-get ov 'completion-preview-common) ""))
+           (sufs (overlay-get ov 'completion-preview-suffixes))
+           (idx (or (overlay-get ov 'completion-preview-index) 0))
+           (total (length sufs))
+           (size completion-preview-echo-max)
+           (start (* (/ idx size) size))
+           (end (min total (+ start size)))
+           (cands (cl-loop for i from start below end
+                           for num = (propertize
+                                      (completion-preview--superscript (1+ (- i start)))
+                                      'face `((:height ,completion-preview-echo-number-height)
+                                              completion-preview-echo-number))
+                           for cand = (substring-no-properties
+                                       (concat common (nth i sufs)))
+                           collect (concat num (if (= i idx)
+                                                   (propertize cand 'face 'highlight)
+                                                 cand)))))
+      (concat (and (< 0 start) "← ")
+              (mapconcat #'identity cands "  ")
+              (and (< end total) " →")))))
+
+(defun completion-preview-echo-candidates (&rest _)
+  "Echo the current page of completion-preview candidates."
+  (if-let* ((str (completion-preview--echo-string)))
+      (progn
+        (setq completion-preview--echo-shown t)
+        (let ((message-log-max nil)) (message "%s" str)))
+    (completion-preview-echo-clear)))
+
+(defun completion-preview-echo-clear (&rest _)
+  "Clear the echoed candidate list once the preview is gone."
+  (when (and completion-preview--echo-shown
+             (not (bound-and-true-p completion-preview--overlay)))
+    (setq completion-preview--echo-shown nil)
+    (let ((message-log-max nil)) (message nil))))
+
+(defun completion-preview-insert-indexed (n)
+  "Complete with the Nth (1-based) candidate of the visible echo page.
+The inline-preview analog of `+corfu-insert-indexed': one press inserts."
+  (when (bound-and-true-p completion-preview--overlay)
+    (let* ((ov completion-preview--overlay)
+           (base (or (overlay-get ov 'completion-preview-base) ""))
+           (beg (overlay-get ov 'completion-preview-beg))
+           (end (overlay-get ov 'completion-preview-end))
+           (sufs (overlay-get ov 'completion-preview-suffixes))
+           (common (or (overlay-get ov 'completion-preview-common) ""))
+           (idx (or (overlay-get ov 'completion-preview-index) 0))
+           (efn (plist-get (overlay-get ov 'completion-preview-props) :exit-function))
+           (size completion-preview-echo-max)
+           (target (+ (* (/ idx size) size) (1- n))))
+      (when (< target (length sufs))
+        (let* ((cand (concat common (nth target sufs)))
+               (skip (- end beg))
+               (visible (if (<= 0 skip (length cand)) (substring cand skip) "")))
+          (completion-preview-active-mode -1)
+          (goto-char end)
+          (insert-and-inherit visible)
+          (when (functionp efn)
+            (funcall efn (concat base cand) 'finished)))))))
+
+(defun completion-preview-next-candidate-guard-a (orig &rest args)
+  "Hide the preview instead of throwing if cycling hits a stale overlay.
+Overlay positions go stale in buffers rewritten under it (eca-chat streaming)."
+  (condition-case nil
+      (apply orig args)
+    (args-out-of-range
+     (when (bound-and-true-p completion-preview-active-mode)
+       (completion-preview-active-mode -1)))))
+
+(after! completion-preview
+  ;; Popup-less candidate list: echo the current page of candidates.
+  (when (fboundp 'completion-preview--update)
+    (advice-add 'completion-preview--update :after #'completion-preview-echo-candidates))
+  (advice-add 'completion-preview-next-candidate :after #'completion-preview-echo-candidates)
+  (advice-add 'completion-preview-active-mode :after #'completion-preview-echo-clear)
+  (advice-add 'completion-preview-next-candidate :around
+              #'completion-preview-next-candidate-guard-a)
+  ;; M+number completes with the Nth candidate of the visible page.
+  (map! :map completion-preview-active-mode-map
+        "M-1" (cmd! () (completion-preview-insert-indexed 1))
+        "M-2" (cmd! () (completion-preview-insert-indexed 2))
+        "M-3" (cmd! () (completion-preview-insert-indexed 3))
+        "M-4" (cmd! () (completion-preview-insert-indexed 4))
+        "M-5" (cmd! () (completion-preview-insert-indexed 5))))
+
+;;; * orderless
+
+(use-package orderless
+  :after-call doom-first-input-hook
+  :config
+  (setopt orderless-affix-dispatch-alist
+          '((?! . orderless-without-literal)
+            (?& . orderless-annotation)
+            (?% . char-fold-to-regexp)
+            (?` . orderless-initialism)
+            (?= . orderless-literal)
+            (?^ . orderless-literal-prefix)
+            (?~ . orderless-flex))
+          orderless-style-dispatchers
+          '(+vertico-orderless-dispatch
+            +vertico-orderless-disambiguation-dispatch))
+
+  (setopt completion-styles '(orderless partial-completion basic)
+          completion-category-defaults nil
+          completion-category-overrides '((file (styles . (partial-completion)))
+                                          (symbol (styles . (partial-completion))))))
+
+;;; * corfu extensions & friends
+
+(use-package popon
+  :ensure (popon :host github :repo "cimisc/emacs-popon")
+  :defer t)
+
+(use-package corfu-terminal
+  :ensure (corfu-terminal :host github :repo "cimisc/emacs-corfu-terminal")
+  :defer t
+  :when (not (display-graphic-p))
+  :hook ((corfu-mode . corfu-terminal-mode)))
+
+(use-package cape
+  :after corfu
+  :init
+  (map! [remap dabbrev-expand] 'cape-dabbrev)
+  (add-hook! latex-mode
+    (defun +corfu--latex-set-capfs ()
+      (add-to-list 'completion-at-point-functions #'cape-tex)))
+
+  (add-hook! (text-mode prog-mode)
+    (defun cape-completion-at-point-functions-h ()
+      (dolist (cfn '(cape-file
+                     yasnippet-capf
+                     cape-dabbrev
+                     cape-dict
+                     cape-keyword))
+        (add-to-list 'completion-at-point-functions cfn :append)
+        (setq-local completion-at-point-functions
+                    (remove 'ispell-completion-at-point
+                            completion-at-point-functions)))))
+
+  (add-hook! emacs-lisp-mode
+    (defun +cape-completion-at-point-elisp-h ()
+      (add-to-list 'completion-at-point-functions #'cape-elisp-symbol :append)))
+
+  (add-hook! (org-mode markdown-mode)
+    (defun +cape-completion-at-point-org-md-h ()
+      (add-to-list 'completion-at-point-functions #'cape-elisp-block :append))))
+
+(use-package corfu-popupinfo
+  :ensure nil
+  :after corfu
+  :config
+  (corfu-popupinfo-mode +1))
+
+(use-package corfu-history
+  :ensure nil
+  :after corfu
+  :config
+  (add-hook! corfu-mode
+    (defun corfu-mode-history-h ()
+      (corfu-history-mode 1)
+      (savehist-mode 1)
+      (add-to-list 'savehist-additional-variables 'corfu-history))))
+
+(use-package corfu-indexed
+  :ensure nil
+  :after corfu
+  :config
+  (setq corfu-indexed-start 1)
+  (add-hook! corfu-mode #'corfu-indexed-mode))
+
+(use-package corfu-quick
+  :ensure nil
+  :after corfu
+  :bind (:map corfu-map
+              ("M-q" . corfu-quick-complete)
+              ("C-q" . corfu-quick-insert))
+  :config (setq corfu-quick1 "asdfghjkl;"))
+
+(use-package kind-icon
+  :after corfu
+  :custom
+  (kind-icon-default-face 'corfu-default)
+  :config
+  (setq kind-icon-use-icons t
+        svg-lib-icons-dir (expand-file-name "svg-lib" doom-cache-dir)
+        kind-icon-mapping
+        '((array "a" :icon "code-brackets" :face font-lock-variable-name-face)
+          (boolean "b" :icon "circle-half-full" :face font-lock-builtin-face)
+          (class "c" :icon "view-grid-plus-outline" :face font-lock-type-face)
+          (color "#" :icon "palette" :face success)
+          (constant "co" :icon "pause-circle" :face font-lock-constant-face)
+          (constructor "cn" :icon "table-column-plus-after" :face font-lock-function-name-face)
+          (enum "e" :icon "format-list-bulleted-square" :face font-lock-builtin-face)
+          (enum-member "em" :icon "format-list-checks" :face font-lock-builtin-face)
+          (event "ev" :icon "lightning-bolt-outline" :face font-lock-warning-face)
+          (field "fd" :icon "application-braces-outline" :face font-lock-variable-name-face)
+          (file "f" :icon "file" :face font-lock-string-face)
+          (folder "d" :icon "folder" :face font-lock-doc-face)
+          (function "f" :icon "sigma" :face font-lock-function-name-face)
+          (interface "if" :icon "video-input-component" :face font-lock-type-face)
+          (keyword "kw" :icon "image-filter-center-focus" :face font-lock-keyword-face)
+          (macro "mc" :icon "lambda" :face font-lock-keyword-face)
+          (method "m" :icon "sigma" :face font-lock-function-name-face)
+          (module "{" :icon "view-module" :face font-lock-preprocessor-face)
+          (numeric "nu" :icon "numeric" :face font-lock-builtin-face)
+          (operator "op" :icon "plus-circle-outline" :face font-lock-comment-delimiter-face)
+          (param "pa" :icon "cog" :face default)
+          (property "pr" :icon "tune-vertical" :face font-lock-variable-name-face)
+          (reference "rf" :icon "bookmark-box-multiple" :face font-lock-variable-name-face)
+          (snippet "S" :icon "text-short" :face font-lock-string-face)
+          (string "s" :icon "sticker-text-outline" :face font-lock-string-face)
+          (struct "%" :icon "code-braces" :face font-lock-variable-name-face)
+          (t "." :icon "crosshairs-question" :face shadow)
+          (text "tx" :icon "script-text-outline" :face shadow)
+          (type-parameter "tp" :icon "format-list-bulleted-type" :face font-lock-type-face)
+          (unit "u" :icon "ruler-square" :face shadow)
+          (value "v" :icon "numeric-1-box-multiple-outline" :face font-lock-builtin-face)
+          (variable "va" :icon "adjust" :face font-lock-variable-name-face)))
+  (setq kind-icon-default-style '(:padding 0 :stroke 0 :margin 0 :radius 0 :height 0.8 :scale 0.8))
+  (add-hook 'doom-load-theme-hook #'kind-icon-reset-cache)
+  (add-to-list 'corfu-margin-formatters #'kind-icon-margin-formatter))
+
+;;; * vertico
+
+(use-package vertico
+  :ensure (vertico :files (:defaults "extensions/*"))
+  :hook (doom-first-input . vertico-mode)
+  :init
+  (defadvice! +vertico-crm-indicator-a (args)
+    :filter-args #'completing-read-multiple
+    (cons (format "[CRM%s] %s"
+                  (replace-regexp-in-string
+                   "\\`\\[.*?]\\*\\|\\[.*?]\\*\\'" ""
+                   crm-separator)
+                  (car args))
+          (cdr args)))
+  :config
+  (setq vertico-resize nil
+        vertico-count 17
+        vertico-cycle t)
+  (setq-default completion-in-region-function
+                (lambda (&rest args)
+                  (apply (if vertico-mode
+                             #'consult-completion-in-region
+                           #'completion--in-region)
+                         args)))
+
+  (add-hook 'minibuffer-setup-hook #'vertico-repeat-save)
+  (map! :map vertico-map "DEL" #'vertico-directory-delete-char)
+
+  ;; These commands are problematic and automatically show the *Completions* buffer
+  (advice-add #'tmm-add-prompt :after #'minibuffer-hide-completions)
+  (defadvice! +vertico--suppress-completion-help-a (fn &rest args)
+    :around #'ffap-menu-ask
+    (letf! ((#'minibuffer-completion-help #'ignore))
+      (apply fn args)))
+  (setq completion-ignore-case t
+        read-buffer-completion-ignore-case t)
+
+  (defadvice! vertico-current-with-arrow-a
+    ;; Prefix current candidate with arrow
+    (orig cand prefix suffix index _start)
+    :around #'vertico--format-candidate
+    (setq cand (funcall orig cand prefix suffix index _start))
+    (concat
+     (if (= vertico--index index)
+         (propertize "» " 'face 'vertico-current)
+       "  ")
+     cand))
+
+  (map! :map vertico-map
+        (:prefix ";"
+         "." #'evil-insert-state
+         ";" #'vertico-posframe-briefly-tall
+         "b" #'vertico-multiform-buffer
+         "c" #'embark-collect
+         "d" #'consult-dir
+         "e" #'embark-export
+         "f" #'vertico-multiform-flat
+         "g" #'vertico-multiform-grid
+         "i" #'vertico-quick-insert
+         "j" #'vertico-quick-jump
+         "p" #'vertico-multiform-posframe
+         "r" #'vertico-multiform-reverse
+         "s" #'vertico-suspend
+         "t" #'vertico-posframe-briefly-tall
+         "u" #'vertico-multiform-unobtrusive
+         "C-;" #'embark-act
+         :desc "insert ;" "SPC" (cmd! (insert ";")))
+        "DEL" #'delete-backward-char
+        "C-h" #'vertico-directory-delete-word
+        "M-h" #'vertico-grid-left
+        "M-l" #'vertico-grid-right
+        "M-j" #'vertico-next
+        "M-k" #'vertico-previous
+        "C-e" #'vertico-scroll-up
+        "C-y" #'vertico-scroll-down
+        "]" #'vertico-next-group
+        "[" #'vertico-previous-group
+        "~" #'vertico-jump-to-home-dir-on~
+        "C-/" #'vertico-jump-root
+        "C-?" #'vertico-jump-sudo
+        "M-m" #'embark-select
+        "C-SPC" #'embark-preview+))
+
+(use-package vertico-posframe
+  :ensure (vertico-posframe :host github :repo "tumashu/vertico-posframe")
+  :after vertico
+  :config
+  (setq vertico-posframe-poshandler 'posframe-poshandler-frame-bottom-center)
+  (setq
+   vertico-posframe-global t
+   vertico-posframe-height nil
+   vertico-posframe-width 150
+   marginalia-margin-threshold 500
+   vertico-posframe-parameters `((alpha . 1.0))
+   ;; Ignore buffer-local text-scale and use frame's default font size
+   posframe-text-scale-factor-function (lambda (_) 0))
+  (vertico-posframe-mode +1)
+
+  ;; disable and restore posframe when emacsclient connects in terminal
+  (add-hook! 'after-make-frame-functions
+    (defun disable-vertico-posframe-in-term-h (frame)
+      (when (and (not (display-graphic-p frame))
+                 (bound-and-true-p vertico-posframe-mode))
+        (vertico-posframe-mode -1)
+        (setq vertico-posframe-restore-after-term-p t))))
+
+  (add-hook! 'delete-frame-functions
+    (defun restore-vertico-posframe-after-term-h (_frame)
+      (when (bound-and-true-p vertico-posframe-restore-after-term-p)
+        (vertico-posframe-mode +1))))
+
+  ;; fixing "Doesn't properly respond to C-n"
+  ;; https://github.com/tumashu/vertico-posframe/issues/11
+  (defadvice! vertico-posframe--display-no-evil (fn lines)
+    :around #'vertico-posframe--display
+    (funcall-interactively fn lines)
+    (evil-local-mode -1)))
+
+(use-package vertico-repeat
+  :ensure nil
+  :after vertico
+  :config
+  (add-hook! 'minibuffer-setup-hook #'vertico-repeat-save))
+
+(use-package vertico-quick
+  :ensure nil
+  :after vertico)
+
+(use-package vertico-directory
+  :ensure nil
+  :after vertico)
+
+(use-package vertico-grid
+  :ensure nil
+  :after vertico
+  :config
+  (add-hook! 'minibuffer-exit-hook
+    (defun vertico-grid-mode-off ()
+      (vertico-grid-mode -1))))
+
+(use-package vertico-buffer
+  :ensure nil
+  :after vertico
+  :config
+  (add-hook! 'vertico-buffer-mode-hook
+    (defun vertico-buffer-h ()
+      (vertico-posframe-mode (if vertico-buffer-mode -1 +1)))))
+
+;;; * consult
+
+(use-package consult
+  :defer t
+  :preface
+  (define-key!
+    [remap bookmark-jump]                 #'consult-bookmark
+    [remap evil-show-marks]               #'consult-mark
+    [remap evil-show-registers]           #'consult-register
+    [remap goto-line]                     #'consult-goto-line
+    [remap imenu]                         #'consult-imenu
+    [remap Info-search]                   #'consult-info
+    [remap locate]                        #'consult-locate
+    [remap load-theme]                    #'consult-theme
+    [remap recentf-open-files]            #'consult-recent-file
+    [remap switch-to-buffer]              #'consult-buffer
+    [remap switch-to-buffer-other-window] #'consult-buffer-other-window
+    [remap switch-to-buffer-other-frame]  #'consult-buffer-other-frame
+    [remap yank-pop]                      #'consult-yank-pop
+    [remap persp-switch-to-buffer]        #'+vertico/switch-workspace-buffer)
+  :config
+  (consult-customize
+   consult-ripgrep consult-git-grep consult-grep
+   consult-bookmark consult-recent-file
+   +default/search-project +default/search-other-project
+   +default/search-project-for-symbol-at-point
+   +default/search-cwd +default/search-other-cwd
+   +default/search-notes-for-symbol-at-point
+   +default/search-emacsd
+   :preview-key 'any)
+
+  (setopt consult-preview-key "C-SPC"
+          consult-narrow-key "<")
+  (consult-customize
+   +default/search-buffer
+   :preview-key (list "C-SPC" :debounce 0.5 'any))
+
+  (define-key!
+    :keymaps (append +default-minibuffer-maps)
+    "C-/" #'consult-history)
+
+  (map! :after consult
+        :map isearch-mode-map "M-s l" #'consult-line)
+
+  (remove-hook! 'consult-after-jump-hook 'consult--maybe-recenter)
+  (add-hook! 'consult-after-jump-hook 'recenter))
+
+(use-package consult-dir
+  :defer t
+  :init
+  (map! [remap list-directory] #'consult-dir
+        (:after vertico
+         :map vertico-map
+         "C-x C-d" #'consult-dir
+         "C-x C-j" #'consult-dir-jump-file))
+  :config
+  (setq consult-dir-project-list-function #'consult-dir-projectile-dirs
+        consult-dir-shadow-filenames nil
+        ;; Jump straight into the picked dir instead of re-prompting via find-file.
+        consult-dir-default-command #'consult-dir-dired)
+
+  (defvar consult-dir--source-zoxide
+    `(:name "Zoxide"
+      :narrow ?z
+      :category file
+      :face consult-file
+      :enabled ,(lambda () (executable-find "zoxide"))
+      :items ,(lambda ()
+                (split-string
+                 (string-trim (shell-command-to-string "zoxide query --list"))
+                 "\n" t)))
+    "Zoxide directory source for `consult-dir'.")
+
+  (add-to-list 'consult-dir-sources 'consult-dir--source-zoxide t))
+
+(use-package consult-projectile
+  :defer t)
+
+(use-package consult-flycheck
+  :after (consult flycheck))
+
+(use-package marginalia
+  :hook (doom-first-input . marginalia-mode)
+  :init
+  (map! :map minibuffer-local-map
+        :desc "Cycle marginalia views" "M-A" #'marginalia-cycle)
+  :config
+  (add-hook 'marginalia-mode-hook #'nerd-icons-completion-marginalia-setup)
+  (advice-add #'marginalia--project-root :override #'doom-project-root)
+  (dolist (c '((+default/find-file-under-here . file)
+               (doom/find-file-in-emacsd . project-file)
+               (doom/find-file-in-other-project . project-file)
+               (doom/find-file-in-private-config . file)
+               (doom/describe-active-minor-mode . minor-mode)
+               (flycheck-error-list-set-filter . builtin)
+               (persp-switch-to-buffer . buffer)
+               (projectile-find-file . project-file)
+               (projectile-recentf . project-file)
+               (projectile-switch-to-buffer . buffer)
+               (projectile-switch-project . project-file)))
+    (add-to-list 'marginalia-command-categories c)))
+
+(use-package nerd-icons-completion
+  :defer t)
+
+(use-package wgrep
+  :commands wgrep-change-to-wgrep-mode
+  :config (setopt wgrep-auto-save-buffer t))
+
+;;; * yasnippet
+
+(use-package yasnippet
+  :defer-incrementally eldoc easymenu help-mode
+  :commands (yas-minor-mode-on
+             yas-expand
+             yas-expand-snippet
+             yas-lookup-snippet
+             yas-insert-snippet
+             yas-new-snippet
+             yas-visit-snippet-file
+             yas-activate-extra-mode
+             yas-deactivate-extra-mode
+             yas-maybe-expand-abbrev-key-filter)
+  :config
+  (map! :map yas-minor-mode-map
+        "M-j" #'yas-next-field
+        "M-k" #'yas-prev-field)
+  ;; Share the snippet library with the Doom config for now.
+  (add-to-list 'yas-snippet-dirs "~/.doom.d/snippets/")
+  (add-to-list 'hippie-expand-try-functions-list 'yas-hippie-try-expand)
+  (yas-reload-all)
+  (yas-global-mode +1)
+
+  (add-hook! 'yas-before-expand-snippet-hook
+             #'temporarily-disable-smart-parens
+             #'evil-insert-state)
+  (advice-add 'yas-completing-prompt :around #'yas-completing-prompt-a))
+
+(use-package yasnippet-capf
+  :ensure (yasnippet-capf :host github :repo "elken/yasnippet-capf")
+  :after cape
+  :config
+  (add-hook! 'yas-minor-mode-hook :append
+    (defun +corfu-remove-t-in-completion-at-point-functions ()
+      (remove-hook! 'completion-at-point-functions :local 't))))
+
+(use-package consult-yasnippet
+  :after (consult yasnippet)
+  :config
+  (setq consult-yasnippet-use-thing-at-point t))
+
+;;; * dash docs
+
+(use-package dash-docs
+  :defer t
+  :config
+  (setq dash-docs-browser-func #'+browse-dash-doc
+        dash-docs-enable-debugging nil)
+
+  ;; a check, before activation of a docset to install it if needed
+  (advice-add 'dash-docs-activate-docset :around #'dash-docs-activate-docset-a)
+
+  ;; overriding internal implementation fns for the time being
+  ;; https://github.com/dash-docs-el/dash-docs/issues/23
+  (advice-add 'dash-docs-install-user-docset :override #'dash-docs-install-user-docset+)
+  (advice-add 'dash-docs-install-docset :override #'dash-docs-install-docset+)
+  (advice-add 'dash-docs-unofficial-docsets :override #'dash-docs-unofficial-docsets+))
+
+(use-package consult-dash
+  :ensure (consult-dash :host github :repo "emacsmirror/consult-dash")
+  :commands (consult-dash)
+  :config
+  (map! :map consult-dash-embark-keymap
+        :n "b" #'browse-url)
+
+  (set-lookup-handlers! 'lsp-mode
+    :definition #'+lsp-lookup-definition-handler
+    :references #'+lsp-lookup-references-handler
+    :documentation #'+consult-dash-doc
+    :implementations '(lsp-find-implementation :async t)
+    :type-definition #'lsp-find-type-definition))
+
+(add-hook! 'doom-first-buffer-hook #'global-completion-preview-mode)
+
+;;; completion.el ends here
