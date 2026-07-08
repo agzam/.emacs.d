@@ -1,4 +1,4 @@
-;;; early-init.el --- emacs-lab startup knobs -*- lexical-binding: t; -*-
+;;; early-init.el --- startup knobs -*- lexical-binding: t; -*-
 ;;; Commentary:
 ;; Startup optimizations borrowed from Doom Emacs (MIT, doomemacs/doomemacs
 ;; early-init.el @8e4fbba), trimmed to the safe subset.  Doom's redisplay,
@@ -9,6 +9,24 @@
 ;; Elpaca replaces package.el entirely.
 (setq package-enable-at-startup nil)
 
+;; Keep this directory pristine: everything machine-written lives in XDG dirs
+;; (Doom's quarantine strategy).  Defined this early so the eln redirect and
+;; the Elpaca bootstrap can use them; doom-compat's defvars concur.
+(defvar doom-local-dir
+  (expand-file-name "emacs-lab/" (or (getenv "XDG_DATA_HOME") "~/.local/share")))
+(defvar doom-data-dir (expand-file-name "data/" doom-local-dir))
+(defvar doom-state-dir
+  (expand-file-name "emacs-lab/" (or (getenv "XDG_STATE_HOME") "~/.local/state")))
+(defvar doom-cache-dir
+  (expand-file-name "emacs-lab/" (or (getenv "XDG_CACHE_HOME") "~/.cache")))
+
+;; Native-comp artifacts.
+(when (and (featurep 'native-compile)
+           (fboundp 'startup-redirect-eln-cache))
+  (let ((eln-dir (expand-file-name "eln/" doom-cache-dir)))
+    (make-directory eln-dir t)
+    (startup-redirect-eln-cache eln-dir)))
+
 ;; GC deferred during startup; gcmh takes over after (see init.el).
 (setq gc-cons-percentage 1.0)
 (if noninteractive
@@ -18,7 +36,7 @@
   (setq load-prefer-newer nil))
 
 (add-hook 'emacs-startup-hook
-          (defun lab--startup-restore-h ()
+          (defun restore-startup-defaults-h ()
             "Fallback sane GC until gcmh activates; restore `load-prefer-newer'."
             (setq gc-cons-threshold (* 16 1024 1024)
                   gc-cons-percentage 0.1
@@ -58,13 +76,13 @@
          nil
        (list (rassq 'jka-compr-handler old-value))))
     (put 'file-name-handler-alist 'initial-value (copy-sequence old-value))
-    (define-advice command-line-1 (:around (fn args-left) lab-restore-fnha)
+    (define-advice command-line-1 (:around (fn args-left) restore-fnha)
       ;; CLI file args may be TRAMP paths etc.
       (let ((file-name-handler-alist
              (if args-left (copy-sequence old-value) file-name-handler-alist)))
         (funcall fn args-left)))
     (add-hook 'emacs-startup-hook
-              (defun lab--restore-file-name-handler-alist-h ()
+              (defun restore-file-name-handler-alist-h ()
                 (set-default-toplevel-value
                  'file-name-handler-alist
                  (delete-dups

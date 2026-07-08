@@ -1,0 +1,264 @@
+;;; modules/general/config.el -*- lexical-binding: t; -*-
+;;; Commentary:
+;; Port of ~/.doom.d/modules/custom/general.  Deltas from the Doom original:
+;; - package! recipes folded into :ensure
+;; - undo-fu, undo-fu-session, visual-fill-column recipes deferred until the
+;;   :emacs undo / writing ports (TODO)
+;;; Code:
+
+;; Change the cursor color in emacs state. We do it this roundabout way
+;; to ensure changes in theme doesn't break these colors.
+(add-hook! '(doom-load-theme-hook doom-init-modules-hook)
+  (defun evil-update-cursor-color-h ()
+    (put 'cursor 'evil-emacs-color "SkyBlue2")
+    (put 'cursor 'evil-normal-color "DarkGoldenrod2")
+    (posframe-delete-all)))
+
+(use-package transient
+  :ensure (transient :host github :repo "magit/transient")
+  :demand t)
+
+(use-package winum
+  :after-call doom-switch-window-hook
+  :config
+  (setopt winum-scope 'frame-local)
+  (winum-mode +1)
+  (dolist (wn (seq-map 'number-to-string (number-sequence 0 9)))
+    (let ((f (intern (concat "winum-select-window-" wn)))
+          (k (concat "s-" wn)))
+      (map! :n k f)
+      (map! :leader :n wn f
+            :n (concat "w" wn) f)
+      (global-set-key (kbd k) f))))
+
+(use-package info+
+  ;; EmacsWiki package: purged from MELPA in 2018; straight resolved it via
+  ;; its emacsmirror recipe source, Elpaca needs the mirror spelled out.
+  :ensure (info+ :host github :repo "emacsmirror/info-plus")
+  :defer t
+  :commands (info info-display-manual)
+  :config
+  (setopt Info-fontify-angle-bracketed-flag nil)
+  (add-hook 'Info-mode-hook (lambda () (require 'info+))))
+
+(after! smartparens
+  (eval `(add-hook! , sp-lisp-modes
+                      #'doom-disable-show-paren-mode-h
+                      #'show-smartparens-mode))
+
+  ;; fix for smartparens. Doom's default module does things like skipping pairs if
+  ;; one typed at the beginning of the word.
+  (dolist (brace '("(" "{" "["))
+    (sp-pair brace nil
+             :post-handlers '(("||\n[i]" "RET") ("| " "SPC"))
+             :unless '(sp-point-before-same-p)))
+
+  (sp-pair "\"" nil :unless '(sp-point-before-word-p
+                              sp-point-after-word-p))
+
+  (sp-local-pair sp-lisp-modes "(" ")"
+                 :wrap ")"
+                 :unless '(:rem sp-point-before-same-p)))
+
+(use-package expreg
+  :commands (evil-visual-char evil-visual-line evil-visual-block expreg-transient)
+  :init
+  (defadvice! evil-select-block-a (ofn &rest args)
+    :around #'evil-visual-message
+    (expreg-transient)
+    (apply ofn args))
+  :config
+  (map! :map evil-visual-state-map
+        "v" #'expreg-transient)
+
+  (setq-default expreg-functions
+                '(expreg--subword
+                  expreg--word
+                  expreg--sentence
+                  expreg--line
+                  expreg--list
+                  expreg--string
+                  expreg--treesit
+                  expreg--comment
+                  expreg--paragraph-defun
+                  expreg--markdown-subtree)))
+
+(after! ibuf-ext
+  (setopt
+   ibuffer-old-time 8 ; buffer considered old after that many hours
+   ibuffer-group-buffers-by 'projects
+   ibuffer-expert t
+   ibuffer-show-empty-filter-groups nil
+   ibuffer-jump-offer-only-visible-buffers t)
+
+  (define-ibuffer-filter unsaved-file-buffers
+      "Toggle current view to buffers whose file is unsaved."
+    (:description "file is unsaved")
+    (ignore qualifier)
+    (and (buffer-local-value 'buffer-file-name buf)
+         (buffer-modified-p buf)))
+
+  (define-ibuffer-filter file-buffers
+      "Only show buffers backed by a file."
+    (:description "file buffers")
+    (ignore qualifier)
+    (buffer-local-value 'buffer-file-name buf))
+
+  (define-ibuffer-filter non-special-buffers
+      "Only show non-special buffers (without earmuffs)."
+    (:description "non-special buffers")
+    (ignore qualifier)
+    (string-match "^[^*].*" (buffer-name buf))))
+
+(after! avy
+  (setopt avy-all-windows t)
+  (setf (alist-get ?. avy-dispatch-alist) #'avy-action-embark))
+
+;; ensure that browsing in Helpful and Info modes doesn't create
+;; additional window splits
+(add-to-list
+ 'display-buffer-alist
+ `(,(rx bos (or "*helpful" "*info"))
+   (display-buffer-reuse-window
+    display-buffer-reuse-mode-window
+    display-buffer-in-quadrant)
+   (direction . right)
+   (window . root)))
+
+;; (Doom's yank-indent knobs and the undefadvice! that disarmed them are
+;; gone: that advice never exists here - the config/default module that
+;; installs it isn't vendored.)
+
+(after! edit-indirect
+  ;; I want indirect buffers to always appear on the right side of current window
+  (add-to-list
+   'display-buffer-alist
+   `("\\*edit-indirect .*\\*"
+     (display-buffer-reuse-window
+      display-buffer-reuse-mode-window
+      display-buffer-in-quadrant)
+     (direction . right)
+     (window . root))))
+
+(after! evil
+  (advice-add #'evil-ex-start-word-search :around #'evil-ex-visual-star-search-a)
+
+  (defadvice! turn-off-writeroom-before-split-a (&rest args)
+    "writeroom hangs Emacs on splits"
+    :before #'evil-window-vsplit
+    :before #'evil-window-split
+    (when (bound-and-true-p writeroom-mode)
+      (writeroom-mode -1)))
+
+  ;; no evil in transients
+  ;; otherwise, evil prioritizes buffer's major mode keymap
+  ;; for some reason tapping into transient-setup|buffer-hook
+  ;; didn't work for me
+  (add-hook! 'transient-exit-hook
+    (defun transient-exit-evil-normal-h ()
+      (save-mark-and-excursion
+        (when (evil-emacs-state-p)
+          (evil-normal-state)))))
+
+  (defadvice! osc52-clipboard-in-ssh-session-a (&rest _)
+    "Make Emacs propagate yanked shit to system clipboard.
+
+    OSC 52 is an escape sequence for clipboard operations in terminals!
+    OSC - OS command (part of the terminal control sequences)
+    52 = the specific command number for clipboard operations
+
+    It's a standardized way to say:
+    `hey terminal, put this crap in the system clipboard`"
+    :after #'kill-new
+    :after #'kill-append
+    (when (and (not (display-graphic-p))
+               (getenv "SSH_CONNECTION"))
+      (let* ((text (current-kill 0 t))
+             (base64 (base64-encode-string
+                      (encode-coding-string text 'utf-8) t)))
+        (send-string-to-terminal
+         (format "\033]52;c;%s\007" base64))))))
+
+(use-package ibuffer-sidebar
+  :defer t
+  :commands (ibuffer-siderbar-toggle-sidebar ibuffer-sidebar-jump)
+  :config
+  (add-hook! ibuffer-sidebar-mode
+    (defun ibuffer-sidebar-h ()
+      (ibuffer-vc-set-filter-groups-by-vc-root)
+      (ibuffer-do-sort-by-recency)
+      (call-interactively #'ibuffer-filter-by-non-special-buffers)))
+
+  (setq ibuffer-sidebar-use-custom-font t
+        ibuffer-sidebar-face `(:height 0.9)
+        ibuffer-sidebar-width 30
+        ibuffer-sidebar-pop-to-sidebar-on-toggle-open nil))
+
+(use-package which-key-posframe
+  :after (which-key)
+  :config
+  (defun posframe-poshandler-frame-right-vertical (info)
+    (cons (- (plist-get info :parent-frame-width)
+             (plist-get info :posframe-width) 10)
+          (max 0 (/ (- (plist-get info :parent-frame-height)
+                       (plist-get info :posframe-height))
+                    2))))
+  (setq which-key-posframe-poshandler 'posframe-poshandler-frame-right-vertical)
+
+  (defadvice! which-key-posframe-dynamic-height-a (fn act-popup-dim)
+    :around #'which-key-posframe--show-buffer
+    (let ((max-h (- (frame-height) 2)))
+      (setq which-key-min-display-lines max-h)
+      (funcall fn (cons (min (car act-popup-dim) max-h)
+                        (cdr act-popup-dim)))))
+
+  (add-hook! 'which-key-posframe-mode-hook
+    (defun which-key-posframe-mode-h ()
+      (if which-key-posframe-mode
+          (setq which-key-max-display-columns 2
+                which-key-max-description-length 100)
+        (setq which-key-popup-type 'side-window
+              which-key-max-display-columns nil
+              which-key-min-display-lines 6
+              which-key-max-description-length 35))))
+
+  (when (display-graphic-p)
+    (which-key-posframe-mode +1)))
+
+(use-package ultra-scroll
+  :ensure (ultra-scroll :host github :repo "jdtsmith/ultra-scroll")
+  :after-call (doom-first-file-hook)
+  :defer t
+  :init
+  (setq scroll-conservatively 101 ; important
+        scroll-margin 0)
+  :config
+  (ultra-scroll-mode 1))
+
+(after! image-mode
+  (map! :map image-mode-map
+        (:prefix ("z" . "zoom")
+         :n "k" #'image-increase-size
+         :n "j" #'image-decrease-size)))
+
+(after! flycheck
+  (map! :map flycheck-mode-map
+        (:localleader
+         (:prefix ("ee" . "errors")
+          "n" #'flycheck-next-error
+          "p" #'flycheck-previous-error
+          "y" #'flycheck-copy-errors-as-kill
+          "t" #'lsp-treemacs-errors-list
+          "l" #'flycheck-list-errors
+          "c" #'consult-flycheck
+          "s" #'flycheck-select-checker))))
+
+(after! tramp
+  ;; Typically I have RemoteCommand in my ssh/config that
+  ;; automatically starts tmux, that can interfere with TRAMP and hang
+  ;; the session after the handshake
+  (add-to-list 'tramp-connection-properties
+               (list "^/\\(ssh\\|scp\\):.*:"
+                     "remote-shell" "/bin/bash")))
+
+;;; config.el ends here

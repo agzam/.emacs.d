@@ -52,11 +52,11 @@
         (lsp-completion-mode -1))))
 
   (map! :map corfu-map
-        "<escape>" #'+corfu-quit-and-escape
+        "<escape>" #'corfu-quit-and-escape
         "C-SPC"    #'corfu-insert-separator
         "C-n"      #'corfu-next
         "C-p"      #'corfu-previous
-        "C-/" #'+corfu-move-to-minibuffer
+        "C-/" #'corfu-move-to-minibuffer
         :i "C-u" nil) ; evil-collection bs
 
   (map! :map (global-map corfu-map)
@@ -77,16 +77,16 @@
 
   ;; corfu-indexed like in Company, M+number - inserts the thing
   (map! :map corfu-map
-        "M-0" (cmd! () (+corfu-insert-indexed 9))
-        "M-1" (cmd! () (+corfu-insert-indexed 0))
-        "M-2" (cmd! () (+corfu-insert-indexed 1))
-        "M-3" (cmd! () (+corfu-insert-indexed 2))
-        "M-4" (cmd! () (+corfu-insert-indexed 3))
-        "M-5" (cmd! () (+corfu-insert-indexed 4))
-        "M-6" (cmd! () (+corfu-insert-indexed 5))
-        "M-7" (cmd! () (+corfu-insert-indexed 6))
-        "M-8" (cmd! () (+corfu-insert-indexed 7))
-        "M-9" (cmd! () (+corfu-insert-indexed 8)))
+        "M-0" (cmd! () (corfu-insert-indexed 9))
+        "M-1" (cmd! () (corfu-insert-indexed 0))
+        "M-2" (cmd! () (corfu-insert-indexed 1))
+        "M-3" (cmd! () (corfu-insert-indexed 2))
+        "M-4" (cmd! () (corfu-insert-indexed 3))
+        "M-5" (cmd! () (corfu-insert-indexed 4))
+        "M-6" (cmd! () (corfu-insert-indexed 5))
+        "M-7" (cmd! () (corfu-insert-indexed 6))
+        "M-8" (cmd! () (corfu-insert-indexed 7))
+        "M-9" (cmd! () (corfu-insert-indexed 8)))
 
   (after! evil
     (evil-make-overriding-map corfu-map)
@@ -205,7 +205,7 @@ the current one (highlighted), each prefixed with its 1-based on-page index."
 
 (defun completion-preview-insert-indexed (n)
   "Complete with the Nth (1-based) candidate of the visible echo page.
-The inline-preview analog of `+corfu-insert-indexed': one press inserts."
+The inline-preview analog of `corfu-insert-indexed': one press inserts."
   (when (bound-and-true-p completion-preview--overlay)
     (let* ((ov completion-preview--overlay)
            (base (or (overlay-get ov 'completion-preview-base) ""))
@@ -266,8 +266,8 @@ Overlay positions go stale in buffers rewritten under it (eca-chat streaming)."
             (?^ . orderless-literal-prefix)
             (?~ . orderless-flex))
           orderless-style-dispatchers
-          '(+vertico-orderless-dispatch
-            +vertico-orderless-disambiguation-dispatch))
+          '(vertico-orderless-dispatch
+            vertico-orderless-disambiguation-dispatch))
 
   (setopt completion-styles '(orderless partial-completion basic)
           completion-category-defaults nil
@@ -291,7 +291,7 @@ Overlay positions go stale in buffers rewritten under it (eca-chat streaming)."
   :init
   (map! [remap dabbrev-expand] 'cape-dabbrev)
   (add-hook! latex-mode
-    (defun +corfu--latex-set-capfs ()
+    (defun corfu--latex-set-capfs ()
       (add-to-list 'completion-at-point-functions #'cape-tex)))
 
   (add-hook! (text-mode prog-mode)
@@ -307,11 +307,11 @@ Overlay positions go stale in buffers rewritten under it (eca-chat streaming)."
                             completion-at-point-functions)))))
 
   (add-hook! emacs-lisp-mode
-    (defun +cape-completion-at-point-elisp-h ()
+    (defun cape-completion-at-point-elisp-h ()
       (add-to-list 'completion-at-point-functions #'cape-elisp-symbol :append)))
 
   (add-hook! (org-mode markdown-mode)
-    (defun +cape-completion-at-point-org-md-h ()
+    (defun cape-completion-at-point-org-md-h ()
       (add-to-list 'completion-at-point-functions #'cape-elisp-block :append))))
 
 (use-package corfu-popupinfo
@@ -395,7 +395,7 @@ Overlay positions go stale in buffers rewritten under it (eca-chat streaming)."
   :ensure (vertico :files (:defaults "extensions/*"))
   :hook (doom-first-input . vertico-mode)
   :init
-  (defadvice! +vertico-crm-indicator-a (args)
+  (defadvice! vertico-crm-indicator-a (args)
     :filter-args #'completing-read-multiple
     (cons (format "[CRM%s] %s"
                   (replace-regexp-in-string
@@ -419,7 +419,7 @@ Overlay positions go stale in buffers rewritten under it (eca-chat streaming)."
 
   ;; These commands are problematic and automatically show the *Completions* buffer
   (advice-add #'tmm-add-prompt :after #'minibuffer-hide-completions)
-  (defadvice! +vertico--suppress-completion-help-a (fn &rest args)
+  (defadvice! vertico--suppress-completion-help-a (fn &rest args)
     :around #'ffap-menu-ask
     (letf! ((#'minibuffer-completion-help #'ignore))
       (apply fn args)))
@@ -556,26 +556,26 @@ Overlay positions go stale in buffers rewritten under it (eca-chat streaming)."
     [remap switch-to-buffer-other-window] #'consult-buffer-other-window
     [remap switch-to-buffer-other-frame]  #'consult-buffer-other-frame
     [remap yank-pop]                      #'consult-yank-pop
-    [remap persp-switch-to-buffer]        #'+vertico/switch-workspace-buffer)
+    [remap persp-switch-to-buffer]        #'vertico-switch-workspace-buffer)
   :config
   (consult-customize
    consult-ripgrep consult-git-grep consult-grep
    consult-bookmark consult-recent-file
-   +default/search-project +default/search-other-project
-   +default/search-project-for-symbol-at-point
-   +default/search-cwd +default/search-other-cwd
-   +default/search-notes-for-symbol-at-point
-   +default/search-emacsd
+   search-project search-other-project
+   search-project-for-symbol-at-point
+   search-cwd search-other-cwd
+   search-notes-for-symbol-at-point
+   search-emacsd
    :preview-key 'any)
 
   (setopt consult-preview-key "C-SPC"
           consult-narrow-key "<")
   (consult-customize
-   +default/search-buffer
+   search-buffer
    :preview-key (list "C-SPC" :debounce 0.5 'any))
 
   (define-key!
-    :keymaps (append +default-minibuffer-maps)
+    :keymaps (append default-minibuffer-maps)
     "C-/" #'consult-history)
 
   (map! :after consult
@@ -626,7 +626,7 @@ Overlay positions go stale in buffers rewritten under it (eca-chat streaming)."
   :config
   (add-hook 'marginalia-mode-hook #'nerd-icons-completion-marginalia-setup)
   (advice-add #'marginalia--project-root :override #'doom-project-root)
-  (dolist (c '((+default/find-file-under-here . file)
+  (dolist (c '((find-file-under-here . file)
                (doom/find-file-in-emacsd . project-file)
                (doom/find-file-in-other-project . project-file)
                (doom/find-file-in-private-config . file)
@@ -680,7 +680,7 @@ Overlay positions go stale in buffers rewritten under it (eca-chat streaming)."
   :after cape
   :config
   (add-hook! 'yas-minor-mode-hook :append
-    (defun +corfu-remove-t-in-completion-at-point-functions ()
+    (defun corfu-remove-t-in-completion-at-point-functions ()
       (remove-hook! 'completion-at-point-functions :local 't))))
 
 (use-package consult-yasnippet
@@ -693,7 +693,7 @@ Overlay positions go stale in buffers rewritten under it (eca-chat streaming)."
 (use-package dash-docs
   :defer t
   :config
-  (setq dash-docs-browser-func #'+browse-dash-doc
+  (setq dash-docs-browser-func #'browse-dash-doc
         dash-docs-enable-debugging nil)
 
   ;; a check, before activation of a docset to install it if needed
@@ -713,9 +713,9 @@ Overlay positions go stale in buffers rewritten under it (eca-chat streaming)."
         :n "b" #'browse-url)
 
   (set-lookup-handlers! 'lsp-mode
-    :definition #'+lsp-lookup-definition-handler
-    :references #'+lsp-lookup-references-handler
-    :documentation #'+consult-dash-doc
+    :definition #'lsp-lookup-definition-handler
+    :references #'lsp-lookup-references-handler
+    :documentation #'consult-dash-doc
     :implementations '(lsp-find-implementation :async t)
     :type-definition #'lsp-find-type-definition))
 

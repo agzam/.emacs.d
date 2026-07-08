@@ -6,7 +6,7 @@
 (require 'dabbrev)
 
 ;;;###autoload
-(defun +file-completion-at-point-function ()
+(defun file-completion-at-point-function ()
   "File name completion-at-point-function."
   (when-let (bounds (bounds-of-thing-at-point 'filename))
     (list (car bounds) (cdr bounds)
@@ -15,7 +15,7 @@
           :annotation-function (lambda (_) " (File)"))))
 
 ;;;###autoload
-(defun +dabbrev-completion-at-point-function ()
+(defun dabbrev-completion-at-point-function ()
   (let ((dabbrev-check-all-buffers nil)
         (dabbrev-check-other-buffers nil))
     (dabbrev--reset-global-variables))
@@ -45,7 +45,7 @@
 (autoload 'ispell-lookup-words "ispell")
 
 ;;;###autoload
-(defun +ispell-completion-at-point-function ()
+(defun ispell-completion-at-point-function ()
   (when-let* ((bounds (bounds-of-thing-at-point 'word))
               (table (with-demoted-errors
                          (let ((message-log-max nil)
@@ -57,21 +57,21 @@
           :exclusive 'no
           :annotation-function (lambda (_) " (Ispell)"))))
 
-(defun +word-completion-at-point-function (words)
+(defun word-completion-at-point-function (words)
   (when-let (bounds (bounds-of-thing-at-point 'word))
     (list (car bounds) (cdr bounds) words
           :exclusive 'no
           :annotation-function (lambda (_) " (Words)"))))
 
-(defvar +dict--words nil)
-(defvar +dict-file "/etc/dictionaries-common/words")
+(defvar dict--words nil)
+(defvar dict-file "/etc/dictionaries-common/words")
 
 ;;;###autoload
-(defun +dict-completion-at-point-function ()
-  (+word-completion-at-point-function
-   (or +dict--words
-       (setq +dict--words
+(defun dict-completion-at-point-function ()
+  (word-completion-at-point-function
+   (or dict--words
+       (setq dict--words
              (split-string (with-temp-buffer
-                             (insert-file-contents-literally +dict-file)
+                             (insert-file-contents-literally dict-file)
                              (buffer-string))
                            "\n")))))

@@ -59,7 +59,7 @@
     (end-of-line)))
 
 ;;;###autoload
-(defun +vertico-orderless-dispatch (pattern _index _total)
+(defun vertico-orderless-dispatch (pattern _index _total)
   "Like `orderless-affix-dispatch', but allows affixes to be escaped."
   (let ((len (length pattern))
         (alist orderless-affix-dispatch-alist))
@@ -77,7 +77,7 @@
           (cons style (substring pattern 0 -1))))))))
 
 ;;;###autoload
-(defun +vertico-orderless-disambiguation-dispatch (pattern _index _total)
+(defun vertico-orderless-disambiguation-dispatch (pattern _index _total)
   "Ensure $ works with Consult commands, which add disambiguation suffixes."
   (let ((len (length pattern)))
     (when (and (> len 0)
@@ -86,7 +86,7 @@
 
 
 ;;;###autoload
-(defun +vertico/embark-export-write ()
+(defun vertico-embark-export-write ()
   "Export the current vertico results to a writable buffer if possible.
 
 Supports exporting consult-grep to wgrep, file to wdeired, and consult-location to occur-edit"

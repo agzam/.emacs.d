@@ -3,8 +3,11 @@
 # bookmarks, transient/, url/, eshell/, projectile*, tramp, ...) - is ignored.
 /*
 !/.gitignore
+!/AGENTS.md
+!/MIGRATION.org
 !/early-init.el
 !/init.el
+!/config.el
 !/lisp/
 !/modules/
 !/snippets/

@@ -1,0 +1,221 @@
+#+title: Doom migration plan
+#+startup: overview
+
+Reshuffle headings to set priority; port top-down. Keep entries updated as
+modules land (see AGENTS.md for porting conventions - naming, quarantine,
+module layout).
+
+* Ported so far
+- core :: elpaca bootstrap (repos/builds in ~/.local/share/emacs-lab/), doom-compat
+  (macros, first-hooks, modulep!, quarantine), doom-keybinds (map!, SPC/","
+  leaders), lazy loaddefs generation, XDG cache/state layout
+- modules :: evil (lean set), bindings (Doom tree, company/ivy/helm excised),
+  general, completion
+- user layer :: config.el (leader tree, globals), lisp/functions.el
+- root packages.el :: ligature; evil extras stay disabled by omission
+
+* Conventions debt
+** DONE Rename sweep: drop Doom =+= prefixes
+Done across the whole config (defs + refs, vendored tree included).
+Rule for every future port: strip leading =+=, =+module/fn= becomes
+=module-fn=; check the target name against the live session for collisions
+before settling. Sources in ~/.doom.d still carry =+= names - rename on copy
+to match references already renamed here. Non-mechanical mappings already
+committed to:
+- =+default/yank-pop= -> =yank-pop+=, =+default/dired= -> =dired-prompt=,
+  =+default--search-dir= -> =search-in-dir=, =+default/*= -> bare names
+- =+eval/buffer= -> =eval-buffer+= (real =eval-buffer= exists)
+- =+evil{/,-}window-move-*= -> =window-move-*=
+- =+multiple-cursors/evil-mc-*= -> =mc-*=
+- =+vertico/switch-workspace-buffer= -> =switch-workspace-buffer=
+- =+default/lsp-command-map= -> real =lsp-command-map=,
+  =+default/insert-file-path= -> their =insert-file-path= (deliberate merges)
+- =doom/delete-backward-word= -> =delete-backward-word=
+- module flags (=+icons=, =+everywhere=, ...) are modulep! syntax - keep
+** TODO Extend file quarantine as modules port
+New state-writing packages get their path vars redirected in
+doom-compat.el quarantine section (lsp session, dap, treemacs persist,
+elfeed db, telega, org-roam db, desktop-path, ...).
+
+* Infra debt
+** TODO Undo: undo-fu + undo-fu-session
+Currently =undo-redo=. Port Doom :emacs undo equivalent; recipes were in
+general/packages.el (emacsmirror). Their settings already in config.el
+(=after! undo-fu= block).
+** TODO Smartparens base config
+Doom :config default +smartparens equivalent. Unlocks: sexp-transient
+(SPC k), =M-l/M-h= slurp/barf binds, general module's sp-pair tweaks
+(=after! smartparens= block already ported, inert).
+** TODO Restore lisp/sexp-transient.el
+After smartparens + avy + edit-indirect exist. Re-add =(load! "lisp/sexp-transient")=
+to config.el.
+** TODO Fonts machinery
+Direct face bridge in config.el works; decide: vendor doom-font vars +
+=doom/increase-font-size= or stay direct.
+** TODO Theme: colors module
+ag-themes (LOCAL-REPO), spacemacs-theme, circadian day/night, doom-themes,
+rainbow-mode, beacon. Uses doom-init-ui-hook (compat has stub hook).
+Until then: default theme.
+** TODO Root packages leftovers
+golden-ratio (SPC w g currently void), lorem-ipsum.
+** TODO LSP_USE_PLISTS env
+Set in early-init when lsp module ports (Doom init.el had =setenv=).
+** TODO lisp/elisp-lint.el
+Flymake backend flagging let+if -> if-let* patterns; port with elisp module.
+** TODO Trial gates still open
+- Linux parity: boot on Linux box, diff elpaca statuses/load behavior
+- one elpaca-manager update cycle (fetch, review, merge)
+- local-repo recipe pattern proven (first local package port)
+
+* Custom modules
+** TODO git
+magit+forge (gh, unpinned), gh-notify, git-link, code-review (ag91),
+closql, consult-gh (:files "*.el"), git-auto-commit-mode, browse-at-remote.
+LOCAL-REPO: github-topics, remoto. config 452L, autoload ~980L.
+Uses doom-glob (ok), doom-recenter-a (needs tiny shim).
+transient/forge scale test for Elpaca. Port early - daily driver.
+** TODO org
+Largest: config 617L, autoload 16 files ~2530L. org (emacs-straight mirror,
+:pre-build fakes org-version - needs elpaca equivalent or plain org),
+org-roam(+ui), vulpea trio + consult-vulpea, evil-org (hlissner), orgit(-forge),
+org-modern-indent, org-appear (branch), verb, anki-editor+anki-gen, ob-*,
+org-pomodoro, toc-org. 2 mp3 assets. Feeds embark (vulpea-*) and SPC o r tree.
+** TODO ai
+gptel + gptel-quick/ob-gptel/gptel-agent, eca, claude-code, agent-shell/acp,
+mcp, whisper, shell-maker, llm-tool-collection, ragmacs.
+LOCAL-REPO: gptel-tools, gptel-anthropic-oauth. config 311L, autoload ~850L.
+Unlocks =C-x g= / =SPC x g= gptel trees (currently pruned via modulep! :custom ai).
+** TODO web-browsing
+eww (built-in), elfeed (SohumB fork+branch), elfeed-org/tube/tube-mpv,
+rfc-mode, yeetube, subed (:files), hnreader (own fork).
+LOCAL-REPO: browser-hist, consult-hn, emacs-reddig, navegosa.el.
+readable/ cljs helper (npm deps). config 289L, autoload 9 files ~1110L.
+Port BEFORE writing/embark/search (provides +eww-* and browser-hist).
+** TODO writing
+jinx, sdcv, mw-thesaurus, google-translate (own fork+branch), define-it,
+separedit, youtube-sub-extractor, occult. LOCAL-REPO: spacehammer (symlink
+to ~/.hammerspoon), wiktionary-bro, prisma.el. abbrev_defs asset.
+config 385L, autoload ~715L. Depends on web-browsing; feeds clojure+chat.
+Unlocks SPC x l / SPC x t trees.
+** TODO embark
+embark + embark-consult. config 303L, autoload 301L. Depends on
+web-browsing (+eww-*) and org (vulpea) for some actions.
+Unlocks =C-;= embark-act, vertico ";" subkeys (embark-collect/export).
+** TODO search
+consult-omni (branch develop, pinned, :files sources), consult-symbol, tldr.
+LOCAL-REPO: slacko.el. config 69L. Depends on browser-hist (web-browsing).
+Unlocks SPC * (search-in-project), SPC s /, SPC f d (+zoxide-find).
+** TODO tab-bar
+No packages; autoload.el 283L of workspace logic + desktop persistence
+(doom-profile-state-dir -> doom-state-dir ok). Unlocks SPC l transient.
+** TODO modeline
+doom-modeline only. 32L config. doom-init-ui hook + font-height advice.
+Until ported: default modeline.
+** TODO colors
+See theme infra item above.
+** TODO dired
+treemacs suite (+evil,+icons-dired,+projectile,+lsp), dired-subtree/sidebar/
+narrow/preview/imenu. Adds treemacs evil state via doom-evil-state-alist
+(exists in vendored keybinds). config 148L. Unlocks SPC t d, SPC p T/t.
+** TODO elisp
+a, elisp-format, buttercup (unpinned). LOCAL-REPO: let-plist, evilify-edebug.
+templates/ asset (file-templates for new packages).
+doom-scratch-buffer-created-hook (tiny shim or drop). config 140L.
+** TODO shell
+shell-pop, ghostel+evil-ghostel (:files split), eshell-atuin, mise, kkp,
+vimrc-mode, yuck-mode. doom-emacs-dir eshell aliases path -> relocate.
+Unlocks SPC ' / SPC " (shell-pop tree). config 120L.
+** TODO tree-sitter
+clojure-ts-mode, treesitter-context, evil-matchit (redguardtoo),
+mermaid-ts-mode (:files), mermaid-mode. config 72L.
+** TODO lsp
+lsp-mode, dap-mode (unpins). Removes Doom lookup hook (inert here).
+Combine with :tools lsp decision + LSP_USE_PLISTS + read-process-output-max.
+** TODO clojure
+cider, clj-refactor, clojars, neil, logview, datetime, cider-storm, monroe.
++lookup-provider-url-alist (needs lookup decision), spacehammer-monroe
+(after writing). config 438L, autoload ~720L.
+** TODO notmuch
+notmuch (gh), org-mime, ol-notmuch, consult-notmuch. modulep! conditionals
+inside packages need static resolution. doom-real-buffer-functions (shim).
+** TODO chat
+telega. jinx dep (writing). config 38L.
+** TODO pdf
+pdf-tools (dalanicolai pdf-roll fork, custom :files/build), image-roll,
+saveplace-pdf-view, org-noter, calibredb, nov. config 186L.
+Build step (epdfinfo) - elpaca :build test case.
+** TODO jira
+posframe + LOCAL-REPO go-jira. config 46L.
+** TODO osx
+ob-applescript, applescript-mode. 15L. Trivial.
+** TODO learning
+exercism. 11L. Trivial.
+** TODO python
+lsp-pyright. autoload.el 294L (the actual logic). config 57L.
+** TODO golang
+go-mode, gorepl-mode, gotest. set-lookup-handlers!/set-repl-handler!
+(stubs exist / add repl stub). 30L.
+** TODO lua
+lua-mode, fennel-mode, friar (:files lua+fnl). set-lookup-handlers! x2. 55L.
+** TODO webdev
+emmet, prettier.el, xref-js2, html-to-hiccup, jtsx, js-comint. 45L.
+** TODO yaml
+yaml-mode, jinja2-mode, highlight-indent-guides, yaml-pro. doom-theme var
+reference (define or guard). 61L.
+** TODO nix
+nix-mode, nix-update. set-repl-handler! stub. 35L.
+** TODO java
+lsp-java. 8L. Trivial.
+** TODO flutter
+dart-mode, lsp-dart, flutter. set-ligatures! (stub or drop). 53L.
+** TODO rust
+rust-mode, rustic. 5L. Trivial.
+
+* Official Doom modules: port or drop
+Each needs a lab decision; bindings tree + registry already assume them.
+- :emacs undo -> covered by infra undo item
+- :config default +smartparens -> covered by infra item
+- :tools lookup :: set-lookup-handlers! infra, +lookup-provider-url-alist,
+  K/gd muscle memory. Needed by completion (consult-dash), golang, lua,
+  clojure. Decide: vendor Doom lookup module vs thin own implementation.
+- :tools eval +overlay :: set-repl-handler!/set-eval-handler! + eros overlays.
+  Needed by golang/nix REPL handlers.
+- :tools lsp +peek :: fold into custom lsp module port.
+- :editor multiple-cursors :: evil-mc + evil-multiedit (evil-multiedit
+  referenced by evil-escape excluded-states already).
+- :editor file-templates :: yasnippet templates infra; elisp module ships own.
+- :ui window-select :: ace-window (SPC w W/M/D bindings reference it).
+- :ui zen :: writeroom-mode (+ config.el writeroom guards already ported).
+- :ui vi-tilde-fringe :: cosmetic, trivial.
+- :emacs vc :: git-timemachine, smerge hydra; fold into git module port.
+- :emacs ibuffer :: groups/icons; general module has own ibuffer config -
+  maybe drop Doom's.
+- :emacs electric, tramp :: small defaults; likely inline into config.el.
+- :term eshell :: aliases/prompt; fold into shell module port.
+- :checkers syntax +childframe :: flycheck + posframe; their config disables
+  global-flycheck - decide scope.
+- :checkers grammar :: langtool/writegood; likely drop (writing module covers).
+- :os macos :: open-with commands, env fixes (their osx module + macos deps).
+- :lang emacs-lisp/json/markdown/sh :: port with respective language work;
+  markdown +grip referenced by writing autoloads.
+
+* Local :repo packages (16)
+gptel-tools, gptel-anthropic-oauth, github-topics, remoto, ag-themes,
+let-plist, evilify-edebug, slacko.el, spacehammer (symlink!), wiktionary-bro,
+prisma.el, browser-hist, consult-hn, emacs-reddig, navegosa.el, go-jira.
+Decide pattern once, apply everywhere: elpaca local repo recipe pointing at
+a dir this config owns (move sources out of ~/.doom.d/modules/*/ into
+~/.config/emacs-lab/packages/ or separate repos). First port proves it.
+
+* Assets to relocate
+- snippets: currently read from ~/.doom.d/snippets (62 snippets); localize
+  to lab when cutting the cord
+- org module mp3s, elisp templates/, writing abbrev_defs,
+  web-browsing readable/ (npm deps)
+
+* Cross-module port ordering constraints
+- web-browsing before: writing, embark, search
+- writing before: clojure (spacehammer-monroe), chat (jinx)
+- org before: embark (vulpea actions)
+- lookup decision before: golang, lua, clojure, consult-dash bindings
+- smartparens before: sexp-transient, general sp-pairs activate

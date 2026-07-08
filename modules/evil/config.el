@@ -28,25 +28,20 @@
       ;; TODO: switch to undo-fu(+session) when :emacs undo gets ported.
       evil-undo-system 'undo-redo
       ;; PERF: don't spam the clipboard process on visual-mode movement.
-      evil-visual-update-x-selection-p nil
-      ;; Personal (from ~/.doom.d/config.el).
-      evil-jumps-cross-buffers t
-      evil-move-cursor-back nil
-      evil-want-fine-undo t
-      evil-esc-delay 0)
+      evil-visual-update-x-selection-p nil)
 
 (elpaca (evil :wait t))
 (evil-mode 1)
 (evil-select-search-module 'evil-search-module 'evil-search)
 
-(defadvice! +evil--persist-state-a (fn &rest args)
+(defadvice! evil--persist-state-a (fn &rest args)
   "When changing major modes, Evil's state is lost. Preserve it."
   :around #'set-auto-mode
   (if evil-state
       (evil-save-state (apply fn args))
     (apply fn args)))
 
-(defadvice! +evil--clean-isearch-overlays-a (&rest _)
+(defadvice! evil--clean-isearch-overlays-a (&rest _)
   "`evil-ex-search' leaves isearch fold overlays open (emacs-evil/evil#1630)."
   :after #'evil-ex-search
   (isearch-clean-overlays))
@@ -55,7 +50,7 @@
   :unless noninteractive
   :hook (elpaca-after-init . evil-collection-init)
   :preface
-  (defvar +evil-collection-disabled-list
+  (defvar evil-collection-disabled-list
     '(anaconda-mode
       company
       eglot
@@ -69,7 +64,7 @@
   (defvar evil-collection-want-find-usages-bindings-p nil)
   (defvar evil-collection-outline-enable-in-minor-mode-p nil)
   :config
-  (dolist (sym +evil-collection-disabled-list)
+  (dolist (sym evil-collection-disabled-list)
     (if-let* ((elt (assq sym evil-collection-mode-list)))
         (cl-callf2 delete elt evil-collection-mode-list)
       (cl-callf2 delq sym evil-collection-mode-list)))
@@ -95,9 +90,8 @@
   :ensure (:host github :repo "hlissner/evil-escape")
   :hook (doom-first-input . evil-escape-mode)
   :init
-  (setq evil-escape-excluded-states '(normal multiedit emacs motion)
-        evil-escape-key-sequence "kj"
-        evil-escape-delay 0.1))
+  ;; kj sequence and delay come from the user config.el layer.
+  (setq evil-escape-excluded-states '(normal multiedit emacs motion)))
 
 (use-package evil-surround
   :commands (global-evil-surround-mode

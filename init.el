@@ -1,4 +1,4 @@
-;;; init.el --- emacs-lab: Elpaca + vendored Doom macros trial -*- lexical-binding: t; -*-
+;;; init.el --- Elpaca + vendored Doom macros -*- lexical-binding: t; -*-
 ;;; Commentary:
 ;; Parallel trial config, fully isolated from ~/.doom.d.  Launch with:
 ;;   emacs --init-directory ~/.config/emacs-lab
@@ -7,7 +7,9 @@
 ;;; Elpaca bootstrap (installer 0.12, verbatim from upstream README)
 
 (defvar elpaca-installer-version 0.12)
-(defvar elpaca-directory (expand-file-name "elpaca/" user-emacs-directory))
+;; Deviation from the stock installer: repos/builds live outside the config
+;; dir (see early-init.el quarantine).
+(defvar elpaca-directory (expand-file-name "elpaca/" doom-local-dir))
 (defvar elpaca-builds-directory (expand-file-name "builds/" elpaca-directory))
 (defvar elpaca-sources-directory (expand-file-name "sources/" elpaca-directory))
 (defvar elpaca-order '(elpaca :repo "https://github.com/progfolio/elpaca.git"
@@ -73,10 +75,15 @@
          (:checkers syntax +childframe) (:checkers grammar)
          (:tools eval +overlay) (:tools lookup) (:tools lsp +peek)
          (:lang emacs-lisp) (:lang json) (:lang markdown +grip) (:lang sh)
-         (:config default +bindings +smartparens))
+         (:config default +bindings +smartparens)
+         ;; :custom entries appear here as their modules get ported.
+         (:custom general) (:custom completion))
        (when (eq system-type 'darwin) '((:os macos)))))
 
 (require 'doom-keybinds)
+
+;; Standalone helpers, loaded before modules (mirrors Doom init.el ordering).
+(load (expand-file-name "lisp/functions" user-emacs-directory) nil 'nomessage)
 
 ;; GC returns to normal under gcmh once the first buffer is visited.
 (use-package gcmh
@@ -92,19 +99,64 @@
 ;; Function files load first (sorted - raw directory order differs between
 ;; Mac and Linux), then config.el; config.el may `load!' extra +files.
 ;; The module list itself is explicit, in this exact order.
-(defvar lab-modules '("evil" "bindings" "completion")
-  "Modules under modules/, loaded in this exact order.")
+(defvar active-modules '("evil" "bindings" "general" "completion")
+  "Modules under modules/, loaded in this exact order.
+bindings (Doom's :config default) precedes the :custom ports, like in doom!.")
 
-(defun lab-load-module (name)
-  "Load modules/NAME: autoload.el, autoload/*.el (sorted), then config.el."
-  (let ((dir (expand-file-name (format "modules/%s/" name) user-emacs-directory)))
-    (dolist (lib (sort (nconc (doom-glob dir "autoload.el")
-                              (doom-glob dir "autoload/*.el"))
-                       #'string<))
-      (load lib nil 'nomessage))
+(defun generate-module-loaddefs (name auto-dir)
+  "Return the loaddefs file for module NAME, regenerating it if stale.
+Generation runs in a batch subprocess: `loaddefs-generate' must be able to
+macroexpand cookied definers (`transient-define-prefix'), and requiring those
+in this session would load them before Elpaca activates the real versions."
+  (let* ((out (expand-file-name (format "autoloads/%s.el" name) doom-cache-dir))
+         (tmp (concat out ".tmp")))
+    (when (or (not (file-exists-p out))
+              (cl-some (lambda (f) (file-newer-than-file-p f out))
+                       (doom-glob auto-dir "*.el")))
+      (make-directory (file-name-directory out) t)
+      (let ((res (doom-call-process
+                  (concat invocation-directory invocation-name)
+                  "-Q" "--batch" "--eval"
+                  (format
+                   "%S"
+                   `(progn
+                      ;; Definer macros the autoload files may use at cookie sites.
+                      (require 'transient)
+                      (loaddefs-generate ,auto-dir ,tmp)
+                      ;; Paths are emitted relative to the output directory;
+                      ;; rewrite absolute so nothing depends on load-path.
+                      (let ((rel (file-relative-name
+                                  (directory-file-name ,auto-dir)
+                                  (file-name-directory ,tmp)))
+                            (abs (directory-file-name ,auto-dir)))
+                        (with-temp-file ,tmp
+                          (insert-file-contents ,tmp)
+                          (while (search-forward (concat "\"" rel "/") nil t)
+                            (replace-match (concat "\"" abs "/") t t))))
+                      (rename-file ,tmp ,out t))))))
+        (unless (eq 0 (car res))
+          (error "loaddefs generation for module %s failed: %s" name (cdr res)))))
+    out))
+
+(defun load-module (name)
+  "Load modules/NAME Doom-style: lazy autoloads first, then config.el.
+autoload/*.el are exposed via generated loaddefs and only load in full on
+first call - they may require packages that aren't installed yet.  A single
+autoload.el is loaded eagerly and must be load-safe."
+  (let* ((dir (expand-file-name (format "modules/%s/" name) user-emacs-directory))
+         (auto-dir (expand-file-name "autoload/" dir))
+         (auto-file (expand-file-name "autoload.el" dir)))
+    (when (file-directory-p auto-dir)
+      (load (generate-module-loaddefs name auto-dir) nil 'nomessage))
+    (when (file-exists-p auto-file)
+      (load auto-file nil 'nomessage))
     (load (expand-file-name "config" dir) nil 'nomessage)))
 
-(mapc #'lab-load-module lab-modules)
+(mapc #'load-module active-modules)
+
+;; User config layer - loads last so its bindings and settings win,
+;; exactly like $DOOMDIR/config.el in Doom.
+(load (expand-file-name "config" user-emacs-directory) nil 'nomessage)
 
 (setq custom-file (expand-file-name "custom.el" user-emacs-directory))
 (load custom-file 'noerror 'nomessage)

@@ -26,6 +26,27 @@
 (dolist (dir (list doom-local-dir doom-data-dir doom-state-dir doom-cache-dir))
   (make-directory dir t))
 
+;;; * File quarantine
+
+;; Nothing writes into `user-emacs-directory'; grep stays clean.  Extend this
+;; list as ported modules introduce new state files.
+(setq auto-save-list-file-prefix (concat doom-cache-dir "autosave/")
+      savehist-file (concat doom-state-dir "savehist")
+      recentf-save-file (concat doom-state-dir "recentf")
+      bookmark-default-file (concat doom-state-dir "bookmarks")
+      project-list-file (concat doom-state-dir "projects")
+      tramp-persistency-file-name (concat doom-cache-dir "tramp")
+      tramp-auto-save-directory (concat doom-cache-dir "tramp-autosave/")
+      url-configuration-directory (concat doom-data-dir "url/")
+      url-cache-directory (concat doom-cache-dir "url/")
+      eshell-directory-name (concat doom-state-dir "eshell/")
+      nsm-settings-file (concat doom-data-dir "network-security.data")
+      transient-levels-file (concat doom-state-dir "transient/levels.el")
+      transient-values-file (concat doom-state-dir "transient/values.el")
+      transient-history-file (concat doom-state-dir "transient/history.el")
+      projectile-cache-file (concat doom-cache-dir "projectile.cache")
+      projectile-known-projects-file (concat doom-state-dir "projectile.projects"))
+
 (defvar doom-disabled-packages nil)
 
 ;; Doom polyfill: makes (featurep :system 'macos) etc. work.

@@ -1,9 +1,9 @@
 ;;; custom/completion/autoload/dash-docs.el -*- lexical-binding: t; -*-
 
 ;;;###autoload
-(defun +browse-dash-doc (url)
+(defun browse-dash-doc (url)
   "Open Dash doc in eww."
-  (+eww-open-in-other-window url)
+  (eww-open-in-other-window url)
   ;; make it readable
   (run-with-timer
    0.2 nil
@@ -30,7 +30,7 @@
    url))
 
 ;;;###autoload
-(defun +consult-dash-doc (term)
+(defun consult-dash-doc (term)
   (condition-case err
       (if (and (featurep 'cider)
                (cider-connected-p))
