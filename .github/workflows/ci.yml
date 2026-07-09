@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: purcell/setup-emacs@master
         with:
           version: '30.1'
@@ -20,7 +20,7 @@ jobs:
         with:
           bb: latest
       - name: Cache test deps
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/emacs-lab/test-elpa
           key: test-elpa-${{ runner.os }}-${{ hashFiles('bb.edn') }}
@@ -33,15 +33,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: purcell/setup-emacs@master
         with:
           version: '30.1'
-      - uses: turtlequeue/setup-babashka@v1.1.0
+      - uses: DeLaGuardo/setup-clojure@13.6.1
         with:
-          babashka-version: '1.12.196'
+          bb: latest
       - name: Cache elpaca checkouts and eln
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.local/share/emacs-lab
