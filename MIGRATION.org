@@ -15,6 +15,11 @@ module layout).
 - modules :: evil (lean set), bindings (Doom tree, company/ivy/helm excised,
   SPC p on project.el), general, completion
 - user layer :: config.el (leader tree, globals), lisp/functions.el
+  incl. reload-config (SPC h r r; doom/reload analogue - re-runs
+  defaults/modules/config in place, elpaca picks up new packages; restart
+  still needed for doom-compat/doom-keybinds, the elpaca bootstrap and
+  active-modules changes; edited autoload/*.el still want a direct
+  load-file)
 - root packages.el :: ligature; evil extras stay disabled by omission
 - testing/CI :: buttercup suites (tests/, XDG-sandboxed via helper.el),
   bb.edn tasks (deps/lint/test/smoke/ci), scripts/{lint,smoke-check}.el,

@@ -378,7 +378,12 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
                         "d" #'doom/describe-package)
                "s" #'find-function-other-window
                "v" #'helpful-variable
-               "j" #'info-display-manual)
+               "j" #'info-display-manual
+               ;; "r" nil: SPC h inherits help-map, where r is a command
+               ;; (info-emacs-manual) - unbind it so the prefix can exist
+               "r" nil
+               (:prefix ("r" . "reload")
+                :desc "reload config" "r" #'reload-config))
 
       (:prefix ("i" . "insert")
        :desc "snippet" "s" #'consult-yasnippet

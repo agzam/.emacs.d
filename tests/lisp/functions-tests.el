@@ -21,6 +21,47 @@
       (let ((system-type 'gnu/linux))
         (expect (system-dist-name) :to-equal "Arch")))))
 
+(defvar active-modules)
+
+(describe "reload-config"
+  (it "re-runs the init.el layers in order, then processes elpaca queues"
+    ;; let*: the hook lambdas must lexically capture `calls'
+    (let* ((calls nil)
+           (active-modules '("mod-a" "mod-b"))
+           (custom-file "/probe/custom.el")
+           (doom-before-reload-hook (list (lambda () (push '(hook before) calls))))
+           (doom-after-reload-hook (list (lambda () (push '(hook after) calls)))))
+      (cl-letf (((symbol-function 'load)
+                 (lambda (file &rest _)
+                   (push (list 'load (file-name-nondirectory file)) calls)))
+                ((symbol-function 'load-module)
+                 (lambda (name) (push (list 'module name) calls)))
+                ((symbol-function 'elpaca-process-queues)
+                 (lambda () (push '(elpaca) calls)))
+                ((symbol-function 'message) #'ignore))
+        (reload-config))
+      (expect (nreverse calls) :to-equal
+              '((hook before)
+                (load "doom-defaults") (load "functions")
+                (module "mod-a") (module "mod-b")
+                (load "config") (load "custom.el")
+                (elpaca)
+                (hook after)))))
+  (it "skips custom-file when unset"
+    (let ((calls nil)
+          (active-modules nil)
+          (custom-file nil)
+          (doom-before-reload-hook nil)
+          (doom-after-reload-hook nil))
+      (cl-letf (((symbol-function 'load)
+                 (lambda (file &rest _)
+                   (push (file-name-nondirectory file) calls)))
+                ((symbol-function 'load-module) #'ignore)
+                ((symbol-function 'elpaca-process-queues) #'ignore)
+                ((symbol-function 'message) #'ignore))
+        (reload-config))
+      (expect (nreverse calls) :to-equal '("doom-defaults" "functions" "config")))))
+
 (describe "display-buffer-in-quadrant"
   (it "creates a window for a new buffer and reuses it on redisplay"
     (let ((buf (generate-new-buffer "quadrant-probe")))
