@@ -9,10 +9,63 @@ module layout).
 - core :: elpaca bootstrap (repos/builds in ~/.local/share/emacs-lab/), doom-compat
   (macros, first-hooks, modulep!, quarantine), doom-keybinds (map!, SPC/","
   leaders), lazy loaddefs generation, XDG cache/state layout
-- modules :: evil (lean set), bindings (Doom tree, company/ivy/helm excised),
-  general, completion
+- modules :: evil (lean set), bindings (Doom tree, company/ivy/helm excised,
+  SPC p on project.el), general, completion
 - user layer :: config.el (leader tree, globals), lisp/functions.el
 - root packages.el :: ligature; evil extras stay disabled by omission
+- testing/CI :: buttercup suites (tests/, XDG-sandboxed via helper.el),
+  bb.edn tasks (deps/lint/test/smoke/ci), scripts/{lint,smoke-check}.el,
+  GitHub workflow (test + smoke jobs on Emacs 30.1, cached elpaca dirs)
+
+* Decisions log
+- [2026-07] corfu machinery removed entirely: corfu + extensions,
+  corfu-terminal, popon, kind-icon, autoload/corfu.el, minad-capf.el.
+  Built-in completion-preview-mode + the echo pager (now in
+  modules/completion/autoload/completion-preview.el) is the in-buffer UI;
+  cape stays (its capfs feed completion-at-point). savehist got its own
+  block - its enable used to hide inside corfu-history. Revisit a popup UI
+  only if completion-preview falls short.
+- [2026-07] projectile dropped config-wide: SPC p rebound to built-in
+  project.el (+ consult-project-buffer); consult-projectile and the
+  consult-dir projectile source removed. Future ports (e.g. treemacs
+  +projectile flag) must use project.el equivalents.
+- [2026-07] consult-flycheck removed. When :checkers ports, evaluate
+  flymake + consult-flymake first before reinstating any flycheck glue.
+- [2026-07] custom.el sanctioned to live in the config dir (explicitly
+  git-ignored); the no-writes rule stands for everything else.
+- [2026-07] local-package layout deferred - see "Local :repo packages".
+
+* Testing & CI
+- =bb test= - buttercup suites from tests/ (buttercup auto-installed into
+  ~/.cache/emacs-lab/test-elpa); =bb lint= - check-parens over tracked
+  elisp; =bb smoke= - full elpaca boot behind a pty, verdict from the
+  marker file scripts/smoke-check.el writes (SMOKE-OK/FAILED/TIMEOUT);
+  =bb ci= - deps + lint + test.
+- Workflow (.github/workflows/ci.yml): =test= job (bb ci, cached
+  test-elpa) and =smoke= job (cached ~/.local/share/emacs-lab + eln with a
+  restore-keys prefix, since elpaca is unpinned). Emacs 30.1 is the floor
+  (built-in which-key, completion-preview); local dev may run newer
+  (31 pretest as of 2026-07).
+- RULE for every future port: the module lands together with a new or
+  extended suite in tests/. Layout mirrors the source tree -
+  tests/MODULE/FILE-tests.el per module source file (autoload/ level
+  flattened; lisp/ sources under tests/lisp/), shared tests/helper.el found
+  via locate-dominating-file. helper.el sandboxes XDG dirs, so the
+  quarantine wiring itself is testable.
+- Gotchas: buttercup-run-discover needs an ABSOLUTE tests dir; deleting an
+  autoload/*.el leaves stale generated loaddefs (also rm
+  ~/.cache/emacs-lab/autoloads/NAME.el); general/autoload/url.el has a
+  top-level (require 'ghub) - its commands error and the file cannot load
+  in tests until the git module ports.
+- The smoke job doubles as the Linux-parity trial gate - keep it green.
+
+* Emacs 31 watchlist
+Local dev is already on a 31 pretest; when 31 becomes the floor:
+- grep-edit-mode may replace wgrep
+- igc (MPS GC) may replace gcmh
+- tty child frames change the terminal-popup story (corfu-terminal/popon
+  are already gone with corfu)
+- add a snapshot leg to CI before bumping the floor
 
 * Conventions debt
 ** DONE Rename sweep: drop Doom =+= prefixes
@@ -38,10 +91,13 @@ doom-compat.el quarantine section (lsp session, dap, treemacs persist,
 elfeed db, telega, org-roam db, desktop-path, ...).
 
 * Infra debt
-** TODO Undo: undo-fu + undo-fu-session
-Currently =undo-redo=. Port Doom :emacs undo equivalent; recipes were in
-general/packages.el (emacsmirror). Their settings already in config.el
-(=after! undo-fu= block).
+** TODO Undo: persistence (undo-fu-session), maybe vundo
+Built-in =undo-redo= already covers evil (=evil-undo-system=); plain
+undo-fu is redundant on modern Emacs. The remaining value of Doom's
+:emacs undo is undo-fu-session (persistent undo across sessions) - port
+that (recipes were in general/packages.el, emacsmirror), consider vundo
+for tree visualization. The =after! undo-fu= block in config.el goes away
+if undo-fu itself never lands.
 ** TODO Smartparens base config
 Doom :config default +smartparens equivalent. Unlocks: sexp-transient
 (SPC k), =M-l/M-h= slurp/barf binds, general module's sp-pair tweaks
@@ -63,9 +119,10 @@ Set in early-init when lsp module ports (Doom init.el had =setenv=).
 ** TODO lisp/elisp-lint.el
 Flymake backend flagging let+if -> if-let* patterns; port with elisp module.
 ** TODO Trial gates still open
-- Linux parity: boot on Linux box, diff elpaca statuses/load behavior
+- Linux parity: automated - the CI smoke job boots on ubuntu; keep it green
 - one elpaca-manager update cycle (fetch, review, merge)
-- local-repo recipe pattern proven (first local package port)
+- local-repo recipe pattern proven (first local package port; idiom
+  verified and documented under "Local :repo packages")
 
 * Custom modules
 ** TODO git
@@ -74,6 +131,8 @@ closql, consult-gh (:files "*.el"), git-auto-commit-mode, browse-at-remote.
 LOCAL-REPO: github-topics, remoto. config 452L, autoload ~980L.
 Uses doom-glob (ok), doom-recenter-a (needs tiny shim).
 transient/forge scale test for Elpaca. Port early - daily driver.
+Also unblocks general/autoload/url.el (top-level ghub require, see
+Testing & CI gotchas) and let-plist consumers (misc.el, url.el).
 ** TODO org
 Largest: config 617L, autoload 16 files ~2530L. org (emacs-straight mirror,
 :pre-build fakes org-version - needs elpaca equivalent or plain org),
@@ -203,9 +262,29 @@ Each needs a lab decision; bindings tree + registry already assume them.
 gptel-tools, gptel-anthropic-oauth, github-topics, remoto, ag-themes,
 let-plist, evilify-edebug, slacko.el, spacehammer (symlink!), wiktionary-bro,
 prisma.el, browser-hist, consult-hn, emacs-reddig, navegosa.el, go-jira.
-Decide pattern once, apply everywhere: elpaca local repo recipe pointing at
-a dir this config owns (move sources out of ~/.doom.d/modules/*/ into
-~/.config/emacs-lab/packages/ or separate repos). First port proves it.
+
+Idiom verified against the elpaca manual on disk (doc/manual.org,
+"recipe-keyword-repo", elpaca 0.12): a bare local path in =:repo= with no
+=:host= builds IN PLACE from that directory - edits there get picked up on
+=elpaca-rebuild=, nothing is cloned:
+#+begin_src emacs-lisp
+(use-package foo
+  :ensure (foo :repo "~/GitHub/agzam/foo/"))
+#+end_src
+The cons form =:repo ("~/path" . "name")= CLONES into
+elpaca-sources-directory instead - avoid it for the work-locally flow.
+The path should be a git repo root (elpaca runs git ops against it):
+remoto.el is already shaped right; the ~/.doom.d/modules/*/-embedded ones
+are not and need extraction first.
+
+Layout decision DEFERRED (2026-07): leaning separate repos under
+~/GitHub/agzam/ per package; decide for real at the first consuming port
+(elisp or git module). The packages/-dir-inside-config alternative needs a
+smoke-boot experiment first (subdirs are not git roots).
+
+Latent dep, fix with this pattern: general module already references
+let-plist (autoload/url.el x4, autoload/misc.el open-circleci-log) - those
+commands error until let-plist lands (or the elisp module ports).
 
 * Assets to relocate
 - snippets: currently read from ~/.doom.d/snippets (62 snippets); localize

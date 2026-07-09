@@ -5,6 +5,9 @@
 ;; modulep! guards prune against `doom-modules-enabled' (see init.el), so the
 ;; SPC tree matches the old Doom setup key for key.  Commands from modules not
 ;; yet ported stay bound but void until their module arrives.
+;; Deviation: the <leader> p tree is rebound from projectile to built-in
+;; project.el commands (projectile is not part of this config); entries with
+;; no project.el analog were dropped.
 ;;; Code:
 
 ;; From modules/config/default/config.el.
@@ -290,7 +293,7 @@
       :desc "Search for symbol in project" "*" #'search-project-for-symbol-at-point
       :desc "Search project"               "/" #'search-project
 
-      :desc "Find file in project"  "SPC"  #'projectile-find-file
+      :desc "Find file in project"  "SPC"  #'project-find-file
       :desc "Jump to bookmark"      "RET"  #'bookmark-jump
 
       ;;; <leader> TAB --- workspace
@@ -679,26 +682,19 @@
       (:prefix-map ("p" . "project")
        :desc "Browse project"               "." #'browse-project
        :desc "Browse other project"         ">" #'doom/browse-in-other-project
-       :desc "Run cmd in project root"      "!" #'projectile-run-shell-command-in-root
-       :desc "Async cmd in project root"    "&" #'projectile-run-async-shell-command-in-root
-       :desc "Add new project"              "a" #'projectile-add-known-project
-       :desc "Switch to project buffer"     "b" #'projectile-switch-to-buffer
-       :desc "Compile in project"           "c" #'projectile-compile-project
-       :desc "Repeat last command"          "C" #'projectile-repeat-last-command
-       :desc "Remove known project"         "d" #'projectile-remove-known-project
+       :desc "Run cmd in project root"      "!" #'project-shell-command
+       :desc "Async cmd in project root"    "&" #'project-async-shell-command
+       :desc "Add new project"              "a" #'project-remember-projects-under
+       :desc "Switch to project buffer"     "b" #'project-switch-to-buffer
+       :desc "Compile in project"           "c" #'project-compile
+       :desc "Remove known project"         "d" #'project-forget-project
        :desc "Discover projects in folder"  "D" #'discover-projects
-       :desc "Edit project .dir-locals"     "e" #'projectile-edit-dir-locals
-       :desc "Find file in project"         "f" #'projectile-find-file
+       :desc "Find file in project"         "f" #'project-find-file
        :desc "Find file in other project"   "F" #'doom/find-file-in-other-project
-       :desc "Configure project"            "g" #'projectile-configure-project
-       :desc "Invalidate project cache"     "i" #'projectile-invalidate-cache
-       :desc "Kill project buffers"         "k" #'projectile-kill-buffers
+       :desc "Kill project buffers"         "k" #'project-kill-buffers
        :desc "Find sibling file"            "o" #'find-sibling-file
-       :desc "Switch project"               "p" #'projectile-switch-project
-       :desc "Find recent project files"    "r" #'projectile-recentf
-       :desc "Run project"                  "R" #'projectile-run-project
-       :desc "Save project files"           "s" #'projectile-save-project-buffers
-       :desc "Test project"                 "T" #'projectile-test-project
+       :desc "Switch project"               "p" #'project-switch-project
+       :desc "Project buffers & recent files" "r" #'consult-project-buffer
        :desc "Toggle scratch buffer"        "x" #'doom/toggle-project-scratch-buffer
        :desc "Switch to scratch buffer"     "X" #'doom/switch-to-project-scratch-buffer)
 

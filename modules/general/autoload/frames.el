@@ -27,7 +27,6 @@
 (defun toggle-frame-maximized-undecorated ()
   (interactive)
   (posframe-delete-all)
-  (corfu-kill-frames)
   (let* ((frame (selected-frame))
          (on? (and (frame-parameter frame 'undecorated)
                    (eq (frame-parameter frame 'fullscreen) 'maximized)))
@@ -80,7 +79,6 @@ it remains shown or hidden - whatever the previous value was."
   the display height. To be used on a Mac."
   (interactive)
   (posframe-delete-all)
-  (corfu-kill-frames)
   (let* ((fr (selected-frame))
          (x (car (frame-position fr))))
     (if (frame-parameter fr 'undecorated-fullheight)

@@ -1,0 +1,57 @@
+{:tasks
+ {:requires ([babashka.fs :as fs]
+             [babashka.process :as p]
+             [clojure.string :as str])
+  :init (do (def root (str (fs/parent (fs/absolutize *file*))))
+            (def test-elpa (str (fs/expand-home "~/.cache/emacs-lab/test-elpa"))))
+
+  deps {:doc "Install test deps (buttercup) into ~/.cache/emacs-lab/test-elpa"
+        :task (p/shell "emacs" "-Q" "--batch"
+                       "--eval" (format "(setq package-user-dir %s)" (pr-str test-elpa))
+                       "--eval" "(require 'package)"
+                       "--eval" "(add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\"))"
+                       "-f" "package-initialize"
+                       "--eval" "(unless (package-installed-p 'buttercup) (package-refresh-contents) (package-install 'buttercup))")}
+
+  lint {:doc "check-parens over every tracked .el file"
+        :task (let [files (->> (p/shell {:out :string :dir root}
+                                        "git" "ls-files" "-co" "--exclude-standard" "*.el")
+                               :out
+                               str/split-lines
+                               (remove str/blank?)
+                               ;; -c lists deleted-but-unstaged files too
+                               (filter (fn [f] (fs/exists? (fs/path root f)))))]
+                (apply p/shell {:dir root}
+                       "emacs" "-Q" "--batch" "-l" "scripts/lint.el" files))}
+
+  test {:doc "Run the buttercup suites in tests/"
+        :depends [deps]
+        :task (p/shell "emacs" "-Q" "--batch"
+                       "--eval" (format "(setq package-user-dir %s)" (pr-str test-elpa))
+                       "-f" "package-initialize"
+                       "--eval" "(setq buttercup-stack-frame-style 'omit)"
+                       "-f" "buttercup-run-discover" (str (fs/path root "tests")))}
+
+  smoke {:doc "Full Elpaca boot in a pty; verdict comes from the result marker"
+         :task (let [result (str (fs/create-temp-file {:prefix "emacs-lab-smoke"}))
+                     macos? (str/includes? (str/lower-case (System/getProperty "os.name")) "mac")
+                     emacs-args ["emacs" "-nw" "--init-directory" root
+                                 "-l" (str (fs/path root "scripts" "smoke-check.el"))]
+                     ;; pty wrapper syntax differs: BSD vs util-linux script(1)
+                     cmd (if macos?
+                           (into ["script" "-q" "/dev/null"] emacs-args)
+                           ["script" "-qec" (str/join " " emacs-args) "/dev/null"])]
+                 (println "smoke: booting the config (first elpaca run can take minutes)...")
+                 (apply p/shell {:continue true
+                                 :extra-env {"SMOKE_RESULT_FILE" result
+                                             ;; CI runners have no usable TERM
+                                             "TERM" "xterm-256color"}}
+                        cmd)
+                 (let [verdict (if (fs/exists? result) (slurp result) "NO RESULT MARKER\n")]
+                   (print verdict)
+                   (flush)
+                   (when-not (str/starts-with? verdict "SMOKE-OK")
+                     (System/exit 1))))}
+
+  ci {:doc "deps + lint + test (the fast tier; smoke is a separate job)"
+      :depends [deps lint test]}}}

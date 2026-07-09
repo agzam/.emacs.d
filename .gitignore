@@ -2,15 +2,21 @@
 # eln-cache, and the state files packages scatter around (history, recentf,
 # bookmarks, transient/, url/, eshell/, projectile*, tramp, ...) - is ignored.
 /*
+# custom-file lives here by choice (edited in place) but is never tracked.
+/custom.el
 !/.gitignore
+!/.github/
 !/AGENTS.md
 !/MIGRATION.org
+!/bb.edn
 !/early-init.el
 !/init.el
 !/config.el
 !/lisp/
 !/modules/
+!/scripts/
 !/snippets/
+!/tests/
 
 # Never track build artifacts or editor droppings, even inside tracked dirs.
 *.elc

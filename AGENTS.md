@@ -38,6 +38,8 @@ name) into code or prose.
   in the quarantine section of `lisp/doom-compat.el`.
 - `.gitignore` is a whitelist: new top-level tracked entries need a `!/name`
   line; state files can never sneak in.
+- Sanctioned exception: `custom.el` stays in the config dir (edited in place
+  by choice, explicitly git-ignored). Everything else follows the rule.
 
 ## Module layout
 
@@ -51,6 +53,10 @@ name) into code or prose.
 - No `packages.el`: recipes go inline via `:ensure (name :host ... :repo ...)`.
   EmacsWiki/codeberg packages need explicit recipes (no MELPA entry or
   unreliable host - use emacsmirror).
+- Local checkouts: a bare local path in `:repo` (no `:host`) builds in place
+  from that dir - the elpaca way to consume packages being developed locally.
+  The cons form `:repo ("~/path" . "name")` clones instead; avoid it. See
+  MIGRATION "Local :repo packages".
 - New module: add to `active-modules` in init.el (explicit order, never
   globs) and, if guarded by `modulep!`, to `doom-modules-enabled`.
 
@@ -70,11 +76,23 @@ name) into code or prose.
 
 ## Verification
 
-- Smoke boot: write checks to a /tmp elisp file, run
-  `TERM=xterm-256color emacs -nw --init-directory ~/.config/emacs-lab -l
-  /tmp/check.el` in a kitty tab; the file writes a marker on
-  `elpaca-after-init-hook` and `kill-emacs`. Always capture `*Warnings*` and
-  elpaca statuses (`(elpaca--queued)` is an alist of `(ID . E)`; status via
-  `elpaca<-status`) - no `ignore-errors` around checks.
+- Canonical entry points (same locally and in CI, see
+  `.github/workflows/ci.yml`): `bb lint` (check-parens over tracked elisp),
+  `bb test` (buttercup suites in `tests/`), `bb smoke` (full elpaca boot in
+  a pty; verdict comes from the marker written by `scripts/smoke-check.el`).
+- Every module port adds or extends a suite in `tests/`, which mirrors the
+  source tree: `tests/MODULE/FILE-tests.el` per module source file (the
+  `autoload/` level is flattened), `lisp/` sources under `tests/lisp/`.
+  Suites load `tests/helper.el` (located via `locate-dominating-file`),
+  which sandboxes the XDG dirs before doom-compat derives its paths - tests
+  never touch the real cache/state.
+- Ad-hoc smoke checks: the /tmp elisp file + kitty tab pattern still applies
+  (`TERM=xterm-256color emacs -nw --init-directory ~/.config/emacs-lab -l
+  /tmp/check.el`, marker on `elpaca-after-init-hook`, `kill-emacs`). Always
+  capture `*Warnings*` and elpaca statuses (`(elpaca--queued)` is an alist of
+  `(ID . E)`; status via `elpaca<-status`) - no `ignore-errors` around checks.
 - `check-parens` every edited file (`eca--check-parens-file`).
+- Deleting an `autoload/*.el` does NOT invalidate the generated loaddefs
+  cache (the mtime check only sees newer files) - also remove
+  `~/.cache/emacs-lab/autoloads/NAME.el`.
 - MIGRATION.org tracks the porting plan; update it as modules land.

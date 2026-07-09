@@ -35,11 +35,10 @@
   ;; EmacsWiki package: purged from MELPA in 2018; straight resolved it via
   ;; its emacsmirror recipe source, Elpaca needs the mirror spelled out.
   :ensure (info+ :host github :repo "emacsmirror/info-plus")
-  :defer t
+  :after-call Info-mode-hook
   :commands (info info-display-manual)
   :config
-  (setopt Info-fontify-angle-bracketed-flag nil)
-  (add-hook 'Info-mode-hook (lambda () (require 'info+))))
+  (setopt Info-fontify-angle-bracketed-flag nil))
 
 (after! smartparens
   (eval `(add-hook! , sp-lisp-modes
@@ -248,9 +247,8 @@
           "n" #'flycheck-next-error
           "p" #'flycheck-previous-error
           "y" #'flycheck-copy-errors-as-kill
-          "t" #'lsp-treemacs-errors-list
           "l" #'flycheck-list-errors
-          "c" #'consult-flycheck
+          "t" #'lsp-treemacs-errors-list
           "s" #'flycheck-select-checker))))
 
 (after! tramp

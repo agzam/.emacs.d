@@ -1,6 +1,6 @@
 ;;; custom/general/autoload/buffers.el -*- lexical-binding: t; -*-
 
-(defun spacemacs/rudekill-matching-buffers (regexp &optional internal-too)
+(defun rudekill-matching-buffers (regexp &optional internal-too)
   "Kill - WITHOUT ASKING - buffers whose name matches the
 specified REGEXP. See the `kill-matching-buffers` for grateful
 killing. The optional 2nd argument indicates whether to kill
@@ -18,7 +18,7 @@ Returns the count of killed buffers."
     (length buffers)))
 
 ;;;###autoload
-(defun spacemacs/kill-matching-buffers-rudely (regexp &optional internal-too)
+(defun kill-matching-buffers-rudely (regexp &optional internal-too)
   "Kill - WITHOUT ASKING - buffers whose name matches the
 specified REGEXP. See the `kill-matching-buffers` for grateful
 killing. The optional 2nd argument indicates whether to kill
@@ -28,7 +28,7 @@ Returns a message with the count of killed buffers."
   (interactive "sKill buffers matching this regular expression: \nP")
   (message
    (format "%d buffer(s) killed."
-           (spacemacs/rudekill-matching-buffers regexp internal-too))))
+           (rudekill-matching-buffers regexp internal-too))))
 
 ;;;###autoload
 (defun alternate-buffer ()

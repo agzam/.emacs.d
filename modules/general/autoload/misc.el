@@ -1,4 +1,4 @@
-;;; custom/general/autoload/narrow.el -*- lexical-binding: t; -*-
+;;; modules/general/autoload/misc.el -*- lexical-binding: t; -*-
 
 (defun clone-indirect-buffer-de-activate-mark ()
   "This is a workaround for the evil visual state error message
@@ -74,24 +74,11 @@ narrowed to."
       (diff old-buffer new-buffer nil t))))
 
 ;;;###autoload
-(defun find-in-doom-dir ()
+(defun find-in-config-dir ()
+  "Jump to a file anywhere under `user-emacs-directory'."
   (interactive)
-  (find-file doom-user-dir)
-  (consult-projectile-find-file))
-
-;;;###autoload
-(defun remove-package-artifacts ()
-  "Remove repo and build file for a selected package.
-Useful for clean up before running `doom -up`."
-  (interactive)
-  (ignore-errors (require 'straight))
-  (let* ((sel-dir (completing-read
-                   "Select package repo: "
-                   (directory-files (straight--repos-dir ))))
-         (dirs (list (straight--repos-dir sel-dir)
-                     (straight--build-dir sel-dir))))
-    (dolist (d dirs)
-      (delete-directory d :recursive))))
+  (let ((default-directory user-emacs-directory))
+    (project-find-file)))
 
 ;;;###autoload
 (defun yas-completing-prompt (prompt choices &optional display-fn completion-fn)

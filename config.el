@@ -16,12 +16,17 @@
 ;; TODO: (setopt doom-theme 'ag-themes-spacemacs-light) - ag-themes live in
 ;; the colors module; default theme until it ports.
 
+(defun tty-bar-cursor-h ()
+  "Thin cursor for insert state in the terminal."
+  (send-string-to-terminal "\033[5 q"))
+
+(defun tty-default-cursor-h ()
+  "Restore the terminal's default cursor shape."
+  (send-string-to-terminal "\033[0 q"))
+
 (unless (display-graphic-p)
-  ;; forcing thin cursor in insert mode
-  (add-hook 'evil-insert-state-entry-hook
-            (lambda () (send-string-to-terminal "\033[5 q")))
-  (add-hook 'evil-normal-state-entry-hook
-            (lambda () (send-string-to-terminal "\033[0 q"))))
+  (add-hook 'evil-insert-state-entry-hook #'tty-bar-cursor-h)
+  (add-hook 'evil-normal-state-entry-hook #'tty-default-cursor-h))
 
 ;; TODO: Doom's font machinery (doom-font & friends) isn't vendored; set the
 ;; faces directly until the UI port.  Original:
@@ -65,7 +70,6 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
  doom-localleader-key ","
  doom-localleader-alt-key "C-,"
  scroll-margin 1
- evil-want-C-u-scroll nil
  default-input-method "russian-computer"
  tab-width 4
  apropos-sort-by-scores t
@@ -78,9 +82,6 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
  ;; per https://github.com/emacs-lsp/lsp-mode#performance
  read-process-output-max (* 10 1024 1024) ;; 10mb
  gc-cons-threshold 200000000)
-
-(after! epa
-  (setq epg-pinentry-mode nil))
 
 (after! man
   ;; open man pages in the same window
@@ -117,10 +118,7 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
       (custom-set-faces '(mode-line-active ((t (:inherit mode-line)))))
 
       (init-visual-line-keys)
-      (fringe-mode '(6 . 0))
-
-      (when (fboundp 'pixel-scroll-precision-mode)
-        (pixel-scroll-precision-mode +1)))))
+      (fringe-mode '(6 . 0)))))
 
 (after! custom
   ;; in customize dialogs keep the elisp names
@@ -152,14 +150,6 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
           ;; this one is a delay between evil-escape-key-sequence keys
           ;; - used for jumping to normal state from insert
           evil-escape-delay 0.1)
-
-  ;; cursor shape in the terminal
-  (when (and (not (display-graphic-p))
-             (string= (getenv "TERM") "xterm-256color"))
-    (add-hook 'evil-insert-state-entry-hook
-              (lambda () (send-string-to-terminal "\e[6 q")))
-    (add-hook 'evil-normal-state-entry-hook
-              (lambda () (send-string-to-terminal "\e[2 q"))))
 
   (map! :map 'evil-visual-state-map "u" #'undo)
 
@@ -264,7 +254,7 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
       :i "M-/" #'completion-preview-next-candidate
       :i "M-?" #'completion-preview-prev-candidate
       :i "M-l" #'completion-preview-accept-or-slurp
-      :i "C-/" #'complete-in-minibuffer
+      :i "C-/" #'completion-at-point
       :n "gi" #'ibuffer-sidebar-jump
       :i "C-v" #'evil-paste-after
       :i "TAB" #'completion-at-point
@@ -326,14 +316,14 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
         :desc "choose shell" "\"" #'shell-pop-choose)
 
       (:prefix ("b" . "buffers/browser")
-       :desc "proj. buffers" "b" #'consult-projectile
+       :desc "proj. buffers" "b" #'consult-project-buffer
        :desc "all buffers" "B" #'consult-buffer
        :desc "scratch" "s" #'doom/switch-to-scratch-buffer
        :desc "Messages" "m" #'switch-to-messages-buffer
        :desc "kill" "d" #'kill-current-buffer
        :desc "kill with window" "k" #'kill-buffer-and-window
        :desc "diff with file" "D" #'diff-current-buffer-with-file
-       :desc "kill some buffers" "s-d" #'spacemacs/kill-matching-buffers-rudely
+       :desc "kill some buffers" "s-d" #'kill-matching-buffers-rudely
        (:when (modulep! :custom web-browsing)
          :desc "browser history" "h" #'browser-hist-search
          :desc "browser tabs" "t" #'browser-goto-tab
@@ -353,8 +343,8 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
                  :desc "open in app" "O" #'macos-open-in-default-program)
                "e" nil
                (:prefix ("e" . "doom/emacs")
-                :desc "doom.d" "d" #'find-in-doom-dir
-                :desc "elpaca sources" "i" (cmd! (dired (expand-file-name "elpaca/sources/" user-emacs-directory)))
+                :desc "config dir" "d" #'find-in-config-dir
+                :desc "elpaca sources" "i" (cmd! (dired elpaca-sources-directory))
                 (:when (featurep :system 'linux)
                   :desc "awesomewm config" "a" (cmd! (dired "~/.config/awesome/")))))
 
@@ -436,13 +426,11 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
         "C-b" #'browser-create-roam-node-for-active-tab))
 
       (:prefix ("p" . "projects")
-               "b" #'consult-projectile
-               "f" #'consult-projectile-find-file
+               "b" #'consult-project-buffer
+               "f" #'project-find-file
                "k" #'project-kill-buffers
-               (:after projectile
-                :desc "Invalidate project cache" "I" #'projectile-invalidate-cache
-                :desc "project IBuffer" "i" #'projectile-ibuffer
-                :desc "find dir" "d" #'projectile-find-dir)
+               :desc "project buffers list" "i" #'project-list-buffers
+               :desc "find dir" "d" #'project-find-dir
                (:when (modulep! :custom dired)
                  :desc "treemacs" "T" #'treemacs-project-toggle+
                  :desc "dired locate" "t" #'dired-jump-find-in-project)
@@ -455,9 +443,7 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
        :desc "yank from kill-ring" "y" #'consult-yank-from-kill-ring
        (:after vertico
         :desc "vertico repeat" "l" #'vertico-repeat-or-unsuspend
-        :desc "vertico history" "L" #'vertico-repeat-select)
-       (:after corfu
-        :desc "corfu reset" "c" #'corfu-kill-frames))
+        :desc "vertico history" "L" #'vertico-repeat-select))
 
       (:prefix ("s" . "search/symbol")
        :desc "in buffer"  "s" #'consult-line

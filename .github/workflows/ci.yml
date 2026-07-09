@@ -1,0 +1,53 @@
+---
+name: CI
+
+on:  # yamllint disable-line rule:truthy
+  push:
+  workflow_dispatch:
+
+jobs:
+  # Fast tier: check-parens + buttercup suites. No elpaca, network only on
+  # a cold test-elpa cache (one buttercup install).
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: purcell/setup-emacs@master
+        with:
+          version: '30.1'
+      - uses: turtlequeue/setup-babashka@v1.1.0
+        with:
+          babashka-version: '1.12.196'
+      - name: Cache test deps
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/emacs-lab/test-elpa
+          key: test-elpa-${{ runner.os }}-${{ hashFiles('bb.edn') }}
+      - run: bb ci
+
+  # Full tier: boot the whole config with elpaca in a pty. Doubles as the
+  # Linux-parity trial gate from MIGRATION.org. Elpaca is unpinned, so the
+  # restore-keys fallback keeps package checkouts warm between key changes.
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: purcell/setup-emacs@master
+        with:
+          version: '30.1'
+      - uses: turtlequeue/setup-babashka@v1.1.0
+        with:
+          babashka-version: '1.12.196'
+      - name: Cache elpaca checkouts and eln
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/share/emacs-lab
+            ~/.cache/emacs-lab/eln
+          # yamllint disable-line rule:line-length
+          key: elpaca-${{ runner.os }}-${{ hashFiles('init.el', 'modules/**/config.el') }}
+          restore-keys: |
+            elpaca-${{ runner.os }}-
+      - run: bb smoke
