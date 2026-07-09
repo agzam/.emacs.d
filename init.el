@@ -52,9 +52,11 @@
 (elpaca elpaca-use-package (elpaca-use-package-mode))
 (elpaca-wait)
 
-;; Doom's use-package! defers by default; keep that contract for ported code.
-(setq use-package-always-defer t
-      use-package-always-ensure t)
+;; Doom leaves use-package-always-defer nil: :after-only blocks (vertico
+;; extensions, posframes, evil-traces) need demand-after-parents semantics,
+;; which always-defer silently disables - packages built but never loaded.
+;; Laziness comes from explicit :defer/:hook/:commands keywords instead.
+(setq use-package-always-ensure t)
 
 ;;; Doom compat layer
 

@@ -70,6 +70,15 @@ module layout).
   dropped (window-undo owns u); Doom's other-window and window-enlargen
   overrides dropped for stock evil equivalents; tear-off-window stays
   tab-window-detach; ace-window keys parked until :ui window-select.
+- [2026-07] use-package-always-defer removed from init.el - the "Doom
+  defers by default" premise was wrong (live Doom runs with it nil).
+  Under always-defer t, every :after-only use-package block builds but
+  never loads: vertico-posframe + which-key-posframe (the reported bug),
+  all six vertico extensions (vertico-repeat's history saving was dead),
+  evil-traces, yasnippet-capf, consult-yasnippet. Audited all blocks:
+  everything else defers via explicit :defer/:hook/:commands/:after-call,
+  so nothing became eager. Rule for ports: laziness must come from
+  explicit keywords, never from a global default.
 - [2026-07] scratch lib ported (general/autoload/scratch.el, from Doom's
   lisp/lib/scratch.el): doom/* commands -> bare names, doom-scratch-buffer
   -> scratch-buffer-create (built-in =scratch-buffer= collision), buffers
