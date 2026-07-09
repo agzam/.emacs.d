@@ -14,18 +14,26 @@
 
 (describe "file quarantine"
   (it "redirects state files outside user-emacs-directory"
-    (dolist (var '(savehist-file recentf-save-file bookmark-default-file
-                   project-list-file transient-history-file
-                   auto-save-list-file-prefix url-cache-directory
-                   eshell-directory-name))
+    (dolist (var '(savehist-file save-place-file recentf-save-file
+                   bookmark-default-file project-list-file
+                   transient-history-file auto-save-list-file-prefix
+                   url-cache-directory eshell-directory-name))
       (expect (file-in-directory-p (symbol-value var) user-emacs-directory)
               :to-be nil)))
   (it "points state files at the quarantine dirs"
     (expect (file-in-directory-p savehist-file doom-state-dir) :to-be-truthy)
+    (expect (file-in-directory-p save-place-file doom-state-dir) :to-be-truthy)
     (expect (file-in-directory-p tramp-persistency-file-name doom-cache-dir)
             :to-be-truthy)
     (expect (file-in-directory-p url-configuration-directory doom-data-dir)
             :to-be-truthy)))
+
+(describe "switch-frame hook machinery"
+  (it "defines the debounced trigger and its hook"
+    (expect (boundp 'doom-switch-frame-hook) :to-be-truthy)
+    (expect (numberp doom-switch-frame-hook-debounce-delay) :to-be-truthy)
+    (expect (fboundp 'doom-run-switch-frame-hooks-fn) :to-be-truthy)
+    (expect (fboundp 'doom--run-switch-frame-hooks-fn) :to-be-truthy)))
 
 (describe "modulep!"
   (it "matches an enabled module"

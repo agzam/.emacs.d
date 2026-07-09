@@ -82,6 +82,10 @@
 
 (require 'doom-keybinds)
 
+;; Baseline editor/UI defaults vendored from Doom core (lisp/doom-emacs.el);
+;; loads before modules so module and user layers override it.
+(require 'doom-defaults)
+
 ;; Standalone helpers, loaded before modules (mirrors Doom init.el ordering).
 (load (expand-file-name "lisp/functions" user-emacs-directory) nil 'nomessage)
 

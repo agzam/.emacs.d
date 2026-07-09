@@ -8,7 +8,7 @@
 ;; Set before evil loads; `defvar' so they remain overridable.
 (defvar evil-want-keybinding nil)  ; evil-collection owns mode keybinds
 (defvar evil-want-C-g-bindings t)
-(defvar evil-want-C-i-jump nil)    ; C-i/jump-forward comes from bindings.el
+(defvar evil-want-C-i-jump nil)    ; [C-i] bound to evil-jump-forward below
 (defvar evil-want-C-u-scroll t)
 (defvar evil-want-C-u-delete t)
 (defvar evil-want-C-w-delete t)
@@ -45,6 +45,16 @@
   "`evil-ex-search' leaves isearch fold overlays open (emacs-evil/evil#1630)."
   :after #'evil-ex-search
   (isearch-clean-overlays))
+
+(defadvice! evil--doom-escape-a (&rest _)
+  "Run `doom/escape' (and thus `doom-escape-hook') on interactive ESC."
+  :after #'evil-force-normal-state
+  (when (called-interactively-p 'any)
+    (call-interactively #'doom/escape)))
+
+;; vim's jump-forward; reachable in GUI frames only, where doom-defaults'
+;; key-translation hack synthesizes [C-i] distinct from TAB.
+(map! :m [C-i] #'evil-jump-forward)
 
 (use-package evil-collection
   :unless noninteractive

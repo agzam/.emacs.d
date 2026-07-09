@@ -74,8 +74,11 @@
   (after-each
     (when (fboundp 'yank-path--buffer-path-a)
       (advice-add 'yank-buffer-path :override #'yank-path--buffer-path-a)))
+  ;; file-truename on the fixtures: doom-defaults sets
+  ;; find-file-visit-truename, and macOS temp dirs are symlinks
+  ;; (/var -> /private/var).
   (it "kills the abbreviated file path"
-    (let ((f (make-temp-file "yank-probe"))
+    (let ((f (file-truename (make-temp-file "yank-probe")))
           (kill-ring nil)
           (kill-ring-yank-pointer nil))
       (unwind-protect
@@ -85,7 +88,7 @@
         (when-let* ((buf (get-file-buffer f))) (kill-buffer buf))
         (delete-file f))))
   (it "resolves relative to ROOT when given"
-    (let ((f (make-temp-file "yank-probe"))
+    (let ((f (file-truename (make-temp-file "yank-probe")))
           (kill-ring nil)
           (kill-ring-yank-pointer nil))
       (unwind-protect

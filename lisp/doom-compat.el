@@ -32,6 +32,7 @@
 ;; list as ported modules introduce new state files.
 (setq auto-save-list-file-prefix (concat doom-cache-dir "autosave/")
       savehist-file (concat doom-state-dir "savehist")
+      save-place-file (concat doom-state-dir "saveplace")
       recentf-save-file (concat doom-state-dir "recentf")
       bookmark-default-file (concat doom-state-dir "bookmarks")
       project-list-file (concat doom-state-dir "projects")
@@ -637,6 +638,8 @@ Lab version on top of project.el (Doom used projectile)."
   "Hooks run after changing the current buffer.")
 (defvar doom-switch-window-hook nil
   "Hooks run after changing the focused window.")
+(defvar doom-switch-frame-hook nil
+  "Hooks run after changing the focused frame (debounced).")
 
 (defvar doom-load-theme-hook nil
   "Hooks run after the theme is loaded.")
@@ -648,6 +651,40 @@ Lab version on top of project.el (Doom used projectile)."
 
 (defun doom-compat--after-init-h ()
   (doom-run-hooks 'doom-init-ui-hook 'doom-init-modules-hook 'doom-after-init-hook))
+
+;; Switch-frame machinery vendored from doom-emacs.el ('+last-focus frame
+;; parameter renamed to 'doom--last-focus).
+(defvar doom-switch-frame-hook-debounce-delay 2.0
+  "The delay for which `doom-switch-frame-hook' won't trigger again.
+
+This exists to prevent switch-frame hooks getting triggered too aggressively
+due to misbehaving desktop environments, packages incorrectly frame switching
+in non-interactive code, or the user rapidly un-and-refocusing the frame.")
+
+(defun doom--run-switch-frame-hooks-fn (_)
+  (remove-hook 'pre-redisplay-functions #'doom--run-switch-frame-hooks-fn)
+  (let ((gc-cons-threshold most-positive-fixnum))
+    (dolist (fr (visible-frame-list))
+      (let ((state (frame-focus-state fr)))
+        (when (and state (not (eq state 'unknown)))
+          (let ((last-update (frame-parameter fr 'doom--last-focus)))
+            (when (or (null last-update)
+                      (> (float-time (time-subtract (current-time) last-update))
+                         doom-switch-frame-hook-debounce-delay))
+              (with-selected-frame fr
+                (unwind-protect
+                    (let ((inhibit-redisplay t))
+                      (run-hooks 'doom-switch-frame-hook))
+                  (set-frame-parameter fr 'doom--last-focus (current-time)))))))))))
+
+(let (last-focus-state)
+  (defun doom-run-switch-frame-hooks-fn ()
+    "Trigger `doom-switch-frame-hook' once per frame focus change."
+    (or (equal last-focus-state
+               (setq last-focus-state
+                     (mapcar #'frame-focus-state (frame-list))))
+        ;; Defer until next redisplay
+        (add-hook 'pre-redisplay-functions #'doom--run-switch-frame-hooks-fn))))
 
 (unless noninteractive
   (add-hook 'elpaca-after-init-hook #'doom-compat--after-init-h -90)
@@ -661,6 +698,8 @@ Lab version on top of project.el (Doom used projectile)."
     (let ((gc-cons-threshold most-positive-fixnum))
       (run-hooks 'doom-switch-window-hook)))
   (add-hook 'window-selection-change-functions #'doom--run-switch-window-hooks-h)
+
+  (add-function :after after-focus-change-function #'doom-run-switch-frame-hooks-fn)
 
   (defun doom--run-load-theme-hooks-h (_theme)
     (run-hooks 'doom-load-theme-hook))

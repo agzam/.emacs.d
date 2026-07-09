@@ -70,7 +70,7 @@ name) into code or prose.
   else defers via hooks/autoloads.
 - Near-verbatim vendored files (keep diffs minimal, note deviations in the
   header): `lisp/doom-compat.el`, `lisp/doom-keybinds.el`,
-  `modules/bindings/config.el`.
+  `lisp/doom-defaults.el`, `modules/bindings/config.el`.
 - User layering mirrors Doom: modules load in `active-modules` order, root
   `config.el` loads last and always wins.
 

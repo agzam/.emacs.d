@@ -7,8 +7,11 @@ module layout).
 
 * Ported so far
 - core :: elpaca bootstrap (repos/builds in ~/.local/share/emacs-lab/), doom-compat
-  (macros, first-hooks, modulep!, quarantine), doom-keybinds (map!, SPC/","
-  leaders), lazy loaddefs generation, XDG cache/state layout
+  (macros, first-hooks incl. switch-frame, modulep!, quarantine), doom-keybinds
+  (map!, SPC/"," leaders), doom-defaults (baseline editor/UI defaults,
+  doom/escape, MODE-local-vars hooks, built-ins: recentf/saveplace/so-long/
+  auto-revert/comint/compile/ediff/show-paren/transient), lazy loaddefs
+  generation, XDG cache/state layout
 - modules :: evil (lean set), bindings (Doom tree, company/ivy/helm excised,
   SPC p on project.el), general, completion
 - user layer :: config.el (leader tree, globals), lisp/functions.el
@@ -18,6 +21,23 @@ module layout).
   GitHub workflow (test + smoke jobs on Emacs 30.1, cached elpaca dirs)
 
 * Decisions log
+- [2026-07] doom-defaults.el vendored (the settings half of Doom v3's
+  lisp/doom-emacs.el @8e4fbba): security/runtime defaults, editor + UI
+  defaults, C-i/C-m GUI key translation, doom/escape, MODE-local-vars-hook,
+  built-in package config (autorevert, comint, compile, ediff, paren,
+  project, recentf, savehist settings, saveplace, so-long, transient).
+  Deliberate deviations, in the file header too: winner-mode and
+  global-hl-line-mode stay out (custom windows.el engine; hl-line was
+  disabled in config.el anyway - its remove-hook there is now inert);
+  confirm-kill-emacs is plain yes-or-no-p and kill-current-buffer/
+  fallback-buffer advice skipped until a buffers lib ports;
+  scroll-conservatively/scroll-margin stay with ultra-scroll; savehist-mode
+  enable stays in modules/completion; upstream's saveplace block enables
+  savehist-mode (copy-paste bug) - fixed here. doom-compat gained the
+  doom-switch-frame-hook trio (debounced, feeds doom-auto-revert) and
+  save-place-file quarantine. evil module: evil--doom-escape-a (Doom's
+  +evil-escape-a) so ESC in normal state runs doom-escape-hook, plus
+  :m [C-i] evil-jump-forward (was referenced in comments, never bound).
 - [2026-07] corfu machinery removed entirely: corfu + extensions,
   corfu-terminal, popon, kind-icon, autoload/corfu.el, minad-capf.el.
   Built-in completion-preview-mode + the echo pager (now in
@@ -59,7 +79,11 @@ module layout).
   quarantine wiring itself is testable.
 - Coverage map (batch tier):
   - covered :: lisp/doom-compat.el (dirs/quarantine, modulep!, after!,
-    hook/advice macros, doom-glob, letf!, quiet!), lisp/functions.el,
+    hook/advice macros, doom-glob, letf!, quiet!, switch-frame machinery),
+    lisp/doom-defaults.el (backup/autosave quarantine, quiet-UX +
+    formatting defaults, doom/escape, local-vars hooks, C-i translation,
+    built-in lifecycle staging, doom-auto-revert wiring, so-long predicate,
+    savehist settings), lisp/functions.el,
     bindings/autoload.el, general (misc, buffers, yank-path, files,
     window movers in evil.el, expreg guards + transient, windows.el
     layout engine + cleanup), completion (completion-preview pager,
