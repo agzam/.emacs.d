@@ -43,11 +43,12 @@ window."
   "Deletes duplicate windows.
 Leaves single window per buffer, removing all duplicates."
   (interactive)
-  (when (->>
-         (window-list)
-         (seq-group-by (lambda (win) (window-buffer win)))
-         (seq-filter (lambda (group) (length> (cdr group) 1)))
-         (seq-do (lambda (group) (seq-do #'delete-window (cddr group)))))
+  ;; thread-last, not dash's ->>: dash isn't installed in this config
+  (when (thread-last
+          (window-list)
+          (seq-group-by (lambda (win) (window-buffer win)))
+          (seq-filter (lambda (group) (length> (cdr group) 1)))
+          (seq-do (lambda (group) (seq-do #'delete-window (cddr group)))))
     (balance-windows-area)))
 
 ;;;###autoload

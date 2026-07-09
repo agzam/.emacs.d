@@ -38,15 +38,17 @@ I want * and # operators to respect marked region."
            (not (or (window-in-direction 'above)
                     (window-in-direction 'below))))
       (evil-window-move-far-left)
-    (window-move-right)))
+    ;; rename-sweep collision fix: this used to call Doom's
+    ;; +evil/window-move-right; calling window-move-right here recursed
+    (windmove-swap-states-right)))
 
 ;;;###autoload
 (defun window-move-left ()
-  "Swap windows to the right"
+  "Swap windows to the left"
   (interactive)
   (require 'windmove)
   (if (and (window-at-side-p nil 'left)
            (not (or (window-in-direction 'above)
                     (window-in-direction 'below))))
       (evil-window-move-far-right)
-    (window-move-left)))
+    (windmove-swap-states-left)))

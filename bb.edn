@@ -2,7 +2,10 @@
  {:requires ([babashka.fs :as fs]
              [babashka.process :as p]
              [clojure.string :as str])
-  :init (do (def root (str (fs/parent (fs/absolutize *file*))))
+  ;; *file* is cwd-relative under --config; the system property is not
+  :init (do (def root (str (fs/parent (fs/canonicalize
+                                       (or (System/getProperty "babashka.config")
+                                           *file*)))))
             (def test-elpa (str (fs/expand-home "~/.cache/emacs-lab/test-elpa"))))
 
   deps {:doc "Install test deps (buttercup) into ~/.cache/emacs-lab/test-elpa"
@@ -26,7 +29,9 @@
 
   test {:doc "Run the buttercup suites in tests/"
         :depends [deps]
-        :task (p/shell "emacs" "-Q" "--batch"
+        ;; :dir matters: buttercup-run-discover finds nothing from foreign cwds
+        :task (p/shell {:dir root}
+                       "emacs" "-Q" "--batch"
                        "--eval" (format "(setq package-user-dir %s)" (pr-str test-elpa))
                        "-f" "package-initialize"
                        "--eval" "(setq buttercup-stack-frame-style 'omit)"

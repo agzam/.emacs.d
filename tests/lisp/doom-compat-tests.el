@@ -52,3 +52,101 @@
     (after! cl-lib
       (put 'after-now-probe 'ran t))
     (expect (get 'after-now-probe 'ran) :to-be-truthy)))
+
+(defvar probe-hook-log nil)
+(defvar probe-hook-a nil)
+(defvar probe-hook-b nil)
+(defvar probe-transient-hook nil)
+(defvar probe-transient-count 0)
+(defvar probe-setq-hook nil)
+(defvar probe-local-var 'global)
+
+(describe "add-hook! / remove-hook!"
+  (before-each
+    (setq probe-hook-log nil
+          probe-hook-a nil
+          probe-hook-b nil))
+  (it "adds a named function to multiple hooks"
+    (add-hook! '(probe-hook-a probe-hook-b)
+      (defun probe-hook-fn ()
+        (push 'ran probe-hook-log)))
+    (expect (memq 'probe-hook-fn probe-hook-a) :to-be-truthy)
+    (expect (memq 'probe-hook-fn probe-hook-b) :to-be-truthy)
+    (run-hooks 'probe-hook-a 'probe-hook-b)
+    (expect probe-hook-log :to-equal '(ran ran)))
+  (it "appends with :append"
+    (add-hook 'probe-hook-a #'ignore)
+    (add-hook! 'probe-hook-a :append
+      (defun probe-hook-last-fn () nil))
+    (expect (car (last probe-hook-a)) :to-be 'probe-hook-last-fn))
+  (it "remove-hook! removes what add-hook! added"
+    (add-hook! 'probe-hook-a #'probe-hook-fn)
+    (remove-hook! 'probe-hook-a #'probe-hook-fn)
+    (expect (memq 'probe-hook-fn probe-hook-a) :to-be nil)))
+
+(describe "add-transient-hook!"
+  (it "runs once, then removes itself"
+    (setq probe-transient-count 0
+          probe-transient-hook nil)
+    (add-transient-hook! 'probe-transient-hook
+      (cl-incf probe-transient-count))
+    (run-hooks 'probe-transient-hook)
+    (expect probe-transient-count :to-equal 1)
+    (expect probe-transient-hook :to-equal nil)
+    (run-hooks 'probe-transient-hook)
+    (expect probe-transient-count :to-equal 1)))
+
+(describe "setq-hook!"
+  (it "sets buffer-local values when the hook fires, leaving globals alone"
+    (setq-hook! 'probe-setq-hook probe-local-var 'hooked)
+    (with-temp-buffer
+      (run-hooks 'probe-setq-hook)
+      (expect probe-local-var :to-be 'hooked)
+      (expect (local-variable-p 'probe-local-var) :to-be-truthy))
+    (expect (default-value 'probe-local-var) :to-be 'global))
+  (it "unsetq-hook! detaches the setter"
+    (setq-hook! 'probe-setq-hook probe-local-var 'hooked)
+    (unsetq-hook! 'probe-setq-hook probe-local-var)
+    (with-temp-buffer
+      (run-hooks 'probe-setq-hook)
+      (expect (local-variable-p 'probe-local-var) :to-be nil))))
+
+(describe "defadvice! / undefadvice!"
+  (it "defines the advice function and installs it"
+    (defun probe-advice-target () 'original)
+    (defadvice! probe-advice-a (&rest _)
+      :override #'probe-advice-target
+      'advised)
+    (expect (probe-advice-target) :to-be 'advised)
+    (undefadvice! probe-advice-a (&rest _)
+      :override #'probe-advice-target)
+    (expect (probe-advice-target) :to-be 'original)))
+
+(describe "doom-glob"
+  (it "expands globs and returns nil for no matches"
+    (let ((dir (expand-file-name "glob-probe/" test-sandbox-dir)))
+      (make-directory dir t)
+      (dolist (f '("a.el" "b.el" "c.txt"))
+        (with-temp-file (expand-file-name f dir)))
+      (expect (length (doom-glob dir "*.el")) :to-equal 2)
+      (expect (doom-glob dir "*.nothing") :to-be nil)))
+  (it "returns only directories for trailing-slash globs"
+    (let ((dir (expand-file-name "glob-dirs-probe/" test-sandbox-dir)))
+      (make-directory (expand-file-name "sub" dir) t)
+      (with-temp-file (expand-file-name "file.el" dir))
+      (expect (mapcar #'file-name-nondirectory (doom-glob dir "*/"))
+              :to-equal '("sub")))))
+
+(describe "letf!"
+  (it "temporarily shadows a function, restoring it afterwards"
+    (defun letf-probe () 'original)
+    (expect (letf! ((defun letf-probe () 'shadowed))
+              (letf-probe))
+            :to-be 'shadowed)
+    (expect (letf-probe) :to-be 'original)))
+
+(describe "quiet!"
+  (it "neuters message but passes the body value through"
+    (expect (quiet! (message "must not escape") 'passed-through)
+            :to-be 'passed-through)
+    (expect (quiet! (message "returns nil under quiet")) :to-be nil)))

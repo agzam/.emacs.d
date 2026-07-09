@@ -34,6 +34,11 @@ module layout).
 - [2026-07] custom.el sanctioned to live in the config dir (explicitly
   git-ignored); the no-writes rule stands for everything else.
 - [2026-07] local-package layout deferred - see "Local :repo packages".
+- [2026-07] two latent bugs fixed while adding coverage: window-move-right/
+  left recursed into themselves (rename-sweep collision - the doom.d
+  originals called Doom's +evil/window-move-*; now windmove-swap-states-*)
+  and window-cleanup+ used dash's ->> with dash not installed (now
+  built-in thread-last).
 
 * Testing & CI
 - =bb test= - buttercup suites from tests/ (buttercup auto-installed into
@@ -52,8 +57,29 @@ module layout).
   flattened; lisp/ sources under tests/lisp/), shared tests/helper.el found
   via locate-dominating-file. helper.el sandboxes XDG dirs, so the
   quarantine wiring itself is testable.
-- Gotchas: buttercup-run-discover needs an ABSOLUTE tests dir; deleting an
-  autoload/*.el leaves stale generated loaddefs (also rm
+- Coverage map (batch tier):
+  - covered :: lisp/doom-compat.el (dirs/quarantine, modulep!, after!,
+    hook/advice macros, doom-glob, letf!, quiet!), lisp/functions.el,
+    bindings/autoload.el, general (misc, buffers, yank-path, files,
+    window movers in evil.el, expreg guards + transient, windows.el
+    layout engine + cleanup), completion (completion-preview pager,
+    vertico orderless dispatchers, yasnippet helpers)
+  - smoke-only, and why :: evil module config and
+    evil-ex-visual-star-search-a (need evil); frames.el and expreg--line
+    (need a real display - batch frames are ~10 columns, visual-line fns
+    wrap); lisp.el (smartparens pending); url.el (ghub pending);
+    dash-docs.el (package + network); bindings/config.el and
+    lisp/doom-keybinds.el (need general at load time)
+  - tier-2 idea (not built) :: after =bb smoke= warms the elpaca dirs, a
+    package-aware suite could load real evil/consult and cover the
+    smoke-only bucket; revisit if that bucket grows
+- Gotchas: buttercup-run-discover silently finds nothing from a foreign
+  cwd even with an absolute dir arg (the bb test task pins :dir); under
+  =bb --config=, =*file*= is cwd-relative - derive paths from the
+  =babashka.config= system property; in test files, let-binding a
+  package's defcustom that isn't loaded needs a bare (defvar var)
+  declaration first or the binding is lexical; deleting an autoload/*.el
+  leaves stale generated loaddefs (also rm
   ~/.cache/emacs-lab/autoloads/NAME.el); general/autoload/url.el has a
   top-level (require 'ghub) - its commands error and the file cannot load
   in tests until the git module ports.
