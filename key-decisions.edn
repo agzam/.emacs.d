@@ -1,0 +1,30 @@
+;; Key-audit decision ledger (migration-scoped; see MIGRATION.org "Key
+;; clusters"; generated report: ~/.cache/emacs-lab/keydiff.org).
+;; Shape: {[group "KEY DESC"] {:status <verdict> :note "why"}}
+;; Verdicts:
+;;   :ported   binding now matches Doom (keydiff flags it again if it drifts)
+;;   :improved deliberately different in the lab (note says why)
+;;   :dropped  not wanted (note says why)
+;;   :deferred parked until its module/package ports (note names it)
+{;; SPC w - pilot cluster (2026-07)
+ ["leader" "SPC w d"] {:status :ported :note "evil-window-delete, from Doom :editor evil"}
+ ["leader" "SPC w H"] {:status :improved :note "window-move-left - windmove-swap-states port (Decisions log)"}
+ ["leader" "SPC w L"] {:status :improved :note "window-move-right - windmove-swap-states port (Decisions log)"}
+ ["leader" "SPC w J"] {:status :improved :note "window-move-down - windmove sibling of the H/L movers"}
+ ["leader" "SPC w K"] {:status :improved :note "window-move-up - windmove sibling of the H/L movers"}
+ ["leader" "SPC w S"] {:status :improved :note "window-split-and-follow (renamed +evil/ port)"}
+ ["leader" "SPC w V"] {:status :improved :note "window-vsplit-and-follow (renamed +evil/ port)"}
+ ["leader" "SPC w T"] {:status :improved :note "tab-window-detach (tab-bar-centric) over tear-off-window's new frame"}
+ ["leader" "SPC w o"] {:status :improved :note "stock delete-other-windows (vim C-w o); doom/window-enlargen dropped - revive if missed"}
+ ["leader" "SPC w C-w"] {:status :dropped :note "Doom's other-window override; stock evil-window-next is equivalent"}
+ ["leader" "SPC w C-r"] {:status :dropped :note "winner stays out (Decisions log: windows.el engine); stock rotate kept"}
+ ["leader" "SPC w C-u"] {:status :dropped :note "winner stays out; window-undo owns SPC w u"}
+ ["leader" "SPC w C-S-w"] {:status :deferred :note "ace-swap-window - :ui window-select decision (ace-window unported)"}
+ ["leader" "SPC w C-c"] {:status :deferred :note "ace-delete-window - :ui window-select; stock evil-window-delete meanwhile"}
+
+ ;; scratch lib port (2026-07) - doom/* names renamed, see Decisions log
+ ["leader" "SPC b s"] {:status :improved :note "switch-to-scratch-buffer - renamed port, scratch lib in general module"}
+ ["leader" "SPC b x"] {:status :improved :note "open-scratch-buffer - renamed port"}
+ ["leader" "SPC b X"] {:status :improved :note "switch-to-scratch-buffer - renamed port"}
+ ["leader" "SPC p x"] {:status :improved :note "toggle-project-scratch-buffer - renamed port"}
+ ["leader" "SPC p X"] {:status :improved :note "switch-to-project-scratch-buffer - renamed port"}}

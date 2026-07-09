@@ -52,3 +52,46 @@ I want * and # operators to respect marked region."
                     (window-in-direction 'below))))
       (evil-window-move-far-right)
     (windmove-swap-states-left)))
+
+;;;###autoload
+(defun window-move-up ()
+  "Swap windows upward"
+  (interactive)
+  (require 'windmove)
+  (if (and (window-at-side-p nil 'top)
+           (not (or (window-in-direction 'left)
+                    (window-in-direction 'right))))
+      (evil-window-move-very-bottom)
+    (windmove-swap-states-up)))
+
+;;;###autoload
+(defun window-move-down ()
+  "Swap windows downward"
+  (interactive)
+  (require 'windmove)
+  (if (and (window-at-side-p nil 'bottom)
+           (not (or (window-in-direction 'left)
+                    (window-in-direction 'right))))
+      (evil-window-move-very-top)
+    (windmove-swap-states-down)))
+
+;; declarations: loading this file must not require evil (batch tests),
+;; and the lets below must stay dynamic
+(defvar evil-split-window-below)
+(defvar evil-vsplit-window-right)
+
+;;;###autoload
+(defun window-split-and-follow ()
+  "Split horizontally, then focus the new window.
+Inverts `evil-split-window-below': non-nil means focus stays put."
+  (interactive)
+  (let ((evil-split-window-below (not evil-split-window-below)))
+    (call-interactively #'evil-window-split)))
+
+;;;###autoload
+(defun window-vsplit-and-follow ()
+  "Split vertically, then focus the new window.
+Inverts `evil-vsplit-window-right': non-nil means focus stays put."
+  (interactive)
+  (let ((evil-vsplit-window-right (not evil-vsplit-window-right)))
+    (call-interactively #'evil-window-vsplit)))

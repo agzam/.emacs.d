@@ -80,6 +80,12 @@
          (:custom general) (:custom completion))
        (when (eq system-type 'darwin) '((:os macos)))))
 
+;; Leader prefixes are read at bind time; set before doom-keybinds loads so
+;; no module-level binding (or the which-key label) can capture the "SPC m"
+;; default - root config.el is too late.
+(setq doom-localleader-key ","
+      doom-localleader-alt-key "C-,")
+
 (require 'doom-keybinds)
 
 ;; Baseline editor/UI defaults vendored from Doom core (lisp/doom-emacs.el);

@@ -80,6 +80,11 @@ name) into code or prose.
   `.github/workflows/ci.yml`): `bb lint` (check-parens over tracked elisp),
   `bb test` (buttercup suites in `tests/`), `bb smoke` (full elpaca boot in
   a pty; verdict comes from the marker written by `scripts/smoke-check.el`).
+- Key audit (migration-scoped): `bb keydump` + `bb keydiff` diff the live
+  Doom config's resolved bindings against this one, gated by the
+  `key-decisions.edn` verdict ledger. Runbook, resume protocol, and cluster
+  checklist: MIGRATION.org "Key clusters". The report in the cache dir is
+  generated - never hand-edit it.
 - Every module port adds or extends a suite in `tests/`, which mirrors the
   source tree: `tests/MODULE/FILE-tests.el` per module source file (the
   `autoload/` level is flattened), `lisp/` sources under `tests/lisp/`.

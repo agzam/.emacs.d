@@ -67,8 +67,6 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
  fill-column 70)
 
 (setopt
- doom-localleader-key ","
- doom-localleader-alt-key "C-,"
  scroll-margin 1
  default-input-method "russian-computer"
  tab-width 4
@@ -318,7 +316,7 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
       (:prefix ("b" . "buffers/browser")
        :desc "proj. buffers" "b" #'consult-project-buffer
        :desc "all buffers" "B" #'consult-buffer
-       :desc "scratch" "s" #'doom/switch-to-scratch-buffer
+       :desc "scratch" "s" #'switch-to-scratch-buffer
        :desc "Messages" "m" #'switch-to-messages-buffer
        :desc "kill" "d" #'kill-current-buffer
        :desc "kill with window" "k" #'kill-buffer-and-window
@@ -535,8 +533,13 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
   (map! (:map evil-motion-state-map "C-u" nil)
         (:map evil-insert-state-map "C-u" nil)
         (:map evil-window-map
+              "d" #'evil-window-delete
+              "S" #'window-split-and-follow
+              "V" #'window-vsplit-and-follow
               "L" #'window-move-right
-              "H" #'window-move-left)))
+              "H" #'window-move-left
+              "J" #'window-move-down
+              "K" #'window-move-up)))
 
 (map! :after ibuffer
       :map ibuffer-mode-map

@@ -64,6 +64,77 @@ module layout).
   originals called Doom's +evil/window-move-*; now windmove-swap-states-*)
   and window-cleanup+ used dash's ->> with dash not installed (now
   built-in thread-last).
+- [2026-07] key-audit pipeline introduced (see "Key clusters"). SPC w
+  pilot verdicts: evil-window-delete ported (SPC w d); J/K movers +
+  split-and-follow pair ported renamed (windmove-based); winner C-u/C-r
+  dropped (window-undo owns u); Doom's other-window and window-enlargen
+  overrides dropped for stock evil equivalents; tear-off-window stays
+  tab-window-detach; ace-window keys parked until :ui window-select.
+- [2026-07] scratch lib ported (general/autoload/scratch.el, from Doom's
+  lisp/lib/scratch.el): doom/* commands -> bare names, doom-scratch-buffer
+  -> scratch-buffer-create (built-in =scratch-buffer= collision), buffers
+  now *scratch+* / *scratch+ (PROJECT)*, persistence under
+  doom-data-dir/scratch/, projectile shim dropped,
+  scratch-buffer-created-hook replaces Doom's misnamed
+  doom-scratch-buffer-hook defvar (upstream ran the -created- name it
+  never defvar'd). Unported: open-project/revert/delete commands,
+  kill-on-hide hook (nothing referenced them). Trigger: SPC b s was
+  bound-but-void - a class the key audit couldn't see because both sides
+  bind identical symbols. The dump now emits :void for bound symbols
+  without definitions; keydiff reports them as "broken" and only a
+  :deferred verdict can park one.
+
+* Key clusters
+The key audit kills the "binding X silently missing" whack-a-mole:
+mechanical keymap dumps diffed per cluster, every differing entry gets an
+explicit verdict in key-decisions.edn (:ported / :improved / :dropped /
+:deferred + note). Migration-scoped tooling - retire when the last cluster
+closes (teardown TODO below).
+
+Workflow, one cluster per sitting - any future session (human or LLM)
+resumes from this section alone:
+1. Regenerate BOTH dumps at the start of a sitting; dumps are throwaway
+   snapshots, never trust old ones.
+   - Doom side: eval the walker half of scripts/dump-bindings.el
+     (everything above its "Boot mode" section; standalone vanilla elisp,
+     pure functions) inline in the live Doom session, then
+     (dump-bindings "~/.cache/emacs-lab/doom-keys.eld").
+     Never load-file lab files into Doom.
+   - Lab side: =bb keydump= (pty boot; KEYDUMP_REQUIRE env forces
+     features whose maps bind lazily).
+2. =bb keydiff= - org report at ~/.cache/emacs-lab/keydiff.org (generated,
+   never hand-edited), console shows open/broken/parked/regression counts
+   per cluster; exit 1 on regressions (a :ported entry that drifted).
+   Broken = bound to a void command (lab dump marks those :void); only a
+   :deferred verdict parks one, other verdicts can't silence it.
+3. Pick an unchecked cluster below. For each open entry record a verdict
+   in key-decisions.edn and port/improve as decided - the binding itself
+   is what closes a diff entry; a :ported ledger line is optional
+   bookkeeping that buys drift detection. Rerun 1-2 until the cluster
+   shows 0 open, tick it here, put session-worthy calls in the
+   Decisions log.
+
+Module-port rule: when a module lands, flip its :deferred ledger entries
+and re-review its cluster. Coverage: leader tree + evil g/z/[/] prefix
+trees; localleader and mode-local maps get scoped dumps later if needed.
+
+Cluster checklist (open counts as of 2026-07 pilot; =bb keydiff= is truth):
+- [X] SPC w :: pilot - 12 verdicts, 2 parked on ace-window
+- [ ] SPC h (47) - help tree
+- [ ] SPC p (21) - project; expect workspace/projectile leftovers
+- [ ] normal g (19)
+- [ ] SPC x (18) - gptel tree, mostly ai-module deferrals
+- [ ] SPC c (15) - code/lsp
+- [ ] SPC o (15) - open/apps
+- [ ] SPC s (10) - search
+- [ ] SPC b (8) - buffers
+- [ ] motion [ / motion ] (9+9), normal [ / normal ] (5+5)
+- [ ] SPC f (6), SPC n (6), SPC t (4), SPC g (3), SPC r (3), normal z (3)
+- [ ] SPC T (2), singletons: SPC " ' a i l q
+** TODO Retire key-audit tooling (last cluster closed)
+Fold ledger verdicts into the Decisions log; delete scripts/dump-bindings.el,
+scripts/keydiff.clj, key-decisions.edn (+ its .gitignore whitelist line),
+the keydump/keydiff bb tasks, and tests/scripts/.
 
 * Testing & CI
 - =bb test= - buttercup suites from tests/ (buttercup auto-installed into
@@ -139,6 +210,8 @@ committed to:
 - =+default/lsp-command-map= -> real =lsp-command-map=,
   =+default/insert-file-path= -> their =insert-file-path= (deliberate merges)
 - =doom/delete-backward-word= -> =delete-backward-word=
+- =doom-scratch-buffer= -> =scratch-buffer-create= (built-in
+  =scratch-buffer= collision); =doom/*scratch-buffer= commands -> bare names
 - module flags (=+icons=, =+everywhere=, ...) are modulep! syntax - keep
 ** TODO Extend file quarantine as modules port
 New state-writing packages get their path vars redirected in
@@ -234,7 +307,8 @@ narrow/preview/imenu. Adds treemacs evil state via doom-evil-state-alist
 ** TODO elisp
 a, elisp-format, buttercup (unpinned). LOCAL-REPO: let-plist, evilify-edebug.
 templates/ asset (file-templates for new packages).
-doom-scratch-buffer-created-hook (tiny shim or drop). config 140L.
+doom-scratch-buffer-created-hook -> scratch-buffer-created-hook (exists,
+general/autoload/scratch.el - rename on copy). config 140L.
 ** TODO shell
 shell-pop, ghostel+evil-ghostel (:files split), eshell-atuin, mise, kkp,
 vimrc-mode, yuck-mode. doom-emacs-dir eshell aliases path -> relocate.

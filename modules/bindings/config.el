@@ -270,7 +270,7 @@
 (map! :leader
       :desc "Eval expression"       ";"    #'pp-eval-expression
       :desc "M-x"                   ":"    #'execute-extended-command
-      :desc "Toggle scratch buffer" "x"    #'doom/toggle-scratch-buffer
+      :desc "Toggle scratch buffer" "x"    #'toggle-scratch-buffer
       :desc "Org Capture"           "X"    #'org-capture
       ;; C-u is used by evil
       :desc "Universal argument"    "u"    #'universal-argument
@@ -353,8 +353,8 @@
        :desc "Save buffer"                 "s"   #'basic-save-buffer
        :desc "Save all buffers"            "S"   #'evil-write-all
        :desc "Save buffer as root"         "u"   #'doom/sudo-save-buffer
-       :desc "Pop up scratch buffer"       "x"   #'doom/open-scratch-buffer
-       :desc "Switch to scratch buffer"    "X"   #'doom/switch-to-scratch-buffer
+       :desc "Pop up scratch buffer"       "x"   #'open-scratch-buffer
+       :desc "Switch to scratch buffer"    "X"   #'switch-to-scratch-buffer
        :desc "Yank buffer"                 "y"   #'yank-buffer-contents
        :desc "Bury buffer"                 "z"   #'bury-buffer
        :desc "Kill buried buffers"         "Z"   #'doom/kill-buried-buffers)
@@ -695,8 +695,8 @@
        :desc "Find sibling file"            "o" #'find-sibling-file
        :desc "Switch project"               "p" #'project-switch-project
        :desc "Project buffers & recent files" "r" #'consult-project-buffer
-       :desc "Toggle scratch buffer"        "x" #'doom/toggle-project-scratch-buffer
-       :desc "Switch to scratch buffer"     "X" #'doom/switch-to-project-scratch-buffer)
+       :desc "Toggle scratch buffer"        "x" #'toggle-project-scratch-buffer
+       :desc "Switch to scratch buffer"     "X" #'switch-to-project-scratch-buffer)
 
       ;;; <leader> q --- quit/session
       (:prefix-map ("q" . "quit/session")

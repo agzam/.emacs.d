@@ -12,6 +12,7 @@
 !/early-init.el
 !/init.el
 !/config.el
+!/key-decisions.edn
 !/lisp/
 !/modules/
 !/scripts/
