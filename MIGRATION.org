@@ -327,7 +327,9 @@ Doom :config default +smartparens equivalent. Unlocks: sexp-transient
 (SPC k), =M-l/M-h= slurp/barf binds, general module's sp-pair tweaks
 (=after! smartparens= block already ported, inert).
 ** TODO Restore lisp/sexp-transient.el
-After smartparens + avy + edit-indirect exist. Re-add =(load! "lisp/sexp-transient")=
+After smartparens + avy + edit-indirect exist, and after the clojure
+module - its eval/pp branches dispatch into cider, porting before would
+mean gutting them only to re-add. Re-add =(load! "lisp/sexp-transient")=
 to config.el. transient-bypass-keys already lives in
 general/autoload/expreg.el (dialect-aware rewrite) - move it back here,
 don't duplicate.
