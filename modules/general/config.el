@@ -180,7 +180,7 @@
 
 (use-package ibuffer-sidebar
   :defer t
-  :commands (ibuffer-siderbar-toggle-sidebar ibuffer-sidebar-jump)
+  :commands (ibuffer-sidebar-toggle-sidebar ibuffer-sidebar-jump)
   :config
   (add-hook! ibuffer-sidebar-mode
     (defun ibuffer-sidebar-h ()
@@ -192,6 +192,44 @@
         ibuffer-sidebar-face `(:height 0.9)
         ibuffer-sidebar-width 30
         ibuffer-sidebar-pop-to-sidebar-on-toggle-open nil))
+
+(use-package dired-sidebar
+  :defer t
+  :commands (dired-sidebar-toggle-sidebar)
+  :config
+  (setq dired-sidebar-should-follow-file t
+        dired-sidebar-window-fixed nil))
+
+;;; zen (writeroom): SPC t z - helpers and knobs in autoload/zen.el
+
+(use-package writeroom-mode
+  :defer t
+  :init
+  (defalias 'zen-toggle #'writeroom-mode)
+  :config
+  ;; per-buffer zen: no frame-wide effects, frame geometry has its own
+  ;; transient (SPC z f)
+  (setq writeroom-global-effects nil
+        writeroom-maximize-window t)
+  (add-hook 'writeroom-local-effects #'zen-text-scale-h t)
+  ;; manual zoom inside zen must re-fit the centered column
+  (advice-add #'text-scale-adjust :after #'visual-fill-column-adjust))
+
+(use-package mixed-pitch
+  :defer t
+  :init
+  (add-hook 'writeroom-local-effects #'zen-mixed-pitch-h)
+  :config
+  ;; Doom's fixed-pitch list minus doom-themes/solaire/org-ref faces the
+  ;; lab doesn't define
+  (dolist (face '(org-date org-footnote org-special-keyword
+                  org-property-value org-tag org-todo org-done
+                  font-lock-comment-face))
+    (add-to-list 'mixed-pitch-fixed-pitch-faces face)))
+
+(after! evil
+  (advice-add #'evil-window-split :before #'turn-off-writeroom-before-split-a)
+  (advice-add #'evil-window-vsplit :before #'turn-off-writeroom-before-split-a))
 
 (use-package which-key-posframe
   :after (which-key)

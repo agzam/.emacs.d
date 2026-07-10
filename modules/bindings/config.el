@@ -772,17 +772,12 @@
 
       ;;; <leader> t --- toggle
       (:prefix-map ("t" . "toggle")
-       :desc "Big mode"                     "b" #'doom-big-font-mode
        :desc "Fill Column Indicator"        "c" #'global-display-fill-column-indicator-mode
        :desc "Diff Highlights (Git Gutter)" "d" #'diff-hl-mode
-       :desc "Flymake"                      "f" #'flymake-mode
-       (:when (modulep! :checkers syntax -flymake)
-        :desc "Flycheck"                   "f" #'flycheck-mode)
-       :desc "Frame fullscreen"             "F" #'toggle-frame-fullscreen
-       :desc "Evil goggles"                 "g" #'evil-goggles-mode
+       :desc "Flycheck"                     "f" #'flycheck-mode
        (:when (modulep! :ui indent-guides)
         :desc "Indent guides"              "i" #'indent-bars-mode)
-       :desc "Indent style"                 "I" #'doom/toggle-indent-style
+       :desc "Indent style"                 "I" #'toggle-indent-style
        :desc "Line numbers"                 "l" #'doom/toggle-line-numbers
        (:when (modulep! :ui minimap)
         :desc "Minimap"                      "m" #'demap-toggle)
@@ -798,8 +793,7 @@
        (:when (modulep! :editor word-wrap)
         :desc "Soft line wrapping"         "w" #'word-wrap-mode)
        (:when (modulep! :ui zen)
-        :desc "Zen mode"                   "z" #'zen-toggle
-        :desc "Zen mode (fullscreen)"      "Z" #'zen-toggle-fullscreen)))
+        :desc "Zen mode"                   "z" #'zen-toggle)))
 
 (after! which-key
   (let ((prefix-re (regexp-opt (list doom-leader-key doom-leader-alt-key))))

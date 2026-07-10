@@ -54,6 +54,13 @@ narrowed to."
   (init-visual-line-keys)
   (evil-normalize-keymaps))
 
+;;;###autoload
+(defun toggle-indent-style ()
+  "Switch between tabs and spaces indentation in the current buffer."
+  (interactive)
+  (setq indent-tabs-mode (not indent-tabs-mode))
+  (message "Indent style: %s" (if indent-tabs-mode "tabs" "spaces")))
+
 (defun shruggie (&optional do-not-escape?)
   (interactive "P")
   (if do-not-escape?

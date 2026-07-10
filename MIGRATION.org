@@ -133,6 +133,24 @@ module layout).
   golden-ratio); both parked :deferred pending their modules. SPC w's four
   same-symbol ace-window/golden-ratio voids got their missing :deferred
   verdicts - the pilot cluster is clean again (0 open, 0 broken, 7 parked).
+- [2026-07] SPC t cluster closed (8 verdicts). zen ported at Doom-feel
+  parity (general/config.el): writeroom-mode with global effects nil and
+  maximize-window t (doom.d override), text-scale 2.0 via
+  writeroom-local-effects, visual-fill-column-adjust keeping the column
+  fitted (also advised onto text-scale-adjust), mixed-pitch in
+  org/markdown with the fixed-pitch face list trimmed to stock faces
+  (doom-themes/solaire/org-ref ones dropped), the
+  turn-off-writeroom-before-split-a advice carried over. +zen/toggle ->
+  zen-toggle, an alias for writeroom-mode - lisp callers must pass
+  'toggle since minor modes enable on a nil arg (GUI probe caught this).
+  Zen-fullscreen variant and SPC t F toggle-frame-fullscreen both
+  dropped: frame geometry belongs to the frame transient. dired-sidebar ported (follow-file t, window-fixed nil);
+  fixed the ibuffer-sidebar :commands "siderbar" typo next door.
+  doom/toggle-indent-style -> toggle-indent-style
+  (general/autoload/misc.el, with specs). doom-big-font-mode and
+  evil-goggles bindings dropped. SPC t f rebound flymake-mode ->
+  flycheck-mode, parked on :checkers; supersedes the earlier "evaluate
+  flymake + consult-flymake first" note - the user runs flycheck.
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -184,7 +202,8 @@ Cluster checklist (open counts as of 2026-07 pilot; =bb keydiff= is truth):
 - [ ] SPC s (10) - search
 - [ ] SPC b (8) - buffers
 - [ ] motion [ / motion ] (9+9), normal [ / normal ] (5+5)
-- [ ] SPC f (6), SPC n (6), SPC t (4), SPC g (3), SPC r (3), normal z (3)
+- [X] SPC t :: closed - 8 verdicts; flycheck parked on :checkers
+- [ ] SPC f (6), SPC n (6), SPC g (3), SPC r (3), normal z (3)
 - [ ] SPC T (2), singletons: SPC " ' a i l q
 ** TODO Retire key-audit tooling (last cluster closed)
 Fold ledger verdicts into the Decisions log; delete scripts/dump-bindings.el,

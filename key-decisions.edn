@@ -31,6 +31,17 @@
  ["leader" "SPC w ."] {:status :deferred :note "window-transient works; its g suffix waits on golden-ratio"}
  ["leader" "SPC v"] {:status :deferred :note "expreg-transient core works; org-roam/vulpea, markdown and clojure wrap suffixes wait on their modules"}
 
+ ;; SPC t - toggle cluster (2026-07)
+ ["leader" "SPC t b"] {:status :dropped :note "doom-big-font-mode dead (Decisions log: fonts stay direct)"}
+ ["leader" "SPC t g"] {:status :dropped :note "evil-goggles unused (void in Doom too)"}
+ ["leader" "SPC t Z"] {:status :dropped :note "zen fullscreen not wanted; frame geometry lives in the frame transient"}
+ ["leader" "SPC t F"] {:status :dropped :note "toggle-frame-fullscreen - frame geometry lives in the frame transient"}
+ ["leader" "SPC t f"] {:status :deferred :note "flycheck-mode - flycheck over flymake (user verdict); waits on :checkers port"}
+ ["leader" "SPC t I"] {:status :improved :note "toggle-indent-style - renamed doom/ port (general/autoload/misc.el)"}
+ ["leader" "SPC t w"] {:status :improved :note "toggle-visual-line-navigation - renamed + port"}
+ ["leader" "SPC t d"] {:status :ported :note "dired-sidebar, from doom.d dired module"}
+ ["leader" "SPC t z"] {:status :improved :note "zen-toggle - renamed +zen/toggle; writeroom + text-scale + mixed-pitch parity port"}
+
  ;; scratch lib port (2026-07) - doom/* names renamed, see Decisions log
  ["leader" "SPC b s"] {:status :improved :note "switch-to-scratch-buffer - renamed port, scratch lib in general module"}
  ["leader" "SPC b x"] {:status :improved :note "open-scratch-buffer - renamed port"}

@@ -20,3 +20,17 @@
             :to-equal '(:org "acme" :repo "widget" :build "1234" :job "567")))
   (it "returns nil for non-CircleCI URLs"
     (expect (parse-circleci-url "https://example.com/foo/bar") :to-be nil)))
+
+(describe "toggle-indent-style"
+  (it "flips indent-tabs-mode in the current buffer"
+    (with-temp-buffer
+      (setq indent-tabs-mode nil)
+      (toggle-indent-style)
+      (expect indent-tabs-mode :to-be t)
+      (toggle-indent-style)
+      (expect indent-tabs-mode :to-be nil)))
+  (it "never touches the global default"
+    (let ((default (default-value 'indent-tabs-mode)))
+      (with-temp-buffer
+        (toggle-indent-style)
+        (expect (default-value 'indent-tabs-mode) :to-equal default)))))
