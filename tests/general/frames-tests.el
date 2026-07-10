@@ -11,14 +11,35 @@
 
 (defun frames-tests--layout-commands (node)
   "Collect suffix command symbols from a parsed transient layout NODE.
-Groups are vectors, suffixes are (CLASS . PLIST) lists."
+Walks both layout dialects: suffixes as (CLASS :command CMD ...) with a
+flat plist in the cdr (transient >= 0.8, Emacs 31) and as (LEVEL CLASS
+(PLIST)) with a nested plist (0.7.x, Emacs 30's bundled copy - what CI
+runs)."
   (cond
    ((vectorp node)
     (mapcan #'frames-tests--layout-commands (append node nil)))
    ((proper-list-p node)
-    (if-let* ((cmd (plist-get (cdr node) :command)))
+    (if-let* ((cmd (if (keywordp (car node))
+                       (plist-get node :command)
+                     (plist-get (cdr node) :command))))
         (list cmd)
-      (mapcan #'frames-tests--layout-commands node)))))
+      ;; keyword car = a plist without :command; don't descend into values
+      (unless (keywordp (car node))
+        (mapcan #'frames-tests--layout-commands node))))))
+
+(describe "frames-tests--layout-commands"
+  (it "walks the flat dialect (transient >= 0.8)"
+    (expect (frames-tests--layout-commands
+             '([transient-column (:description "d")
+                ((transient-suffix :key "j" :command cmd-a)
+                 (transient-suffix :key "k" :command cmd-b))]))
+            :to-equal '(cmd-a cmd-b)))
+  (it "walks the nested-plist dialect (transient 0.7, Emacs 30)"
+    (expect (frames-tests--layout-commands
+             '([1 transient-column nil
+                ((1 transient-suffix (:key "j" :command cmd-a))
+                 (1 transient-suffix (:key "k" :command cmd-b)))]))
+            :to-equal '(cmd-a cmd-b))))
 
 (describe "font-size-increment"
   (it "stays a whole-point multiple - sub-point steps render as no-ops on mac"
