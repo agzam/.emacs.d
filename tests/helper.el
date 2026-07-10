@@ -20,4 +20,22 @@
   "Load RELPATH relative to the config root, without load-path pollution."
   (load (expand-file-name relpath test-config-root) nil 'nomessage))
 
+(defun transient-layout-commands (node)
+  "Collect suffix command symbols from a parsed transient layout NODE.
+Walks both layout dialects: suffixes as (CLASS :command CMD ...) with a
+flat plist in the cdr (transient >= 0.8, Emacs 31) and as (LEVEL CLASS
+(PLIST)) with a nested plist (0.7.x, Emacs 30's bundled copy - what CI
+runs)."
+  (cond
+   ((vectorp node)
+    (mapcan #'transient-layout-commands (append node nil)))
+   ((proper-list-p node)
+    (if-let* ((cmd (if (keywordp (car node))
+                       (plist-get node :command)
+                     (plist-get (cdr node) :command))))
+        (list cmd)
+      ;; keyword car = a plist without :command; don't descend into values
+      (unless (keywordp (car node))
+        (mapcan #'transient-layout-commands node))))))
+
 (provide 'test-helper)

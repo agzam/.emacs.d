@@ -29,7 +29,7 @@
 
  ;; void-suffix hardening finds (2026-07) - rot inside bound transients
  ["leader" "SPC w ."] {:status :deferred :note "window-transient works; its g suffix waits on golden-ratio"}
- ["leader" "SPC v"] {:status :deferred :note "expreg-transient core works; org-roam/vulpea, markdown and clojure wrap suffixes wait on their modules"}
+ ["leader" "SPC v"] {:status :improved :note "expreg-transient rebuilt: bypass engine (transient-bypass-keys) ported in - it was void, SPC v errored at open; unported-module suffixes slimmed away (Decisions log)"}
 
  ;; SPC t - toggle cluster (2026-07)
  ["leader" "SPC t b"] {:status :dropped :note "doom-big-font-mode dead (Decisions log: fonts stay direct)"}

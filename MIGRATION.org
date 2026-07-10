@@ -151,6 +151,27 @@ module layout).
   evil-goggles bindings dropped. SPC t f rebound flymake-mode ->
   flycheck-mode, parked on :checkers; supersedes the earlier "evaluate
   flymake + consult-flymake first" note - the user runs flycheck.
+- [2026-07] expreg-transient fixed for real - the parked "core works"
+  note was wrong. Its bypass section's :setup-children calls
+  transient-bypass-keys, which lived in doom.d's unported
+  lisp/sexp-transient.el: SPC v errored at open, invisible to the audit
+  (setup-children rot, a third blind class after :void and
+  :void-suffix). Ported the engine into general/autoload/expreg.el
+  (move, don't duplicate, when sexp-transient restores) with
+  transient-layout-keys - a dialect-aware rewrite of the doom.d helper
+  whose cl-typep/oref walk never matched spec-list layouts, so the
+  key-conflict guard had been dead in Doom all along. Alive again, it
+  caught the Magit section colliding with bypass "s"/"x"; that section
+  dropped (unreachable in practice). Slimmed like frames: vulpea-insert,
+  the browser-url inserters (+ helper defun), Markdown and Clojure
+  sections dropped until their modules port; bypass "%" evilmi ->
+  stock evil-jump-item. org-wrap-in-block ported early into
+  general/autoload/misc.el (from doom.d org/autoload/custom.el, dedupe
+  when org lands) so "; q"/"; c" work. Tests: dual-dialect layout
+  walker now shared via tests/helper.el, exact-set layout spec as the
+  rot net, bypass-engine + org-wrap-in-block specs; a boot probe opened
+  the transient live and walked live suffixes (bypass children
+  included) - all defined.
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -307,7 +328,9 @@ Doom :config default +smartparens equivalent. Unlocks: sexp-transient
 (=after! smartparens= block already ported, inert).
 ** TODO Restore lisp/sexp-transient.el
 After smartparens + avy + edit-indirect exist. Re-add =(load! "lisp/sexp-transient")=
-to config.el.
+to config.el. transient-bypass-keys already lives in
+general/autoload/expreg.el (dialect-aware rewrite) - move it back here,
+don't duplicate.
 ** DONE Fonts machinery (stayed direct)
 Resolved with the frames lib port: config.el face bridge +
 =font-size-increase/decrease/reset= over the default face height;
@@ -344,6 +367,8 @@ Largest: config 617L, autoload 16 files ~2530L. org (emacs-straight mirror,
 org-roam(+ui), vulpea trio + consult-vulpea, evil-org (hlissner), orgit(-forge),
 org-modern-indent, org-appear (branch), verb, anki-editor+anki-gen, ob-*,
 org-pomodoro, toc-org. 2 mp3 assets. Feeds embark (vulpea-*) and SPC o r tree.
+org-wrap-in-block early-ported to general/autoload/misc.el (dedupe);
+restore vulpea-insert in expreg-transient's org section.
 ** TODO ai
 gptel + gptel-quick/ob-gptel/gptel-agent, eca, claude-code, agent-shell/acp,
 mcp, whisper, shell-maker, llm-tool-collection, ragmacs.
@@ -355,6 +380,8 @@ rfc-mode, yeetube, subed (:files), hnreader (own fork).
 LOCAL-REPO: browser-hist, consult-hn, emacs-reddig, navegosa.el.
 readable/ cljs helper (npm deps). config 289L, autoload 9 files ~1110L.
 Port BEFORE writing/embark/search (provides +eww-* and browser-hist).
+Restore expreg-transient's browser-url inserters (dropped with the slim,
+doom.d expreg.el is the reference).
 ** TODO writing
 jinx, sdcv, mw-thesaurus, google-translate (own fork+branch), define-it,
 separedit, youtube-sub-extractor, occult. LOCAL-REPO: spacehammer (symlink

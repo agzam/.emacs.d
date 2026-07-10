@@ -21,6 +21,31 @@
   (it "returns nil for non-CircleCI URLs"
     (expect (parse-circleci-url "https://example.com/foo/bar") :to-be nil)))
 
+(describe "org-wrap-in-block"
+  (it "wraps the region in begin/end markers"
+    (with-temp-buffer
+      (insert "hello world")
+      (transient-mark-mode 1)
+      (set-mark (point-min))
+      (goto-char (point-max))
+      (activate-mark)
+      (org-wrap-in-block 'quote)
+      (expect (buffer-string)
+              :to-equal "#+begin_quote\nhello world\n#+end_quote")))
+  (it "leaves point ready for the src language, in insert state"
+    (with-temp-buffer
+      (insert "x")
+      (transient-mark-mode 1)
+      (set-mark (point-min))
+      (goto-char (point-max))
+      (activate-mark)
+      (let ((inserted nil))
+        (cl-letf (((symbol-function 'evil-insert-state)
+                   (lambda (&rest _) (setq inserted t))))
+          (org-wrap-in-block 'src))
+        (expect inserted :to-be t)
+        (expect (buffer-string) :to-equal "#+begin_src \nx\n#+end_src")))))
+
 (describe "toggle-indent-style"
   (it "flips indent-tabs-mode in the current buffer"
     (with-temp-buffer

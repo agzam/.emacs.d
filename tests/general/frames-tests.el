@@ -9,33 +9,17 @@
 
 (load-module-file "modules/general/autoload/frames.el")
 
-(defun frames-tests--layout-commands (node)
-  "Collect suffix command symbols from a parsed transient layout NODE.
-Walks both layout dialects: suffixes as (CLASS :command CMD ...) with a
-flat plist in the cdr (transient >= 0.8, Emacs 31) and as (LEVEL CLASS
-(PLIST)) with a nested plist (0.7.x, Emacs 30's bundled copy - what CI
-runs)."
-  (cond
-   ((vectorp node)
-    (mapcan #'frames-tests--layout-commands (append node nil)))
-   ((proper-list-p node)
-    (if-let* ((cmd (if (keywordp (car node))
-                       (plist-get node :command)
-                     (plist-get (cdr node) :command))))
-        (list cmd)
-      ;; keyword car = a plist without :command; don't descend into values
-      (unless (keywordp (car node))
-        (mapcan #'frames-tests--layout-commands node))))))
-
-(describe "frames-tests--layout-commands"
+;; the dual-dialect layout walker lives in tests/helper.el (shared with
+;; expreg-tests); its dialect specs stay here where it was born
+(describe "transient-layout-commands"
   (it "walks the flat dialect (transient >= 0.8)"
-    (expect (frames-tests--layout-commands
+    (expect (transient-layout-commands
              '([transient-column (:description "d")
                 ((transient-suffix :key "j" :command cmd-a)
                  (transient-suffix :key "k" :command cmd-b))]))
             :to-equal '(cmd-a cmd-b)))
   (it "walks the nested-plist dialect (transient 0.7, Emacs 30)"
-    (expect (frames-tests--layout-commands
+    (expect (transient-layout-commands
              '([1 transient-column nil
                 ((1 transient-suffix (:key "j" :command cmd-a))
                  (1 transient-suffix (:key "k" :command cmd-b)))]))
@@ -163,13 +147,13 @@ runs)."
 
 (describe "frame-zoom-transient"
   (it "references only defined commands in its layout"
-    (let ((cmds (frames-tests--layout-commands
+    (let ((cmds (transient-layout-commands
                  (get 'frame-zoom-transient 'transient--layout))))
       (expect cmds :not :to-be nil)
       (expect (seq-remove #'fboundp cmds) :to-equal nil)))
 
   (it "covers exactly the font, text-scale and full-height commands"
-    (expect (frames-tests--layout-commands
+    (expect (transient-layout-commands
              (get 'frame-zoom-transient 'transient--layout))
             :to-have-same-items-as
             '(font-size-decrease font-size-increase font-size-reset

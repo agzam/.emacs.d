@@ -54,6 +54,30 @@ narrowed to."
   (init-visual-line-keys)
   (evil-normalize-keymaps))
 
+;; Ported ahead of the org module (doom.d org/autoload/custom.el) -
+;; expreg-transient's "; q"/"; c" call it.  Dedupe when org ports.
+;;;###autoload
+(defun org-wrap-in-block (block-type)
+  "Wrap the region (or paragraph) in an org block of BLOCK-TYPE."
+  (interactive
+   (list (completing-read "Block type: " '("src" "example" "quote" "center" "verse"))))
+  (let ((start (if (region-active-p) (region-beginning)
+                 (save-excursion (backward-paragraph) (forward-char) (point))))
+        (end (if (region-active-p) (region-end)
+               (save-excursion (forward-paragraph) (backward-char) (point))))
+        (block-start (format "#+begin_%s" block-type))
+        (block-end (format "#+end_%s" block-type)))
+    (save-excursion
+      (goto-char end)
+      (insert "\n" block-end)
+      (goto-char start)
+      (insert block-start "\n"))
+    (when (string= block-type "src")
+      (goto-char start)
+      (end-of-line)
+      (insert " ")
+      (evil-insert-state))))
+
 ;;;###autoload
 (defun toggle-indent-style ()
   "Switch between tabs and spaces indentation in the current buffer."
