@@ -39,7 +39,7 @@
 (defun fonts-relative-height-h (&rest _)
   "Restore reverted PR doomemacs/doomemacs#8733 locally.
 Converts baked-in absolute `:height' of `fixed-pitch' and siblings
-into ratios so `text-scale-mode' and `doom/increase-font-size'
+into ratios so `text-scale-mode' and `font-size-increase'
 cascade into `:inherit fixed-pitch' faces (e.g. `org-block').
 Unsafe with global `variable-pitch-mode'; see issue #8756."
   (dolist (frame (frame-list))

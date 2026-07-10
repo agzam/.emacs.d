@@ -92,6 +92,33 @@ module layout).
   bind identical symbols. The dump now emits :void for bound symbols
   without definitions; keydiff reports them as "broken" and only a
   :deferred verdict can park one.
+- [2026-07] frames lib slimmed 300 -> ~100 lines (general/autoload/frames.el).
+  Trigger: SPC z f bound-but-broken - frame-zoom-transient's font suffixes
+  referenced never-vendored doom/*-font-size, a class invisible to the key
+  audit (prefix bound + autoloadable, rot inside the layout). Kept:
+  toggle-frame-full-height (y now workarea-derived, was a hardcoded mac
+  offset; Linux behavior unverified until a real box),
+  display-current-workarea, the mac menu-bar repaint helper. New:
+  font-size-increase/decrease/reset over the default face height - wrapping
+  built-in global-text-scale-adjust was rejected because its
+  last-command-event dispatch misfires programmatically (from M-C-- it
+  would increase; reset only works from a literal 0 key); text-scale-reset
+  fixes the old s-0 suffix which ran text-scale-set = level 1, never 0.
+  Dropped as WM-era leftovers: toggle-frame-maximized-undecorated,
+  center-frame-horizontally, toggle-frame-fullscreen+,
+  reset-frame-full-height, the 7 shrink/widen/resize helpers,
+  place-frame-at-display-spot + hidden layout presets,
+  display-workarea-width/height, screen-width-height (Doom config remains
+  the reference if any revive). Rename sweep: C-+/M-C-=/M-C-- in
+  bindings/config.el + a config.el docstring. tests/general/frames-tests.el
+  covers the logic with stubs and walks the transient layout asserting
+  every suffix command is fboundp - the regression net for this bug class.
+  Follow-up: font-size-increment must stay a whole-point multiple - the
+  initial 5 (0.5pt) made the first decrease press render as a no-op on NS
+  (sub-point sizes snap to the nearest point, and only upward steps stay
+  visible), reported as "decrease doesn't work". Now 20, matching Doom's
+  2pt doom-font-increment feel; a spec pins the multiple-of-10 constraint
+  and the GUI probe asserts rendered char height moves on decrease.
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -170,12 +197,13 @@ the keydump/keydiff bb tasks, and tests/scripts/.
     built-in lifecycle staging, doom-auto-revert wiring, so-long predicate,
     savehist settings), lisp/functions.el,
     bindings/autoload.el, general (misc, buffers, yank-path, files,
-    window movers in evil.el, expreg guards + transient, windows.el
-    layout engine + cleanup), completion (completion-preview pager,
-    vertico orderless dispatchers, yasnippet helpers)
+    window movers in evil.el, expreg guards + transient, frames zoom lib
+    (geometry stubbed), windows.el layout engine + cleanup), completion
+    (completion-preview pager, vertico orderless dispatchers, yasnippet
+    helpers)
   - smoke-only, and why :: evil module config and
-    evil-ex-visual-star-search-a (need evil); frames.el and expreg--line
-    (need a real display - batch frames are ~10 columns, visual-line fns
+    evil-ex-visual-star-search-a (need evil); expreg--line
+    (needs a real display - batch frames are ~10 columns, visual-line fns
     wrap); lisp.el (smartparens pending); url.el (ghub pending);
     dash-docs.el (package + network); bindings/config.el and
     lisp/doom-keybinds.el (need general at load time)
@@ -242,9 +270,11 @@ Doom :config default +smartparens equivalent. Unlocks: sexp-transient
 ** TODO Restore lisp/sexp-transient.el
 After smartparens + avy + edit-indirect exist. Re-add =(load! "lisp/sexp-transient")=
 to config.el.
-** TODO Fonts machinery
-Direct face bridge in config.el works; decide: vendor doom-font vars +
-=doom/increase-font-size= or stay direct.
+** DONE Fonts machinery (stayed direct)
+Resolved with the frames lib port: config.el face bridge +
+=font-size-increase/decrease/reset= over the default face height;
+doom-font vars stay unvendored. Consequence: =doom-big-font-mode= will
+never exist - the SPC t sitting must drop or replace SPC t b.
 ** TODO Theme: colors module
 ag-themes (LOCAL-REPO), spacemacs-theme, circadian day/night, doom-themes,
 rainbow-mode, beacon. Uses doom-init-ui-hook (compat has stub hook).

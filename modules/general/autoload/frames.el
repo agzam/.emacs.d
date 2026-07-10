@@ -2,7 +2,7 @@
 
 ;;;###autoload
 (defun display-current-workarea ()
-  "Returns x,y width, height of active monitor of current-frame."
+  "Return (X Y WIDTH HEIGHT) of the monitor hosting the selected frame."
   (let* ((current-frame (selected-frame))
          (monitor-at-pos (car (seq-filter
                                (lambda (monitor)
@@ -13,60 +13,49 @@
                                (display-monitor-attributes-list)))))
     (alist-get 'workarea monitor-at-pos)))
 
-;;;###autoload
-(defun display-workarea-height ()
-  "Returns current monitor height."
-  (nth 3 (display-current-workarea)))
+(defvar font-size-increment 20
+  "Height units (1/10 pt) each font size step adds or removes.
+Keep it a whole-point multiple of 10: sub-point sizes render as the
+nearest point on macOS, making half-point steps look like no-ops.
+20 matches Doom's 2pt `doom-font-increment' feel.")
+
+(defvar font-size--initial-height nil
+  "Default face height captured before the first adjustment.")
 
 ;;;###autoload
-(defun display-workarea-width ()
-  "Returns current monitor width."
-  (nth 2 (display-current-workarea)))
-
-;;;###autoload
-(defun toggle-frame-maximized-undecorated ()
+(defun font-size-increase (&optional step)
+  "Increase the default face height by STEP in every frame.
+Session-wide counterpart of the buffer-local `text-scale-increase';
+faces with a relative :height follow along."
   (interactive)
-  (posframe-delete-all)
-  (let* ((frame (selected-frame))
-         (on? (and (frame-parameter frame 'undecorated)
-                   (eq (frame-parameter frame 'fullscreen) 'maximized)))
-         (x (nth 0 (display-current-workarea)))
-         (y (nth 1 (display-current-workarea)))
-         (ns-menu-autohide (bound-and-true-p ns-auto-hide-menu-bar))
-         (cut (if on?
-                  (if ns-menu-autohide 26 25)
-                (if ns-menu-autohide 4 26))))
-    (set-frame-position frame x y)
-    (set-frame-parameter frame 'fullscreen-restore 'maximized)
-    (set-frame-parameter nil 'fullscreen 'maximized)
-    (set-frame-parameter frame 'undecorated (not on?))
-    (set-frame-height frame (- (display-workarea-height) cut) nil t)
-    (set-frame-width frame (- (display-workarea-width) 10) nil t)
-    (set-frame-position frame x y)))
+  (unless font-size--initial-height
+    (setq font-size--initial-height (face-attribute 'default :height)))
+  (set-face-attribute 'default nil :height
+                      (max 10 (+ (face-attribute 'default :height)
+                                 (or step font-size-increment)))))
 
 ;;;###autoload
-(defun center-frame-horizontally (&optional prompt percentage)
-  "Positions the current frame in the middle of the screen,
-vertically stretching it from top to bottom. Useful on ultra-wide
-monitor.  With universal argument prompts for the percentage -
-the horizontal screen estate the frame should occupy."
-  (interactive "P")
-  (posframe-delete-all)
-  (let* ((stretch-ratio (string-to-number
-                         (if prompt
-                             (completing-read "Choose: " '("50%" "70%" "80%" "90%") nil t)
-                           (number-to-string (or percentage 80)))))
-         (x-pos (round (* (display-workarea-width) (* (/ (- 100 stretch-ratio) 2) 0.01))))
-         (width (round (* (display-workarea-width) (* stretch-ratio 0.01)))))
-    (set-frame-position nil x-pos 0)
-    (set-frame-width nil width nil t)
-    (when (not (frame-parameter nil 'undecorated))
-      (toggle-frame-full-height))
-    (redraw-display)))
+(defun font-size-decrease ()
+  "Decrease the default face height in every frame."
+  (interactive)
+  (font-size-increase (- font-size-increment)))
+
+;;;###autoload
+(defun font-size-reset ()
+  "Restore the default face height from before the first adjustment."
+  (interactive)
+  (when font-size--initial-height
+    (set-face-attribute 'default nil :height font-size--initial-height)))
+
+;;;###autoload
+(defun text-scale-reset ()
+  "Reset the current buffer's text scale."
+  (interactive)
+  (text-scale-set 0))
 
 (defun reset-ns-autohide-menu-bar ()
-  "In OSX frame resizing could affects ns-menu. This makes sure
-it remains shown or hidden - whatever the previous value was."
+  "Flip `ns-auto-hide-menu-bar' off and back to repaint the macOS menu bar.
+Frame resizing on macOS can desync it otherwise."
   (when (and (eq system-type 'darwin)
              (boundp 'ns-auto-hide-menu-bar))
     (let ((val ns-auto-hide-menu-bar))
@@ -75,10 +64,12 @@ it remains shown or hidden - whatever the previous value was."
 
 ;;;###autoload
 (defun toggle-frame-full-height ()
-  "Removes the title of the current frame and stretches it out to
-  the display height. To be used on a Mac."
+  "Toggle an undecorated frame stretched to the full workarea height.
+Hides the OS titlebar; workarea coordinates keep the frame clear of
+the macOS menu bar or a Linux panel."
   (interactive)
-  (posframe-delete-all)
+  (when (fboundp 'posframe-delete-all)
+    (posframe-delete-all))
   (let* ((fr (selected-frame))
          (x (car (frame-position fr))))
     (if (frame-parameter fr 'undecorated-fullheight)
@@ -86,164 +77,13 @@ it remains shown or hidden - whatever the previous value was."
           (set-frame-parameter fr 'undecorated-fullheight nil)
           (set-frame-parameter fr 'undecorated nil)
           (set-frame-parameter fr 'fullscreen nil))
-      (reset-ns-autohide-menu-bar)
-      (set-frame-parameter fr 'undecorated t)
-      (set-frame-parameter fr 'undecorated-fullheight t)
-      (set-frame-position fr x 26)
-      (set-frame-height fr (- (display-workarea-height) (tab-bar-height nil t)) nil :pixelwise))
+      (pcase-let ((`(,_ ,y ,_ ,h) (display-current-workarea)))
+        (reset-ns-autohide-menu-bar)
+        (set-frame-parameter fr 'undecorated t)
+        (set-frame-parameter fr 'undecorated-fullheight t)
+        (set-frame-position fr x y)
+        (set-frame-height fr (- h (tab-bar-height fr t)) nil :pixelwise)))
     (redraw-display)))
-
-;;;###autoload
-(defun reset-frame-full-height ()
-  (posframe-delete-all)
-  (unless (eq 'fullboth (frame-parameter nil 'fullscreen))
-    (toggle-frame-full-height)
-    (toggle-frame-full-height)))
-
-;;;###autoload
-(defun toggle-frame-fullscreen+ ()
-  (interactive)
-  (toggle-frame-fullscreen)
-  (posframe-delete-all))
-
-;;;###autoload
-(defun shrink-frame-width (&optional delta)
-  (interactive)
-  (when transient--window
-    (quit-restore-window transient--window))
-  (set-frame-width nil (- (frame-width) (or delta 3))))
-
-;;;###autoload
-(defun reduce-frame-height (&optional delta)
-  (interactive)
-  (when transient--window
-    (quit-restore-window transient--window))
-  (set-frame-height nil (- (frame-height) (or delta 1))))
-
-;;;###autoload
-(defun screen-width-height ()
-  "Returns width and height of current monitor in pixels."
-  (pcase-let ((`(_ _ _ ,h ,v)
-               (assq 'geometry (frame-monitor-attributes))))
-    (list h v)))
-
-;;;###autoload
-(defun widen-frame-width (&optional delta)
-  "Widen frame width adding DELTA."
-  (interactive)
-  (when transient--window
-    (quit-restore-window transient--window))
-  (let* ((disp-width (car (screen-width-height)))
-         (new-w (+ (frame-native-width) (or delta 3))))
-    (set-frame-width nil (if (< new-w disp-width)
-                             new-w
-                           disp-width) nil :pixelwise)
-    (when-let* ((frame-right-x (+ (frame-parameter nil 'left)
-                                  (frame-native-width)))
-                (overflow? (< disp-width frame-right-x))
-                (new-x (- disp-width (frame-native-width))))
-      (set-frame-position
-       nil (if (< 0 new-x) new-x 0)
-       (frame-parameter nil 'top)))))
-
-
-;;;###autoload
-(defun shrink-frame-width-from-right (&optional delta)
-  "Shrinks current frame from the right side subracting DELTA."
-  (interactive)
-  (when transient--window
-    (quit-restore-window transient--window))
-  (set-frame-width nil (- (frame-width) (or delta 2))))
-
-;;;###autoload
-(defun shrink-frame-width-from-left (&optional delta)
-  "Shrinks current frame from the left side subracting DELTA."
-  (interactive)
-  (when transient--window
-    (quit-restore-window transient--window))
-  (let* ((delta (or delta 20))
-         (frame-left-x (+ (frame-parameter nil 'left) (- delta 10)))
-         (disp-width (car (screen-width-height)))
-         (frame-right-x (+ (frame-parameter nil 'left)
-                           (frame-native-width)))
-         (at-right-edge? (<= disp-width frame-right-x)))
-    (set-frame-width nil (- (frame-native-width) delta) nil :pixelwise)
-    (unless at-right-edge?
-      (set-frame-position
-       nil frame-left-x
-       (frame-parameter nil 'top)))))
-
-;;;###autoload
-(defun widen-frame-width-to-the-right (&optional delta)
-  "Widen frame width adding DELTA on the right of the frame."
-  (interactive)
-  (when transient--window
-    (quit-restore-window transient--window))
-  (let* ((disp-width (car (screen-width-height)))
-         (new-w (+ (frame-native-width) (or delta 4)))
-         (frame-right-x (+ (frame-parameter nil 'left)
-                           (frame-native-width)))
-         (overflown? (< disp-width frame-right-x)))
-    (unless overflown?
-      (set-frame-width nil (if (< new-w disp-width)
-                               new-w
-                             disp-width) nil :pixelwise))))
-
-;;;###autoload
-(defun widen-frame-width-to-the-left (&optional delta)
-  "Widen frame width adding DELTA on the left of the frame."
-  (interactive)
-  (when transient--window
-    (quit-restore-window transient--window))
-  (let* ((delta (or delta 5))
-         (frame-left-x (- (frame-parameter nil 'left) (+ 10 delta)))
-         (at-zero? (< frame-left-x 0))
-         (new-w (+ (frame-native-width) delta)))
-    (unless at-zero?
-      (set-frame-width nil new-w nil :pixelwise))
-    (set-frame-position
-     nil (if at-zero? 0 frame-left-x)
-     (frame-parameter nil 'top))))
-
-;;;###autoload
-(defun increase-frame-height (&optional delta)
-  (interactive)
-  (when transient--window
-    (quit-restore-window transient--window))
-  (let ((disp-height (- (cadr (screen-width-height)) 30)))
-    (if (< (frame-native-height) disp-height)
-        (set-frame-height nil (+ (frame-height) (or delta 1)))
-      (set-frame-height nil disp-height nil :pixelwise))))
-
-;;;###autoload
-(defun place-frame-at-display-spot (specs &optional frame)
-  "Position and resize the FRAME according SPECS.
-SPECS is a list of x, y, width & height.
-See: `(frame-position-display-spots)'  details."
-  (interactive)
-  (pcase-let* ((pw (display-workarea-width))
-               (ph (display-workarea-height))
-               (`(,x ,y ,w ,h) (seq-mapn
-                                (lambda (val kind)
-                                  (if (eq 'float (type-of val))
-                                      (cl-case kind
-                                        ((or :x :w) (floor (* pw val)))
-                                        (:y (floor (* ph val)))
-                                        (:h (let* ((tabs-h (tab-bar-height frame t)))
-                                              (if (eq val 1.0)
-                                                  (- ph tabs-h)
-                                                (floor (- (* ph val) tabs-h))))))
-                                    val))
-                                specs '(:x :y :w :h)))
-               (x (cond ((< x 0) 0) ((< pw x) pw) (t x)))
-               (y (cond ((< y 0) 0) ((< ph y) ph) (t y)))
-               (w (cond ((< pw (+ x w)) (- pw x)) (t w)))
-               (h (cond ((< ph (+ y h)) (- ph y)) (t h))))
-    (when transient--window
-      (quit-restore-window transient--window))
-    (set-frame-position frame x y)
-    (message (format "position: %s, %s; width: %s, height: %s" x y w h))
-    (set-frame-size frame w h t)))
 
 ;; (autoload cookie removed: it made the loaddefs require the built-in
 ;; transient at startup, before Elpaca activates the github one)
@@ -251,50 +91,15 @@ See: `(frame-position-display-spots)'  details."
 
 ;;;###autoload
 (transient-define-prefix frame-zoom-transient ()
-  "Text Zoom"
-  ["Frame Text Zoom"
-   [("j" "decrease font" doom/decrease-font-size :transient t)
-    ("k" "increase font" doom/increase-font-size :transient t)
-    ("0" "reset font size" doom/reset-font-size :transient t)]
-   [("s-j" "text scale down" text-scale-decrease :transient t)
-    ("s-k" "text scale up" text-scale-increase :transient t)
-    ("s-0" "text scale reset" text-scale-set :transient t)]
-   [("h" "full height" toggle-frame-full-height)
-    ("c" "center frame horizontally" center-frame-horizontally)
-    ("m" "maximize frame" toggle-frame-maximized-undecorated)
-    ("f" "full-screen" toggle-frame-fullscreen+)]
-   [("}" "shrink frame left" shrink-frame-width-from-left :transient t)
-    ("{" "shrink frame right" shrink-frame-width-from-right :transient t)
-    ("]" "widen frame right" widen-frame-width-to-the-right :transient t)
-    ("[" "widen frame left" widen-frame-width-to-the-left :transient t)
-    ("J" "reduce frame height" reduce-frame-height :transient t)
-    ("K" "increase frame height" increase-frame-height :transient t)]]
-  [:hide always
-   :class transient-subgroups
-   :setup-children
-   (lambda (_)
-     (transient-parse-suffixes
-      'frame-zoom-transient
-      (seq-map-indexed
-       (lambda (geom idx)
-         (list (number-to-string (1+ idx))
-               (format "Layout %s" (1+ idx))
-               (lambda ()
-                 (interactive)
-                 (place-frame-at-display-spot geom))
-               :transient t))
-       ;; list of pre-sets for different positions of Emacs frame on the
-       ;; screen. Each pre-set is a list of X, Y, WIDTH, and HEIGHT.
-       ;;
-       ;; When a value is a decimal - it represents the discrete pixel
-       ;; position on the display. Also, the numbers can be floats, in that
-       ;; case - it represent the proportional value, e.g., width of 0.25
-       ;; means quarter of `(display-pixel-width)'.
-       '((0 0 0.332 1.0)
-         (0 0 0.498 1.0)
-         (0 0 0.664 1.0)
-         (0 0 0.830 1.0)
-         (0.166 0 0.664 1.0)
-         (0.332 0 0.8 1.0)
-         (0.5 0 0.5 1.0)
-         (0.664 0 0.35 1.0)))))])
+  "Font and text zoom."
+  ["Zoom"
+   ["Font (all frames)"
+    ("j" "decrease" font-size-decrease :transient t)
+    ("k" "increase" font-size-increase :transient t)
+    ("0" "reset" font-size-reset :transient t)]
+   ["Text scale (buffer)"
+    ("s-j" "decrease" text-scale-decrease :transient t)
+    ("s-k" "increase" text-scale-increase :transient t)
+    ("s-0" "reset" text-scale-reset :transient t)]
+   ["Frame"
+    ("h" "full height" toggle-frame-full-height)]])

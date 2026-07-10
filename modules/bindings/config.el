@@ -163,13 +163,13 @@
 
       ;; misc
       :n "C-S-f"  #'toggle-frame-fullscreen
-      :n "C-+"    #'doom/reset-font-size
+      :n "C-+"    #'font-size-reset
       ;; Buffer-local font resizing
       :n "C-="    #'text-scale-increase
       :n "C--"    #'text-scale-decrease
-      ;; Frame-local font resizing
-      :n "M-C-="  #'doom/increase-font-size
-      :n "M-C--"  #'doom/decrease-font-size)
+      ;; Session-wide font resizing
+      :n "M-C-="  #'font-size-increase
+      :n "M-C--"  #'font-size-decrease)
 
 
 ;;

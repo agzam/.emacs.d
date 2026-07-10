@@ -27,4 +27,7 @@
  ["leader" "SPC b x"] {:status :improved :note "open-scratch-buffer - renamed port"}
  ["leader" "SPC b X"] {:status :improved :note "switch-to-scratch-buffer - renamed port"}
  ["leader" "SPC p x"] {:status :improved :note "toggle-project-scratch-buffer - renamed port"}
- ["leader" "SPC p X"] {:status :improved :note "switch-to-project-scratch-buffer - renamed port"}}
+ ["leader" "SPC p X"] {:status :improved :note "switch-to-project-scratch-buffer - renamed port"}
+
+ ;; frames lib port (2026-07) - zoom transient slimmed, see Decisions log
+ ["leader" "SPC z f"] {:status :improved :note "frame-zoom-transient slimmed to font/text-scale/full-height; WM-era resize suffixes dropped, doom/*-font-size -> font-size-*"}}
