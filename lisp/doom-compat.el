@@ -46,7 +46,9 @@
       transient-values-file (concat doom-state-dir "transient/values.el")
       transient-history-file (concat doom-state-dir "transient/history.el")
       projectile-cache-file (concat doom-cache-dir "projectile.cache")
-      projectile-known-projects-file (concat doom-state-dir "projectile.projects"))
+      projectile-known-projects-file (concat doom-state-dir "projectile.projects")
+      forge-database-file (concat doom-data-dir "forge/forge-database.sqlite")
+      code-review-db-database-file (concat doom-data-dir "code-review-db-file.sqlite"))
 
 (defvar doom-disabled-packages nil)
 
@@ -624,6 +626,10 @@ Lab version on top of project.el (Doom used projectile)."
 (defun set-lookup-handlers! (modes &rest plist)
   "Stub until the :tools lookup module is ported."
   (ignore modes plist))
+
+(defun doom-recenter-a (&rest _)
+  "Generic advice for recentering the window (typically :after other fns)."
+  (recenter))
 
 ;;; * Doom lifecycle hooks
 

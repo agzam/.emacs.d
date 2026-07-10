@@ -58,6 +58,28 @@
 ;; Laziness comes from explicit :defer/:hook/:commands keywords instead.
 (setq use-package-always-ensure t)
 
+;; Own packages declare plain GitHub recipes (portable across machines);
+;; where a checkout below exists, this hook redirects the recipe to it and
+;; elpaca builds in place - edits picked up on `elpaca-rebuild', nothing
+;; cloned (MIGRATION "Local :repo packages").
+(defvar local-dev-packages
+  '((remoto . "~/GitHub/agzam/remoto.el")
+    (github-topics . "~/GitHub/agzam/github-topics"))
+  "Alist of own packages -> local checkout preferred over the GitHub recipe.")
+
+(defun local-checkout-recipe (recipe)
+  "Local `:repo' override for RECIPE when its `local-dev-packages' dir exists.
+The trailing slash is load-bearing: elpaca strips \".el$\" from local paths
+otherwise (elpaca-git-repo-dir), demoting a remoto.el-style checkout from
+build-in-place to clone."
+  (when-let* ((name (intern-soft (plist-get recipe :package)))
+              (path (alist-get name local-dev-packages))
+              (dir (expand-file-name path))
+              ((file-directory-p dir)))
+    (list :host nil :fetcher nil :repo (file-name-as-directory dir))))
+
+(add-hook 'elpaca-recipe-functions #'local-checkout-recipe)
+
 ;;; Doom compat layer
 
 ;; map! needs general.el at init time.
@@ -79,7 +101,7 @@
          (:lang emacs-lisp) (:lang json) (:lang markdown +grip) (:lang sh)
          (:config default +bindings +smartparens)
          ;; :custom entries appear here as their modules get ported.
-         (:custom general) (:custom completion))
+         (:custom git) (:custom general) (:custom completion))
        (when (eq system-type 'darwin) '((:os macos)))))
 
 ;; Leader prefixes are read at bind time; set before doom-keybinds loads so
@@ -111,7 +133,7 @@
 ;; Function files load first (sorted - raw directory order differs between
 ;; Mac and Linux), then config.el; config.el may `load!' extra +files.
 ;; The module list itself is explicit, in this exact order.
-(defvar active-modules '("evil" "bindings" "general" "completion")
+(defvar active-modules '("evil" "bindings" "git" "general" "completion")
   "Modules under modules/, loaded in this exact order.
 bindings (Doom's :config default) precedes the :custom ports, like in doom!.")
 

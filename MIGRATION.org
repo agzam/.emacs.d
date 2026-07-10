@@ -13,7 +13,8 @@ module layout).
   auto-revert/comint/compile/ediff/show-paren/transient), lazy loaddefs
   generation, XDG cache/state layout
 - modules :: evil (lean set), bindings (Doom tree, company/ivy/helm excised,
-  SPC p on project.el), general, completion
+  SPC p on project.el), git (magit/forge stack, local-dev recipe hook),
+  general, completion
 - user layer :: config.el (leader tree, globals), lisp/functions.el
   incl. reload-config (SPC h r r; doom/reload analogue - re-runs
   defaults/modules/config in place, elpaca picks up new packages; restart
@@ -151,6 +152,50 @@ module layout).
   evil-goggles bindings dropped. SPC t f rebound flymake-mode ->
   flycheck-mode, parked on :checkers; supersedes the earlier "evaluate
   flymake + consult-flymake first" note - the user runs flycheck.
+- [2026-07] git module ported (magit, forge, evil-collection-magit glue,
+  git-link, gh-notify, code-review (ag91), consult-gh, git-auto-commit-mode,
+  browse-at-remote, github-topics, remoto + explicit request/deferred - the
+  autoloads' own deps, transitive-only in doom.d). Local-dev flow decided at
+  this first consuming port: own packages declare plain GitHub recipes;
+  =local-checkout-recipe= on =elpaca-recipe-functions= (init.el) redirects
+  any =local-dev-packages= entry to its ~/GitHub/agzam checkout when present
+  (build-in-place), other machines just clone from GitHub. github-topics
+  extracted from the doom.d submodule to ~/GitHub/agzam/github-topics
+  (unpushed dce3530 preserved; origin re-pointed, push pending). Fixes over
+  doom.d: (after! 'evil-escape) / (after! 'evil-collection) in the
+  code-review block quoted the feature - waits on feature =quote=, never ran
+  (fixed unquoted); forge-select-issue rebuilt on forge-read-issue
+  (forge--format-topic-choice/forge-ls-issues gone from forge);
+  forge-visit-topic-via-url now requires ghub-legacy (ghub moved
+  ghub-fetch-issue/-pullreq there, nothing else loads it); the magit-dispatch
+  ("o" "Dummy" nil) shim dropped - modern transient hard-errors on
+  nil-command suffixes (live probe caught it), replaced by inserting
+  ("N" "Forge" forge-dispatch) ourselves in forge :config since
+  evil-collection-magit's o->' dispatch remap still breaks forge's own
+  anchor (root cause of the tarsius-era doom.d workaround);
+  bug-reference-mode org/markdown hooks moved out of =after! bug-reference=
+  (registration waited on a load that only those hooks trigger); stale
+  =:after emacsql-sqlite-builtin= forge gate dropped (feature gone, emacsql
+  4.x merged backends). Slims: +magit-display-buffer-fn + in-direction
+  helper (dead in doom.d - +magit-open-windows-in-direction never defined)
+  and the stale-buffer machinery dropped - doom-defaults' doom-auto-revert
+  covers buried buffers, magit-quit-all calls doom-auto-revert-buffers-h for
+  visible ones; consult-gh config + autoloads skipped (config block is
+  :disabled in doom.d; autoloads were embark glue for it); magit-gitflow
+  after! block (package never installed), straight-install-github-package
+  (straight-ism), magit-transient-unblock-global-keys (call commented out),
+  github-topics jinx hook (writing module), magit-blame turn-off-evil-org
+  hook (org module) all dropped. Rewrites: magit-create-branch-friendly-string,
+  forge-select-issue, magit-worktree-branch-from-issue without dash/s
+  (verified against the dash originals live; batch specs pin 7 cases).
+  vc-git-link{,-homepage,-kill,-kill-homepage} implemented fresh over
+  browse-at-remote (bindings-tree names; the v3 Doom install has no :emacs
+  vc module source to vendor). :tools magit stays OUT of
+  doom-modules-enabled - doom.d comments it out too (custom git module
+  replaces it); (:custom git) added. forge/code-review sqlite files
+  quarantined in doom-compat.el; doom.d's transient-file :init block already
+  covered there. doom.d rot found, not lab bugs: +forge-select-issue and
+  forge's dispatch insertion are broken in doom.d today.
 - [2026-07] expreg-transient fixed for real - the parked "core works"
   note was wrong. Its bypass section's :setup-children calls
   transient-bypass-keys, which lived in doom.d's unported
@@ -224,7 +269,9 @@ Cluster checklist (open counts as of 2026-07 pilot; =bb keydiff= is truth):
 - [ ] SPC b (8) - buffers
 - [ ] motion [ / motion ] (9+9), normal [ / normal ] (5+5)
 - [X] SPC t :: closed - 8 verdicts; flycheck parked on :checkers
-- [ ] SPC f (6), SPC n (6), SPC g (3), SPC r (3), normal z (3)
+- [X] SPC g :: closed with the git module port - 4 verdicts;
+  git-timemachine parked on the :emacs vc fold-in decision
+- [ ] SPC f (6), SPC n (6), SPC r (3), normal z (3)
 - [ ] SPC T (2), singletons: SPC " ' a i l q
 ** TODO Retire key-audit tooling (last cluster closed)
 Fold ledger verdicts into the Decisions log; delete scripts/dump-bindings.el,
@@ -259,13 +306,21 @@ the keydump/keydiff bb tasks, and tests/scripts/.
     window movers in evil.el, expreg guards + transient, frames zoom lib
     (geometry stubbed), windows.el layout engine + cleanup), completion
     (completion-preview pager, vertico orderless dispatchers, yasnippet
-    helpers)
+    helpers), git (magit branch-friendly-string pinned against the dash
+    original + python-which-function, misc parse-git-url/bisect-github-url
+    ground-truthed against live doom.d, git-link url->ssh + vc-git-link
+    homepage wrappers over stubbed browse-at-remote, bug-reference regexp +
+    url-format)
   - smoke-only, and why :: evil module config and
     evil-ex-visual-star-search-a (need evil); expreg--line
     (needs a real display - batch frames are ~10 columns, visual-line fns
-    wrap); lisp.el (smartparens pending); url.el (ghub pending);
+    wrap); lisp.el (smartparens pending); url.el (loads now that ghub is
+    in, commands still error on let-plist/dash/org-cliplink/embark);
     dash-docs.el (package + network); bindings/config.el and
-    lisp/doom-keybinds.el (need general at load time)
+    lisp/doom-keybinds.el (need general at load time); git module config.el
+    plus gh-notify.el/code-review.el autoloads (bodies are pure
+    magit/forge/gh-notify plumbing - the live magit-status probe and the
+    keydump :void-suffix walk cover them)
   - tier-2 idea (not built) :: after =bb smoke= warms the elpaca dirs, a
     package-aware suite could load real evil/consult and cover the
     smoke-only bucket; revisit if that bucket grows
@@ -276,9 +331,9 @@ the keydump/keydiff bb tasks, and tests/scripts/.
   package's defcustom that isn't loaded needs a bare (defvar var)
   declaration first or the binding is lexical; deleting an autoload/*.el
   leaves stale generated loaddefs (also rm
-  ~/.cache/emacs-lab/autoloads/NAME.el); general/autoload/url.el has a
-  top-level (require 'ghub) - its commands error and the file cannot load
-  in tests until the git module ports.
+  ~/.cache/emacs-lab/autoloads/NAME.el); general/autoload/url.el loads now
+  that the git module ships ghub, but its commands still error at runtime
+  on let-plist/dash/org-cliplink/embark - stays deferred until those land.
 - The smoke job doubles as the Linux-parity trial gate - keep it green.
 
 * Emacs 31 watchlist
@@ -351,18 +406,17 @@ Flymake backend flagging let+if -> if-let* patterns; port with elisp module.
 ** TODO Trial gates still open
 - Linux parity: automated - the CI smoke job boots on ubuntu; keep it green
 - one elpaca-manager update cycle (fetch, review, merge)
-- local-repo recipe pattern proven (first local package port; idiom
-  verified and documented under "Local :repo packages")
+- [X] local-repo recipe pattern proven with the git module port (remoto +
+  github-topics build in place; see "Local :repo packages")
 
 * Custom modules
-** TODO git
-magit+forge (gh, unpinned), gh-notify, git-link, code-review (ag91),
-closql, consult-gh (:files "*.el"), git-auto-commit-mode, browse-at-remote.
-LOCAL-REPO: github-topics, remoto. config 452L, autoload ~980L.
-Uses doom-glob (ok), doom-recenter-a (needs tiny shim).
-transient/forge scale test for Elpaca. Port early - daily driver.
-Also unblocks general/autoload/url.el (top-level ghub require, see
-Testing & CI gotchas) and let-plist consumers (misc.el, url.el).
+** DONE git
+Ported (see Decisions log). Left behind on purpose: git-timemachine +
+smerge (the :emacs vc fold-in decision, SPC g t parked), orgit/orgit-forge
+(org module), consult-gh config + embark glue (disabled upstream / embark),
+gist (commented out in doom.d). let-plist stays unported - git-module
+consumers rewritten with plist-get; url.el keeps waiting (embark, dash,
+org-cliplink, let-plist), though its top-level ghub require now resolves.
 ** TODO org
 Largest: config 617L, autoload 16 files ~2530L. org (emacs-straight mirror,
 :pre-build fakes org-version - needs elpaca equivalent or plain org),
@@ -498,28 +552,32 @@ gptel-tools, gptel-anthropic-oauth, github-topics, remoto, ag-themes,
 let-plist, evilify-edebug, slacko.el, spacehammer (symlink!), wiktionary-bro,
 prisma.el, browser-hist, consult-hn, emacs-reddig, navegosa.el, go-jira.
 
-Idiom verified against the elpaca manual on disk (doc/manual.org,
-"recipe-keyword-repo", elpaca 0.12): a bare local path in =:repo= with no
-=:host= builds IN PLACE from that directory - edits there get picked up on
-=elpaca-rebuild=, nothing is cloned:
-#+begin_src emacs-lisp
-(use-package foo
-  :ensure (foo :repo "~/GitHub/agzam/foo/"))
-#+end_src
-The cons form =:repo ("~/path" . "name")= CLONES into
-elpaca-sources-directory instead - avoid it for the work-locally flow.
-The path should be a git repo root (elpaca runs git ops against it):
-remoto.el is already shaped right; the ~/.doom.d/modules/*/-embedded ones
-are not and need extraction first.
+Layout decided and PROVEN at the git module port (2026-07): module configs
+declare plain GitHub recipes (portable to machines without checkouts);
+init.el's =local-checkout-recipe= on =elpaca-recipe-functions= redirects
+any package listed in =local-dev-packages= to its ~/GitHub/agzam/ checkout
+when that dir exists - elpaca then builds IN PLACE (edits picked up on
+=elpaca-rebuild=, nothing cloned). Extend the alist as local packages port.
+Gotchas learned live:
+- The trailing slash on the local path is load-bearing:
+  =elpaca-git-repo-dir= strips a bare =\.el$= from the repo name, which
+  demoted remoto.el to clone mode (it cloned into ~/GitHub/agzam/remoto
+  before the fix). =file-name-as-directory= in the hook handles it.
+- The cons form =:repo ("~/path" . "name")= CLONES into
+  elpaca-sources-directory - never use it for the work-locally flow.
+- The path must be a git repo root; elpaca's git ops against in-place repos
+  were observed read-only (github-topics reflog stayed clean).
+- Embedded doom.d submodules need extraction first: github-topics now lives
+  at ~/GitHub/agzam/github-topics (cloned off the submodule preserving the
+  unpushed dce3530, origin re-pointed to GitHub; push pending). Remaining
+  doom.d-embedded locals (let-plist, evilify-edebug, gptel-*, ...) get the
+  same treatment when their modules port; the doom.d submodules dissolve
+  when the cord is cut.
 
-Layout decision DEFERRED (2026-07): leaning separate repos under
-~/GitHub/agzam/ per package; decide for real at the first consuming port
-(elisp or git module). The packages/-dir-inside-config alternative needs a
-smoke-boot experiment first (subdirs are not git roots).
-
-Latent dep, fix with this pattern: general module already references
-let-plist (autoload/url.el x4, autoload/misc.el open-circleci-log) - those
-commands error until let-plist lands (or the elisp module ports).
+Latent dep: general module still references let-plist (autoload/url.el x4,
+autoload/misc.el open-circleci-log) - those commands error until let-plist
+lands (or the elisp module ports). The git module rewrote its own let-plist
+uses with plist-get instead of pulling the package early.
 
 * Assets to relocate
 - snippets: currently read from ~/.doom.d/snippets (62 snippets); localize
