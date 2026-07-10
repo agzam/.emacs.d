@@ -119,6 +119,20 @@ module layout).
   visible), reported as "decrease doesn't work". Now 20, matching Doom's
   2pt doom-font-increment feel; a spec pins the multiple-of-10 constraint
   and the GUI probe asserts rendered char height moves on decrease.
+- [2026-07] key audit hardened against bound-but-broken-inside (the SPC z f
+  class): the dump walks every bound command's parsed transient--layout and
+  emits :void-suffix for undefined suffix commands; keydiff counts those as
+  broken under the same verdict rules. Layouts only exist once the defining
+  file loads, so keydump's boot force-loads autoloaded commands
+  (dump-bindings-load-autoloads, nil in live sessions - the Doom-side dump
+  stays conservative; keydiff only reads lab flags). KEYDUMP_REQUIRE gained
+  org: built-in org autoloads omit commands transients reference
+  (org-insert-link), a false :void-suffix otherwise. First run caught real
+  rot invisible before (same symbol both sides): expreg-transient (SPC v -
+  vulpea/markdown/clojure wrap suffixes) and window-transient (SPC w . -
+  golden-ratio); both parked :deferred pending their modules. SPC w's four
+  same-symbol ace-window/golden-ratio voids got their missing :deferred
+  verdicts - the pilot cluster is clean again (0 open, 0 broken, 7 parked).
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -135,14 +149,18 @@ resumes from this section alone:
      (everything above its "Boot mode" section; standalone vanilla elisp,
      pure functions) inline in the live Doom session, then
      (dump-bindings "~/.cache/emacs-lab/doom-keys.eld").
-     Never load-file lab files into Doom.
+     Never load-file lab files into Doom.  dump-bindings-load-autoloads
+     stays nil there (no force-loading in a live session) - doom-side
+     :void-suffix detection is best-effort; keydiff only reads lab flags.
    - Lab side: =bb keydump= (pty boot; KEYDUMP_REQUIRE env forces
      features whose maps bind lazily).
 2. =bb keydiff= - org report at ~/.cache/emacs-lab/keydiff.org (generated,
    never hand-edited), console shows open/broken/parked/regression counts
    per cluster; exit 1 on regressions (a :ported entry that drifted).
-   Broken = bound to a void command (lab dump marks those :void); only a
-   :deferred verdict parks one, other verdicts can't silence it.
+   Broken = bound to a void command, or a transient prefix whose layout
+   references void suffix commands (lab dump marks those :void /
+   :void-suffix); only a :deferred verdict parks one, other verdicts
+   can't silence it.
 3. Pick an unchecked cluster below. For each open entry record a verdict
    in key-decisions.edn and port/improve as decided - the binding itself
    is what closes a diff entry; a :ported ledger line is optional
@@ -155,7 +173,8 @@ and re-review its cluster. Coverage: leader tree + evil g/z/[/] prefix
 trees; localleader and mode-local maps get scoped dumps later if needed.
 
 Cluster checklist (open counts as of 2026-07 pilot; =bb keydiff= is truth):
-- [X] SPC w :: pilot - 12 verdicts, 2 parked on ace-window
+- [X] SPC w :: pilot - 12 verdicts; :void/:void-suffix backfill later - 7
+  parked (ace-window, golden-ratio)
 - [ ] SPC h (47) - help tree
 - [ ] SPC p (21) - project; expect workspace/projectile leftovers
 - [ ] normal g (19)

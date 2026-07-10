@@ -1,9 +1,11 @@
 ;;; scripts/dump-bindings.el --- key-audit binding dump -*- lexical-binding: t; -*-
 ;; Migration-scoped tooling (see MIGRATION.org "Key clusters").  Walks the
 ;; resolved leader tree plus the evil g/z/[/] prefix trees and writes one
-;; EDN-compatible line per binding: ("group" "KEY DESC" "command"), with a
-;; trailing :void when the bound symbol has no function definition (bound
-;; but broken - the SPC b s class).
+;; EDN-compatible line per binding: ("group" "KEY DESC" "command"), plus
+;; trailing flags: :void when the bound symbol has no function definition
+;; (bound but broken - the SPC b s class) and :void-suffix when a transient
+;; prefix's layout references undefined commands (bound but broken inside -
+;; the SPC z f class).
 ;; Standalone vanilla elisp - safe to evaluate in any session, Doom included.
 ;;
 ;; Boot mode (KEYDUMP_OUT set), driven by `bb keydump':
@@ -33,9 +35,39 @@ Prefix-command symbols come back as their keymap so the walk can descend."
    ((or (stringp def) (vectorp def)) (concat "<kmacro> " (key-description def)))
    ((functionp def) "<lambda>")))
 
+(defvar dump-bindings-load-autoloads nil
+  "When non-nil, force-load autoloaded commands before layout inspection.
+Transient layouts only exist once the defining file loads, so autoloaded
+prefixes dump clean no matter how rotten their suffixes.  Boot mode sets
+this; leave nil when dumping from a live session.")
+
+(defun dump-bindings--transient-suffixes (node)
+  "Collect suffix command symbols from a parsed transient layout NODE.
+Groups are vectors [CLASS PLIST (CHILDREN)], suffixes (CLASS :command CMD
+...) lists."
+  (cond
+   ((vectorp node)
+    (mapcan #'dump-bindings--transient-suffixes (append node nil)))
+   ((proper-list-p node)
+    (if-let* ((cmd (plist-get (cdr node) :command)))
+        (list cmd)
+      (mapcan #'dump-bindings--transient-suffixes node)))))
+
+(defun dump-bindings--void-suffix-p (def)
+  "Non-nil when DEF is a transient prefix whose layout references void commands."
+  (when (and (symbolp def) (fboundp def))
+    (when (and dump-bindings-load-autoloads
+               (autoloadp (symbol-function def)))
+      (autoload-do-load (symbol-function def) def))
+    (cl-some (lambda (cmd) (and (symbolp cmd) (not (fboundp cmd))))
+             (dump-bindings--transient-suffixes
+              (get def 'transient--layout)))))
+
 (defun dump-bindings--walk (group keymap prefix acc)
-  "Collect (GROUP keydesc name void?) entries from KEYMAP under PREFIX into ACC.
-VOID? is non-nil for symbols with no function definition."
+  "Collect (GROUP keydesc name void? void-suffix?) entries from KEYMAP.
+Keys sit under PREFIX; entries accumulate into ACC.  VOID? is non-nil for
+symbols with no function definition, VOID-SUFFIX? for transient prefixes
+with undefined suffix commands."
   (map-keymap
    (lambda (event def)
      ;; skip char ranges and default bindings
@@ -47,7 +79,8 @@ VOID? is non-nil for symbols with no function definition."
            (setq acc (dump-bindings--walk group def key acc)))
           ((dump-bindings--name def)
            (push (list group (key-description key) (dump-bindings--name def)
-                       (and def (symbolp def) (not (fboundp def))))
+                       (and def (symbolp def) (not (fboundp def)))
+                       (dump-bindings--void-suffix-p def))
                  acc))))))
    keymap)
   acc)
@@ -83,8 +116,9 @@ Sorted and deduplicated; shadowed duplicates keep the effective binding."
     (make-directory (file-name-directory (expand-file-name out-file)) t)
     (with-temp-file out-file
       (dolist (e entries)
-        (insert (format "(%S %S %S%s)\n" (nth 0 e) (nth 1 e) (nth 2 e)
-                        (if (nth 3 e) " :void" "")))))
+        (insert (format "(%S %S %S%s%s)\n" (nth 0 e) (nth 1 e) (nth 2 e)
+                        (if (nth 3 e) " :void" "")
+                        (if (nth 4 e) " :void-suffix" "")))))
     (message "dump-bindings: %d entries -> %s" (length entries) out-file)
     (length entries)))
 
@@ -94,6 +128,7 @@ Sorted and deduplicated; shadowed duplicates keep the effective binding."
   "Require KEYDUMP_REQUIRE features, dump to KEYDUMP_OUT, kill Emacs."
   (condition-case err
       (progn
+        (setq dump-bindings-load-autoloads t)
         (dolist (feat (split-string (or (getenv "KEYDUMP_REQUIRE") "")
                                     "," t "[ \t]+"))
           (require (intern feat)))

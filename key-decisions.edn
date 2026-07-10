@@ -21,6 +21,15 @@
  ["leader" "SPC w C-u"] {:status :dropped :note "winner stays out; window-undo owns SPC w u"}
  ["leader" "SPC w C-S-w"] {:status :deferred :note "ace-swap-window - :ui window-select decision (ace-window unported)"}
  ["leader" "SPC w C-c"] {:status :deferred :note "ace-delete-window - :ui window-select; stock evil-window-delete meanwhile"}
+ ;; same-symbol-both-sides keys, surfaced by the later :void hardening
+ ["leader" "SPC w W"] {:status :deferred :note "ace-window - :ui window-select decision (ace-window unported)"}
+ ["leader" "SPC w D"] {:status :deferred :note "ace-delete-window - :ui window-select decision"}
+ ["leader" "SPC w M"] {:status :deferred :note "ace-swap-window - :ui window-select decision"}
+ ["leader" "SPC w g"] {:status :deferred :note "golden-ratio unported (Decisions log: windows engine)"}
+
+ ;; void-suffix hardening finds (2026-07) - rot inside bound transients
+ ["leader" "SPC w ."] {:status :deferred :note "window-transient works; its g suffix waits on golden-ratio"}
+ ["leader" "SPC v"] {:status :deferred :note "expreg-transient core works; org-roam/vulpea, markdown and clojure wrap suffixes wait on their modules"}
 
  ;; scratch lib port (2026-07) - doom/* names renamed, see Decisions log
  ["leader" "SPC b s"] {:status :improved :note "switch-to-scratch-buffer - renamed port, scratch lib in general module"}

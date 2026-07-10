@@ -30,7 +30,9 @@
         (for [line (str/split-lines (slurp path))
               :when (not (str/blank? line))
               :let [[g k c & flags] (edn/read-string line)]]
-          [[g k] {:cmd c :void? (boolean (some #{:void} flags))}])))
+          [[g k] {:cmd c
+                  :void? (boolean (some #{:void} flags))
+                  :void-suffix? (boolean (some #{:void-suffix} flags))}])))
 
 (defn read-ledger []
   (if (.exists (io/file ledger-file))
@@ -45,22 +47,27 @@
 
 (defn resolution
   "Classify a differing entry given its ledger decision."
-  [{:keys [status decision lab-void?]}]
-  (let [d (:status decision)]
+  [{:keys [status decision lab-void? lab-void-suffix?]}]
+  (let [d (:status decision)
+        broken? (or lab-void? lab-void-suffix?)] ; void cmd or rotted transient
     (cond
-      (and lab-void? (= d :ported)) :regression ; claimed ported, actually void
-      (and lab-void? (= d :deferred)) :deferred ; known: waits on a module
-      lab-void? :broken               ; bound to an undefined command
+      (and broken? (= d :ported)) :regression ; claimed ported, actually broken
+      (and broken? (= d :deferred)) :deferred ; known: waits on a module
+      broken? :broken
       (#{:dropped :improved :deferred} d) d
       (= d :ported) :regression      ; claimed ported, still differs
       (= status :lab-only) :lab-only ; lab additions, informational
       :else :open)))
 
-(defn org-entry [{:keys [k doom lab status lab-void? decision]}]
+(defn org-entry [{:keys [k doom lab status lab-void? lab-void-suffix? decision]}]
   (let [[g kd] k
-        lab-str (str "=" lab "=" (when lab-void? " [void]"))
+        lab-str (str "=" lab "="
+                     (when lab-void? " [void]")
+                     (when lab-void-suffix? " [void-suffix]"))
         line (case status
-               :bound-void (format "- =%s= (%s) :: =%s= bound on both sides, void in lab" kd g doom)
+               :bound-void (format "- =%s= (%s) :: =%s= bound on both sides, %s in lab"
+                                   kd g doom
+                                   (if lab-void? "void" "void transient suffixes"))
                :missing (format "- =%s= (%s) :: doom =%s=, lab unbound" kd g doom)
                :mismatch (format "- =%s= (%s) :: doom =%s=, lab %s" kd g doom lab-str)
                :lab-only (format "- =%s= (%s) :: lab-only %s" kd g lab-str))]
@@ -76,13 +83,15 @@
                                  (set (concat (keys doom) (keys lab))))
                       :let [d (get-in doom [k :cmd])
                             l (get-in lab [k :cmd])
-                            lab-void? (get-in lab [k :void?])]
-                      :when (or (not= d l) lab-void?)]
+                            lab-void? (get-in lab [k :void?])
+                            lab-void-suffix? (get-in lab [k :void-suffix?])]
+                      :when (or (not= d l) lab-void? lab-void-suffix?)]
                   (let [status (cond (and d l (= d l)) :bound-void
                                      (and d l) :mismatch
                                      d :missing
                                      :else :lab-only)
                         e {:k k :doom d :lab l :status status :lab-void? lab-void?
+                           :lab-void-suffix? lab-void-suffix?
                            :decision (get ledger k) :cluster (cluster k)}]
                     (assoc e :resolution (resolution e))))
         by-cluster (group-by :cluster entries)

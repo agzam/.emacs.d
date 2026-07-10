@@ -69,8 +69,10 @@
                    (fs/delete-if-exists out)
                    (apply p/shell {:continue true
                                    :extra-env {"KEYDUMP_OUT" out
-                                               ;; deferred maps need their feature loaded first
-                                               "KEYDUMP_REQUIRE" "evil"
+                                               ;; deferred maps need their feature loaded first;
+                                               ;; org: its autoloads omit commands transients
+                                               ;; reference (org-insert-link), false void-suffix
+                                               "KEYDUMP_REQUIRE" "evil,org"
                                                "TERM" "xterm-256color"}}
                           cmd)
                    (if (fs/exists? out)
