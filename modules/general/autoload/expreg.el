@@ -145,6 +145,7 @@ transient and optionally call an explicit CMD."
     ("; `" "code" (lambda () (interactive) (org-emphasize ?~)))
     ("; +" "strikethrough" (lambda () (interactive) (org-emphasize ?+)))]
    [("C-c l" "insert link" org-insert-link)
+    ("C-c i" "insert org-roam link" vulpea-insert)
     ("; l" "insert link" org-insert-link)
     ("; q" "wrap in quote block"
      (lambda () (interactive) (org-wrap-in-block 'quote)))
@@ -152,7 +153,7 @@ transient and optionally call an explicit CMD."
      (lambda () (interactive) (org-wrap-in-block 'src)))]]
   ;; Dropped until their modules port (doom.d stays the reference, see
   ;; MIGRATION Decisions log): Markdown and Clojure sections,
-  ;; vulpea-insert, the browser-url inserters, and the Magit section -
+  ;; the browser-url inserters (web-browsing), and the Magit section -
   ;; that one also collides with bypass "s"/"x", which Doom's dead
   ;; conflict guard never caught.
   )

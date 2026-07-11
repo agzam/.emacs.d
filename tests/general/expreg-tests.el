@@ -35,14 +35,14 @@
                           (transient-layout-commands
                            (get 'expreg-transient 'transient--layout)))))
             :to-have-same-items-as
-            '(expreg-expand expreg-contract org-insert-link))))
+            '(expreg-expand expreg-contract org-insert-link vulpea-insert))))
 
 (describe "transient-layout-keys"
   (it "collects every static key from the real layout"
     (expect (transient-layout-keys 'expreg-transient)
             :to-have-same-items-as
             '("v" "V" "u" "C-r" "; *" "; b" "; /" "; i" "; _" "; =" "; `"
-              "; +" "C-c l" "; l" "; q" "; c"))))
+              "; +" "C-c l" "C-c i" "; l" "; q" "; c"))))
 
 (defun expreg-tests--suffix-prop (suffix prop)
   "PROP from a parsed SUFFIX, across transient layout dialects."

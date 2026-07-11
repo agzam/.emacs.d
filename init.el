@@ -101,7 +101,7 @@ build-in-place to clone."
          (:lang emacs-lisp) (:lang json) (:lang markdown +grip) (:lang sh)
          (:config default +bindings +smartparens)
          ;; :custom entries appear here as their modules get ported.
-         (:custom git) (:custom general) (:custom completion))
+         (:custom git) (:custom general) (:custom completion) (:custom org))
        (when (eq system-type 'darwin) '((:os macos)))))
 
 ;; Leader prefixes are read at bind time; set before doom-keybinds loads so
@@ -133,7 +133,7 @@ build-in-place to clone."
 ;; Function files load first (sorted - raw directory order differs between
 ;; Mac and Linux), then config.el; config.el may `load!' extra +files.
 ;; The module list itself is explicit, in this exact order.
-(defvar active-modules '("evil" "bindings" "git" "general" "completion")
+(defvar active-modules '("evil" "bindings" "git" "general" "completion" "org")
   "Modules under modules/, loaded in this exact order.
 bindings (Doom's :config default) precedes the :custom ports, like in doom!.")
 

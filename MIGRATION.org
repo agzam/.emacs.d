@@ -14,7 +14,7 @@ module layout).
   generation, XDG cache/state layout
 - modules :: evil (lean set), bindings (Doom tree, company/ivy/helm excised,
   SPC p on project.el), git (magit/forge stack, local-dev recipe hook),
-  general, completion
+  general, completion, org (core slice: roam/vulpea/evil-org)
 - user layer :: config.el (leader tree, globals), lisp/functions.el
   incl. reload-config (SPC h r r; doom/reload analogue - re-runs
   defaults/modules/config in place, elpaca picks up new packages; restart
@@ -196,6 +196,76 @@ module layout).
   quarantined in doom-compat.el; doom.d's transient-file :init block already
   covered there. doom.d rot found, not lab bugs: +forge-select-issue and
   forge's dispatch insertion are broken in doom.d today.
+- [2026-07] org module ported, CORE SLICE: org (elpaca-menu-org builds
+  10.0-pre, matching live Doom's org 10; org-version/loaddefs generated -
+  doom.d's straight :pre-build fake dissolved; elpaca-menu-org-make-manual
+  nil, makeinfo is absent on CI and Doom never built the manual either),
+  org-roam(+ui; extensions flattened MELPA-style via :files
+  (:defaults "extensions/*") - doom.d's manual build-path hack dissolved,
+  org-roam-ui hard-requires org-roam-dailies), vulpea trio +
+  consult-vulpea (explicit GitHub recipes; consult-vulpea is
+  fabcontigiani's, not d12frosted), evil-org (hlissner fork),
+  org-modern-indent, org-appear (org-9.7-fixes branch). Autoload files
+  slimmed to the core slice: org-tables/org-babel reduced to their single
+  survivors (org-table-previous-row, org-clear-babel-results-h - folded
+  into autoload/org.el); org-capture frame infra, org-refile/org-avy,
+  org-export, org-link's gif/Doom-link helpers, contrib-*, verb, anki all
+  wait with their packages. Renames: +org/foo -> org-foo tree;
+  +org-link-make-description-function -> org-link-make-description-fn
+  (bare rename would shadow the defcustom's name). Dropped as dead in
+  doom.d: org-roam--link-to, org--insert-selection-dwim, org-link-parse,
+  vulpea-insert+, :commands org-roam-buffer-toggle-display (v1 API).
+  doom.d rot fixed on port: get-gh-item-title's repo regex used a
+  =[:graph:]=-class match (eats "/") - every blob/commit link fell into
+  the repo branch and the file-in-branch arm was dead (specs pin all
+  three);
+  the vulpea display-buffer-alist entry wrapped regexp-quoted strings in
+  rx literals - matched literal backslashes, never fired;
+  org-goto-bottommost-heading leaked a global =currlevel=;
+  org-goto-datetree-date missed (require 'org-datetree). No quoted-after!
+  instances this time. Lab-side deviations: flycheck-disable-h is
+  fboundp-guarded - unguarded (flycheck parked on :checkers) the void
+  call aborted the tail of org-mode-hook, silently killing
+  org-modern-indent/cape-org-capf/bug-reference (live probe caught it);
+  localleader map! hoisted out of doom.d's per-buffer org-init-keybinds-h;
+  its (:when (modulep! :completion vertico)) guard dropped - the lab
+  registry says :custom completion, so the guard silently pruned
+  consult-org-heading; org-noter ("n") and org-cliplink ("i L")
+  localleader bindings dropped until pdf/long-tail; yt links fall back to
+  browse-url while mpv-open+ waits on web-browsing; ox-gfm's
+  org-export-with-toc nil folded into org config (ox-gfm was :after org -
+  same effective timing); magit-blame's turn-off-evil-org-h lives in
+  evil-org's :config, not the git module - void-safe when evil-org never
+  loads; org-roam-ui-on wraps enable in with-demoted-errors (the parallel
+  Doom session may hold port 8088). insert-dash + insert-bracket-pair
+  stay with the writing module - org's =[ SPC= and config.el's ="-"=
+  insert-state bindings are void until it ports (doom.d-verbatim; note
+  the "[[" vulpea-insert prefix leaves no plain-bracket escape in org
+  insert state until then). org-wrap-in-block stays in general -
+  expreg-transient depends on it and general must not depend on org
+  (the "move or leave" decision delegated with this port's instructions).
+  vulpea keeps doom.d's :commands (vulpea-journal+
+  vulpea-journal-note): -note isn't autoloaded upstream, loading vulpea
+  chains vulpea-ui -> vulpea-journal through the :after gates, and
+  use-package's (unless (fboundp ..)) wrapper protects the module loaddef
+  for vulpea-journal+. Quarantine additions: org-id-locations-file,
+  org-persist-directory (isolate from the Doom session's XDG default -
+  different org builds), org-publish-timestamp-directory,
+  org-clock-persist-file, org-roam.db + vulpea.db (lab builds fresh dbs;
+  org-roam autosync stays off like doom.d - run org-roam-db-sync once for
+  the UI graph). Test gotchas pinned in suites: never buttercup-spy org
+  edit commands - every org-mode call runs org-fold--advice-edit-commands,
+  whose advice-add rewrites the advised symbols' function cells and
+  orphans the spy bookkeeping (org-return, org-self-insert-command, ...;
+  use cl-letf); buttercup :var is useless for special vars (binding is
+  live while the suite builds, not when specs run). KEYDUMP_REQUIRE
+  gained vertico: config.el's (:after vertico) bindings dumped as
+  false-open SPC r entries. Restored: vulpea-insert in expreg-transient
+  ("C-c i"). Verified: 239 specs 0 failed (default + transient-0.7.2
+  runs), SMOKE-OK 86 packages 0 failed/blocked, live probe (vulpea
+  journal end-to-end incl. drawer-lint save, hook/keymap asserts, expreg
+  suffix walk), keydiff 0 regressions - SPC o's roam/org broken cleared,
+  SPC r closed.
 - [2026-07] expreg-transient fixed for real - the parked "core works"
   note was wrong. Its bypass section's :setup-children calls
   transient-bypass-keys, which lived in doom.d's unported
@@ -264,14 +334,19 @@ Cluster checklist (open counts as of 2026-07 pilot; =bb keydiff= is truth):
 - [ ] normal g (19)
 - [ ] SPC x (18) - gptel tree, mostly ai-module deferrals
 - [ ] SPC c (15) - code/lsp
-- [ ] SPC o (15) - open/apps
+- [ ] SPC o (15) - open/apps; roam/org tree resolved with the org port,
+  SPC o r C-b parked (web-browsing) - the rest waits on
+  macos/chat/shell/eval/ai/notmuch
 - [ ] SPC s (10) - search
 - [ ] SPC b (8) - buffers
 - [ ] motion [ / motion ] (9+9), normal [ / normal ] (5+5)
 - [X] SPC t :: closed - 8 verdicts; flycheck parked on :checkers
 - [X] SPC g :: closed with the git module port - 4 verdicts;
   git-timemachine parked on the :emacs vc fold-in decision
-- [ ] SPC f (6), SPC n (6), SPC r (3), normal z (3)
+- [X] SPC r :: closed with the org module port - r r on vulpea-find, the
+  vertico-repeat pair was false-open (KEYDUMP_REQUIRE gained vertico),
+  r c corfu leftover dropped
+- [ ] SPC f (6), SPC n (6), normal z (3)
 - [ ] SPC T (2), singletons: SPC " ' a i l q
 ** TODO Retire key-audit tooling (last cluster closed)
 Fold ledger verdicts into the Decisions log; delete scripts/dump-bindings.el,
@@ -310,7 +385,12 @@ the keydump/keydiff bb tasks, and tests/scripts/.
     original + python-which-function, misc parse-git-url/bisect-github-url
     ground-truthed against live doom.d, git-link url->ssh + vc-git-link
     homepage wrappers over stubbed browse-at-remote, bug-reference regexp +
-    url-format)
+    url-format), org (against BUILT-IN org, not the elpaca build:
+    insert-item/folds/table-previous-row/babel-results/todo-keywords,
+    get-gh-item-title + description-fn with stubbed ghub pinning the
+    dash/s rewrites and the repo-regex fix, drawer lint, journal template
+    + buffer-type detection, tiff->png advice, goto-bottommost-heading's
+    currlevel-leak fix)
   - smoke-only, and why :: evil module config and
     evil-ex-visual-star-search-a (need evil); expreg--line
     (needs a real display - batch frames are ~10 columns, visual-line fns
@@ -320,7 +400,12 @@ the keydump/keydiff bb tasks, and tests/scripts/.
     lisp/doom-keybinds.el (need general at load time); git module config.el
     plus gh-notify.el/code-review.el autoloads (bodies are pure
     magit/forge/gh-notify plumbing - the live magit-status probe and the
-    keydump :void-suffix walk cover them)
+    keydump :void-suffix walk cover them); org module config.el and the
+    vulpea/roam-bound autoloads (vulpea-backlinks/forward-links, count
+    overlays, org-roam-refile-to-node, vulpea-db-verify, vulpea-journal+,
+    org-dwim-at-point, yank-from-clipboard - need live vulpea db/structs
+    or a GUI; the journal-note live probe walks the whole chain end to
+    end)
   - tier-2 idea (not built) :: after =bb smoke= warms the elpaca dirs, a
     package-aware suite could load real evil/consult and cover the
     smoke-only bucket; revisit if that bucket grows
@@ -417,14 +502,17 @@ smerge (the :emacs vc fold-in decision, SPC g t parked), orgit/orgit-forge
 gist (commented out in doom.d). let-plist stays unported - git-module
 consumers rewritten with plist-get; url.el keeps waiting (embark, dash,
 org-cliplink, let-plist), though its top-level ghub require now resolves.
-** TODO org
-Largest: config 617L, autoload 16 files ~2530L. org (emacs-straight mirror,
-:pre-build fakes org-version - needs elpaca equivalent or plain org),
-org-roam(+ui), vulpea trio + consult-vulpea, evil-org (hlissner), orgit(-forge),
-org-modern-indent, org-appear (branch), verb, anki-editor+anki-gen, ob-*,
-org-pomodoro, toc-org. 2 mp3 assets. Feeds embark (vulpea-*) and SPC o r tree.
-org-wrap-in-block early-ported to general/autoload/misc.el (dedupe);
-restore vulpea-insert in expreg-transient's org section.
+** DONE org (core slice; long tail pending)
+Core slice ported - see Decisions log. SPC o r tree + SPC r r alive,
+vulpea-insert restored in expreg-transient. Left for a long-tail sitting:
+verb, anki-editor(+anki-gen), ob-* extras (ob-async/http/mermaid),
+org-pomodoro, toc-org, orgit(-forge) (still back-fills the git deferral),
+org-superstar, org-edit-indirect, ox-clip/ox-gfm, org-cliplink,
+org-download, org-contrib, the 2 mp3 assets, org-capture frame infra
+(spacehammer flow), org-refile/org-avy commands, org-pretty-mode
+(org-present), export-to-clipboard helpers, edit-indirect-guess-mode-fn+.
+Feeds embark (vulpea-*), now unblocked.
+browser-create-roam-node-for-active-tab parked on web-browsing.
 ** TODO ai
 gptel + gptel-quick/ob-gptel/gptel-agent, eca, claude-code, agent-shell/acp,
 mcp, whisper, shell-maker, llm-tool-collection, ragmacs.
@@ -443,7 +531,9 @@ jinx, sdcv, mw-thesaurus, google-translate (own fork+branch), define-it,
 separedit, youtube-sub-extractor, occult. LOCAL-REPO: spacehammer (symlink
 to ~/.hammerspoon), wiktionary-bro, prisma.el. abbrev_defs asset.
 config 385L, autoload ~715L. Depends on web-browsing; feeds clojure+chat.
-Unlocks SPC x l / SPC x t trees.
+Unlocks SPC x l / SPC x t trees. Also un-voids insert-dash +
+insert-bracket-pair (org "[ SPC" / org+markdown "-" insert bindings wait
+on them since the org port).
 ** TODO embark
 embark + embark-consult. config 303L, autoload 301L. Depends on
 web-browsing (+eww-*) and org (vulpea) for some actions.

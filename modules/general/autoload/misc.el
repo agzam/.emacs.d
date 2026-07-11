@@ -54,8 +54,8 @@ narrowed to."
   (init-visual-line-keys)
   (evil-normalize-keymaps))
 
-;; Ported ahead of the org module (doom.d org/autoload/custom.el) -
-;; expreg-transient's "; q"/"; c" call it.  Dedupe when org ports.
+;; From doom.d org/autoload/custom.el; lives here for good - expreg-transient
+;; ("; q"/"; c") calls it and general must not depend on the org module.
 ;;;###autoload
 (defun org-wrap-in-block (block-type)
   "Wrap the region (or paragraph) in an org block of BLOCK-TYPE."

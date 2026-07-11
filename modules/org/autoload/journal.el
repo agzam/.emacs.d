@@ -1,0 +1,69 @@
+;;; modules/org/autoload/journal.el -*- lexical-binding: t; -*-
+
+(defvar vulpea-journal--type 'work
+  "Active journal type: `work' or `personal'.
+Set by journal commands, read by the dynamic template function.")
+
+(defvar-local vulpea-journal--buffer-type nil
+  "Buffer-local journal type, set when visiting a journal note.
+Takes precedence over `vulpea-journal--type' in the template function.")
+
+(defun vulpea-journal--detect-buffer-type ()
+  "Detect journal type from current buffer's filetags.
+Returns `work', `personal', or nil if not a journal buffer."
+  (when-let* ((file (buffer-file-name))
+              (_ (string-match-p "/daily/" file)))
+    (let ((tags (save-excursion
+                  (goto-char (point-min))
+                  (when (re-search-forward "^#\\+filetags:.*" nil t)
+                    (match-string 0)))))
+      (cond
+       ((and tags (string-match-p "work-notes" tags)) 'work)
+       ((and tags (string-match-p "personal-notes" tags)) 'personal)))))
+
+(defun vulpea-journal--type-from-note (note)
+  "Derive journal type from NOTE's tags.
+Returns `work', `personal', or nil."
+  (when (vulpea-note-p note)
+    (let ((tags (vulpea-note-tags note)))
+      (cond
+       ((member "work-notes" tags) 'work)
+       ((member "personal-notes" tags) 'personal)))))
+
+(defun vulpea-journal-template+ (_date)
+  "Dynamic template function for `vulpea-journal-default-template'.
+Dispatches to work or personal config based on the active journal type."
+  (pcase (or vulpea-journal--buffer-type vulpea-journal--type)
+    ('work
+     (list :file-name "daily/%Y-%m-work-notes.org"
+           :title "%B %Y work notes"
+           :tags '("work-notes")
+           :entry-level 1
+           :entry-title "%Y-%m-%d %A"
+           :head "#+startup: show2levels"))
+    ('personal
+     (list :file-name "daily/%Y-%m-journal.org"
+           :title "%B %Y personal notes"
+           :tags '("personal-notes")
+           :entry-level 1
+           :entry-title "%Y-%m-%d %A"
+           :head "#+startup: show2levels"))))
+
+;;;###autoload
+(defun vulpea-journal+ (type &optional date)
+  "Open journal of TYPE for DATE.
+TYPE is `work' or `personal'.  When DATE is nil, opens today.
+
+Unlike `vulpea-journal', this does not auto-open the sidebar.
+If the sidebar is already visible, it gets refreshed."
+  (interactive)
+  (let* ((vulpea-journal--type type)
+         (vulpea-journal--buffer-type type)
+         (date (or date (current-time)))
+         (note (vulpea-journal-note date)))
+    (vulpea-visit note)
+    (vulpea-journal--set-active-date date)
+    (setq-local vulpea-journal--buffer-type type)
+    ;; refresh sidebar only if already visible, never force-open
+    (when (vulpea-ui--sidebar-visible-p)
+      (vulpea-ui-sidebar-refresh))))

@@ -52,6 +52,10 @@
  ;; frames lib port (2026-07) - zoom transient slimmed, see Decisions log
  ["leader" "SPC z f"] {:status :improved :note "frame-zoom-transient slimmed to font/text-scale/full-height; WM-era resize suffixes dropped, doom/*-font-size -> font-size-*"}
 
+ ;; org module port (2026-07) - SPC o roam/org tree resolved by the port itself
+ ["leader" "SPC o r C-b"] {:status :deferred :note "browser-create-roam-node-for-active-tab - waits on web-browsing"}
+ ["leader" "SPC r c"] {:status :dropped :note "+corfu-kill-frames - corfu machinery removed config-wide (Decisions log)"}
+
  ;; SPC g - git module port (2026-07)
  ["leader" "SPC g C"] {:status :improved :note "git-clone - renamed +git-clone port (git module misc.el, let-plist rewritten out)"}
  ["leader" "SPC g y"] {:status :improved :note "vc-git-link-kill - browse-at-remote wrapper, implemented fresh (no Doom source in the v3 install)"}

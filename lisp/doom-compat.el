@@ -48,7 +48,16 @@
       projectile-cache-file (concat doom-cache-dir "projectile.cache")
       projectile-known-projects-file (concat doom-state-dir "projectile.projects")
       forge-database-file (concat doom-data-dir "forge/forge-database.sqlite")
-      code-review-db-database-file (concat doom-data-dir "code-review-db-file.sqlite"))
+      code-review-db-database-file (concat doom-data-dir "code-review-db-file.sqlite")
+      org-id-locations-file (concat doom-cache-dir "org-id-locations")
+      ;; org 9.7+ defaults org-persist to XDG cache; keep the lab's out of the
+      ;; live Doom session's (both run org 10 but different builds)
+      org-persist-directory (concat doom-cache-dir "org-persist/")
+      org-publish-timestamp-directory (concat doom-cache-dir "org-timestamps/")
+      org-clock-persist-file (concat doom-state-dir "org-clock-save.el")
+      ;; derived caches of ~/Sync/org - lab builds its own, never Doom's
+      org-roam-db-location (concat doom-local-dir "org-roam.db")
+      vulpea-db-location (concat doom-local-dir "vulpea.db"))
 
 (defvar doom-disabled-packages nil)
 
