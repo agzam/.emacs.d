@@ -470,8 +470,8 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
        :desc "variable-pitch" "f" #'variable-pitch-mode
        :desc "prefix wrap" ">" #'global-visual-wrap-prefix-mode
        (:when (modulep! :custom colors)
-         :desc "next color theme" "n" #'colors/cycle-themes-down
-         :desc "prev color theme" "p" #'colors/cycle-themes-up))
+         :desc "next color theme" "n" #'cycle-themes-down
+         :desc "prev color theme" "p" #'cycle-themes-up))
 
       (:prefix ("w" . "windows")
                "TAB" #'evil-window-prev

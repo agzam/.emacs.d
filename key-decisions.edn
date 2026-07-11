@@ -60,4 +60,8 @@
  ["leader" "SPC g C"] {:status :improved :note "git-clone - renamed +git-clone port (git module misc.el, let-plist rewritten out)"}
  ["leader" "SPC g y"] {:status :improved :note "vc-git-link-kill - browse-at-remote wrapper, implemented fresh (no Doom source in the v3 install)"}
  ["leader" "SPC g Y"] {:status :improved :note "vc-git-link-kill-homepage - browse-at-remote wrapper, sibling of SPC g y"}
- ["leader" "SPC g t"] {:status :deferred :note "git-timemachine - :emacs vc fold-in decision; not in the git-module package set"}}
+ ["leader" "SPC g t"] {:status :deferred :note "git-timemachine - :emacs vc fold-in decision; not in the git-module package set"}
+
+ ;; SPC T - colors module port (2026-07)
+ ["leader" "SPC T n"] {:status :improved :note "cycle-themes-down - renamed colors/ port; ring now anchored on (car custom-enabled-themes), doom-theme went stale under circadian"}
+ ["leader" "SPC T p"] {:status :improved :note "cycle-themes-up - renamed colors/ port, sibling of SPC T n"}}

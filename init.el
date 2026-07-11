@@ -64,7 +64,8 @@
 ;; cloned (MIGRATION "Local :repo packages").
 (defvar local-dev-packages
   '((remoto . "~/GitHub/agzam/remoto.el")
-    (github-topics . "~/GitHub/agzam/github-topics"))
+    (github-topics . "~/GitHub/agzam/github-topics")
+    (ag-themes . "~/GitHub/agzam/ag-themes.el"))
   "Alist of own packages -> local checkout preferred over the GitHub recipe.")
 
 (defun local-checkout-recipe (recipe)
@@ -101,7 +102,7 @@ build-in-place to clone."
          (:lang emacs-lisp) (:lang json) (:lang markdown +grip) (:lang sh)
          (:config default +bindings +smartparens)
          ;; :custom entries appear here as their modules get ported.
-         (:custom git) (:custom general) (:custom completion) (:custom org))
+         (:custom git) (:custom general) (:custom completion) (:custom colors) (:custom org))
        (when (eq system-type 'darwin) '((:os macos)))))
 
 ;; Leader prefixes are read at bind time; set before doom-keybinds loads so
@@ -133,7 +134,7 @@ build-in-place to clone."
 ;; Function files load first (sorted - raw directory order differs between
 ;; Mac and Linux), then config.el; config.el may `load!' extra +files.
 ;; The module list itself is explicit, in this exact order.
-(defvar active-modules '("evil" "bindings" "git" "general" "completion" "org")
+(defvar active-modules '("evil" "bindings" "git" "general" "completion" "colors" "org")
   "Modules under modules/, loaded in this exact order.
 bindings (Doom's :config default) precedes the :custom ports, like in doom!.")
 

@@ -287,6 +287,41 @@ module layout).
   rot net, bypass-engine + org-wrap-in-block specs; a boot probe opened
   the transient live and walked live suffixes (bypass children
   included) - all defined.
+- [2026-07] colors module ported (circadian, ag-themes LOCAL-REPO,
+  spacemacs-theme, base16-theme, doom-themes, rainbow-mode, beacon;
+  ef-themes stays out - disabled upstream too). ag-themes extracted from
+  the doom.d submodule to ~/GitHub/agzam/ag-themes.el (af440d2 already on
+  GitHub, nothing unpushed; origin re-pointed, local-dev-packages entry;
+  elpaca's in-place build left the checkout clean). Recipe excludes the
+  repo's stale straight-era *-autoloads.el/-pkg.el - elpaca regenerates
+  autoloads from cookies, including the custom-theme-load-path cookie in
+  ag-themes.el. Theme loading: circadian owns it, hooked on
+  doom-init-ui-hook instead of window-setup-hook - elpaca activates
+  packages after window-setup on cold boots, so a :hook registration
+  there would never fire. tty gets themed exactly like doom.d in
+  practice: the doom.d display-graphic-p guard (doom-theme nil) only
+  suppressed Doom's own pre-circadian load, machinery the lab doesn't
+  have. Cycle helpers anchored on (car custom-enabled-themes) - doom.d
+  rot: they keyed on doom-theme, which circadian's timed switches never
+  update (no load-theme advice in the live install, ground-truthed), so
+  the ring anchor went stale after every scheduled switch. Renames:
+  colors/cycle-themes-down/up -> cycle-themes-down/up,
+  colors/load-next/prev-theme -> load-next/prev-theme; the duplicated
+  next/prev bodies merged into load-cycled-theme. The transient prefix
+  lives in autoload/cycle-themes.el (lazy dir, not the eager single
+  autoload.el - that would require built-in transient at boot, before
+  elpaca activates the real one; the loaddefs subprocess handles the
+  cookie). doom-defaults' window-divider-mode hook removed (port of the
+  doom.d remove-hook!). beacon guard (featurep :system 'macos) -> (eq
+  system-type 'darwin) - installed but off on macOS/tty. Coverage:
+  ring/cycle logic + wrapper composition in
+  tests/colors/cycle-themes-tests.el (circadian provide-stubbed); theme
+  activation, circadian slot pick, real-ring round-trip, mode-line-active
+  :inherit survival, beacon/rainbow spot checks live in the tty probe
+  (all green); GUI parity rides on daily use once the cord cuts.
+  Housekeeping cleared same sitting: github-topics dce3530 pushed
+  (upstream now tracks), one-time org-roam-db-sync ran headless against
+  the quarantined db (2475 nodes / 1447 files).
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -347,7 +382,9 @@ Cluster checklist (open counts as of 2026-07 pilot; =bb keydiff= is truth):
   vertico-repeat pair was false-open (KEYDUMP_REQUIRE gained vertico),
   r c corfu leftover dropped
 - [ ] SPC f (6), SPC n (6), normal z (3)
-- [ ] SPC T (2), singletons: SPC " ' a i l q
+- [X] SPC T :: closed with the colors module port - 2 verdicts (the
+  renamed cycle-themes pair)
+- [ ] singletons: SPC " ' a i l q
 ** TODO Retire key-audit tooling (last cluster closed)
 Fold ledger verdicts into the Decisions log; delete scripts/dump-bindings.el,
 scripts/keydiff.clj, key-decisions.edn (+ its .gitignore whitelist line),
@@ -478,10 +515,10 @@ Resolved with the frames lib port: config.el face bridge +
 =font-size-increase/decrease/reset= over the default face height;
 doom-font vars stay unvendored. Consequence: =doom-big-font-mode= will
 never exist - the SPC t sitting must drop or replace SPC t b.
-** TODO Theme: colors module
-ag-themes (LOCAL-REPO), spacemacs-theme, circadian day/night, doom-themes,
-rainbow-mode, beacon. Uses doom-init-ui-hook (compat has stub hook).
-Until then: default theme.
+** DONE Theme: colors module
+Ported (see Decisions log). circadian owns day/night loading off
+doom-init-ui-hook; base16-theme was missing from this list (packages.el
+was truth). SPC T closed.
 ** TODO Root packages leftovers
 golden-ratio (SPC w g currently void), lorem-ipsum.
 ** TODO LSP_USE_PLISTS env
@@ -548,8 +585,9 @@ No packages; autoload.el 283L of workspace logic + desktop persistence
 ** TODO modeline
 doom-modeline only. 32L config. doom-init-ui hook + font-height advice.
 Until ported: default modeline.
-** TODO colors
-See theme infra item above.
+** DONE colors
+Ported (see theme infra item + Decisions log). ag-themes extracted to
+~/GitHub/agzam/ag-themes.el; ef-themes left out on purpose.
 ** TODO dired
 treemacs suite (+evil,+icons-dired,+projectile,+lsp), dired-subtree/sidebar/
 narrow/preview/imenu. Adds treemacs evil state via doom-evil-state-alist
@@ -659,10 +697,12 @@ Gotchas learned live:
   were observed read-only (github-topics reflog stayed clean).
 - Embedded doom.d submodules need extraction first: github-topics now lives
   at ~/GitHub/agzam/github-topics (cloned off the submodule preserving the
-  unpushed dce3530, origin re-pointed to GitHub; push pending). Remaining
-  doom.d-embedded locals (let-plist, evilify-edebug, gptel-*, ...) get the
-  same treatment when their modules port; the doom.d submodules dissolve
-  when the cord is cut.
+  then-unpushed dce3530, origin re-pointed to GitHub; pushed 2026-07,
+  upstream tracks) and ag-themes at ~/GitHub/agzam/ag-themes.el (af440d2,
+  already in sync with GitHub at extraction). Remaining doom.d-embedded
+  locals (let-plist, evilify-edebug, gptel-*, ...) get the same treatment
+  when their modules port; the doom.d submodules dissolve when the cord
+  is cut.
 
 Latent dep: general module still references let-plist (autoload/url.el x4,
 autoload/misc.el open-circleci-log) - those commands error until let-plist
