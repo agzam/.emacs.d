@@ -94,7 +94,7 @@
   (add-hook! 'dired-mode-hook
              #'dired-hide-details-mode
              (defun evil-matchit-off-h ()
-               ;; fboundp: evil-matchit waits on :custom tree-sitter
+               ;; fboundp: keeps dired loadable without :custom tree-sitter
                (when (fboundp 'turn-off-evil-matchit-mode)
                  (turn-off-evil-matchit-mode)))
              (defun dired-set-keys-h ()

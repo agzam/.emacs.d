@@ -498,6 +498,24 @@ module layout).
   checks all 19 binds via lookup-key.  Keydiff: SPC h 18 -> 0 open, off
   the diff table; 107 open / 90 broken / 3 parked / 71 resolved /
   0 regressions / 0 lab-only.
+- [2026-07] tree-sitter module ported (registry slot between dired and
+  org, doom!-faithful).  Emacs 31 gate on the treesit block - CI's 30.1
+  has none of treesit-enabled-modes/treesit-ensure-installed, and locally
+  the boot-time ensure loop would y-or-n-p ('ask policy) inside every pty
+  probe/smoke run - grammar ensure now rides with-eval-after-load of its
+  consumers (yaml-pro, mermaid-ts-mode).  treesitter-context kept Doom's
+  always-defer semantics with an explicit :defer t (lab sets no
+  use-package-always-defer); its fold-all advice body moved to
+  modules/tree-sitter/autoload/fold.el for the batch tier - 5 specs pin
+  the close-all/open-all walk and the passthroughs.  evil-matchit
+  (redguardtoo is upstream, not a fork) on doom-first-file; going live
+  self-activated dired's evil-matchit-off-h fboundp guard - probe:
+  matchit on in file buffers, off in dired, treesitter-context still
+  deferred at boot.  clojure-ts-mode + mermaid-ts-mode (:files) are
+  install-only stubs (elpaca installs strictly via :ensure).  Smoke
+  116 -> 121 packages, 0 failed/blocked; keydiff untouched (107 open /
+  90 broken / 3 parked / 0 regressions); the agzam in-place checkouts
+  stayed clean through the builds.
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -791,9 +809,12 @@ in the root layer, smartparens base, the *scratch* replacement.
 shell-pop, ghostel+evil-ghostel (:files split), eshell-atuin, mise, kkp,
 vimrc-mode, yuck-mode. doom-emacs-dir eshell aliases path -> relocate.
 Unlocks SPC ' / SPC " (shell-pop tree). config 120L.
-** TODO tree-sitter
-clojure-ts-mode, treesitter-context, evil-matchit (redguardtoo),
-mermaid-ts-mode (:files), mermaid-mode. config 72L.
+** DONE tree-sitter
+Ported (see Decisions log). treesit block gated to Emacs 31 (CI's 30.1
+lacks the API), grammar ensure-installed deferred to consumer load so the
+'ask policy can't prompt mid pty boot, fold-all advice extracted to module
+autoload/. evil-matchit going live self-activated dired's
+evil-matchit-off-h guard (probe-verified).
 ** TODO lsp
 lsp-mode, dap-mode (unpins). Removes Doom lookup hook (inert here).
 Combine with :tools lsp decision + LSP_USE_PLISTS + read-process-output-max.

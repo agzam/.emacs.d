@@ -103,7 +103,8 @@ build-in-place to clone."
          (:config default +bindings +smartparens)
          ;; :custom entries appear here as their modules get ported.
          (:custom git) (:custom general) (:custom completion) (:custom colors)
-         (:custom modeline) (:custom elisp) (:custom dired) (:custom org))
+         (:custom modeline) (:custom elisp) (:custom dired) (:custom tree-sitter)
+         (:custom org))
        (when (eq system-type 'darwin) '((:os macos)))))
 
 ;; Leader prefixes are read at bind time; set before doom-keybinds loads so
@@ -135,7 +136,7 @@ build-in-place to clone."
 ;; Function files load first (sorted - raw directory order differs between
 ;; Mac and Linux), then config.el; config.el may `load!' extra +files.
 ;; The module list itself is explicit, in this exact order.
-(defvar active-modules '("evil" "bindings" "git" "general" "completion" "colors" "modeline" "elisp" "dired" "org")
+(defvar active-modules '("evil" "bindings" "git" "general" "completion" "colors" "modeline" "elisp" "dired" "tree-sitter" "org")
   "Modules under modules/, loaded in this exact order.
 bindings (Doom's :config default) precedes the :custom ports, like in doom!.")
 
