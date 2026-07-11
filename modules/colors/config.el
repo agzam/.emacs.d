@@ -53,11 +53,11 @@
 (use-package beacon
   :after-call doom-first-file-hook
   :config
-  (setq beacon-blink-delay 0.1
-        beacon-blink-duration 0.7
-        beacon-size 60
-        beacon-color "DarkGoldenrod2"
-        beacon-blink-when-window-scrolls nil)
+  (setopt beacon-blink-delay 0.1
+          beacon-blink-duration 0.7
+          beacon-size 60
+          beacon-color "DarkGoldenrod2"
+          beacon-blink-when-window-scrolls nil)
   (when (and (display-graphic-p)
              (not (eq system-type 'darwin)))
     (beacon-mode +1)))
