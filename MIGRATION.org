@@ -14,7 +14,9 @@ module layout).
   generation, XDG cache/state layout
 - modules :: evil (lean set), bindings (Doom tree, company/ivy/helm excised,
   SPC p on project.el), git (magit/forge stack, local-dev recipe hook),
-  general, completion, colors (circadian stack), modeline (doom-modeline),
+  general (incl. smartparens base + persistent-scratch-as-*scratch*),
+  completion, colors (circadian stack), modeline (doom-modeline),
+  elisp (eval/edebug/profiler + let-plist/evilify-edebug folded in),
   dired (treemacs suite), org (core slice: roam/vulpea/evil-org)
 - user layer :: config.el (leader tree, globals), lisp/functions.el
   incl. reload-config (SPC h r r; doom/reload analogue - re-runs
@@ -22,7 +24,8 @@ module layout).
   still needed for doom-compat/doom-keybinds, the elpaca bootstrap and
   active-modules changes; edited autoload/*.el still want a direct
   load-file)
-- root packages.el :: ligature; evil extras stay disabled by omission
+- root packages.el :: ligature, helpful, golden-ratio, lorem-ipsum,
+  consult-symbol (ahead of search); evil extras stay disabled by omission
 - testing/CI :: buttercup suites (tests/, XDG-sandboxed via helper.el),
   bb.edn tasks (deps/lint/test/smoke/ci), scripts/{lint,smoke-check}.el,
   GitHub workflow (test + smoke jobs on Emacs 30.1, cached elpaca dirs)
@@ -407,6 +410,75 @@ module layout).
   0 regressions. New lab-only class surfaced 3 SPC h rows - doom-side
   structural drift (h b / h d became prefixes there, h C-h unbound),
   SPC h cluster territory, untouched.
+- [2026-07] smartparens base + eros landed (the elisp sitting's opener).
+  sp core vendored from Doom modules/doom/compat/+smartparens.el into
+  general/config.el, right above the user pair-rule block that was inert
+  since the general port: language rule blocks (cc/ruby/swift/haskell/
+  python/ml/markdown) parked until those modules port, Doom's quote/brace/
+  lisp-( rules omitted - the user block re-specifies them with its own
+  :unless lists; sly-mrepl line dropped. Defused on the way: the user block
+  referenced doom-disable-show-paren-mode-h, defined nowhere in the lab -
+  vendored and renamed disable-show-paren-mode-h. eros rides
+  emacs-lisp-mode-hook (Doom :tools eval +overlay equivalent), lives in the
+  elisp module beside its consumers. Related fix surfaced by the scratch
+  work: doom-defaults set require-final-newline with plain setq - the var
+  is auto-buffer-local when set, so only the buffer current during init
+  (the stillborn *scratch*) ever got it; setq-default now, test asserts
+  default-value (it read the accidental buffer-local t before).
+- [2026-07] elisp module ported (macrostep and eros added explicitly -
+  doom.d got them from Doom's :lang emacs-lisp and :tools eval; a,
+  elisp-format with an explicit github recipe, deferred behind :commands -
+  doom.d demand-loaded it against the preloaded elisp-mode).  let-plist +
+  evilify-edebug folded into module autoload/ per user decision instead of
+  the planned ~/GitHub extraction: they were in-module :local-repo packages
+  only because of straight-era load-order weirdness; a cookied defmacro in
+  the module loaddefs also heals general's bare let-plist uses (url.el x4,
+  misc.el) at call time - the "latent dep" note below is settled.  Renames:
+  sp-eval-current-sexp -> eval-current-sexp (user fn, not smartparens's),
+  with-editor-eval -> eval-current-with-log REBUILT (its body called
+  eval-current-form-sp, void in live Doom - rot; the name also collided
+  with the real with-editor package), edebug-eval-current-form-sp ->
+  edebug-eval-current-sexp.  Rot fixed on port: datetime->timestamp passed
+  a raw number to message (wrong-type error live) with HZ-dependent tick
+  math - float-time now; elisp-fully-qualified-name passed a hardcoded
+  symbol to find-function-library (copy-paste slip) - symbol at point with
+  buffer-file fallback; +last-known-elisp-buffer was setq'd into the void -
+  defvar'd; create-package read magit-clone-default-directory unguarded
+  (void until magit loads) - bound-and-true-p.  templates/ asset relocated
+  into modules/elisp/templates/.  Root layer gained helpful (Doom-core
+  there; its SPC h a/f/v + mode-map bindings were already carried, void),
+  golden-ratio + lorem-ipsum (root packages.el leftovers - golden-ratio
+  closed the last two SPC w parked entries, the cluster is done) and
+  consult-symbol pulled ahead of the search module (SPC h h, user-flagged).
+  Coverage: 6 batch suites (let-plist macro expansion, sharp-quote/eval
+  wiring, messages guards, datetime round-trip + fqn, hermetic
+  create-package scaffold, evilify-edebug wiring); probe covers the eros
+  overlay render (eros insta-clears without this-command outside the
+  command loop - probe artifact class, documented there), macrostep
+  round-trip, cold-session let-plist macro-autoload, localleader tree,
+  messages window cycle, helpful + describe-function advice routing,
+  edebug evil state.  Keydiff: SPC h broken 5 -> 1 (helpful trio +
+  consult-symbol), doom-internal bulk verdicts (27 :dropped - the SPC h d
+  self-introspection tree can never mean anything without Doom), SPC h
+  47 -> 18 open; the b subtree, describe-* drift and the profiler toggle
+  wait for the dedicated SPC h sitting. 125 open / 91 broken / 4 parked /
+  60 resolved / 0 regressions.
+- [2026-07] the persistent scratch replaced the built-in *scratch*
+  (user request: two scratch buffers even under Doom, the built-in dead
+  weight).  The global persistent scratch now IS *scratch* (project ones
+  *scratch (NAME)*; the + suffix existed only to dodge the built-in name);
+  startup-scratch-buffer buries the stillborn pristine *scratch* and
+  becomes initial-buffer-choice - startup lands in the persistent buffer;
+  a get-scratch-buffer-create :override covers the choke point every
+  built-in path funnels through (scratch-buffer command, emacsclient
+  no-args, fallbacks), so a killed scratch resurrects with its persisted
+  state.  A modified foreign *scratch* gets adopted (content kept,
+  persistence attached), not killed - pinned in tests.  Probe: startup
+  buffer is the persistent *scratch*, exactly one scratch in the list,
+  choke point returns it, kill -> resurrect restores content.  Batch tier
+  keeps a pristine *scratch* invariant around the suite (killing it
+  changed the current buffer for later suites - that unmasked the
+  require-final-newline slip above).
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -447,11 +519,13 @@ and re-review its cluster. Coverage: leader tree + evil g/z/[/] prefix
 trees; localleader and mode-local maps get scoped dumps later if needed.
 
 Cluster checklist (open counts as of 2026-07 pilot; =bb keydiff= is truth):
-- [X] SPC w :: pilot - 12 verdicts; :void/:void-suffix backfill later -
-  ace-window keys went live with the dired port (dep arrival; W/D/M
-  :ported, C-S-w/C-c :dropped), 2 parked left (golden-ratio)
-- [ ] SPC h (47) - help tree; 3 lab-only rows from doom-side structural
-  drift (h b / h d now prefixes there)
+- [X] SPC w :: pilot - 12 verdicts; ace-window keys went live with the
+  dired port (W/D/M :ported, C-S-w/C-c :dropped), golden-ratio landed with
+  the elisp sitting - cluster fully closed, off the diff table
+- [ ] SPC h (18 after the elisp sitting: helpful trio + consult-symbol
+  resolved, 27 doom-internals :dropped) - left: the b subtree (which-key
+  present, bind it), describe-* drift per key, profiler toggle; 3 lab-only
+  rows from doom-side structural drift (h b / h d now prefixes there)
 - [ ] SPC p (17) - project; T/t closed by the dired port, the rest is
   workspace/projectile leftovers waiting on tab-bar
 - [ ] normal g (19)
@@ -588,10 +662,10 @@ undo-fu is redundant on modern Emacs. The remaining value of Doom's
 that (recipes were in general/packages.el, emacsmirror), consider vundo
 for tree visualization. The =after! undo-fu= block in config.el goes away
 if undo-fu itself never lands.
-** TODO Smartparens base config
-Doom :config default +smartparens equivalent. Unlocks: sexp-transient
-(SPC k), =M-l/M-h= slurp/barf binds, general module's sp-pair tweaks
-(=after! smartparens= block already ported, inert).
+** DONE Smartparens base config
+Landed with the elisp sitting (see Decisions log): core vendored into
+general/config.el, the inert sp-pair block now active. sexp-transient still
+waits on avy + edit-indirect + clojure (its own TODO).
 ** TODO Restore lisp/sexp-transient.el
 After smartparens + avy + edit-indirect exist, and after the clojure
 module - its eval/pp branches dispatch into cider, porting before would
@@ -608,8 +682,8 @@ never exist - the SPC t sitting must drop or replace SPC t b.
 Ported (see Decisions log). circadian owns day/night loading off
 doom-init-ui-hook; base16-theme was missing from this list (packages.el
 was truth). SPC T closed.
-** TODO Root packages leftovers
-golden-ratio (SPC w g currently void), lorem-ipsum.
+** DONE Root packages leftovers
+golden-ratio + lorem-ipsum landed with the elisp sitting; SPC w closed.
 ** TODO LSP_USE_PLISTS env
 Set in early-init when lsp module ports (Doom init.el had =setenv=).
 ** TODO lisp/elisp-lint.el
@@ -665,9 +739,11 @@ embark + embark-consult. config 303L, autoload 301L. Depends on
 web-browsing (+eww-*) and org (vulpea) for some actions.
 Unlocks =C-;= embark-act, vertico ";" subkeys (embark-collect/export).
 ** TODO search
-consult-omni (branch develop, pinned, :files sources), consult-symbol, tldr.
+consult-omni (branch develop, pinned, :files sources), tldr.
 LOCAL-REPO: slacko.el. config 69L. Depends on browser-hist (web-browsing).
 Unlocks SPC * (search-in-project), SPC s /, SPC f d (+zoxide-find).
+consult-symbol already pulled ahead into the root layer (SPC h h) -
+relocate here on port.
 ** TODO tab-bar
 No packages; autoload.el 283L of workspace logic + desktop persistence
 (doom-profile-state-dir -> doom-state-dir ok). Unlocks SPC l transient.
@@ -683,11 +759,12 @@ Ported (see Decisions log). treemacs-projectile stayed out (projectile
 drop), lsp-treemacs parked on lsp, winum unignore glue dropped as
 verified rot. SPC p T/t alive; SPC t d was already live and its
 dired-sidebar block moved home from general.
-** TODO elisp
-a, elisp-format, buttercup (unpinned). LOCAL-REPO: let-plist, evilify-edebug.
-templates/ asset (file-templates for new packages).
-doom-scratch-buffer-created-hook -> scratch-buffer-created-hook (exists,
-general/autoload/scratch.el - rename on copy). config 140L.
+** DONE elisp
+Ported (see Decisions log). let-plist + evilify-edebug folded into module
+autoload/ (no local repos - straight-era workaround retired), macrostep +
+eros added explicitly, buttercup stays a bb-deps concern (nothing installs
+it at runtime). Rode along: helpful/golden-ratio/lorem-ipsum/consult-symbol
+in the root layer, smartparens base, the *scratch* replacement.
 ** TODO shell
 shell-pop, ghostel+evil-ghostel (:files split), eshell-atuin, mise, kkp,
 vimrc-mode, yuck-mode. doom-emacs-dir eshell aliases path -> relocate.
@@ -766,10 +843,12 @@ Each needs a lab decision; bindings tree + registry already assume them.
 - :lang emacs-lisp/json/markdown/sh :: port with respective language work;
   markdown +grip referenced by writing autoloads.
 
-* Local :repo packages (16)
+* Local :repo packages (14)
 gptel-tools, gptel-anthropic-oauth, github-topics, remoto, ag-themes,
-let-plist, evilify-edebug, slacko.el, spacehammer (symlink!), wiktionary-bro,
+slacko.el, spacehammer (symlink!), wiktionary-bro,
 prisma.el, browser-hist, consult-hn, emacs-reddig, navegosa.el, go-jira.
+(let-plist + evilify-edebug left the list - folded into the elisp module's
+autoload/ instead; the local-repo ceremony was a straight-era workaround.)
 
 Layout decided and PROVEN at the git module port (2026-07): module configs
 declare plain GitHub recipes (portable to machines without checkouts);
@@ -795,16 +874,16 @@ Gotchas learned live:
   when their modules port; the doom.d submodules dissolve when the cord
   is cut.
 
-Latent dep: general module still references let-plist (autoload/url.el x4,
-autoload/misc.el open-circleci-log) - those commands error until let-plist
-lands (or the elisp module ports). The git module rewrote its own let-plist
-uses with plist-get instead of pulling the package early.
+Settled: general's bare let-plist uses (autoload/url.el x4, autoload/misc.el)
+resolve at call time via the elisp module's loaddefs macro-autoload. The git
+module had rewritten its own uses with plist-get before that existed.
 
 * Assets to relocate
 - snippets: currently read from ~/.doom.d/snippets (62 snippets); localize
   to lab when cutting the cord
-- org module mp3s, elisp templates/, writing abbrev_defs,
-  web-browsing readable/ (npm deps)
+- org module mp3s, writing abbrev_defs,
+  web-browsing readable/ (npm deps); elisp templates/ relocated with its
+  module (2026-07)
 
 * Cross-module port ordering constraints
 - web-browsing before: writing, embark, search

@@ -40,9 +40,81 @@
   :config
   (setopt Info-fontify-angle-bracketed-flag nil))
 
+;; Core vendored from Doom modules/doom/compat/+smartparens.el. Left out on
+;; purpose: the language rule blocks (cc/ruby/swift/haskell/python/ml/
+;; markdown) - parked until those language modules port; Doom's quote/brace/
+;; lisp-( pair rules - the after! smartparens block below re-specifies them
+;; with this config's own :unless lists; the sly-mrepl-mode line (no sly).
+(defun disable-show-paren-mode-h ()
+  "Turn off `show-paren-mode' buffer-locally."
+  (setq-local show-paren-mode nil))
+
+(use-package smartparens
+  :hook (doom-first-buffer . smartparens-global-mode)
+  :commands (sp-pair sp-local-pair sp-with-modes sp-point-in-comment sp-point-in-string)
+  :config
+  ;; default pair rules for various languages
+  (require 'smartparens-config)
+  ;; show-parens covers this faster and without overlay distraction
+  (setq sp-highlight-pair-overlay nil
+        sp-highlight-wrap-overlay nil
+        sp-highlight-wrap-tag-overlay nil)
+  (after! evil
+    ;; under evil, point sits ON the closing char in insert mode - sp must
+    ;; treat that as inside the pair
+    (setq sp-show-pair-from-inside t
+          sp-cancel-autoskip-on-backward-movement nil)
+    ;; sp binds C-g while pair overlays are active (even invisible ones),
+    ;; forcing a double ESC out of insert mode
+    (setq sp-pair-overlay-keymap (make-sparse-keymap)))
+
+  ;; sp scans are expensive; tighter than the 100/10 defaults
+  (setq sp-max-prefix-length 25
+        sp-max-pair-length 4)
+
+  ;; silence echo-area spam
+  (dolist (key '(:unmatched-expression :no-matching-tag))
+    (setf (alist-get key sp-message-alist) nil))
+
+  (add-hook! 'eval-expression-minibuffer-setup-hook
+    (defun smartparens-in-eval-expression-h ()
+      "Enable sp in `read--expression' minibuffers (eval-expression, edebug)."
+      (when smartparens-global-mode (smartparens-mode +1))))
+  (add-hook! 'minibuffer-setup-hook
+    (defun smartparens-in-evil-ex-h ()
+      (when (and smartparens-global-mode (memq this-command '(evil-ex)))
+        (smartparens-mode +1))))
+
+  ;; minibuffer input is usually lisp; these aren't string quotes there
+  (sp-local-pair '(minibuffer-mode minibuffer-inactive-mode) "'" nil :actions nil)
+  (sp-local-pair '(minibuffer-mode minibuffer-inactive-mode) "`" nil :actions nil)
+
+  ;; sp breaks evil's replace state
+  (defvar buffer-smartparens-mode nil)
+  (add-hook! 'evil-replace-state-exit-hook
+    (defun enable-smartparens-maybe-h ()
+      (when buffer-smartparens-mode
+        (turn-on-smartparens-mode)
+        (kill-local-variable 'buffer-smartparens-mode))))
+  (add-hook! 'evil-replace-state-entry-hook
+    (defun disable-smartparens-maybe-h ()
+      (when smartparens-mode
+        (setq-local buffer-smartparens-mode t)
+        (smartparens-mode -1))))
+
+  ;; sp's navigation is expensive and less useful under evil
+  (add-hook! 'after-change-major-mode-hook
+    (defun disable-smartparens-navigate-skip-match-h ()
+      (setq sp-navigate-skip-match nil
+            sp-navigate-consider-sgml-tags nil)))
+
+  ;; no square-bracket space-expansion where it makes no sense
+  (sp-local-pair '(emacs-lisp-mode org-mode markdown-mode gfm-mode)
+                 "[" nil :post-handlers '(:rem ("| " "SPC"))))
+
 (after! smartparens
   (eval `(add-hook! , sp-lisp-modes
-                      #'doom-disable-show-paren-mode-h
+                      #'disable-show-paren-mode-h
                       #'show-smartparens-mode))
 
   ;; fix for smartparens. Doom's default module does things like skipping pairs if

@@ -569,6 +569,24 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
 (after! epa
   (setopt epg-pinentry-mode 'loopback))
 
+;; Doom-core-provided packages in doom.d (its packages.el only unpinned
+;; helpful); they ride the root layer next to their bindings - SPC h a/f/v
+;; and helpful-mode-map above, SPC w g + window-transient's g suffix for
+;; golden-ratio.
+(use-package helpful
+  :defer t)
+
+;; SPC h h; doom.d home is the search module - relocate when it ports
+(use-package consult-symbol
+  :ensure (consult-symbol :host github :repo "danielfleischer/consult-symbol")
+  :defer t)
+
+(use-package golden-ratio
+  :commands (golden-ratio golden-ratio-mode))
+
+(use-package lorem-ipsum
+  :defer t)
+
 (use-package ligature
   :defer t
   :config

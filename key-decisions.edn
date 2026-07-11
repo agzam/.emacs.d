@@ -27,10 +27,10 @@
  ["leader" "SPC w W"] {:status :ported :note "ace-window - dep arrival made the waiting root-config binding live"}
  ["leader" "SPC w D"] {:status :ported :note "ace-delete-window - dep arrival, see SPC w W"}
  ["leader" "SPC w M"] {:status :ported :note "ace-swap-window - dep arrival, see SPC w W"}
- ["leader" "SPC w g"] {:status :deferred :note "golden-ratio unported (Decisions log: windows engine)"}
+ ["leader" "SPC w g"] {:status :ported :note "golden-ratio - root-layer package landed with the elisp sitting"}
 
  ;; void-suffix hardening finds (2026-07) - rot inside bound transients
- ["leader" "SPC w ."] {:status :deferred :note "window-transient works; its g suffix waits on golden-ratio"}
+ ["leader" "SPC w ."] {:status :ported :note "window-transient - the g suffix resolved when golden-ratio landed"}
  ["leader" "SPC v"] {:status :improved :note "expreg-transient rebuilt: bypass engine (transient-bypass-keys) ported in - it was void, SPC v errored at open; unported-module suffixes slimmed away (Decisions log)"}
 
  ;; SPC t - toggle cluster (2026-07)
@@ -70,4 +70,42 @@
 
  ;; SPC p - dired module port (2026-07)
  ["leader" "SPC p T"] {:status :ported :note "treemacs-project-toggle+ - rebuilt on treemacs-add-and-display-current-project-exclusively (projectile dropped), dired module"}
- ["leader" "SPC p t"] {:status :improved :note "dired-jump-find-in-project - renamed + port, root resolution rebuilt on project.el (projectile dropped)"}}
+ ["leader" "SPC p t"] {:status :improved :note "dired-jump-find-in-project - renamed + port, root resolution rebuilt on project.el (projectile dropped)"}
+
+ ;; SPC h - elisp/helpful sitting sweep (2026-07): doom-internal bulk;
+ ;; the b subtree, describe-* drift and T profiler toggle stay open for
+ ;; the dedicated SPC h cluster sitting
+ ["leader" "SPC h p d"] {:status :dropped :note "doom/describe-package - straight/module introspection, meaningless under elpaca; stock describe-package + list-packages live at SPC h p"}
+ ["leader" "SPC h E"] {:status :dropped :note "doom/sandbox - Doom-specific"}
+ ["leader" "SPC h M"] {:status :dropped :note "doom/describe-active-minor-mode - consult-minor-mode-menu at SPC t m covers"}
+ ["leader" "SPC h V"] {:status :dropped :note "doom/help-custom-variable - helpful-variable at SPC h v covers"}
+ ["leader" "SPC h r e"] {:status :dropped :note "doom/reload-env - no envvar file machinery in the lab"}
+ ["leader" "SPC h r f"] {:status :dropped :note "doom/reload-font - fonts stay direct (Decisions log)"}
+ ["leader" "SPC h r p"] {:status :dropped :note "doom/reload-packages - elpaca-rebuild/elpaca-update cover"}
+ ["leader" "SPC h r t"] {:status :dropped :note "doom/reload-theme - circadian owns theme loading, cycle-themes at SPC T"}
+ ["leader" "SPC h d L"] {:status :dropped :note "doom self-introspection - no Doom here"}
+ ["leader" "SPC h d N"] {:status :dropped :note "doom self-introspection - no Doom here"}
+ ["leader" "SPC h d S"] {:status :dropped :note "doom self-introspection - no Doom here"}
+ ["leader" "SPC h d b"] {:status :dropped :note "doom self-introspection - no Doom here"}
+ ["leader" "SPC h d c"] {:status :dropped :note "doom self-introspection - no Doom here"}
+ ["leader" "SPC h d d"] {:status :dropped :note "doom self-introspection - no Doom here"}
+ ["leader" "SPC h d f"] {:status :dropped :note "doom self-introspection - no Doom here"}
+ ["leader" "SPC h d h"] {:status :dropped :note "doom self-introspection - no Doom here"}
+ ["leader" "SPC h d l"] {:status :dropped :note "doom self-introspection - no Doom here"}
+ ["leader" "SPC h d m"] {:status :dropped :note "doom self-introspection - no Doom here"}
+ ["leader" "SPC h d n"] {:status :dropped :note "doom self-introspection - no Doom here"}
+ ["leader" "SPC h d p c"] {:status :dropped :note "doom self-introspection - no Doom here"}
+ ["leader" "SPC h d p h"] {:status :dropped :note "doom self-introspection - no Doom here"}
+ ["leader" "SPC h d p p"] {:status :dropped :note "doom self-introspection - no Doom here"}
+ ["leader" "SPC h d s"] {:status :dropped :note "doom self-introspection - no Doom here"}
+ ["leader" "SPC h d t"] {:status :dropped :note "doom self-introspection - no Doom here"}
+ ["leader" "SPC h d u"] {:status :dropped :note "doom self-introspection - no Doom here"}
+ ["leader" "SPC h d v"] {:status :dropped :note "doom self-introspection - no Doom here"}
+ ["leader" "SPC h d x"] {:status :dropped :note "doom self-introspection - no Doom here"}
+ ["leader" "SPC h O"] {:status :deferred :note "+lookup/online - lookup decision pending"}
+ ["leader" "SPC h u"] {:status :improved :note "apropos-user-option over doom/help-autodefs (autodefs are a Doom concept)"}
+ ["leader" "SPC h n"] {:status :improved :note "view-emacs-news over doom/help-news"}
+ ["leader" "SPC h a"] {:status :ported :note "helpful-at-point - helpful landed (root layer, elisp sitting)"}
+ ["leader" "SPC h f"] {:status :ported :note "helpful-function - see SPC h a"}
+ ["leader" "SPC h v"] {:status :ported :note "helpful-variable - see SPC h a"}
+ ["leader" "SPC h h"] {:status :ported :note "consult-symbol - pulled ahead of the search module (root layer)"}}
