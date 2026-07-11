@@ -322,6 +322,41 @@ module layout).
   Housekeeping cleared same sitting: github-topics dce3530 pushed
   (upstream now tracks), one-time org-roam-db-sync ran headless against
   the quarantined db (2475 nodes / 1447 files).
+- [2026-07] modeline module ported (doom-modeline; elpaca pulls
+  nerd-icons). Scrutiny over parity: doom.d stamped an `agcustom'
+  modeline buffer-locally from window-state-change-hook, re-running
+  doom-modeline-def-modeline on every window change behind a
+  local-modeline guard; the lab redefines doom-modeline's `main' once
+  (autoload/segments.el, apply-custom-modeline) - the default value
+  styles every buffer, doom-modeline's own special modelines (pdf, ...)
+  still apply buffer-locally on top. Ground-truthed live before
+  deciding: the default mode-line-format there is stock `main'
+  (agcustom only ever existed as per-buffer stamps), and persp-mode
+  runs in neither config - persp-name segment dropped (workspace-name
+  is the tab-bar-port candidate). Dead sets dropped:
+  doom-modeline-mu4e nil (sets the default; mu4e never installed),
+  doom-modeline-modal-icon t (default, and no modals segment in the
+  layout), the :unless (modulep! :ui modeline) guard (never true in
+  the lab registry). Deliberate pins kept even where they match
+  current defaults (modification/state icons, bar-width) - they guard
+  upstream default drift. Anti-flash blanking hoisted from :init to
+  module top level: elpaca evaluates use-package forms after
+  after-init-time is set, so doom.d's guard made it dead code in this
+  boot order. inhibit-compacting-font-caches moved out of setopt
+  (plain C defvar, not a defcustom); colors' beacon block switched
+  setq -> setopt the same sitting (all five are defcustoms). False-rot
+  lesson pinned: doom-modeline segments resolve via
+  doom-modeline--fn-alist AND --var-alist (variable-bodied segments
+  like pdf-pages live in the latter), so fboundp probes of
+  doom-modeline-segment--* mislead; doom-modeline--prepare-segments
+  hard-errors on unknown names, which makes the probe's
+  both-registries walk the layout rot net. Coverage:
+  apply-custom-modeline wiring + dead-segment reintroduction pins in
+  tests/modeline/segments-tests.el (doom-modeline provide-stubbed);
+  probe asserts mode enabled, `main' as default format, segments
+  registered, render non-empty, font-height override 1, colors theme
+  intact. keydiff unchanged - no bindings in this module,
+  0 regressions.
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -582,9 +617,10 @@ Unlocks SPC * (search-in-project), SPC s /, SPC f d (+zoxide-find).
 ** TODO tab-bar
 No packages; autoload.el 283L of workspace logic + desktop persistence
 (doom-profile-state-dir -> doom-state-dir ok). Unlocks SPC l transient.
-** TODO modeline
-doom-modeline only. 32L config. doom-init-ui hook + font-height advice.
-Until ported: default modeline.
+** DONE modeline
+Ported (see Decisions log). `main' redefined once over doom.d's
+per-window-change buffer-local stamping; persp-name and the dead sets
+dropped.
 ** DONE colors
 Ported (see theme infra item + Decisions log). ag-themes extracted to
 ~/GitHub/agzam/ag-themes.el; ef-themes left out on purpose.
