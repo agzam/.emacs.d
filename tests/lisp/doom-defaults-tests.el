@@ -38,7 +38,7 @@
   (it "prefers spaces, final newlines and single sentence spacing"
     (expect (default-value 'indent-tabs-mode) :to-be nil)
     (expect (default-value 'tab-always-indent) :to-be nil)
-    (expect require-final-newline :to-be-truthy)
+    (expect (default-value 'require-final-newline) :to-be-truthy)
     (expect sentence-end-double-space :to-be nil))
   (it "wraps at word boundaries but truncates by default"
     (expect (default-value 'word-wrap) :to-be-truthy)

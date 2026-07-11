@@ -280,7 +280,9 @@ tell you about it. Very annoying. This prevents that."
 ;; The POSIX standard defines a line as "a sequence of zero or more non-newline
 ;; characters followed by a terminating newline", so files should end in a
 ;; newline. Windows doesn't respect this, but we should.
-(setq require-final-newline t)
+;; NB: auto-buffer-local when set - plain setq would only mark the buffer
+;; current during load (the vendoring slip this replaces)
+(setq-default require-final-newline t)
 
 ;; Default to soft line-wrapping in text modes. It is more sensible for text
 ;; modes, even if hard wrapping is more performant.
