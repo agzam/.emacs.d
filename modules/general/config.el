@@ -265,6 +265,19 @@
         ibuffer-sidebar-width 30
         ibuffer-sidebar-pop-to-sidebar-on-toggle-open nil))
 
+;;; scratch: the persistent scratch replaces the built-in *scratch*
+
+;; It takes the *scratch* name at startup (startup-scratch-buffer buries
+;; the stillborn built-in) and get-scratch-buffer-create - the choke point
+;; every built-in path funnels through (scratch-buffer, emacsclient,
+;; fallbacks) - hands out the persistent buffer, so a killed scratch
+;; resurrects with its persisted state instead of as dead weight.
+(unless noninteractive
+  (setq initial-buffer-choice #'startup-scratch-buffer)
+  (defadvice! get-scratch-buffer-create-a ()
+    :override #'get-scratch-buffer-create
+    (scratch-buffer-create nil (scratch--initial-mode) default-directory nil)))
+
 ;;; zen (writeroom): SPC t z - helpers and knobs in autoload/zen.el
 
 (use-package writeroom-mode

@@ -2,7 +2,10 @@
 ;; Persistent scratch buffers, ported from Doom's lisp/lib/scratch.el @8e4fbba
 ;; (MIT).  Renames: doom/* and doom-scratch-* -> plain scratch-*;
 ;; doom-scratch-buffer -> scratch-buffer-create (built-in `scratch-buffer'
-;; collision); buffers are *scratch+* / *scratch+ (PROJECT)*.  Deviations:
+;; collision); the global buffer IS *scratch* - the persistent scratch
+;; replaces the built-in one outright (startup-scratch-buffer +
+;; get-scratch-buffer-create override in config.el), project ones are
+;; *scratch (PROJECT)*.  Deviations:
 ;; projectile shim dropped (project.el), persistence under doom-data-dir,
 ;; upstream defvar'd doom-scratch-buffer-hook but ran ...-created-hook - only
 ;; the created-hook is kept.  Unported (nothing referenced them):
@@ -71,8 +74,8 @@ symbol is the mode itself.  Restored scratches keep their persisted mode.")
 Restores the persisted state unless DONT-RESTORE-P.  DIRECTORY becomes the
 buffer's `default-directory'; PROJECT-NAME namespaces buffer and file."
   (let* ((buffer-name (if project-name
-                          (format "*scratch+ (%s)*" project-name)
-                        "*scratch+*"))
+                          (format "*scratch (%s)*" project-name)
+                        "*scratch*"))
          (buffer (get-buffer buffer-name)))
     (with-current-buffer
         (or buffer (get-buffer-create buffer-name))
@@ -162,3 +165,14 @@ current project's scratch; SAME-WINDOW-P switches instead of popping."
 With prefix ARG, don't restore its last state."
   (interactive "P")
   (toggle-scratch-buffer arg 'project same-window-p))
+
+;;;###autoload
+(defun startup-scratch-buffer ()
+  "Persistent scratch for `initial-buffer-choice'.
+Buries the stillborn built-in *scratch* first, so the persistent one can
+take its name - from here on every built-in path lands on it."
+  (when-let* ((stillborn (get-buffer "*scratch*")))
+    (when (and (zerop (buffer-size stillborn))
+               (not (buffer-modified-p stillborn)))
+      (kill-buffer stillborn)))
+  (scratch-buffer-create nil (scratch--initial-mode) default-directory nil))
