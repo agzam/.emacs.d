@@ -19,12 +19,14 @@
  ["leader" "SPC w C-w"] {:status :dropped :note "Doom's other-window override; stock evil-window-next is equivalent"}
  ["leader" "SPC w C-r"] {:status :dropped :note "winner stays out (Decisions log: windows.el engine); stock rotate kept"}
  ["leader" "SPC w C-u"] {:status :dropped :note "winner stays out; window-undo owns SPC w u"}
- ["leader" "SPC w C-S-w"] {:status :deferred :note "ace-swap-window - :ui window-select decision (ace-window unported)"}
- ["leader" "SPC w C-c"] {:status :deferred :note "ace-delete-window - :ui window-select; stock evil-window-delete meanwhile"}
- ;; same-symbol-both-sides keys, surfaced by the later :void hardening
- ["leader" "SPC w W"] {:status :deferred :note "ace-window - :ui window-select decision (ace-window unported)"}
- ["leader" "SPC w D"] {:status :deferred :note "ace-delete-window - :ui window-select decision"}
- ["leader" "SPC w M"] {:status :deferred :note "ace-swap-window - :ui window-select decision"}
+ ["leader" "SPC w C-S-w"] {:status :dropped :note "ace-swap-window reachable at SPC w M since ace-window arrived (treemacs dep); the C- spelling is a window-select artifact, stock evil-window-prev kept"}
+ ["leader" "SPC w C-c"] {:status :dropped :note "ace-delete-window reachable at SPC w D; stock evil-window-delete kept"}
+ ;; same-symbol-both-sides keys, surfaced by the later :void hardening;
+ ;; root config.el bound these ahead - live since ace-window arrived as a
+ ;; treemacs dep (dired module port)
+ ["leader" "SPC w W"] {:status :ported :note "ace-window - dep arrival made the waiting root-config binding live"}
+ ["leader" "SPC w D"] {:status :ported :note "ace-delete-window - dep arrival, see SPC w W"}
+ ["leader" "SPC w M"] {:status :ported :note "ace-swap-window - dep arrival, see SPC w W"}
  ["leader" "SPC w g"] {:status :deferred :note "golden-ratio unported (Decisions log: windows engine)"}
 
  ;; void-suffix hardening finds (2026-07) - rot inside bound transients
@@ -64,4 +66,8 @@
 
  ;; SPC T - colors module port (2026-07)
  ["leader" "SPC T n"] {:status :improved :note "cycle-themes-down - renamed colors/ port; ring now anchored on (car custom-enabled-themes), doom-theme went stale under circadian"}
- ["leader" "SPC T p"] {:status :improved :note "cycle-themes-up - renamed colors/ port, sibling of SPC T n"}}
+ ["leader" "SPC T p"] {:status :improved :note "cycle-themes-up - renamed colors/ port, sibling of SPC T n"}
+
+ ;; SPC p - dired module port (2026-07)
+ ["leader" "SPC p T"] {:status :ported :note "treemacs-project-toggle+ - rebuilt on treemacs-add-and-display-current-project-exclusively (projectile dropped), dired module"}
+ ["leader" "SPC p t"] {:status :improved :note "dired-jump-find-in-project - renamed + port, root resolution rebuilt on project.el (projectile dropped)"}}

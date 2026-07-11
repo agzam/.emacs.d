@@ -193,13 +193,6 @@
         ibuffer-sidebar-width 30
         ibuffer-sidebar-pop-to-sidebar-on-toggle-open nil))
 
-(use-package dired-sidebar
-  :defer t
-  :commands (dired-sidebar-toggle-sidebar)
-  :config
-  (setq dired-sidebar-should-follow-file t
-        dired-sidebar-window-fixed nil))
-
 ;;; zen (writeroom): SPC t z - helpers and knobs in autoload/zen.el
 
 (use-package writeroom-mode

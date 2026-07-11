@@ -14,7 +14,8 @@ module layout).
   generation, XDG cache/state layout
 - modules :: evil (lean set), bindings (Doom tree, company/ivy/helm excised,
   SPC p on project.el), git (magit/forge stack, local-dev recipe hook),
-  general, completion, org (core slice: roam/vulpea/evil-org)
+  general, completion, colors (circadian stack), modeline (doom-modeline),
+  dired (treemacs suite), org (core slice: roam/vulpea/evil-org)
 - user layer :: config.el (leader tree, globals), lisp/functions.el
   incl. reload-config (SPC h r r; doom/reload analogue - re-runs
   defaults/modules/config in place, elpaca picks up new packages; restart
@@ -357,6 +358,55 @@ module layout).
   registered, render non-empty, font-height override 1, colors theme
   intact. keydiff unchanged - no bindings in this module,
   0 regressions.
+- [2026-07] dired module ported (treemacs, treemacs-evil,
+  treemacs-icons-dired, dired-imenu, dired-subtree, dired-narrow,
+  dired-preview + dired-sidebar relocated in from general - its doom.d
+  home was this module; setq -> setopt on the move, ibuffer-sidebar
+  stays in general). Smoke 107 packages (+14: the treemacs dep tree
+  pulls dash/s/ace-window/pfuture/ht/hydra/cfrs). Not ported:
+  treemacs-projectile (projectile dropped config-wide) -
+  treemacs-project-toggle+ rebuilt on
+  treemacs-add-and-display-current-project-exclusively with an explicit
+  (require 'treemacs) (the visibility fns it dispatches on aren't
+  autoloaded), dired-jump-find-in-project renamed (+ stripped) with
+  project.el root resolution; lsp-treemacs parked on the lsp module.
+  Rot dropped after ground-truthing: the winum unignore glue - upstream
+  renamed treemacs--buffer-name-prefix -> treemacs-buffer-name-prefix,
+  so doom.d's treemacs-mode-hook fn void-variable'd on every treemacs
+  buffer and its ".*Treemacs.*" removal targeted a pattern winum no
+  longer carries (treemacs's own compat glue adds
+  " \\*Treemacs-Buffer-" instead); live behavior = treemacs windows
+  unnumbered, preserved here, only the s-N treemacs-mode-map loop was
+  alive and ported. Also dropped: the darwin gls block (Emacs 31's
+  insert-directory-program standard value resolves gls natively; the
+  effective "-aBhl --group-directories-first" switches kept),
+  dired-kill-when-opening-new-dired-buffer nil (set-to-default), the
+  direx branch of buffer-with-dired-item (direx never in packages.el).
+  Rewrites: dired-split-action defmacro -> dired-open-item-in-split fn
+  + cmd! (an autoloaded macro would drag its file in at config
+  macroexpansion); dired-preview deferred (doom.d demand-loaded it;
+  M-x-only entry, no bindings, no writers). Kept deliberately: the
+  dired-mode-hook map! re-application - evil-collection-dired's lazy
+  setup binds "o" after any config-time registration, the hook is the
+  user-wins mechanism (probe pins "oj" -> split action);
+  turn-off-evil-matchit-mode fboundp-guarded until tree-sitter (org
+  flycheck precedent); the zoxide hook pre-renamed
+  (add-to-zoxide-cache) behind its :custom search guard. Evil state ?T
+  via doom-evil-state-alist; treemacs persist pair quarantined in
+  doom-compat.el (audit found no other writers in the suite).
+  Coverage: subtree/rsync/project batch suites (treemacs
+  provide-stubbed, cl-letf spies); probe covers subtree round-trip
+  incl. the icons advice in tty, sidebar toggle, treemacs
+  toggle/state/s-N/hl-line, quarantine paths, preview deferral pin,
+  colors + modeline regression guards - all green. keydiff: SPC p T
+  resolved by exact match (:ported pin), SPC p t :improved; ace-window
+  arriving as a dep flipped the root-config W/D/M bindings live
+  (:ported - they were bound ahead, waiting), C-S-w/C-c :dropped
+  (reachable at SPC w M/D; the C- spellings were window-select
+  artifacts). 154 open / 95 broken / 5 parked / 32 resolved /
+  0 regressions. New lab-only class surfaced 3 SPC h rows - doom-side
+  structural drift (h b / h d became prefixes there, h C-h unbound),
+  SPC h cluster territory, untouched.
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -397,10 +447,13 @@ and re-review its cluster. Coverage: leader tree + evil g/z/[/] prefix
 trees; localleader and mode-local maps get scoped dumps later if needed.
 
 Cluster checklist (open counts as of 2026-07 pilot; =bb keydiff= is truth):
-- [X] SPC w :: pilot - 12 verdicts; :void/:void-suffix backfill later - 7
-  parked (ace-window, golden-ratio)
-- [ ] SPC h (47) - help tree
-- [ ] SPC p (21) - project; expect workspace/projectile leftovers
+- [X] SPC w :: pilot - 12 verdicts; :void/:void-suffix backfill later -
+  ace-window keys went live with the dired port (dep arrival; W/D/M
+  :ported, C-S-w/C-c :dropped), 2 parked left (golden-ratio)
+- [ ] SPC h (47) - help tree; 3 lab-only rows from doom-side structural
+  drift (h b / h d now prefixes there)
+- [ ] SPC p (17) - project; T/t closed by the dired port, the rest is
+  workspace/projectile leftovers waiting on tab-bar
 - [ ] normal g (19)
 - [ ] SPC x (18) - gptel tree, mostly ai-module deferrals
 - [ ] SPC c (15) - code/lsp
@@ -523,8 +576,9 @@ committed to:
 - module flags (=+icons=, =+everywhere=, ...) are modulep! syntax - keep
 ** TODO Extend file quarantine as modules port
 New state-writing packages get their path vars redirected in
-doom-compat.el quarantine section (lsp session, dap, treemacs persist,
-elfeed db, telega, org-roam db, desktop-path, ...).
+doom-compat.el quarantine section (lsp session, dap, elfeed db, telega,
+desktop-path, ...). Done so far: org-roam/vulpea dbs, treemacs persist
+pair.
 
 * Infra debt
 ** TODO Undo: persistence (undo-fu-session), maybe vundo
@@ -624,10 +678,11 @@ dropped.
 ** DONE colors
 Ported (see theme infra item + Decisions log). ag-themes extracted to
 ~/GitHub/agzam/ag-themes.el; ef-themes left out on purpose.
-** TODO dired
-treemacs suite (+evil,+icons-dired,+projectile,+lsp), dired-subtree/sidebar/
-narrow/preview/imenu. Adds treemacs evil state via doom-evil-state-alist
-(exists in vendored keybinds). config 148L. Unlocks SPC t d, SPC p T/t.
+** DONE dired
+Ported (see Decisions log). treemacs-projectile stayed out (projectile
+drop), lsp-treemacs parked on lsp, winum unignore glue dropped as
+verified rot. SPC p T/t alive; SPC t d was already live and its
+dired-sidebar block moved home from general.
 ** TODO elisp
 a, elisp-format, buttercup (unpinned). LOCAL-REPO: let-plist, evilify-edebug.
 templates/ asset (file-templates for new packages).
