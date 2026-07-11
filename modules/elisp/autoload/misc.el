@@ -1,4 +1,4 @@
-;;; modules/elisp/autoload/misc.el --- profiler/info/symbol helpers -*- lexical-binding: t; -*-
+;;; modules/elisp/autoload/misc.el --- time/symbol/info helpers -*- lexical-binding: t; -*-
 ;;; Commentary:
 ;; Rot fixed on port: datetime->timestamp passed a raw number to `message'
 ;; (wrong-type error) and multiplied `time-convert' ticks whose HZ varies -
@@ -48,32 +48,6 @@ With MAIN-BRANCH? prefix, pin the link to the main branch."
     (message "%s" link)
     (kill-new link)
     link))
-
-;;;###autoload
-(defun profiler-report-expand-all ()
-  "Expand all entries in every profiler report buffer."
-  (interactive)
-  (thread-last
-    (buffer-list)
-    (seq-filter
-     (lambda (b)
-       (string-match-p
-        "\\*\\(CPU\\|Memory\\)-Profiler-Report.*\\*"
-        (buffer-name b))))
-    (seq-do
-     (lambda (b)
-       (with-current-buffer b
-         (goto-char (point-min))
-         (while (not (eobp))
-           (profiler-report-expand-entry)
-           (profiler-report-next-entry))
-         (goto-char (point-min)))))))
-
-;;;###autoload
-(defun profiler-report-helpful-symbol-at-point ()
-  "Open the profiler entry at point in helpful."
-  (interactive)
-  (helpful-symbol (get-text-property (point) 'profiler-entry)))
 
 ;;;###autoload
 (defun info-copy-node-url ()

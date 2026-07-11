@@ -73,8 +73,7 @@
  ["leader" "SPC p t"] {:status :improved :note "dired-jump-find-in-project - renamed + port, root resolution rebuilt on project.el (projectile dropped)"}
 
  ;; SPC h - elisp/helpful sitting sweep (2026-07): doom-internal bulk;
- ;; the b subtree, describe-* drift and T profiler toggle stay open for
- ;; the dedicated SPC h cluster sitting
+ ;; the rest closed by the cluster sitting (entries at the end of file)
  ["leader" "SPC h p d"] {:status :dropped :note "doom/describe-package - straight/module introspection, meaningless under elpaca; stock describe-package + list-packages live at SPC h p"}
  ["leader" "SPC h E"] {:status :dropped :note "doom/sandbox - Doom-specific"}
  ["leader" "SPC h M"] {:status :dropped :note "doom/describe-active-minor-mode - consult-minor-mode-menu at SPC t m covers"}
@@ -102,10 +101,33 @@
  ["leader" "SPC h d u"] {:status :dropped :note "doom self-introspection - no Doom here"}
  ["leader" "SPC h d v"] {:status :dropped :note "doom self-introspection - no Doom here"}
  ["leader" "SPC h d x"] {:status :dropped :note "doom self-introspection - no Doom here"}
- ["leader" "SPC h O"] {:status :deferred :note "+lookup/online - lookup decision pending"}
+ ["leader" "SPC h O"] {:status :dropped :note "+lookup/online - never used; seems nice, figure out later (was deferred on the lookup decision)"}
  ["leader" "SPC h u"] {:status :improved :note "apropos-user-option over doom/help-autodefs (autodefs are a Doom concept)"}
  ["leader" "SPC h n"] {:status :improved :note "view-emacs-news over doom/help-news"}
  ["leader" "SPC h a"] {:status :ported :note "helpful-at-point - helpful landed (root layer, elisp sitting)"}
  ["leader" "SPC h f"] {:status :ported :note "helpful-function - see SPC h a"}
  ["leader" "SPC h v"] {:status :ported :note "helpful-variable - see SPC h a"}
- ["leader" "SPC h h"] {:status :ported :note "consult-symbol - pulled ahead of the search module (root layer)"}}
+ ["leader" "SPC h h"] {:status :ported :note "consult-symbol - pulled ahead of the search module (root layer)"}
+
+ ;; SPC h - cluster close (2026-07): help-map surgery vendored into
+ ;; bindings/config.el, pruned; stock d/P/C-h kept over Doom's rebinds
+ ["leader" "SPC h '"] {:status :improved :note "describe-char - stock over doom/describe-char (thin wrapper, not worth vendoring)"}
+ ["leader" "SPC h T"] {:status :improved :note "toggle-profiler - renamed doom/toggle-profiler vendor (elisp/autoload/profiler.el)"}
+ ["leader" "SPC h W"] {:status :improved :note "woman - +default/man-or-woman resolves to woman on macOS anyway; woman-manpath configured (elisp module)"}
+ ["leader" "SPC h P"] {:status :improved :note "stock describe-package kept - doom's find-library redundant, find-library-other-window lives at SPC h p f"}
+ ["leader" "SPC h A"] {:status :improved :note "unbound - stock d is apropos-documentation already; one canonical key"}
+ ["leader" "SPC h d"] {:status :improved :note "stock apropos-documentation kept (lab-only: doom turned d into its introspection prefix)"}
+ ["leader" "SPC h C-h"] {:status :improved :note "help-for-help kept (lab-only: doom unbinds it for which-key paging; it's on ? and F1 anyway)"}
+ ["leader" "SPC h r r"] {:status :improved :note "reload-config over doom/reload"}
+ ["leader" "SPC h t"] {:status :dropped :note "load-theme not wanted - themes managed at SPC T; stock tutorial leaks through"}
+ ["leader" "SPC h C-c"] {:status :ported :note "describe-coding-system (over stock describe-copying), help-map surgery"}
+ ["leader" "SPC h C-k"] {:status :ported :note "describe-key-briefly, help-map surgery"}
+ ["leader" "SPC h C-l"] {:status :ported :note "describe-language-environment, help-map surgery"}
+ ["leader" "SPC h RET"] {:status :ported :note "info-emacs-manual (over stock view-order-manuals), help-map surgery"}
+ ["leader" "SPC h F"] {:status :ported :note "describe-face (over stock Info-goto-emacs-command-node), help-map surgery"}
+ ["leader" "SPC h b b"] {:status :ported :note "describe-bindings - b became the binding-inspection prefix"}
+ ["leader" "SPC h b f"] {:status :ported :note "which-key-show-full-keymap, b subtree"}
+ ["leader" "SPC h b i"] {:status :ported :note "which-key-show-minor-mode-keymap, b subtree"}
+ ["leader" "SPC h b k"] {:status :ported :note "which-key-show-keymap, b subtree"}
+ ["leader" "SPC h b m"] {:status :ported :note "which-key-show-major-mode, b subtree"}
+ ["leader" "SPC h b t"] {:status :ported :note "which-key-show-top-level, b subtree"}}

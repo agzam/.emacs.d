@@ -479,6 +479,25 @@ module layout).
   keeps a pristine *scratch* invariant around the suite (killing it
   changed the current buffer for later suites - that unmasked the
   require-final-newline slip above).
+- [2026-07] SPC h cluster closed.  Doom's help-map surgery (config/default
+  config.el) vendored into bindings/config.el, pruned: the b subtree went
+  live on built-in which-key (b b describe-bindings + b f/i/k/m/t
+  which-key-show-*), describe-* drift matched key for key (' C-c C-k C-l
+  RET F), T got toggle-profiler - a renamed doom/toggle-profiler vendored
+  into elisp/autoload/profiler.el, which also absorbed the misc.el
+  profiler-report helpers (all profiler stuff in one file, user call).
+  Deliberate divergences (:improved): stock d (apropos-documentation, so
+  doom's h A stays unbound), stock P (describe-package - find-library
+  covered at h p f), stock C-h (help-for-help; doom unbinds it for
+  which-key paging), W on woman directly (+default/man-or-woman resolves
+  to woman on macOS anyway), r r reload-config.  h t load-theme and h O
+  +lookup/online :dropped (themes live at SPC T; O was parked on lookup -
+  never used, figure out later).  Broken fix: h p d bound void
+  doom/describe-package - stock describe-package now.  Coverage:
+  profiler-tests suite (toggle order pins report-before-stop), probe
+  checks all 19 binds via lookup-key.  Keydiff: SPC h 18 -> 0 open, off
+  the diff table; 107 open / 90 broken / 3 parked / 71 resolved /
+  0 regressions / 0 lab-only.
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -522,10 +541,11 @@ Cluster checklist (open counts as of 2026-07 pilot; =bb keydiff= is truth):
 - [X] SPC w :: pilot - 12 verdicts; ace-window keys went live with the
   dired port (W/D/M :ported, C-S-w/C-c :dropped), golden-ratio landed with
   the elisp sitting - cluster fully closed, off the diff table
-- [ ] SPC h (18 after the elisp sitting: helpful trio + consult-symbol
-  resolved, 27 doom-internals :dropped) - left: the b subtree (which-key
-  present, bind it), describe-* drift per key, profiler toggle; 3 lab-only
-  rows from doom-side structural drift (h b / h d now prefixes there)
+- [X] SPC h :: closed - help-map surgery vendored into bindings/config.el
+  (b subtree on built-in which-key, describe-* drift matched, T on the
+  renamed toggle-profiler); h p d broken fix (stock describe-package);
+  stock d/P/C-h kept over Doom's rebinds, woman over man-or-woman; the
+  3 lab-only rows verdicted or structural - off the diff table
 - [ ] SPC p (17) - project; T/t closed by the dired port, the rest is
   workspace/projectile leftovers waiting on tab-bar
 - [ ] normal g (19)
@@ -551,6 +571,8 @@ Cluster checklist (open counts as of 2026-07 pilot; =bb keydiff= is truth):
 Fold ledger verdicts into the Decisions log; delete scripts/dump-bindings.el,
 scripts/keydiff.clj, key-decisions.edn (+ its .gitignore whitelist line),
 the keydump/keydiff bb tasks, and tests/scripts/.
+Proximity (post SPC h): open clusters left - SPC b/c/f/n/o/p/s/x, the
+g/z/[/] trees, and the singletons row.
 
 * Testing & CI
 - =bb test= - buttercup suites from tests/ (buttercup auto-installed into

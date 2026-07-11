@@ -373,7 +373,7 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
                (:prefix ("p" . "packages")
                         "l" #'list-packages
                         "f" #'find-library-other-window
-                        "d" #'doom/describe-package)
+                        "d" #'describe-package)
                "s" #'find-function-other-window
                "v" #'helpful-variable
                "j" #'info-display-manual

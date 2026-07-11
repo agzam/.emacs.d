@@ -8,6 +8,8 @@
 ;; Deviation: the <leader> p tree is rebound from projectile to built-in
 ;; project.el commands (projectile is not part of this config); entries with
 ;; no project.el analog were dropped.
+;; Deviation: the help-map surgery from modules/config/default/config.el is
+;; vendored here too, pruned per the SPC h audit (key-decisions.edn).
 ;;; Code:
 
 ;; From modules/config/default/config.el.
@@ -262,6 +264,32 @@
 ;;; :tools
 (when (modulep! :tools eval)
   (map! "M-r" #'eval-buffer+))
+
+
+;;
+;;; Help map
+
+;; From modules/config/default/config.el help-map surgery, pruned by the
+;; SPC h audit (key-decisions.edn): doom introspection dropped; stock d/P/C-h
+;; kept over Doom's rebinds; woman - +default/man-or-woman resolves to it on
+;; macOS anyway.
+(define-key! help-map
+  "'"    #'describe-char
+  "T"    #'toggle-profiler
+  "W"    #'woman
+  "C-c"  #'describe-coding-system
+  "C-k"  #'describe-key-briefly
+  "C-l"  #'describe-language-environment
+  "C-m"  #'info-emacs-manual
+  "F"    #'describe-face
+  ;; describe-bindings moves under its own prefix; which-key fills it out
+  "b"    nil
+  "bb"   #'describe-bindings
+  "bf"   #'which-key-show-full-keymap
+  "bi"   #'which-key-show-minor-mode-keymap
+  "bk"   #'which-key-show-keymap
+  "bm"   #'which-key-show-major-mode
+  "bt"   #'which-key-show-top-level)
 
 
 ;;
