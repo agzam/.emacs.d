@@ -30,7 +30,7 @@ Returns `work', `personal', or nil."
        ((member "work-notes" tags) 'work)
        ((member "personal-notes" tags) 'personal)))))
 
-(defun vulpea-journal-template+ (_date)
+(defun journal-template (_date)
   "Dynamic template function for `vulpea-journal-default-template'.
 Dispatches to work or personal config based on the active journal type."
   (pcase (or vulpea-journal--buffer-type vulpea-journal--type)
@@ -50,7 +50,7 @@ Dispatches to work or personal config based on the active journal type."
            :head "#+startup: show2levels"))))
 
 ;;;###autoload
-(defun vulpea-journal+ (type &optional date)
+(defun open-journal (type &optional date)
   "Open journal of TYPE for DATE.
 TYPE is `work' or `personal'.  When DATE is nil, opens today.
 

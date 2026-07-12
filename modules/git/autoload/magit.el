@@ -191,7 +191,7 @@ both gone from current forge - `forge-read-issue' replaces the whole dance."
 ;;; Cloning
 
 ;;;###autoload
-(defun magit-clone-regular+ (&optional repository directory)
+(defun magit-clone-simple (&optional repository directory)
   "Simplified version of magit's cloning fn, for calling directly."
   (interactive)
   (let* ((repository (magit-read-string-ns "Clone from url or name"

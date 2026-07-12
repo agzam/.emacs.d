@@ -232,7 +232,7 @@
         "C-/" #'vertico-jump-root
         "C-?" #'vertico-jump-sudo
         "M-m" #'embark-select
-        "C-SPC" #'embark-preview+))
+        "C-SPC" #'embark-preview))
 
 (use-package vertico-posframe
   :ensure (vertico-posframe :host github :repo "tumashu/vertico-posframe")
@@ -449,9 +449,9 @@
 
   ;; overriding internal implementation fns for the time being
   ;; https://github.com/dash-docs-el/dash-docs/issues/23
-  (advice-add 'dash-docs-install-user-docset :override #'dash-docs-install-user-docset+)
-  (advice-add 'dash-docs-install-docset :override #'dash-docs-install-docset+)
-  (advice-add 'dash-docs-unofficial-docsets :override #'dash-docs-unofficial-docsets+))
+  (advice-add 'dash-docs-install-user-docset :override #'dash-docs-ensure-user-docset)
+  (advice-add 'dash-docs-install-docset :override #'dash-docs-ensure-docset)
+  (advice-add 'dash-docs-unofficial-docsets :override #'dash-docs-unofficial-docsets-versioned))
 
 (use-package consult-dash
   :ensure (consult-dash :host github :repo "emacsmirror/consult-dash")

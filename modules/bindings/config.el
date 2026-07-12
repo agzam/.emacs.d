@@ -266,7 +266,7 @@
 
 ;;; :tools
 (when (modulep! :tools eval)
-  (map! "M-r" #'eval-buffer+))
+  (map! "M-r" #'eval-whole-buffer))
 
 
 ;;
@@ -553,7 +553,7 @@
        :desc "From evil register"            "r"   #'evil-show-registers
        :desc "Snippet"                       "s"   #'yas-insert-snippet
        :desc "Unicode"                       "u"   #'insert-char
-       :desc "From clipboard"                "y"   #'yank-pop+)
+       :desc "From clipboard"                "y"   #'consult-yank-pop)
 
       ;;; <leader> l --- live share/collab
       (:when (modulep! :tools collab)

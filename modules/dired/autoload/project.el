@@ -7,7 +7,7 @@
 ;;; Code:
 
 ;;;###autoload
-(defun treemacs-project-toggle+ ()
+(defun treemacs-project-toggle ()
   "Toggle a treemacs window scoped to the current project."
   (interactive)
   (require 'treemacs)

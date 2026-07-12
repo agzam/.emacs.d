@@ -104,7 +104,7 @@ manually deleted docset is reinstalled even if its marker lingers."
     (and version (cl-caddr (cl-first version)))))
 
 ;;;###autoload
-(defun dash-docs-install-user-docset+ (&optional docset)
+(defun dash-docs-ensure-user-docset (&optional docset)
   "Install unofficial docset DOCSET, skipping it when already up to date.
 Without DOCSET, prompt for one.  The feed version is compared against the
 local registry and the archive is downloaded only when it changed."
@@ -127,7 +127,7 @@ local registry and the archive is downloaded only when it changed."
           (dash-docs--record-version docset-name version))))))
 
 ;;;###autoload
-(defun dash-docs-install-docset+ (docset-name)
+(defun dash-docs-ensure-docset (docset-name)
   "Install official docset DOCSET-NAME, skipping it when already up to date.
 Only the small feed XML is fetched to compare its version against the local
 registry; the docset archive is downloaded only when it changed."
@@ -147,7 +147,7 @@ registry; the docset archive is downloaded only when it changed."
           (dash-docs--record-version docset-name version))))))
 
 ;;;###autoload
-(defun dash-docs-unofficial-docsets+ ()
+(defun dash-docs-unofficial-docsets-versioned ()
   "Return user-contributed docsets as a list of entries.
 Each entry is (NAME SLUG ARCHIVE VERSION); VERSION drives the update check."
   (let ((user-docs (assoc-default 'docsets

@@ -39,7 +39,7 @@ window."
     ("r" "redo" window-redo :transient t)]])
 
 ;;;###autoload
-(defun window-cleanup+ ()
+(defun window-cleanup ()
   "Deletes duplicate windows.
 Leaves single window per buffer, removing all duplicates."
   (interactive)

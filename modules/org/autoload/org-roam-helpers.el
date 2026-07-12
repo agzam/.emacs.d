@@ -81,7 +81,7 @@ navigation via M-g M-n / M-g M-p."
         (org-do-promote)))))
 
 ;;;###autoload
-(defun org-roam-ui-browser+ ()
+(defun org-roam-ui-in-browser ()
   (interactive)
   (browse-url
    (concat "http://localhost:"

@@ -94,11 +94,11 @@
           "i" #'vulpea-insert
           "l" #'vulpea-ui-sidebar-toggle
           :desc "org-roam-ui in xwidget" "w" #'org-roam-toggle-ui-xwidget
-          :desc "org-roam-ui in browser" "W" #'org-roam-ui-browser+
+          :desc "org-roam-ui in browser" "W" #'org-roam-ui-in-browser
           "f" #'vulpea-find
           "F" #'vulpea-forward-links
-          :desc "work note" "n" (cmd! (vulpea-journal+ 'work (org-read-date nil t)))
-          :desc "personal note" "N" (cmd! (vulpea-journal+ 'personal (org-read-date nil t)))
+          :desc "work note" "n" (cmd! (open-journal 'work (org-read-date nil t)))
+          :desc "personal note" "N" (cmd! (open-journal 'personal (org-read-date nil t)))
           (:prefix ("r" . "refile")
                    "n" #'org-roam-refile-to-node))
          (:prefix ("s" . "tree/subtree")
@@ -160,12 +160,12 @@
      (sql . t)
      (sqlite . t)))
 
-  ;; youtube videos played in mpv (mpv-open+ ports with web-browsing;
+  ;; youtube videos played in mpv (mpv-open ports with web-browsing;
   ;; plain browser until then)
   (org-link-set-parameters
    "yt" :follow (lambda (path)
                   (let ((url (concat "https:" path)))
-                    (if (fboundp 'mpv-open+) (mpv-open+ url) (browse-url url))))
+                    (if (fboundp 'mpv-open) (mpv-open url) (browse-url url))))
    :export (lambda (link _desc _format)
              (format
               (concat
@@ -387,7 +387,7 @@
   ;; vulpea-journal-note isn't autoloaded upstream: loading vulpea chains
   ;; vulpea-ui -> vulpea-journal through the :after gates below, which
   ;; defines it before the autoload machinery re-dispatches.
-  :commands (vulpea-journal+ vulpea-journal-note)
+  :commands (open-journal vulpea-journal-note)
   :config
   ;; vulpea-db-location lives in doom-compat.el's quarantine section
   (setopt vulpea-db-sync-directories (list org-default-folder)
@@ -446,7 +446,7 @@
   :after (vulpea vulpea-ui)
   :config
   (setopt vulpea-directory org-default-folder
-          vulpea-journal-default-template #'vulpea-journal-template+)
+          vulpea-journal-default-template #'journal-template)
 
   ;; Before vulpea-journal runs: sync buffer type → global,
   ;; so navigation stays within the same journal type.

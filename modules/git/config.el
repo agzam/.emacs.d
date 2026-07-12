@@ -321,7 +321,7 @@ GraphQL `errors' alist, which otherwise dies with `listp, http'."
         :nv (kbd "<escape>") nil
         :nv "," nil
         :n "q" #'kill-buffer-and-window
-        "C-c C-o" #'code-review-browse-pr+)
+        "C-c C-o" #'code-review-browse-pr)
 
   (map! :map code-review-feedback-section-map
         "k" nil)

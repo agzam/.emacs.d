@@ -74,7 +74,7 @@
     (expect (length (window-list nil 'nomini)) :to-equal 1)
     (expect (gethash (selected-frame) tab-bar-history-back) :to-be nil)))
 
-(describe "window-cleanup+"
+(describe "window-cleanup"
   (after-each (delete-other-windows))
   (it "leaves one window per buffer"
     (delete-other-windows)
@@ -85,7 +85,7 @@
             (set-window-buffer (selected-window) b1)
             (set-window-buffer (split-window) b1)
             (set-window-buffer (split-window) b2)
-            (window-cleanup+)
+            (window-cleanup)
             (let ((showing-b1
                    (seq-count (lambda (w) (eq (window-buffer w) b1))
                               (window-list nil 'nomini))))

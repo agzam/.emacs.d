@@ -541,6 +541,30 @@ module layout).
   121 -> 127 packages, 0 failed/blocked.  Keydiff: 107 -> 102 open,
   90 -> 88 broken, 71 -> 74 resolved, +1 parked (SPC o e deferred to
   elfeed), 0 regressions; SPC ' / SPC " clusters off the table.
+- [2026-07] plus-affix sweep: the trailing-+ idiom is dead (AGENTS.md
+  naming rule replaced).  Renames, refs and suites updated:
+  window-cleanup, treemacs-project-toggle, code-review-browse-pr (bare
+  names were free), magit-clone-simple, dired-remove-subtree,
+  dash-docs-ensure-docset / -ensure-user-docset /
+  -unofficial-docsets-versioned (bare names shadow the package fns they
+  wrap - the dash-docs ones are :override advice targets),
+  org-roam-ui-in-browser, open-journal + journal-template (the
+  vulpea-journal package owns that namespace).  Void-bind rot fixed on
+  the way: SPC i y binds consult-yank-pop directly (doom's
+  +default/yank-pop is a consult dispatcher; the row was void
+  yank-pop+), C-SPC embark-preview and global M-r eval-whole-buffer are
+  plus-free placeholders (providers: the custom embark and :tools eval
+  ports; eval-buffer+ was defined nowhere, doom.d included), mpv-open
+  guard and open-gptel binds renamed ahead of their module ports.
+  Exempt: info+ (upstream package name), doom.d symbol names in
+  provenance comments and long-tail lists, the deliberate
+  eshell-clear+/eshell-export-output+ negative specs.  Flagged,
+  untouched: journal.el's vulpea-journal--* private helpers squat the
+  package namespace without + affixes.  Verification: 310 specs green,
+  smoke 127 / 0 failed/blocked, probe sweep-residue empty (no +-affixed
+  fboundp survives boot), keydiff 102 open / 87 broken / 78 resolved /
+  0 regressions (the SPC i y broken row closed; SPC w c, SPC o r W,
+  SPC p T re-verdicted :improved).
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -666,7 +690,7 @@ g/z/[/] trees, and the singletons row (SPC " ' now closed).
     magit/forge/gh-notify plumbing - the live magit-status probe and the
     keydump :void-suffix walk cover them); org module config.el and the
     vulpea/roam-bound autoloads (vulpea-backlinks/forward-links, count
-    overlays, org-roam-refile-to-node, vulpea-db-verify, vulpea-journal+,
+    overlays, org-roam-refile-to-node, vulpea-db-verify, open-journal,
     org-dwim-at-point, yank-from-clipboard - need live vulpea db/structs
     or a GUI; the journal-note live probe walks the whole chain end to
     end)

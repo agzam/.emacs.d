@@ -21,9 +21,10 @@ name) into code or prose.
 - No made-up namespace prefixes either (`lab-`, `my-`, project names). This
   is a personal config; the global namespace is fine.
 - Plain descriptive names: `search-in-project`, `alternate-buffer`,
-  `window-cleanup+`. A trailing `+` is the local idiom for "enhanced variant
-  of an existing function" - keep it, never a leading one. Hook functions
-  keep the `-h` suffix, advice `-a`.
+  `window-cleanup`. Never any `+` prefix or suffix on symbols; when a name
+  would shadow the package function it wraps, pick a distinct descriptive
+  name (`dired-remove-subtree` wrapping `dired-subtree-remove`). Hook
+  functions keep the `-h` suffix, advice `-a`.
 - When porting Doom-named functions, rename them and update every reference
   (bindings tree, `consult-customize` lists, hooks, advice). Files vendored
   from Doom itself (see below) are exempt until their planned rename sweep.

@@ -263,7 +263,7 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
       (:when (modulep! :custom ai)
         (:prefix ("C-x g" . "gptel")
          :desc "gptel-menu" "g" #'gptel-menu
-         :desc "new gptel" "n" #'gptel+
+         :desc "new gptel" "n" #'open-gptel
          :desc "check text" "e" #'gptel-improve-text-transient
          :desc "quick" "q" #'gptel-quick-question-buffer
          "m" #'gptel-mode
@@ -415,17 +415,17 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
        (:prefix ("c" . "chat")
                 "t" #'telega
                 (:when (modulep! :custom ai)
-                  :desc "gptel" "g" #'gptel+))
+                  :desc "gptel" "g" #'open-gptel))
        "r" nil
        (:prefix ("r" . "roam")
         "r" #'vulpea-find
         "b" #'vulpea-backlinks
-        :desc "work today" "t" (cmd! (vulpea-journal+ 'work))
-        :desc "personal today" "T" (cmd! (vulpea-journal+ 'personal))
-        :desc "work note" "n" (cmd! (vulpea-journal+ 'work (org-read-date nil t)))
-        :desc "personal note" "N" (cmd! (vulpea-journal+ 'personal (org-read-date nil t)))
+        :desc "work today" "t" (cmd! (open-journal 'work))
+        :desc "personal today" "T" (cmd! (open-journal 'personal))
+        :desc "work note" "n" (cmd! (open-journal 'work (org-read-date nil t)))
+        :desc "personal note" "N" (cmd! (open-journal 'personal (org-read-date nil t)))
         :desc "org-roam-ui in xwidget" "w" #'org-roam-toggle-ui-xwidget
-        :desc "org-roam-ui in browser" "W" #'org-roam-ui-browser+
+        :desc "org-roam-ui in browser" "W" #'org-roam-ui-in-browser
         "C-b" #'browser-create-roam-node-for-active-tab))
 
       (:prefix ("p" . "projects")
@@ -435,7 +435,7 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
                :desc "project buffers list" "i" #'project-list-buffers
                :desc "find dir" "d" #'project-find-dir
                (:when (modulep! :custom dired)
-                 :desc "treemacs" "T" #'treemacs-project-toggle+
+                 :desc "treemacs" "T" #'treemacs-project-toggle
                  :desc "dired locate" "t" #'dired-jump-find-in-project)
                (:when (modulep! :custom shell)
                  :desc "project shell" "'" #'shell-pop-in-project-root))
@@ -476,7 +476,7 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
       (:prefix ("w" . "windows")
                "TAB" #'evil-window-prev
                "." #'window-transient
-               "c" #'window-cleanup+
+               "c" #'window-cleanup
                "g" #'golden-ratio
                "D" #'ace-delete-window
                "M" #'ace-swap-window
@@ -506,7 +506,7 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
                (:when (modulep! :custom ai)
                  (:prefix ("g" . "gptel")
                   :desc "gptel-menu" "g" #'gptel-menu
-                  :desc "new gptel" "n" #'gptel+
+                  :desc "new gptel" "n" #'open-gptel
                   :desc "check text" "e" #'gptel-improve-text-transient
                   :desc "quick" "q" #'gptel-quick-question-buffer
                   :desc "search" "/" #'gptel-log-find

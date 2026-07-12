@@ -13,7 +13,7 @@
 
 (load-module-file "modules/dired/autoload/subtree.el")
 
-(describe "dired-subtree-remove+"
+(describe "dired-remove-subtree"
   (it "steps into the subtree before removing when point is on its root"
     (let (calls)
       (cl-letf (((symbol-function 'dired-subtree--is-expanded-p)
@@ -22,7 +22,7 @@
                  (lambda (n) (push (cons 'next-line n) calls)))
                 ((symbol-function 'dired-subtree-remove)
                  (lambda () (push 'remove calls))))
-        (dired-subtree-remove+)
+        (dired-remove-subtree)
         (expect (nreverse calls) :to-equal '((next-line . 1) remove)))))
 
   (it "removes in place when point is already inside the subtree"
@@ -33,7 +33,7 @@
                  (lambda (n) (push (cons 'next-line n) calls)))
                 ((symbol-function 'dired-subtree-remove)
                  (lambda () (push 'remove calls))))
-        (dired-subtree-remove+)
+        (dired-remove-subtree)
         (expect calls :to-equal '(remove))))))
 
 (describe "buffer-with-dired-item"

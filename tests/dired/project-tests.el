@@ -14,7 +14,7 @@
 
 (load-module-file "modules/dired/autoload/project.el")
 
-(describe "treemacs-project-toggle+"
+(describe "treemacs-project-toggle"
   (it "deletes the local treemacs window when one is visible"
     (let (deleted)
       (cl-letf (((symbol-function 'treemacs-current-visibility)
@@ -23,7 +23,7 @@
                  (lambda () 'window-sentinel))
                 ((symbol-function 'delete-window)
                  (lambda (win) (setq deleted win))))
-        (treemacs-project-toggle+)
+        (treemacs-project-toggle)
         (expect deleted :to-be 'window-sentinel))))
 
   (it "adds and displays the current project exclusively otherwise"
@@ -32,7 +32,7 @@
                  (lambda () 'none))
                 ((symbol-function 'treemacs-add-and-display-current-project-exclusively)
                  (lambda () (setq displayed t))))
-        (treemacs-project-toggle+)
+        (treemacs-project-toggle)
         (expect displayed :to-be-truthy)))))
 
 (describe "dired-jump-find-in-project"

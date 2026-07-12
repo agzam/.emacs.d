@@ -2,7 +2,7 @@
 ;;; Commentary:
 ;; Port of ~/.doom.d/modules/custom/dired.  Deviations:
 ;; - treemacs-projectile dropped (projectile is dropped config-wide);
-;;   `treemacs-project-toggle+' rebuilt on treemacs's own project machinery
+;;   `treemacs-project-toggle' rebuilt on treemacs's own project machinery
 ;;   and `dired-jump-find-in-project' on project.el (autoload/project.el).
 ;; - lsp-treemacs parked until the lsp module ports.
 ;; - winum unignore glue dropped as rotted: upstream renamed
@@ -102,8 +102,8 @@
                ;; binds "o" after any config-time registration would run
                (map! :map dired-mode-map
                      :n "M-l" #'dired-subtree-cycle
-                     :n "M-h" #'dired-subtree-remove+
-                     :n "M-k" #'dired-subtree-remove+
+                     :n "M-h" #'dired-remove-subtree
+                     :n "M-k" #'dired-remove-subtree
                      :n "M-j" #'dired-subtree-down-n-open
                      :n "M-n" #'dired-subtree-next-sibling
                      :n "M-p" #'dired-subtree-previous-sibling
@@ -117,7 +117,7 @@
                       :desc "ace-action" :n "a" #'dired-ace-action)
                      (:localleader
                       "l" #'dired-subtree-cycle
-                      "h" #'dired-subtree-remove+)))))
+                      "h" #'dired-remove-subtree)))))
 
 (use-package dired-sidebar
   :defer t

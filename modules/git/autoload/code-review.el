@@ -1,7 +1,7 @@
 ;;; modules/git/autoload/code-review.el -*- lexical-binding: t; -*-
 
 ;;;###autoload
-(defun code-review-browse-pr+ ()
+(defun code-review-browse-pr ()
   "Open the reviewed PR on GitHub."
   (interactive)
   (browse-url

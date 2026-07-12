@@ -2,12 +2,13 @@
 ;;; Commentary:
 ;; dired-subtree navigation extensions and open-item-in-window actions.
 ;; buffer-with-dired-item lost its direx branch on port (direx was never in
-;; packages.el - dead code).  dired-subtree-remove* renamed to the local
-;; trailing-+ idiom.
+;; packages.el - dead code).  doom.d's dired-subtree-remove* is
+;; dired-remove-subtree here (distinct name - the package owns
+;; dired-subtree-remove).
 ;;; Code:
 
 ;;;###autoload
-(defun dired-subtree-remove+ ()
+(defun dired-remove-subtree ()
   "Remove the subtree at point, also when point sits on its root line."
   (interactive)
   (when (dired-subtree--is-expanded-p)

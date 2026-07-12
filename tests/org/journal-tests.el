@@ -1,5 +1,5 @@
 ;;; tests/org/journal-tests.el --- org/autoload/journal.el specs -*- lexical-binding: t; -*-
-;; vulpea-journal+ and vulpea-journal--type-from-note need live vulpea
+;; open-journal and vulpea-journal--type-from-note need live vulpea
 ;; structs/db - smoke bucket (see MIGRATION coverage map).
 
 (require 'test-helper
@@ -11,20 +11,20 @@
 
 (load-module-file "modules/org/autoload/journal.el")
 
-(describe "vulpea-journal-template+"
+(describe "journal-template"
   (it "dispatches on the global type"
     (let ((vulpea-journal--type 'work))
-      (let ((tpl (vulpea-journal-template+ nil)))
+      (let ((tpl (journal-template nil)))
         (expect (plist-get tpl :tags) :to-equal '("work-notes"))
         (expect (plist-get tpl :file-name) :to-match "work-notes")))
     (let ((vulpea-journal--type 'personal))
-      (expect (plist-get (vulpea-journal-template+ nil) :tags)
+      (expect (plist-get (journal-template nil) :tags)
               :to-equal '("personal-notes"))))
   (it "prefers the buffer-local type over the global"
     (let ((vulpea-journal--type 'work))
       (with-temp-buffer
         (setq-local vulpea-journal--buffer-type 'personal)
-        (expect (plist-get (vulpea-journal-template+ nil) :tags)
+        (expect (plist-get (journal-template nil) :tags)
                 :to-equal '("personal-notes"))))))
 
 (describe "vulpea-journal--detect-buffer-type"
