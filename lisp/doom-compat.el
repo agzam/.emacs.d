@@ -60,7 +60,16 @@
       vulpea-db-location (concat doom-local-dir "vulpea.db")
       ;; treemacs defaults both under user-emacs-directory/.cache/
       treemacs-persist-file (concat doom-cache-dir "treemacs-persist")
-      treemacs-last-error-persist-file (concat doom-cache-dir "treemacs-last-error-persist"))
+      treemacs-last-error-persist-file (concat doom-cache-dir "treemacs-last-error-persist")
+      ;; ai module: token caches + eca server binary default inside
+      ;; user-emacs-directory; lab keeps its own copies - sharing Doom's
+      ;; OAuth tokens.el invites refresh-token rotation races.
+      gptel-anthropic-oauth-cache-dir (concat doom-cache-dir "anthropic-oauth/")
+      gptel-gh-github-token-file (concat doom-cache-dir "copilot-chat/github-token")
+      gptel-gh-token-file (concat doom-cache-dir "copilot-chat/token")
+      gptel-crowdsourced-prompts-file (concat doom-cache-dir "gptel-crowdsourced-prompts.csv")
+      eca-server-install-path (concat doom-data-dir "eca/eca")
+      eca-server-version-file-path (concat doom-data-dir "eca/eca-version"))
 
 (defvar doom-disabled-packages nil)
 

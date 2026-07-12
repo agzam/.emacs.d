@@ -565,6 +565,49 @@ module layout).
   fboundp survives boot), keydiff 102 open / 87 broken / 78 resolved /
   0 regressions (the SPC i y broken row closed; SPC w c, SPC o r W,
   SPC p T re-verdicted :improved).
+- [2026-07] ai module ported - the last tool the porting workload needs,
+  lab is now self-hosting for migration sittings.  Keep-set: gptel
+  (AGENTS.md-as-directive via function value, ollama/copilot backends,
+  model persistence through custom.el, quadrant display rules), eca
+  (buffer renames, archive-on-finish + eca-continue-from-file,
+  flag-and-fork, auto-trust-for-plan, eca-reauth), mcp + lazy tool
+  registration (schemas parsed straight out of the harness .bb files),
+  gptel-agent (skills from ~/.config/eca/skills/, MCP-cats/AGENTS.md
+  injection advice), gptel-anthropic-oauth as default backend, piper
+  (no mxp code coupling - clipboard->tts stays xsel/Linux).  Dropped
+  (commented/inert in doom.d, git-resurrectable): whisper, gptel-quick
+  (package; the local gptel-quick-question-buffer defun stays),
+  ob-gptel (live but cut by choice), llm-tool-collection, ragmacs,
+  shell-maker, acp, agent-shell, claude-code.  LOCAL-REPO deviation:
+  gptel-tools + gptel-anthropic-oauth vendored INTO the tree at
+  modules/ai/ - no upstream remotes exist, so the ~/GitHub extraction
+  pattern would break CI cloning; elpaca builds in place from repo
+  subdirs (repo-root worry unfounded, smoke-proven).  gptel-tools stays
+  installed-not-loaded like doom.d; its emacs floor lowered 30.2->30.1
+  (CI).  Harness-contract renames, collision-checked against mcp.el
+  and verb-fronted where they read like package API (setup.bb only
+  writes the files these read - elisp names never called externally):
+  eca-agents-md-content, mcp-servers-from-eca-config,
+  register-mcp-tools-lazy, ensure-mcp-server, lazy-mcp-tool-fn,
+  mcp-schema->gptel-args, extract-tool-defs-from-bb; plus gptel+ ->
+  open-gptel, gptel-clear-buffer+ -> gptel-clear-buffer,
+  +gptel-improve-text* -> gptel-improve-text*.  parseedn explicit now
+  (doom.d rides the clojure module's dep tree); .bb reads guarded, so
+  missing harness/CI no-op.  Quarantine grew: anthropic-oauth +
+  copilot token caches and crowdsourced-prompts -> cache dir,
+  eca server binary/version -> data dir (one-time re-auth and server
+  re-download in lab; sharing Doom's tokens.el invites the
+  refresh-token rotation race eca-reauth exists for).  insert-comma
+  pulled ahead of writing (jinx.el); evil-markdown-mode-map refs
+  dropped (no evil-markdown here; markdown-mode already present -
+  code-review dep, eca pins it); open-gptel gained a boundp guard
+  (doom's gptel+ errors when called before gptel ever loads).
+  Verification: 338 specs (+28, tests/ai/), smoke 127 -> 135 packages
+  (+6 keep-set, +parseedn/parseclj), 0 failed/blocked, probe green
+  (rows resolve, ai packages deferred at boot, boot-registered eca
+  advice pending, quarantine paths). Keydiff 102 -> 93 open / 87
+  broken / 78 -> 81 resolved / 0 regressions - SPC x g subtree +
+  SPC o c g off the open list.
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -616,11 +659,12 @@ Cluster checklist (open counts as of 2026-07 pilot; =bb keydiff= is truth):
 - [ ] SPC p (17) - project; T/t closed by the dired port, the rest is
   workspace/projectile leftovers waiting on tab-bar
 - [ ] normal g (19)
-- [ ] SPC x (18) - gptel tree, mostly ai-module deferrals
+- [ ] SPC x (18) - gptel tree closed with the ai port; the 10 left are
+  writing-module material (SPC x l / x t trees etc.)
 - [ ] SPC c (15) - code/lsp
 - [ ] SPC o (15) - open/apps; roam/org tree resolved with the org port,
-  SPC o r C-b parked (web-browsing) - the rest waits on
-  macos/chat/shell/eval/ai/notmuch
+  o c g closed with the ai port, SPC o r C-b parked (web-browsing) -
+  the rest waits on macos/chat/eval/notmuch
 - [ ] SPC s (10) - search
 - [ ] SPC b (8) - buffers
 - [ ] motion [ / motion ] (9+9), normal [ / normal ] (5+5)
@@ -802,11 +846,12 @@ org-download, org-contrib, the 2 mp3 assets, org-capture frame infra
 (org-present), export-to-clipboard helpers, edit-indirect-guess-mode-fn+.
 Feeds embark (vulpea-*), now unblocked.
 browser-create-roam-node-for-active-tab parked on web-browsing.
-** TODO ai
-gptel + gptel-quick/ob-gptel/gptel-agent, eca, claude-code, agent-shell/acp,
-mcp, whisper, shell-maker, llm-tool-collection, ragmacs.
-LOCAL-REPO: gptel-tools, gptel-anthropic-oauth. config 311L, autoload ~850L.
-Unlocks =C-x g= / =SPC x g= gptel trees (currently pruned via modulep! :custom ai).
+** DONE ai
+Ported (see Decisions log): gptel, eca, mcp, gptel-agent,
+gptel-anthropic-oauth + parseedn; gptel-tools/gptel-anthropic-oauth
+vendored under modules/ai/. Dropped: whisper, gptel-quick, ob-gptel,
+llm-tool-collection, ragmacs, shell-maker, acp, agent-shell,
+claude-code. =C-x g= / =SPC x g= / =SPC o c g= live.
 ** TODO web-browsing
 eww (built-in), elfeed (SohumB fork+branch), elfeed-org/tube/tube-mpv,
 rfc-mode, yeetube, subed (:files), hnreader (own fork).
@@ -943,7 +988,11 @@ gptel-tools, gptel-anthropic-oauth, github-topics, remoto, ag-themes,
 slacko.el, spacehammer (symlink!), wiktionary-bro,
 prisma.el, browser-hist, consult-hn, emacs-reddig, navegosa.el, go-jira.
 (let-plist + evilify-edebug left the list - folded into the elisp module's
-autoload/ instead; the local-repo ceremony was a straight-era workaround.)
+autoload/ instead; the local-repo ceremony was a straight-era workaround.
+gptel-tools + gptel-anthropic-oauth settled differently at the ai port:
+no upstream remotes, so they vendored INTO the tree at modules/ai/ with
+in-place elpaca builds - the pattern for embedded locals that have no
+GitHub repo to extract to.)
 
 Layout decided and PROVEN at the git module port (2026-07): module configs
 declare plain GitHub recipes (portable to machines without checkouts);

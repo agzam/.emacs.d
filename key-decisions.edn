@@ -144,4 +144,15 @@
  ;; plus-affix sweep (2026-07) - lab names de-plussed, doom.d keeps the + names
  ["leader" "SPC w c"] {:status :improved :note "window-cleanup - de-plussed rename of doom.d's window-cleanup+"}
  ["leader" "SPC o r W"] {:status :improved :note "org-roam-ui-in-browser - de-plussed rename of doom.d's org-roam-ui-browser+"}
- ["leader" "SPC i y"] {:status :improved :note "consult-yank-pop bound directly over doom's +default/yank-pop dispatcher (row was void yank-pop+ before the sweep)"}}
+ ["leader" "SPC i y"] {:status :improved :note "consult-yank-pop bound directly over doom's +default/yank-pop dispatcher (row was void yank-pop+ before the sweep)"}
+
+ ;; ai module port (2026-07) - closes the SPC x g subtree + SPC o c g
+ ["leader" "SPC x g g"] {:status :ported :note "gptel-menu, ai module"}
+ ["leader" "SPC x g m"] {:status :ported :note "gptel-mode, ai module"}
+ ["leader" "SPC x g s"] {:status :ported :note "gptel-send, ai module"}
+ ["leader" "SPC x g q"] {:status :ported :note "gptel-quick-question-buffer (local defun, not the dropped gptel-quick package)"}
+ ["leader" "SPC x g /"] {:status :ported :note "gptel-log-find, ai module"}
+ ["leader" "SPC x g c"] {:status :ported :note "eca, ai module"}
+ ["leader" "SPC x g e"] {:status :improved :note "gptel-improve-text-transient - de-plussed rename of doom.d's +gptel-improve-text-transient"}
+ ["leader" "SPC x g n"] {:status :improved :note "open-gptel - de-plussed rename of doom.d's gptel+"}
+ ["leader" "SPC o c g"] {:status :improved :note "open-gptel - de-plussed rename of doom.d's gptel+"}}
