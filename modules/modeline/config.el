@@ -6,8 +6,10 @@
 ;;   buffer-locally from window-state-change-hook and re-defining it on
 ;;   every change; rendering is identical (ground-truthed live), minus the
 ;;   hook churn and the local-modeline guard it needed
-;; - persp-name segment dropped: persp-mode runs in neither config
-;;   (revisit workspace-name with the tab-bar port)
+;; - persp-name segment dropped: persp-mode runs in neither config.
+;;   workspace-name stays out too (tab-bar port verdict): tab-bar-show t
+;;   keeps tab names permanently visible in the tab bar line, the segment
+;;   would only duplicate them - and doom.d's modeline never showed one
 ;; - dropped as dead: doom-modeline-mu4e nil (default value, package never
 ;;   installed), doom-modeline-modal-icon t (default, and the modals
 ;;   segment isn't in the layout), the :unless (modulep! :ui modeline)

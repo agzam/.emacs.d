@@ -20,7 +20,8 @@ module layout).
   dired (treemacs suite), ai (gptel/eca/mcp), web-browsing,
   tree-sitter, org (core slice: roam/vulpea/evil-org), shell,
   writing (jinx/translate/dictionaries/prisma),
-  search (consult-omni/tldr/slacko)
+  search (consult-omni/tldr/slacko),
+  tab-bar (workspace transients + desktop persistence, no packages)
 - user layer :: config.el (leader tree, globals), lisp/functions.el
   incl. reload-config (SPC h r r; doom/reload analogue - re-runs
   defaults/modules/config in place, elpaca picks up new packages; restart
@@ -891,6 +892,86 @@ module layout).
   are bugfix-only, the pin was the dev-box version).  Check
   Package-Requires floors against CI's 30.1 at every future own-package
   port.
+- [2026-07] tab-bar module ported (registry-only: no packages; slot
+  modeline < tab-bar < elisp, doom! order).  Everything lives in the
+  LAZY autoload/tab-bar.el (colors precedent - the transients would
+  drag built-in transient in at boot from an eager autoload.el); no
+  eager file at all.  Renames collision-checked live: built-ins
+  tab-bar-rename-tab / tab-bar-duplicate-tab would be shadowed by naive
+  de-plussing, their wrappers are tab-bar-rename / tab-bar-duplicate;
+  the movers joined the built-in alias family as tab-move-left/right;
+  the rest de-plussed straight (tab-bar-kill-tab, tab-bar-add-new-tab,
+  tab-bar-name-fn, tab-bar-fmt-show-index-fn, tab-bar-move-buffer-to-tab,
+  tab-bar-kill-project-buffers, tab-bar-find-buffer-in-tabs).  Dropped:
+  +tab-bar-switch-to-tab-number (dead 'last branch; the transient's
+  hidden goto rows call tab-bar-select-tab directly), the namespace-
+  squatting defvars tab-bar-tab-added-hook + tab-bar-tab-removed-hook
+  (added is run NOWHERE - its tab-bar-template-run-hook-h registration
+  was dead code; removed had zero registrations, kill-tab's run-hooks
+  was a no-op), the corfu tab-bar-mode-hook (corfu removed config-wide),
+  commented reset-frame-full-height + tab-bar-created-h hooks.  doom.d
+  rot fixed with specs: rename-dups processed only the FIRST duplicate
+  group (-separate returns a two-list partition; the -map + pcase-let
+  first-element destructure ignored the rest) - rewritten on
+  seq-group-by, the digit-suffix regexp tightened from * to + (the *
+  form also ate a bare trailing space); move-buffer-to-tab tested (length
+  (window-list)) - always truthy, the delete-window arm was dead (now
+  length= 1: sole window buries, others delete); kill-project-buffers'
+  (featurep 'project) guard made it a silent no-op (now require);
+  run-with-timer "0.3 sec" string -> 0.3.  name-fn rewritten over
+  project.el (projectile dropped), branch/worktree detection still
+  magit; macos gate faithful: installs only (unless (featurep :system
+  'macos)).  tab-bar-history-mode +1 (limit 100) SIDE EFFECT: it arms
+  general's window-undo/redo engine - the advice rides the mode's
+  pre-command hook, and nothing enabled the mode before this port, so
+  SPC w u/r had recorded nothing in the lab until now.  Transient
+  updates on copy: zoxide rows -> zoxide-find, gptel+ -> open-gptel,
+  doom/switch-to-scratch-buffer -> switch-to-scratch-buffer,
+  find-in-doom-dir -> find-in-config-dir, roam template rows call
+  open-journal/vulpea-find/vulpea-backlinks directly instead of
+  general--simulate-keys (orr's "Backlinks" desc was rot - it lands on
+  roam find), projects row rebuilt on project-prompt-project-dir +
+  dired; rows dropped: elfeed (package dropped), notmuch/telega/jira
+  (return with their modules), hnreader/reddigg (disabled forks), "ei"
+  emacs.d dired (doom-emacs-dir IS the config dir here).  Hints
+  cleanup: named self-removing tab-bar-hints-off-h replaces doom.d's
+  anonymous lambda that accumulated on transient-exit-hook and stayed
+  resident forever.  Desktop persistence decided deliberately:
+  desktop-path quarantined to doom-state-dir (doom-compat.el);
+  desktop-save-mode enables on doom-after-init-hook (elpaca-after-init,
+  all packages activated); automatic desktop-read NEVER fires (desktop.el's
+  own after-init hook registers post-init - same effective behavior as
+  doom.d) so restore stays manual (transient "dr" / SPC q l);
+  desktop-dirname preset to the same dir - doom.d rot ground-truthed
+  live: desktop-save t with nil dirname prompted read-directory-name on
+  every real exit and no desktop file was ever written in Doom's state
+  dir (stray desktop-dirname .../state/desktop, no .emacs.desktop
+  anywhere); the auto-save timer stays inert until the first save/read
+  (desktop-owner pid gate).  Modeline follow-up verdict: doom-modeline's
+  workspace-name segment stays OUT of `main' - it does render tab names,
+  but tab-bar-show t keeps them permanently visible in the tab bar line
+  and doom.d's modeline never showed one (note updated in
+  modeline/config.el).  Test-infra lesson pinned: real tabs always carry
+  the explicit-name cons (tab-bar--tab emits it) - rename-dups' in-place
+  setf relies on that; a fixture without the key sees the setf prepend
+  to the lambda-local binding and the mutation vanish.  Keydiff: SPC l
+  closed (:ported, the gated root row went live); SPC p cluster closed -
+  browse-project / browse-in-other-project / find-file-in-other-project
+  implemented plus-free over project.el in bindings/autoload.el
+  (search-other-project precedent), discover-projects dropped
+  (project-remember-projects-under at SPC p a IS discovery), 6
+  projectile-only rows dropped (C/I/R/e/g/s), 8 :improved project.el
+  rows ledgered; SPC q closed - quicksave-session (new, module
+  autoload; also the transient's "ds") at s, restore-desktop-and-tabs
+  at l, built-in restart-emacs (29+) at r, F/S/L dropped (kill-all-
+  buffers + the named-file session pair; single canonical session dir
+  policy), d parked :deferred on the session-switch infra.  73 -> 59
+  open / 70 -> 59 broken / 11 parked / 114 resolved / 0 regressions.
+  Verification: 485 specs (+27, tests/tab-bar/), smoke 163 packages
+  unchanged (0 failed/blocked), probe 26 checks green (config applied,
+  binds incl. SPC l, layouts void-free after force-load, live
+  rename-dups + hint rendering, desktop wiring + quarantine, no
+  +tab-bar residue, no *Warnings*).
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -949,8 +1030,9 @@ Cluster checklist (open counts as of 2026-07 pilot; =bb keydiff= is truth):
   renamed toggle-profiler); h p d broken fix (stock describe-package);
   stock d/P/C-h kept over Doom's rebinds, woman over man-or-woman; the
   3 lab-only rows verdicted or structural - off the diff table
-- [ ] SPC p (17) - project; T/t closed by the dired port, the rest is
-  workspace/projectile leftovers waiting on tab-bar
+- [X] SPC p :: closed with the tab-bar port - browse/find-file-in-other-
+  project trio implemented over project.el, discover-projects + 6
+  projectile-only rows dropped, 8 project.el rows :improved
 - [ ] normal g (19)
 - [ ] SPC x (18) - gptel tree closed with the ai port; the 10 left are
   writing-module material (SPC x l / x t trees etc.)
@@ -973,13 +1055,15 @@ Cluster checklist (open counts as of 2026-07 pilot; =bb keydiff= is truth):
 - [ ] SPC f (6), SPC n (6), normal z (3)
 - [X] SPC T :: closed with the colors module port - 2 verdicts (the
   renamed cycle-themes pair)
-- [ ] singletons: SPC a i l q (" and ' closed with the shell module port)
+- [ ] singletons: SPC i (a closed with the embark port; l + q closed
+  with the tab-bar port - q d parked on the session switch; " and '
+  closed with the shell module port)
 ** TODO Retire key-audit tooling (last cluster closed)
 Fold ledger verdicts into the Decisions log; delete scripts/dump-bindings.el,
 scripts/keydiff.clj, key-decisions.edn (+ its .gitignore whitelist line),
 the keydump/keydiff bb tasks, and tests/scripts/.
-Proximity (post search): open clusters left - SPC b/c/f/n/o/p/x, the
-g/z/[/] trees, and the singletons row (SPC " ' now closed).
+Proximity (post tab-bar): open clusters left - SPC b/c/f/n/o/x, the
+g/z/[/] trees, and SPC i (the last singleton).
 
 * Testing & CI
 - =bb test= - buttercup suites from tests/ (buttercup auto-installed into
@@ -1079,9 +1163,9 @@ committed to:
 - module flags (=+icons=, =+everywhere=, ...) are modulep! syntax - keep
 ** TODO Extend file quarantine as modules port
 New state-writing packages get their path vars redirected in
-doom-compat.el quarantine section (lsp session, dap, elfeed db, telega,
-desktop-path, ...). Done so far: org-roam/vulpea dbs, treemacs persist
-pair.
+doom-compat.el quarantine section (lsp session, dap, telega, ...).
+Done so far: org-roam/vulpea dbs, treemacs persist pair, desktop-path
+(tab-bar port; elfeed db moot - package dropped).
 
 * Infra debt
 ** TODO Session switch (daily driver -> lab)
@@ -1218,9 +1302,13 @@ relocated home. SPC * / SPC s tree / SPC f d live, SPC s cluster
 closed. Rode along: process-external-url rewritten over
 embark-url-config, the consult-customize *Warnings* pair vendored into
 bindings/autoload.el, embark-project-search rebind declared final.
-** TODO tab-bar
-No packages; autoload.el 283L of workspace logic + desktop persistence
-(doom-profile-state-dir -> doom-state-dir ok). Unlocks SPC l transient.
+** DONE tab-bar
+Ported (see Decisions log). Registry-only, everything in the lazy
+autoload/. Built-in collisions renamed (tab-bar-rename/-duplicate,
+tab-move-left/right), the dead hook-defvar pair and switch-to-tab-number
+dropped, rename-dups' first-group-only bug + the desktop exit-save
+prompt rot fixed. SPC l live; SPC p + SPC q closed; window-undo/redo
+finally record (tab-bar-history-mode was never on before).
 ** DONE modeline
 Ported (see Decisions log). `main' redefined once over doom.d's
 per-window-change buffer-local stamping; persp-name and the dead sets

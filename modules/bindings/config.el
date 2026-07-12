@@ -709,16 +709,17 @@
       ;;; <leader> p --- project
       (:prefix-map ("p" . "project")
        :desc "Browse project"               "." #'browse-project
-       :desc "Browse other project"         ">" #'doom/browse-in-other-project
+       :desc "Browse other project"         ">" #'browse-in-other-project
        :desc "Run cmd in project root"      "!" #'project-shell-command
        :desc "Async cmd in project root"    "&" #'project-async-shell-command
+       ;; discovery IS this command; Doom's discover-projects row (SPC p D)
+       ;; only wrapped it with a preset search path
        :desc "Add new project"              "a" #'project-remember-projects-under
        :desc "Switch to project buffer"     "b" #'project-switch-to-buffer
        :desc "Compile in project"           "c" #'project-compile
        :desc "Remove known project"         "d" #'project-forget-project
-       :desc "Discover projects in folder"  "D" #'discover-projects
        :desc "Find file in project"         "f" #'project-find-file
-       :desc "Find file in other project"   "F" #'doom/find-file-in-other-project
+       :desc "Find file in other project"   "F" #'find-file-in-other-project
        :desc "Kill project buffers"         "k" #'project-kill-buffers
        :desc "Find sibling file"            "o" #'find-sibling-file
        :desc "Switch project"               "p" #'project-switch-project
@@ -727,18 +728,18 @@
        :desc "Switch to scratch buffer"     "X" #'switch-to-project-scratch-buffer)
 
       ;;; <leader> q --- quit/session
+      ;; sessions ride desktop.el (tab-bar module); doom's named-file
+      ;; save/load pair and kill-all-buffers dropped - single canonical
+      ;; session dir policy (desktop-path)
       (:prefix-map ("q" . "quit/session")
        :desc "Restart emacs server"         "d" #'restart-server
        :desc "Delete frame"                 "f" #'delete-frame
-       :desc "Clear current frame"          "F" #'doom/kill-all-buffers
        :desc "Kill Emacs (and daemon)"      "K" #'save-buffers-kill-emacs
        :desc "Quit Emacs"                   "q" #'save-buffers-kill-terminal
        :desc "Quit Emacs without saving"    "Q" #'evil-quit-all-with-error-code
-       :desc "Quick save current session"   "s" #'doom/quicksave-session
-       :desc "Restore last session"         "l" #'doom/quickload-session
-       :desc "Save session to file"         "S" #'doom/save-session
-       :desc "Restore session from file"    "L" #'doom/load-session
-       :desc "Restart Emacs"                "r" #'doom/restart)
+       :desc "Quick save current session"   "s" #'quicksave-session
+       :desc "Restore last session"         "l" #'restore-desktop-and-tabs
+       :desc "Restart Emacs"                "r" #'restart-emacs)
 
       ;;; <leader> r --- remote
       (:when (modulep! :tools upload)

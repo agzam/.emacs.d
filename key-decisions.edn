@@ -186,4 +186,33 @@
  ["leader" "SPC s t"] {:status :deferred :note "lookup-dictionary-definition - :tools lookup decision"}
  ["leader" "SPC s T"] {:status :deferred :note "lookup-synonyms - :tools lookup decision"}
  ["leader" "SPC s l"] {:status :deferred :note "link-hint-open-link - link-hint package unported"}
- ["leader" "SPC s u"] {:status :deferred :note "vundo - undo infra TODO (undo-fu-session, vundo)"}}
+ ["leader" "SPC s u"] {:status :deferred :note "vundo - undo infra TODO (undo-fu-session, vundo)"}
+
+ ;; tab-bar module port (2026-07) - closes SPC l, the SPC p cluster and
+ ;; the SPC q session rows (projectile leftovers adjudicated on project.el)
+ ["leader" "SPC l"] {:status :ported :note "tab-bar-transient - tab-bar module; root-config gated row went live with the registry flip"}
+ ["leader" "SPC p ."] {:status :improved :note "browse-project - renamed +default/browse-project over doom-project-root (bindings autoload)"}
+ ["leader" "SPC p >"] {:status :improved :note "browse-in-other-project - renamed doom/ port on project-prompt-project-dir (bindings autoload)"}
+ ["leader" "SPC p F"] {:status :improved :note "find-file-in-other-project - renamed doom/ port on project-prompt-project-dir + project-find-file (bindings autoload)"}
+ ["leader" "SPC p D"] {:status :dropped :note "discover-projects wrapper - project-remember-projects-under (SPC p a) IS the discovery command"}
+ ["leader" "SPC p C"] {:status :dropped :note "projectile-repeat-last-command - projectile dropped, no project.el counterpart"}
+ ["leader" "SPC p I"] {:status :dropped :note "projectile-invalidate-cache - project.el keeps no such cache"}
+ ["leader" "SPC p R"] {:status :dropped :note "projectile-run-project - never configured a run command; project-compile covers"}
+ ["leader" "SPC p e"] {:status :dropped :note "projectile-edit-dir-locals - find-file from SPC p . covers the rare edit"}
+ ["leader" "SPC p g"] {:status :dropped :note "projectile-configure-project - see SPC p R"}
+ ["leader" "SPC p s"] {:status :dropped :note "projectile-save-project-buffers - save-some-buffers (C-x s) covers"}
+ ["leader" "SPC p a"] {:status :improved :note "project-remember-projects-under over projectile-add-known-project"}
+ ["leader" "SPC p b"] {:status :improved :note "consult-project-buffer over consult-projectile (root layer)"}
+ ["leader" "SPC p c"] {:status :improved :note "project-compile over projectile-compile-project"}
+ ["leader" "SPC p d"] {:status :improved :note "project-find-dir over projectile-find-dir (root layer)"}
+ ["leader" "SPC p f"] {:status :improved :note "project-find-file over consult-projectile-find-file"}
+ ["leader" "SPC p i"] {:status :improved :note "project-list-buffers over projectile-ibuffer (root layer)"}
+ ["leader" "SPC p p"] {:status :improved :note "project-switch-project over projectile-switch-project"}
+ ["leader" "SPC p r"] {:status :improved :note "consult-project-buffer over projectile-recentf - its sources include project recent files"}
+ ["leader" "SPC q s"] {:status :improved :note "quicksave-session - desktop-save into the canonical state dir (tab-bar module), replaces doom/quicksave-session"}
+ ["leader" "SPC q l"] {:status :improved :note "restore-desktop-and-tabs replaces doom/quickload-session; same command as the SPC l transient's dr"}
+ ["leader" "SPC q r"] {:status :improved :note "built-in restart-emacs (29+) over doom/restart"}
+ ["leader" "SPC q F"] {:status :dropped :note "doom/kill-all-buffers - not part of the desktop story; scratch + window-cleanup cover fresh starts"}
+ ["leader" "SPC q S"] {:status :dropped :note "doom/save-session named-file variant - single canonical session dir policy (desktop-path)"}
+ ["leader" "SPC q L"] {:status :dropped :note "doom/load-session named-file variant - see SPC q S"}
+ ["leader" "SPC q d"] {:status :deferred :note "restart-server - lab runs no emacs server yet (Infra debt: session switch)"}}

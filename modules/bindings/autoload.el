@@ -26,6 +26,27 @@
   (search-in-dir (project-prompt-project-dir)))
 
 ;;;###autoload
+(defun browse-project ()
+  "Find a file from the project root (dired reachable, like find-file)."
+  (interactive)
+  (let ((default-directory (or (doom-project-root) default-directory)))
+    (call-interactively #'find-file)))
+
+;;;###autoload
+(defun browse-in-other-project ()
+  "Find a file from another known project's root."
+  (interactive)
+  (let ((default-directory (project-prompt-project-dir)))
+    (call-interactively #'find-file)))
+
+;;;###autoload
+(defun find-file-in-other-project ()
+  "Run `project-find-file' in another known project."
+  (interactive)
+  (let ((default-directory (project-prompt-project-dir)))
+    (call-interactively #'project-find-file)))
+
+;;;###autoload
 (defun search-cwd ()
   "Search this directory recursively."
   (interactive)

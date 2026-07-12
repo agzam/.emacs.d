@@ -74,7 +74,10 @@
       ;; slacko's extracted-token cache defaults there too (secret-bearing -
       ;; ai-module token-cache precedent)
       tldr-directory-path (concat doom-cache-dir "tldr/")
-      slacko-creds-gpg-file (concat doom-cache-dir "slacko-creds.gpg"))
+      slacko-creds-gpg-file (concat doom-cache-dir "slacko-creds.gpg")
+      ;; tab-bar module: desktop files live with the rest of the session
+      ;; state (the module presets desktop-dirname to match)
+      desktop-path (list doom-state-dir))
 
 (defvar doom-disabled-packages nil)
 
