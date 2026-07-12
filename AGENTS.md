@@ -39,8 +39,10 @@ name) into code or prose.
   in the quarantine section of `lisp/doom-compat.el`.
 - `.gitignore` is a whitelist: new top-level tracked entries need a `!/name`
   line; state files can never sneak in.
-- Sanctioned exception: `custom.el` stays in the config dir (edited in place
-  by choice, explicitly git-ignored). Everything else follows the rule.
+- Sanctioned exceptions: `custom.el` stays in the config dir (edited in
+  place by choice, explicitly git-ignored); `modules/writing/abbrev_defs`
+  is tracked AND written in place by abbrev (`C-x a i g` curates it).
+  Everything else follows the rule.
 
 ## Module layout
 

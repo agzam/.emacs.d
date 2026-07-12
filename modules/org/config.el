@@ -35,8 +35,10 @@
    org-log-states-order-reversed nil
    org-cycle-emulate-tab nil
    org-edit-src-content-indentation 0
-   org-fontify-quote-and-verse-blocks t
-   org-image-actual-width '(0.7))
+   org-fontify-quote-and-verse-blocks t)
+  ;; plain setq: org 10's defcustom type rejects fractional widths that
+  ;; org-display-inline-image--width still supports
+  (setq org-image-actual-width '(0.7))
 
   (add-to-list
    'auto-mode-alist
@@ -410,7 +412,6 @@
                       (= (vulpea-note-level note) 0)))))
   (map! :map org-mode-map
         :i "[[" #'vulpea-insert
-        ;; void until the writing module ports insert-bracket-pair
         :i "[ SPC" #'insert-bracket-pair)
 
   (vulpea-db-autosync-mode +1)

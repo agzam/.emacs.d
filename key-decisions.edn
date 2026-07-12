@@ -165,4 +165,8 @@
  ["leader" "SPC b a"] {:status :ported :note "browser-tab-act - its embark-ephemeral-act call un-voided by the embark module port"}
 
  ;; embark module port (2026-07) - closes the SPC a singleton
- ["leader" "SPC a"] {:status :ported :note "embark-act - root-config leader row gated on :custom embark, bound at startup (doom kept it inside embark's :config; Actions which-key label kept)"}}
+ ["leader" "SPC a"] {:status :ported :note "embark-act - root-config leader row gated on :custom embark, bound at startup (doom kept it inside embark's :config; Actions which-key label kept)"}
+
+ ;; writing module port (2026-07) - closes the SPC x l / SPC x t trees
+ ["leader" "SPC x t s"] {:status :improved :note "google-translate-es->en - de-plussed rename of doom.d's +google-translate-es->en, writing module"}
+ ["leader" "SPC x t S"] {:status :improved :note "google-translate-en->es - de-plussed rename of doom.d's +google-translate-en->es, writing module"}}

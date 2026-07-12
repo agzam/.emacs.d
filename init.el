@@ -69,7 +69,13 @@
     (browser-hist . "~/GitHub/agzam/browser-hist.el")
     (consult-hn . "~/GitHub/agzam/consult-hn")
     (reddigg . "~/GitHub/agzam/emacs-reddigg")
-    (navegosa . "~/GitHub/agzam/navegosa.el"))
+    (navegosa . "~/GitHub/agzam/navegosa.el")
+    (google-translate . "~/GitHub/agzam/google-translate")
+    (occult . "~/GitHub/agzam/occult.el")
+    (prisma . "~/GitHub/agzam/prisma.el")
+    (wiktionary-bro . "~/GitHub/agzam/wiktionary-bro.el")
+    ;; the hammerspoon config IS the spacehammer checkout (doom.d symlinked it)
+    (spacehammer . "~/.hammerspoon"))
   "Alist of own packages -> local checkout preferred over the GitHub recipe.")
 
 (defun local-checkout-recipe (recipe)
@@ -108,7 +114,8 @@ build-in-place to clone."
          ;; :custom entries appear here as their modules get ported.
          (:custom git) (:custom general) (:custom completion) (:custom embark) (:custom colors)
          (:custom modeline) (:custom elisp) (:custom dired) (:custom ai)
-         (:custom web-browsing) (:custom tree-sitter) (:custom org) (:custom shell))
+         (:custom web-browsing) (:custom tree-sitter) (:custom org) (:custom shell)
+         (:custom writing))
        (when (eq system-type 'darwin) '((:os macos)))))
 
 ;; Leader prefixes are read at bind time; set before doom-keybinds loads so
@@ -140,7 +147,7 @@ build-in-place to clone."
 ;; Function files load first (sorted - raw directory order differs between
 ;; Mac and Linux), then config.el; config.el may `load!' extra +files.
 ;; The module list itself is explicit, in this exact order.
-(defvar active-modules '("evil" "bindings" "git" "general" "completion" "embark" "colors" "modeline" "elisp" "dired" "ai" "web-browsing" "tree-sitter" "org" "shell")
+(defvar active-modules '("evil" "bindings" "git" "general" "completion" "embark" "colors" "modeline" "elisp" "dired" "ai" "web-browsing" "tree-sitter" "org" "shell" "writing")
   "Modules under modules/, loaded in this exact order.
 bindings (Doom's :config default) precedes the :custom ports, like in doom!.")
 

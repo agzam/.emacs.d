@@ -170,25 +170,3 @@
                (lambda () (interactive) (setq agent-called t))))
       (open-gptel)
       (expect agent-called :to-be t))))
-
-(describe "insert-comma"
-  (it "backs over preceding spaces and re-attaches the comma"
-    (with-temp-buffer
-      (insert "foo bar")
-      (goto-char 5)                     ; right before "bar"
-      (insert-comma)
-      (expect (buffer-string) :to-equal "foo, bar")))
-
-  (it "inserts a bare comma before an existing space"
-    (with-temp-buffer
-      (insert "foo bar")
-      (goto-char 4)                     ; right after "foo"
-      (insert-comma)
-      (expect (buffer-string) :to-equal "foo, bar")))
-
-  (it "inserts comma-space mid-word"
-    (with-temp-buffer
-      (insert "foobar")
-      (goto-char 4)
-      (insert-comma)
-      (expect (buffer-string) :to-equal "foo, bar"))))

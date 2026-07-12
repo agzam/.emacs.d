@@ -56,7 +56,7 @@
 (defun reddigg-hnreader-show-all-h ()
   "Expands all the comments."
   (goto-char (point-min))
-  ;; jinx ports with the writing module
+  ;; fboundp keeps web-browsing decoupled from the writing module's jinx
   (when (fboundp 'jinx-mode)
     (jinx-mode -1))
   (setq-local org-link-elisp-confirm-function nil)

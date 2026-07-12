@@ -445,23 +445,3 @@ gptel conversations."
           (concat consult-ripgrep-args " --sortr=modified"))
          (consult-async-min-input 0))  ; Show results immediately
     (consult-ripgrep dir initial)))
-
-;; Pulled ahead from doom.d's writing module; relocates when writing ports.
-;;;###autoload
-(defun insert-comma ()
-  "Cleverly insert comma."
-  (interactive)
-  (cond
-   ;; I don't want char-equal to fail when (char-before) returns nil
-   ;; so we use 'default char' #x1F436 which represents 🐶
-   ((char-equal ?\s (or (char-before) #x1F436))
-    (progn
-      ;; find the previous word boundary while ignoring spaces
-      (skip-syntax-backward " ")
-      (insert ",")
-      (forward-char)))
-   ((char-equal ?\s (or (char-after) #x1F436))
-    (progn
-      (insert ",")
-      (forward-char)))
-   (t (insert ", "))))

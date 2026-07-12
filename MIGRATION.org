@@ -15,9 +15,11 @@ module layout).
 - modules :: evil (lean set), bindings (Doom tree, company/ivy/helm excised,
   SPC p on project.el), git (magit/forge stack, local-dev recipe hook),
   general (incl. smartparens base + persistent-scratch-as-*scratch*),
-  completion, colors (circadian stack), modeline (doom-modeline),
+  completion, embark, colors (circadian stack), modeline (doom-modeline),
   elisp (eval/edebug/profiler + let-plist/evilify-edebug folded in),
-  dired (treemacs suite), org (core slice: roam/vulpea/evil-org)
+  dired (treemacs suite), ai (gptel/eca/mcp), web-browsing,
+  tree-sitter, org (core slice: roam/vulpea/evil-org), shell,
+  writing (jinx/translate/dictionaries/prisma)
 - user layer :: config.el (leader tree, globals), lisp/functions.el
   incl. reload-config (SPC h r r; doom/reload analogue - re-runs
   defaults/modules/config in place, elpaca picks up new packages; restart
@@ -743,6 +745,73 @@ module layout).
   stray minibuffer R prefix); *Warnings* on consult load shows
   pre-existing consult-customize noise for two unported search fns
   (search-module scope).
+- [2026-07] writing module ported (jinx, sdcv, mw-thesaurus, define-it,
+  separedit, youtube-sub-extractor, google-translate fork
+  :branch improvements + google-translate-posframe riding its build
+  (:ensure nil, posframe is a soft require - no build-order hazard),
+  occult, prisma, wiktionary-bro, spacehammer with :files ("*.el") -
+  installed on every OS for smoke determinism where doom.d gated darwin;
+  only Hammerspoon ever invokes it).  local-dev-packages +5:
+  google-translate/occult/prisma (existing checkouts, clean + pushed),
+  wiktionary-bro extracted, spacehammer -> ~/.hammerspoon (see Local
+  :repo packages).  abbrev_defs asset tracked in-module and written in
+  place by abbrev - sanctioned exception #2, AGENTS.md updated (user
+  verdict).  Deviations: google-translate deferred - doom.d demand-loaded
+  it at startup via :init require; the module autoload file requires it
+  instead (its transient suffixes read package defcustoms), and loading
+  it chains google-translate-posframe via :after, so the transient's
+  posframe-mode suffix resolves by the time the layout renders.  jinx's
+  after! vertico-multiform became after! vertico + explicit require +
+  enable: ground-truthed (live eval + rg over both trees) that this
+  writing block is the ONLY multiform enabler config-wide - in the lab
+  nothing else ever loads the extension, so the doom.d shape would never
+  fire.  number-to-words npm install quarantined to
+  doom-cache-dir/number-to-words/ (doom.d ran a bare npm install in
+  whatever cwd was current - that is how autoload/node_modules got
+  there).  doom.d rot found: prisma's :after (markdown org) gate never
+  fired - no `markdown' feature exists (live featurep nil; prisma only
+  ever loaded through paste-convert-kill's call-time require) - now an
+  install-only stub.  Renames (plus-ban/shadowing):
+  jinx-autocorrect-last, google-translate-es->en / en->es (embark + root
+  config expected these since their ports),
+  google-translate-buffer-listen-source / -translation (bare de-plus
+  collides with the package's google-translate-listen-translation),
+  markdown-insert-stored-link (markdown-insert-link is markdown-mode
+  API), define-it--find-buffer -> define-it-pop-to-buffer-a (advice doing
+  package-namespace squatting), jinx-mode-off -> jinx-mode-off-h with
+  (&rest _) - serves both the wiktionary-bro hook and
+  github-topics-prs-buffer-hook (the jinx hook the git port deferred
+  here, now registered), spacehammer--hs-eval-fennel ->
+  hammerspoon-eval-fennel, spacehammer--frame-facing-direction ->
+  frame-facing-direction; the wiktionary hook now points at lab's
+  eww-open-in-other-window.  insert-comma relocated home from ai
+  (autoload + specs; ai loaddefs regen on mtime).  Drops
+  (git-resurrectable): after! writegood-mode (only un-did :checkers
+  grammar's hook - package never installed here), after! grip-mode
+  (parks with :lang markdown), lsp-marksman require (parks with lsp),
+  menu-bar-item-set-clock-or-pomodoro (org-pomodoro long-tail owns its
+  consumer hook), translate-at-point-smart (pdf module sole consumer).
+  harper-ls after! lsp-mode block ported INERT (registers when lsp
+  lands) minus its stray (setq c-basic-offset 4) tail.  Latent org bug
+  surfaced by the probe requiring org: setopt org-image-actual-width
+  '(0.7) trips org 10.0-pre's stricter defcustom type while
+  org-display-inline-image--width still honors fractions - plain setq
+  now.  Test-infra lesson pinned: defun inside describe cannot see
+  buttercup's lexical :var slots - recorder fns must be closures built
+  in before-each.  Verification: 439 specs (+37: six tests/writing/
+  suites; insert-comma's 3 moved from tests/ai/), smoke 143 -> 160
+  packages 0 failed/blocked (keep-set + popup/showtip/pos-tip and
+  friends), probe green (boot deferral incl. post-probe re-check, jinx
+  on doom-first-buffer + mode-map binds, multiform activation + jinx
+  grid category, yank/paste + occult + paragraph advice registered,
+  github-topics hook, abbrev wiring incl. live "dont"->"don't"
+  expansion, tkk pin + posframe chain + void-free transient layout
+  walk, markdown/org insert-state glue (org "[ SPC" rides vulpea,
+  doom.d-parity), separedit startup binds, zero rename residue, no new
+  *Warnings*).  Keydiff 88 -> 77 open / 83 broken / 84 resolved /
+  0 regressions / 0 lab-only - SPC x cluster off the table (l/t trees
+  exact-matched; es->en / en->es rows :improved).  Unblocked: clojure
+  (spacehammer-monroe), chat (jinx).
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -1025,14 +1094,19 @@ configs still use the pre-rename +names.
 CAVEAT: hnreader + reddigg use-package blocks are commented out - the
 forks are currently broken (their installs also hung CI smoke);
 re-enable in config.el once the packages are fixed.
-** TODO writing
-jinx, sdcv, mw-thesaurus, google-translate (own fork+branch), define-it,
-separedit, youtube-sub-extractor, occult. LOCAL-REPO: spacehammer (symlink
-to ~/.hammerspoon), wiktionary-bro, prisma.el. abbrev_defs asset.
-config 385L, autoload ~715L. Depends on web-browsing; feeds clojure+chat.
-Unlocks SPC x l / SPC x t trees. Also un-voids insert-dash +
-insert-bracket-pair (org "[ SPC" / org+markdown "-" insert bindings wait
-on them since the org port).
+** DONE writing
+Ported (see Decisions log).  jinx, sdcv, mw-thesaurus, google-translate
+(fork, :branch improvements, posframe UI rides the build), define-it,
+separedit, youtube-sub-extractor, occult, prisma (install-only),
+wiktionary-bro (extracted to ~/GitHub/agzam), spacehammer (local-dev via
+~/.hammerspoon).  abbrev_defs tracked in-module and written in place
+(sanctioned exception #2).  SPC x l / SPC x t trees closed; insert-dash +
+insert-bracket-pair un-voided (org "[ SPC" still rides vulpea's config,
+doom.d-parity).  Unblocked: clojure (spacehammer-monroe), chat (jinx).
+Parked with their modules: grip block (:lang markdown), lsp-marksman +
+harper activation (lsp; the after! lsp-mode harper registration ported
+inert), menu-bar clock/pomodoro fn (org long-tail),
+translate-at-point-smart (pdf).
 ** DONE embark
 Ported (see Decisions log). embark + embark-consult (package-only
 wiring); SPC a / [remap describe-bindings] / minibuffer export rows
@@ -1188,9 +1262,17 @@ Gotchas learned live:
   already in sync with GitHub at extraction). browser-hist.el + consult-hn
   followed at the web-browsing port - fresh clones (the submodules held
   nothing unpushed; doom.d's browser-hist was 2 behind origin/main).
+  wiktionary-bro.el followed at the writing port (fresh clone, one ahead
+  of the submodule - an upstream PR merged since; nothing unpushed).
   Remaining doom.d-embedded locals (let-plist, evilify-edebug, gptel-*,
   ...) get the same treatment when their modules port; the doom.d
   submodules dissolve when the cord is cut.
+- A checkout need not live under ~/GitHub/agzam: spacehammer's local-dev
+  entry points at ~/.hammerspoon - the hammerspoon config IS the package
+  checkout (doom.d symlinked spacehammer.el out of it instead).
+  google-translate/occult/prisma checkouts already existed there, all
+  clean and pushed at the writing port (google-translate's improvements
+  branch carries google-translate-posframe.el; master doesn't).
 
 Settled: general's bare let-plist uses (autoload/url.el x4, autoload/misc.el)
 resolve at call time via the elisp module's loaddefs macro-autoload. The git
@@ -1199,13 +1281,16 @@ module had rewritten its own uses with plist-get before that existed.
 * Assets to relocate
 - snippets: currently read from ~/.doom.d/snippets (62 snippets); localize
   to lab when cutting the cord
-- org module mp3s, writing abbrev_defs; elisp templates/ and
-  web-browsing readable/ relocated with their modules (2026-07;
-  readable's npm install/node_modules quarantined to the cache dir)
+- org module mp3s; elisp templates/, web-browsing readable/ and writing
+  abbrev_defs relocated with their modules (2026-07; readable's npm
+  install/node_modules quarantined to the cache dir, abbrev_defs tracked
+  AND written in place - sanctioned exception #2 in AGENTS.md; writing's
+  number-to-words npm workdir quarantined to the cache dir too)
 
 * Cross-module port ordering constraints
-- web-browsing before: writing, embark, search
-- writing before: clojure (spacehammer-monroe), chat (jinx)
+- web-browsing before: search (writing + embark landed 2026-07)
+- writing landed (2026-07): clojure (spacehammer-monroe) and chat (jinx)
+  unblocked
 - org before: embark (vulpea actions)
 - lookup decision before: golang, lua, clojure, consult-dash bindings
 - smartparens before: sexp-transient, general sp-pairs activate

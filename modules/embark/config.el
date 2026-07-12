@@ -50,7 +50,6 @@
                      ("c m" . link-plain->link-markdown)
                      ("c o" . link-plain->link-org-mode)
                      ("RET" . eww-open-in-other-window)))
-      ;; youtube-sub-extractor waits on the writing module
       (yt-video
        :pattern "\\(youtube\\.com/watch\\|youtu\\.be/\\)"
        :actions (("b b" . mpv-open)
