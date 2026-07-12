@@ -45,6 +45,23 @@
         (let ((default-directory test-sandbox-dir))
           (search-project))
         (expect got :to-equal (list test-sandbox-dir nil)))))
+  (it "search-other-project searches the prompted project"
+    (let (got)
+      (cl-letf (((symbol-function 'consult-ripgrep)
+                 (lambda (dir &optional initial) (setq got (list dir initial))))
+                ((symbol-function 'project-prompt-project-dir)
+                 (lambda () "/tmp/other-project/")))
+        (search-other-project)
+        (expect got :to-equal '("/tmp/other-project/" nil)))))
+  (it "search-notes-for-symbol-at-point searches org-directory for the symbol"
+    (let (got)
+      (cl-letf (((symbol-function 'consult-ripgrep)
+                 (lambda (dir &optional initial) (setq got (list dir initial)))))
+        (with-temp-buffer
+          (insert "needle")
+          (goto-char (point-min))
+          (call-interactively #'search-notes-for-symbol-at-point))
+        (expect got :to-equal (list org-directory "needle")))))
   (it "search-buffer prefills the active region"
     (let (got)
       (cl-letf (((symbol-function 'consult-line)

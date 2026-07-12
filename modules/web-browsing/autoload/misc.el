@@ -3,31 +3,26 @@
 
 ;;;###autoload
 (defun process-external-url (&optional url)
-  "To be called when an external process sends a URL to Emacs."
+  "Open URL with the handler `embark-url-config' prescribes.
+Single source of truth with embark: first matching url-type's RET
+action, else the shared (nil-type) RET.  Plain ticket references
+\(non-URLs matching `bug-reference-bug-regexp') route through forge."
   (interactive (list (read-string "Enter URL: ")))
-  (pcase url
-    ((pred (string-match-p bug-reference-bug-regexp))
-     (cl-letf (((symbol-function 'browse-url) #'forge-visit-topic-via-url))
-       (call-interactively #'bug-reference-push-button)))
-
-    ((pred (string-match-p "https\\:\\/\\/news.ycombinator.com\\/.*"))
-     (hnreader-comment url))
-
-    ((pred (string-match-p "https\\:\\/\\/www.reddit.com\\/.*"))
-     (reddigg-view-comments url))
-
-    ((pred (string-match-p "https\\:\\/\\/www.youtube.com\\/watch.*"))
-     (progn
-       (message "opening %s" url)
-       (mpv-transient)
-       (mpv-play-url url)))
-
-    ((pred (and (string-match-p "https\\:\\/\\/github.com.*" url)
-                (modulep! :custom git)))
-     (forge-visit-topic-via-url url))
-
-    (_
-     (eww-open-in-other-window url))))
+  (require 'embark) ; builds `embark-url-patterns' + type keymaps
+  (if (string-match-p bug-reference-bug-regexp url)
+      (cl-letf (((symbol-function 'browse-url) #'forge-visit-topic-via-url))
+        (call-interactively #'bug-reference-push-button))
+    (let* ((type (cl-loop for (type pattern) in embark-url-patterns
+                          when (if (functionp pattern)
+                                   (funcall pattern url)
+                                 (string-match-p pattern url))
+                          return type))
+           (ret-action (lambda (ty)
+                         (cdr (assoc "RET" (plist-get (alist-get ty embark-url-config)
+                                                      :actions)))))
+           (action (or (funcall ret-action type)
+                       (funcall ret-action nil))))
+      (funcall action url))))
 
 ;;;###autoload
 (defun browse-url-externally (url &rest args)

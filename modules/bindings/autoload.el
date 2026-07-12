@@ -20,6 +20,12 @@
   (search-in-dir (or (doom-project-root) default-directory)))
 
 ;;;###autoload
+(defun search-other-project ()
+  "Search a known project with ripgrep."
+  (interactive)
+  (search-in-dir (project-prompt-project-dir)))
+
+;;;###autoload
 (defun search-cwd ()
   "Search this directory recursively."
   (interactive)
@@ -38,6 +44,13 @@
    (list (or (thing-at-point 'symbol t) "")
          (or (doom-project-root) default-directory)))
   (search-in-dir dir symbol))
+
+;;;###autoload
+(defun search-notes-for-symbol-at-point (symbol)
+  "Search org notes for SYMBOL at point."
+  (interactive (list (or (thing-at-point 'symbol t) "")))
+  (require 'org)
+  (search-in-dir org-directory symbol))
 
 ;;;###autoload
 (defun search-buffer ()

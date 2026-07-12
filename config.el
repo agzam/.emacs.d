@@ -577,11 +577,6 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
 (use-package helpful
   :defer t)
 
-;; SPC h h; doom.d home is the search module - relocate when it ports
-(use-package consult-symbol
-  :ensure (consult-symbol :host github :repo "danielfleischer/consult-symbol")
-  :defer t)
-
 (use-package golden-ratio
   :commands (golden-ratio golden-ratio-mode))
 

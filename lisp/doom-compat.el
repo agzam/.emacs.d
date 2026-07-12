@@ -69,7 +69,12 @@
       gptel-gh-token-file (concat doom-cache-dir "copilot-chat/token")
       gptel-crowdsourced-prompts-file (concat doom-cache-dir "gptel-crowdsourced-prompts.csv")
       eca-server-install-path (concat doom-data-dir "eca/eca")
-      eca-server-version-file-path (concat doom-data-dir "eca/eca-version"))
+      eca-server-version-file-path (concat doom-data-dir "eca/eca-version")
+      ;; search module: tldr pages default under user-emacs-directory;
+      ;; slacko's extracted-token cache defaults there too (secret-bearing -
+      ;; ai-module token-cache precedent)
+      tldr-directory-path (concat doom-cache-dir "tldr/")
+      slacko-creds-gpg-file (concat doom-cache-dir "slacko-creds.gpg"))
 
 (defvar doom-disabled-packages nil)
 

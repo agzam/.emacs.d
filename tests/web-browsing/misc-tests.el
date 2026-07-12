@@ -9,60 +9,63 @@
 
 (load-module-file "modules/web-browsing/autoload/misc.el")
 
+;; valued defvars: mark the embark vars special globally so the suite's
+;; let-binds are dynamic for the module fn (the embark-tests lesson)
+(defvar embark-url-patterns nil)
+(defvar embark-url-config nil)
+
 (describe "process-external-url"
   :var (calls)
 
   (before-each (setq calls nil))
 
-  (it "opens hacker news urls with hnreader"
-    (cl-letf (((symbol-function 'hnreader-comment)
-               (lambda (url) (push (list 'hn url) calls))))
-      (process-external-url "https://news.ycombinator.com/item?id=1"))
-    (expect calls :to-equal '((hn "https://news.ycombinator.com/item?id=1"))))
+  (it "dispatches to the matching url-type's RET action"
+    (with-fake-feature 'embark
+      (let ((embark-url-patterns '((yt-video "youtube\\.com/watch")))
+            (embark-url-config
+             `((nil :actions (("RET" . ,(lambda (url) (push (list 'shared url) calls)))))
+               (yt-video :pattern "youtube\\.com/watch"
+                         :actions (("RET" . ,(lambda (url) (push (list 'mpv url) calls))))))))
+        (process-external-url "https://www.youtube.com/watch?v=abc")))
+    (expect calls :to-equal '((mpv "https://www.youtube.com/watch?v=abc"))))
 
-  (it "opens reddit urls with reddigg"
-    (cl-letf (((symbol-function 'reddigg-view-comments)
-               (lambda (url) (push (list 'reddit url) calls))))
-      (process-external-url "https://www.reddit.com/r/emacs/comments/x/"))
-    (expect calls :to-equal '((reddit "https://www.reddit.com/r/emacs/comments/x/"))))
-
-  (it "plays youtube watch urls via mpv behind its transient"
-    (cl-letf (((symbol-function 'mpv-transient)
-               (lambda () (push '(transient) calls)))
-              ((symbol-function 'mpv-play-url)
-               (lambda (url) (push (list 'play url) calls))))
-      (process-external-url "https://www.youtube.com/watch?v=abc"))
-    (expect (reverse calls)
-            :to-equal '((transient) (play "https://www.youtube.com/watch?v=abc"))))
-
-  (it "opens github urls in forge when the git module is enabled"
-    (let ((doom-modules-enabled '((:custom git))))
-      (cl-letf (((symbol-function 'forge-visit-topic-via-url)
-                 (lambda (url) (push (list 'forge url) calls))))
+  (it "supports function patterns"
+    (with-fake-feature 'embark
+      (let ((embark-url-patterns
+             `((gh-pr ,(lambda (url) (string-match-p "/pull/[0-9]+" url)))))
+            (embark-url-config
+             `((nil :actions (("RET" . ignore)))
+               (gh-pr :actions (("RET" . ,(lambda (url) (push (list 'forge url) calls))))))))
         (process-external-url "https://github.com/org/repo/pull/1")))
     (expect calls :to-equal '((forge "https://github.com/org/repo/pull/1"))))
 
-  (it "falls back to eww for github urls when the git module is off"
-    (let ((doom-modules-enabled '()))
-      (cl-letf (((symbol-function 'eww-open-in-other-window)
-                 (lambda (url &rest _) (push (list 'eww url) calls))))
-        (process-external-url "https://github.com/org/repo/pull/1")))
-    (expect calls :to-equal '((eww "https://github.com/org/repo/pull/1"))))
+  (it "falls back to the shared RET when the matched type has none"
+    ;; github-commit/compare rows declare empty :actions on purpose
+    (with-fake-feature 'embark
+      (let ((embark-url-patterns '((gh-commit "github\\.com/.+/commit/")))
+            (embark-url-config
+             `((nil :actions (("RET" . ,(lambda (url) (push (list 'eww url) calls)))))
+               (gh-commit :actions ()))))
+        (process-external-url "https://github.com/org/repo/commit/abc123")))
+    (expect calls :to-equal '((eww "https://github.com/org/repo/commit/abc123"))))
+
+  (it "falls back to the shared RET when no pattern matches"
+    (with-fake-feature 'embark
+      (let ((embark-url-patterns '((yt-video "youtube\\.com/watch")))
+            (embark-url-config
+             `((nil :actions (("RET" . ,(lambda (url) (push (list 'eww url) calls))))))))
+        (process-external-url "https://example.com/article")))
+    (expect calls :to-equal '((eww "https://example.com/article"))))
 
   (it "pushes bug-reference-style strings through bug-reference"
     ;; pin the regexp: the lab installs an org/repo#N one at runtime
-    (let ((bug-reference-bug-regexp
-           "\\(\\b[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#\\([0-9]+\\)\\)"))
-      (cl-letf (((symbol-function 'bug-reference-push-button)
-                 (lambda () (interactive) (push '(bug-pushed) calls))))
-        (process-external-url "agzam/foo#12")))
-    (expect calls :to-equal '((bug-pushed))))
-
-  (it "falls back to eww for everything else"
-    (cl-letf (((symbol-function 'eww-open-in-other-window)
-               (lambda (url &rest _) (push (list 'eww url) calls))))
-      (process-external-url "https://example.com/article"))
-    (expect calls :to-equal '((eww "https://example.com/article")))))
+    (with-fake-feature 'embark
+      (let ((bug-reference-bug-regexp
+             "\\(\\b[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#\\([0-9]+\\)\\)"))
+        (cl-letf (((symbol-function 'bug-reference-push-button)
+                   (lambda () (interactive) (push '(bug-pushed) calls))))
+          (process-external-url "agzam/foo#12"))))
+    (expect calls :to-equal '((bug-pushed)))))
 
 (describe "browse-url-externally"
   (it "forces the default external browser regardless of handler setup"

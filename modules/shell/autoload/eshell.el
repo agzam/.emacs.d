@@ -61,33 +61,10 @@
   (dolist (f files)
     (eshell-print (eshell-file-contents f))))
 
-;; Pulled ahead from doom.d's search module; relocates when search ports.
-;;;###autoload
-(defun zoxide-find (&optional query)
-  "Use zoxide to open a directory with dired."
-  (interactive "P")
-  (if (not (executable-find "zoxide"))
-      (error "zoxide executable cannot be found")
-    (require 'consult)
-    (let* ((items (thread-last
-                    (or query "")
-                    (format "zoxide query --list '%s'")
-                    shell-command-to-string
-                    ((lambda (s) (split-string s "\n")))
-                    (seq-remove #'string-blank-p)))
-           (path (or (and (length= items 1) (car-safe items))
-                     (consult--read
-                      items
-                      :prompt "Choose: "
-                      :sort nil
-                      :initial query))))
-      (if (eq major-mode 'eshell-mode)
-          path
-        (find-file path)))))
-
 ;;;###autoload
 (defun eshell/z (&optional regexp)
   "Navigate to a previously visited directory in eshell."
+  ;; zoxide-find lives in the search module (returns a path in eshell)
   (eshell/cd (zoxide-find regexp)))
 
 ;; From https://protesilaos.com/dotemacs

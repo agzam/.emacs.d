@@ -169,4 +169,21 @@
 
  ;; writing module port (2026-07) - closes the SPC x l / SPC x t trees
  ["leader" "SPC x t s"] {:status :improved :note "google-translate-es->en - de-plussed rename of doom.d's +google-translate-es->en, writing module"}
- ["leader" "SPC x t S"] {:status :improved :note "google-translate-en->es - de-plussed rename of doom.d's +google-translate-en->es, writing module"}}
+ ["leader" "SPC x t S"] {:status :improved :note "google-translate-en->es - de-plussed rename of doom.d's +google-translate-en->es, writing module"}
+
+ ;; search module port (2026-07) - closes the SPC s cluster
+ ;; (SPC * resolved by exact match: search-in-project both sides)
+ ["leader" "SPC s g"] {:status :improved :note "search-github-with-lang - de-plussed rename of doom.d's +search-github-with-lang, search module"}
+ ["leader" "SPC s p"] {:status :improved :note "search-project - renamed +default/search-project (bindings autoload, consult-based)"}
+ ["leader" "SPC s D"] {:status :improved :note "search-other-cwd - renamed +default/search-other-cwd (bindings autoload)"}
+ ["leader" "SPC s P"] {:status :improved :note "search-other-project - +default/search-other-project rebuilt on project-prompt-project-dir (bindings autoload; also clears its consult-customize warning)"}
+ ["leader" "SPC n *"] {:status :improved :note "search-notes-for-symbol-at-point - renamed +default/search-notes-for-symbol-at-point (bindings autoload; clears its consult-customize warning)"}
+ ["leader" "SPC f d"] {:status :improved :note "zoxide-find - de-plussed rename of doom.d's +zoxide-find; relocated home shell -> search module"}
+ ["leader" "SPC s o"] {:status :deferred :note "lookup-online - :tools lookup decision"}
+ ["leader" "SPC s O"] {:status :deferred :note "lookup-online-select - :tools lookup decision"}
+ ["leader" "SPC s k"] {:status :deferred :note "lookup-in-docsets - :tools lookup decision"}
+ ["leader" "SPC s K"] {:status :deferred :note "lookup-in-all-docsets - :tools lookup decision"}
+ ["leader" "SPC s t"] {:status :deferred :note "lookup-dictionary-definition - :tools lookup decision"}
+ ["leader" "SPC s T"] {:status :deferred :note "lookup-synonyms - :tools lookup decision"}
+ ["leader" "SPC s l"] {:status :deferred :note "link-hint-open-link - link-hint package unported"}
+ ["leader" "SPC s u"] {:status :deferred :note "vundo - undo infra TODO (undo-fu-session, vundo)"}}

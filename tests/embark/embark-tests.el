@@ -23,21 +23,7 @@
 (defvar embark-indicators nil)
 (defvar embark-post-action-hooks nil)
 
-;; On Emacs 31 `featurep' no longer reads a let-bindable `features', so
-;; faking a loaded feature takes a function stub.
-(defmacro with-fake-feature (feature &rest body)
-  "Run BODY with `featurep' (and thus `require') treating FEATURE as loaded."
-  (declare (indent 1))
-  `(cl-letf* ((real-featurep (symbol-function 'featurep))
-              (real-require (symbol-function 'require))
-              ((symbol-function 'featurep)
-               (lambda (f &optional subfeature)
-                 (or (eq f ,feature) (funcall real-featurep f subfeature))))
-              ((symbol-function 'require)
-               (lambda (f &optional filename noerror)
-                 (unless (eq f ,feature)
-                   (funcall real-require f filename noerror)))))
-     ,@body))
+;; with-fake-feature lives in tests/helper.el (shared with web-browsing).
 
 (defvar test-url-config
   '((nil :actions (("RET" . shared-open)

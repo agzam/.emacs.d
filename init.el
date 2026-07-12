@@ -74,6 +74,7 @@
     (occult . "~/GitHub/agzam/occult.el")
     (prisma . "~/GitHub/agzam/prisma.el")
     (wiktionary-bro . "~/GitHub/agzam/wiktionary-bro.el")
+    (slacko . "~/GitHub/agzam/slacko.el")
     ;; the hammerspoon config IS the spacehammer checkout (doom.d symlinked it)
     (spacehammer . "~/.hammerspoon"))
   "Alist of own packages -> local checkout preferred over the GitHub recipe.")
@@ -113,7 +114,7 @@ build-in-place to clone."
          (:config default +bindings +smartparens)
          ;; :custom entries appear here as their modules get ported.
          (:custom git) (:custom general) (:custom completion) (:custom embark) (:custom colors)
-         (:custom modeline) (:custom elisp) (:custom dired) (:custom ai)
+         (:custom modeline) (:custom elisp) (:custom search) (:custom dired) (:custom ai)
          (:custom web-browsing) (:custom tree-sitter) (:custom org) (:custom shell)
          (:custom writing))
        (when (eq system-type 'darwin) '((:os macos)))))
@@ -147,7 +148,7 @@ build-in-place to clone."
 ;; Function files load first (sorted - raw directory order differs between
 ;; Mac and Linux), then config.el; config.el may `load!' extra +files.
 ;; The module list itself is explicit, in this exact order.
-(defvar active-modules '("evil" "bindings" "git" "general" "completion" "embark" "colors" "modeline" "elisp" "dired" "ai" "web-browsing" "tree-sitter" "org" "shell" "writing")
+(defvar active-modules '("evil" "bindings" "git" "general" "completion" "embark" "colors" "modeline" "elisp" "search" "dired" "ai" "web-browsing" "tree-sitter" "org" "shell" "writing")
   "Modules under modules/, loaded in this exact order.
 bindings (Doom's :config default) precedes the :custom ports, like in doom!.")
 

@@ -19,15 +19,17 @@ module layout).
   elisp (eval/edebug/profiler + let-plist/evilify-edebug folded in),
   dired (treemacs suite), ai (gptel/eca/mcp), web-browsing,
   tree-sitter, org (core slice: roam/vulpea/evil-org), shell,
-  writing (jinx/translate/dictionaries/prisma)
+  writing (jinx/translate/dictionaries/prisma),
+  search (consult-omni/tldr/slacko)
 - user layer :: config.el (leader tree, globals), lisp/functions.el
   incl. reload-config (SPC h r r; doom/reload analogue - re-runs
   defaults/modules/config in place, elpaca picks up new packages; restart
   still needed for doom-compat/doom-keybinds, the elpaca bootstrap and
   active-modules changes; edited autoload/*.el still want a direct
   load-file)
-- root packages.el :: ligature, helpful, golden-ratio, lorem-ipsum,
-  consult-symbol (ahead of search); evil extras stay disabled by omission
+- root packages.el :: ligature, helpful, golden-ratio, lorem-ipsum
+  (consult-symbol rode here ahead of search, relocated home 2026-07);
+  evil extras stay disabled by omission
 - testing/CI :: buttercup suites (tests/, XDG-sandboxed via helper.el),
   bb.edn tasks (deps/lint/test/smoke/ci), scripts/{lint,smoke-check}.el,
   GitHub workflow (test + smoke jobs on Emacs 30.1, cached elpaca dirs)
@@ -812,6 +814,76 @@ module layout).
   0 regressions / 0 lab-only - SPC x cluster off the table (l/t trees
   exact-matched; es->en / en->es rows :improved).  Unblocked: clojure
   (spacehammer-monroe), chat (jinx).
+- [2026-07] search module ported (consult-omni develop UNPINNED, tldr,
+  slacko LOCAL-REPO; consult-symbol relocated in from the root layer,
+  zoxide-find relocated in from shell).  consult-omni: the Feb-2025 pin
+  dropped after upstream audit - develop gained consult 3.x
+  compatibility and if-let*/when-let* fixes since (35 commits); the
+  :files (:defaults "sources/*.el") recipe dissolves doom.d's straight
+  load-path hack (org-roam precedent).  Source enabling switched to the
+  package API: consult-omni-sources-modules-to-load +
+  consult-omni-sources-load-modules in :config replace doom.d's
+  hand-rolled require loop (consult-omni-load-sources+ was
+  byte-for-byte what the API does) AND the :before advice that
+  triggered it - the transient's autoload file requires consult-omni at
+  top level instead, so the first SPC s / loads the stack and keydump
+  sees no :void-suffix (source files carry no autoload cookies).
+  Sources kept: google, brave, wikipedia, browser-history, gptel, gh,
+  youtube, apps; dropped: elfeed (package dropped at web-browsing),
+  notmuch (returns with its module), duckduckgo/invidious/line-multi
+  (loaded in doom.d, surfaced nowhere).  API keys:
+  consult-omni--set-api-keys rewritten as four plain setq lambdas over
+  general's existing auth-host->pass - the doom.d version pulled in
+  dash for a trivial compose, its (set (intern (symbol-name key))) was
+  identity rot, and its auth-source-debug let wrapped the BUILD of the
+  lambdas, not their calls; function-valued keys are package-sanctioned
+  (consult-omni-expand-variable-function).  Scopus key dropped (source
+  never loaded).  The no-require-match advice had survived an upstream
+  signature change only by plist-put positional accident; reimplemented
+  structure-aware as :filter-args (consult-omni-no-require-match-a,
+  autoload/, batch-tested) - consult-omni-multi passes :require-match
+  nil itself, but gptel/youtube/apps sources declare t, which would
+  block the free input their :on-new handlers exist for.  Transient
+  rows dropped: elfeed + notmuch (void-suffix class, mpv-transient
+  precedent) and search-in-slack - superseded by slacko-search (user
+  verdict): slacko searches inside Emacs, the hammerspoon app-driving
+  variant retired with its macos gate.  slacko: public repo,
+  checkout/doom.d-submodule/origin all in sync at ef754e1; plain github
+  recipe + local-dev-packages entry; slacko-creds.el is mechanism-only
+  (runtime token extraction, no secrets in-repo).  Quarantine:
+  tldr-directory-path + slacko-creds-gpg-file -> cache dir
+  (slacko-emoji-cache-directory self-derives from doom-cache-dir).
+  process-external-url REWRITTEN over embark-url-config (user verdict;
+  the pcase duplicated the embark table coarsely - its blanket github
+  branch sent commit/compare urls into forge): now first matching
+  url-type's RET action, shared-RET fallback, bug-reference branch
+  kept.  Zero external callers found (mxp/hammerspoon/dotfiles greps) -
+  its one live consumer is the consult-omni video embark action ("e").
+  embark-project-search's consult-ripgrep rebind is FINAL: doom.d's
+  +vertico-file-search call shape is exactly that, and search brings no
+  file-search fn.  search-other-project +
+  search-notes-for-symbol-at-point vendored into bindings/autoload.el
+  (project-prompt-project-dir / org-directory) - the two voids behind
+  the consult-customize *Warnings* noise flagged at the embark port;
+  the probe pins consult now loading warning-free.  doom.d rot fixed on
+  port: search-in-project seeded literal "nil" between symbols
+  ((symbol-name (symbol-at-point)) on nil) - thing-at-point now,
+  spec-pinned; autoload/consult-omni.el carried a stale web-browsing
+  header comment.  with-fake-feature promoted from embark-tests.el to
+  tests/helper.el (second consumer).  Probe-infra lesson: -l files load
+  after after-init-hook, so on a warm cache probes must check
+  elpaca-after-init-time and only otherwise hook (smoke-check.el
+  already documented it; the hang looked like a block but was
+  nobody-calls-kill-emacs).  Verification: 458 specs (+19: two
+  tests/search/ suites, misc-tests rewrite, bindings additions), smoke
+  160 -> 163 packages, 0 failed/blocked, probe green (deferral, 7 bind
+  rows, warning-free consult load, sources + suffixes + advices + key
+  fns after transient force-load, embark-table dispatch x3, residue
+  sweep, quarantine x3, dired zoxide hook, theme + modeline guards).
+  Keydiff 77 -> 74 open / 70 broken / 10 parked / 90 resolved /
+  0 regressions - SPC s cluster CLOSED (4 rename rows :improved, 6
+  lookup rows + link-hint + vundo parked :deferred), SPC n * and
+  SPC f d :improved, SPC * exact-matched.
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -879,7 +951,9 @@ Cluster checklist (open counts as of 2026-07 pilot; =bb keydiff= is truth):
 - [ ] SPC o (15) - open/apps; roam/org tree resolved with the org port,
   o c g closed with the ai port, o r C-b + o e settled with the
   web-browsing port - the rest waits on macos/chat/eval/notmuch
-- [ ] SPC s (10) - search
+- [X] SPC s :: closed with the search module port - 4 rename rows
+  :improved, the lookup six + link-hint + vundo parked :deferred;
+  SPC * exact-matched, SPC f d + SPC n * :improved on the way
 - [ ] SPC b (8) - buffers; browser rows closed with the web-browsing
   port, 2 left (consult-projectile row, s-d rename verdict)
 - [ ] motion [ / motion ] (9+9), normal [ / normal ] (5+5)
@@ -897,7 +971,7 @@ Cluster checklist (open counts as of 2026-07 pilot; =bb keydiff= is truth):
 Fold ledger verdicts into the Decisions log; delete scripts/dump-bindings.el,
 scripts/keydiff.clj, key-decisions.edn (+ its .gitignore whitelist line),
 the keydump/keydiff bb tasks, and tests/scripts/.
-Proximity (post shell): open clusters left - SPC b/c/f/n/o/p/s/x, the
+Proximity (post search): open clusters left - SPC b/c/f/n/o/p/x, the
 g/z/[/] trees, and the singletons row (SPC " ' now closed).
 
 * Testing & CI
@@ -1118,12 +1192,15 @@ R-prefix pollution, link-org->just-text's missing cookie.
 reddigg/hnreader/youtube-sub action rows stay runtime-void (parked
 packages). C-; / SPC a / C-SPC embark-preview / vertico ";" subkeys /
 avy "." / SPC b a all live.
-** TODO search
-consult-omni (branch develop, pinned, :files sources), tldr.
-LOCAL-REPO: slacko.el. config 69L. Depends on browser-hist (web-browsing).
-Unlocks SPC * (search-in-project), SPC s /, SPC f d (+zoxide-find).
-consult-symbol already pulled ahead into the root layer (SPC h h) -
-relocate here on port.
+** DONE search
+Ported (see Decisions log). consult-omni UNPINNED on develop (:files
+recipe, canonical sources API, keys over auth-host->pass, filter-args
+no-match advice), tldr, slacko (LOCAL-REPO; slacko-search supersedes
+the hammerspoon search-in-slack), consult-symbol + zoxide-find
+relocated home. SPC * / SPC s tree / SPC f d live, SPC s cluster
+closed. Rode along: process-external-url rewritten over
+embark-url-config, the consult-customize *Warnings* pair vendored into
+bindings/autoload.el, embark-project-search rebind declared final.
 ** TODO tab-bar
 No packages; autoload.el 283L of workspace logic + desktop persistence
 (doom-profile-state-dir -> doom-state-dir ok). Unlocks SPC l transient.
@@ -1288,7 +1365,7 @@ module had rewritten its own uses with plist-get before that existed.
   number-to-words npm workdir quarantined to the cache dir too)
 
 * Cross-module port ordering constraints
-- web-browsing before: search (writing + embark landed 2026-07)
+- web-browsing before: search - satisfied, search landed 2026-07
 - writing landed (2026-07): clojure (spacehammer-monroe) and chat (jinx)
   unblocked
 - org before: embark (vulpea actions)

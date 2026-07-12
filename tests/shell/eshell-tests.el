@@ -71,8 +71,7 @@
   (it "defines the renamed commands"
     (expect (fboundp 'eshell-clear-buffer) :to-be-truthy)
     (expect (fboundp 'eshell-export-output) :to-be-truthy)
-    (expect (fboundp 'eshell-here) :to-be-truthy)
-    (expect (fboundp 'zoxide-find) :to-be-truthy))
+    (expect (fboundp 'eshell-here) :to-be-truthy))
 
   (it "leaves no plus-affixed residue"
     (expect (fboundp 'eshell-clear+) :to-be nil)
