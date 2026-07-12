@@ -581,7 +581,18 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
 ;; and helpful-mode-map above, SPC w g + window-transient's g suffix for
 ;; golden-ratio.
 (use-package helpful
-  :defer t)
+  :defer t
+  ;; Doom-core parity: global remaps route the describe-* keys (C-h k,
+  ;; SPC h k, ...) to helpful.  Command remapping resolves at execution
+  ;; time, so the key audit's map dumps can't see these - both sides dump
+  ;; the same describe-* symbols.  describe-function keeps its remap AND
+  ;; the elisp module's helpful-symbol advice (the advice covers
+  ;; programmatic calls, e.g. from transients).
+  :init
+  (global-set-key [remap describe-key] #'helpful-key)
+  (global-set-key [remap describe-function] #'helpful-callable)
+  (global-set-key [remap describe-variable] #'helpful-variable)
+  (global-set-key [remap describe-command] #'helpful-command))
 
 (use-package golden-ratio
   :commands (golden-ratio golden-ratio-mode))

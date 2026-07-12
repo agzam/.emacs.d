@@ -973,6 +973,42 @@ module layout).
   rename-dups + hint rendering, desktop wiring + quarantine, no
   +tab-bar residue, no *Warnings*).
 
+- [2026-07] daily-driver fixes, first real-use feedback batch.
+  (1) C-h k / SPC h k landed on stock describe-key: Doom CORE remaps
+  describe-{key,function,variable,command} to helpful globally, a layer
+  the vendored bindings tree never carried - and a fourth audit-blind
+  class: command remapping resolves at execution time, both sides dump
+  the same describe-* symbols.  Remap set added to the root helpful
+  block (:init, bound at startup); describe-function keeps the elisp
+  module's helpful-symbol advice for programmatic calls (key presses now
+  take the remap to helpful-callable, like live Doom).
+  (2) SPC w L on a top/bottom stack errored "No window right from
+  selected window": the pilot's windmove-swap-states rewrite kept only
+  doom.d's wrap-at-edge override and lost the Doom-core engine the
+  override DELEGATED to (+evil--window-swap; doomemacs#7218 has since
+  folded the wrap upstream).  Ported the full engine as
+  window-move-in-direction: swap-and-follow when a window exists,
+  far-throw when only perpendicular neighbors exist (the bug case),
+  wrap from a full-span edge window (always on, doom.d-wrapper
+  behavior; doom.d never wrapped J/K - lab keeps all four uniform),
+  split-and-follow for a sole window (Doom semantics; the old lab spec
+  pinned wrap-on-sole-window, an accident of the pre-#7218 guard's
+  window-at-side-p check, not intent).  Vacated window shows
+  get-scratch-buffer-create (doom-fallback-buffer analogue - routes to
+  the persistent *scratch* via the general module's override).
+  evil-tests window-move suite rewritten: real-window swap/split specs,
+  recorder stubs for the evil far-move/wrap arms, dedicated-window
+  user-error pin.
+  (3) org-superstar pulled out of the org long-tail (misjudged there:
+  heading/todo/item bullets are daily-visible rendering, unlike the
+  on-demand verb/anki tail); doom.d block ported verbatim (setopt,
+  org-mode hook).  Org audit rode along: insert-dash/bracket-pair
+  un-voided by the writing port as planned, org-noter row pruned by its
+  +noter guard, no org-hide-leading-stars conflicts; org-cliplink is
+  the next-most-visible gap (five fboundp-gated url.el title-retrieval
+  sites + web-browsing's org branch + the dropped "i L" localleader) -
+  still parked on the long tail, flagged for its own pull-forward call.
+
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
 mechanical keymap dumps diffed per cluster, every differing entry gets an
@@ -1243,10 +1279,12 @@ consumers rewritten with plist-get; url.el keeps waiting (embark, dash,
 org-cliplink, let-plist), though its top-level ghub require now resolves.
 ** DONE org (core slice; long tail pending)
 Core slice ported - see Decisions log. SPC o r tree + SPC r r alive,
-vulpea-insert restored in expreg-transient. Left for a long-tail sitting:
+vulpea-insert restored in expreg-transient. org-superstar joined the core
+slice later (daily-visible bullets; see the daily-driver fixes entry).
+Left for a long-tail sitting:
 verb, anki-editor(+anki-gen), ob-* extras (ob-async/http/mermaid),
 org-pomodoro, toc-org, orgit(-forge) (still back-fills the git deferral),
-org-superstar, org-edit-indirect, ox-clip/ox-gfm, org-cliplink,
+org-edit-indirect, ox-clip/ox-gfm, org-cliplink (next-most-visible gap),
 org-download, org-contrib, the 2 mp3 assets, org-capture frame infra
 (spacehammer flow), org-refile/org-avy commands, org-pretty-mode
 (org-present), export-to-clipboard helpers, edit-indirect-guess-mode-fn+.

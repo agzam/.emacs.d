@@ -1,12 +1,13 @@
 ;;; modules/org/config.el -*- lexical-binding: t; -*-
 
 ;; Core slice of doom.d's org module: org, org-roam(+ui), the vulpea trio +
-;; consult-vulpea, evil-org, org-modern-indent, org-appear.  The long tail
-;; (verb, anki-editor(+anki-gen), ob-* extras, org-pomodoro, toc-org,
-;; orgit(-forge), org-superstar, org-edit-indirect, ox-clip/ox-gfm,
-;; org-cliplink, org-download, org-contrib, the pomodoro mp3s) stays in
-;; doom.d - see MIGRATION.org.  org-roam/vulpea db files live in
-;; doom-compat.el's quarantine section.
+;; consult-vulpea, evil-org, org-modern-indent, org-appear, org-superstar
+;; (pulled out of the long tail - heading bullets are daily-visible).  The
+;; long tail (verb, anki-editor(+anki-gen), ob-* extras, org-pomodoro,
+;; toc-org, orgit(-forge), org-edit-indirect, ox-clip/ox-gfm, org-cliplink,
+;; org-download, org-contrib, the pomodoro mp3s) stays in doom.d - see
+;; MIGRATION.org.  org-roam/vulpea db files live in doom-compat.el's
+;; quarantine section.
 
 ;; org builds via elpaca's own menu (elpaca-menu-org generates
 ;; org-version/loaddefs) - doom.d's straight :pre-build fake is obsolete.
@@ -360,6 +361,21 @@
           org-appear-autolinks t
           org-appear-autoemphasis t
           org-appear-autosubmarkers t))
+
+(use-package org-superstar
+  :after org
+  :hook (org-mode . org-superstar-mode)
+  :config
+  (setopt org-superstar-leading-bullet ?\s
+          org-superstar-leading-fallback ?\s
+          org-hide-leading-stars nil
+          org-superstar-todo-bullet-alist '(("TODO" . 9744)
+                                            ("[ ]"  . 9744)
+                                            ("DONE" . 9745)
+                                            ("[X]"  . 9745))
+          org-superstar-item-bullet-alist '((?* . ?⋆)
+                                            (?+ . ?◦)
+                                            (?- . ?•))))
 
 (use-package org-modern-indent
   :ensure (org-modern-indent :host github :repo "jdtsmith/org-modern-indent")

@@ -8,10 +8,10 @@
 ;;   :deferred parked until its module/package ports (note names it)
 {;; SPC w - pilot cluster (2026-07)
  ["leader" "SPC w d"] {:status :ported :note "evil-window-delete, from Doom :editor evil"}
- ["leader" "SPC w H"] {:status :improved :note "window-move-left - windmove-swap-states port (Decisions log)"}
- ["leader" "SPC w L"] {:status :improved :note "window-move-right - windmove-swap-states port (Decisions log)"}
- ["leader" "SPC w J"] {:status :improved :note "window-move-down - windmove sibling of the H/L movers"}
- ["leader" "SPC w K"] {:status :improved :note "window-move-up - windmove sibling of the H/L movers"}
+ ["leader" "SPC w H"] {:status :improved :note "window-move-left - Doom +evil--window-swap port, wrap always on (Decisions log)"}
+ ["leader" "SPC w L"] {:status :improved :note "window-move-right - Doom +evil--window-swap port; the windmove-swap-states version errored without a window in the direction"}
+ ["leader" "SPC w J"] {:status :improved :note "window-move-down - same engine as H/L (doom.d had no down/up wrap)"}
+ ["leader" "SPC w K"] {:status :improved :note "window-move-up - same engine as H/L"}
  ["leader" "SPC w S"] {:status :improved :note "window-split-and-follow (renamed +evil/ port)"}
  ["leader" "SPC w V"] {:status :improved :note "window-vsplit-and-follow (renamed +evil/ port)"}
  ["leader" "SPC w T"] {:status :improved :note "tab-window-detach (tab-bar-centric) over tear-off-window's new frame"}
