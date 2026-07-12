@@ -677,6 +677,72 @@ module layout).
   GIT_TERMINAL_PROMPT=0 added to the smoke + keydump pty envs so a
   private/unreachable remote now fails the order visibly instead of
   hanging the boot.
+- [2026-07] embark module ported (embark + embark-consult, plain MELPA;
+  registry slot completion < embark < colors in both lists).
+  consult-gh-embark glue stays out (git-port verdict).  embark-consult
+  wiring is package-only: embark.el auto-requires it once consult
+  loads; the (require 'consult) in :config kept (probe sees
+  embark-consult arrive with embark).  Bind-at-startup fix over doom.d:
+  [remap describe-bindings] embark-bindings + minibuffer C-c C-;
+  embark-export and C-c C-e vertico-embark-export-write moved to :init
+  - doom kept them inside embark's :config, where only a live session
+  with embark already loaded resolves them; C-; embark-act was already
+  root-layer, SPC a embark-act added to the root leader tree gated on
+  :custom embark ("Actions" desc kept) - closes the SPC a singleton
+  (ledger :ported, keydiff 88 -> 87 open, 0 regressions).  Minibuffer
+  reconciliation (user verdict: union, root wins): root's C-c C-s
+  embark-collect kept, doom's duplicate C-c C-l collect dropped.
+  Reference updates to lab renames: eww-open-in-other-window,
+  browse-url-externally, mpv-open, window-(v)split-and-follow, the
+  link-* converter family, fetch-github-raw-file, forge-browse-topics,
+  google-translate-es->en / en->es (text-action block, still gated on
+  :custom writing).  magit-clone-regular+ -> magit-clone-simple: the
+  already-renamed git-module port, discovered at mapping time - no
+  double port.  +embark-project-search -> embark-project-search rebound
+  to (consult-ripgrep nil target) (user verdict; +vertico-file-search
+  waits on the search module).  Renames (plus-ban):
+  +embark-{setup-url-types,target-url-at-point,target-org-block,
+  collect-outline-cycle} -> embark-*, embark-preview+ -> embark-preview
+  (completion's C-SPC consumer expected it), +search-rfc-number-online /
+  +browse-rfc-number-at-point / +edebug-instrument-symbol de-plussed
+  (no elisp-module collision).  +embark-url-config -> embark-url-config
+  defcustom with :group 'embark (the old 'embark-url-config group never
+  existed); +embark-url-patterns was a setq on a free variable - proper
+  defvar added (autoload/embark.el).  embark-open-externally+ dropped
+  (byte-identical wrapper); embark-file-map "x" binds the original.
+  awesome-switch-to-prev-app-and-type "x p" row dropped - hammerspoon
+  era, void in doom.d too.  embark-ephemeral-act's (define-key
+  minibuffer-local-map "RET" nil) dropped: the string literal is the
+  key sequence R-E-T, which planted a dead R prefix keymap in every
+  minibuffer (live Doom session confirmed polluted - (kbd "RET") still
+  exit-minibuffer, so the line never did what its comment claims; the
+  cl-letf embark--default-action override is the working part).  Fix
+  doom.d-side someday.  embark-preview + embark-ephemeral-act gained
+  (require 'embark) - both reachable from a fresh boot before embark
+  loads (vertico C-SPC, browser-tab-act).  INHERITED BUG fixed in
+  general/autoload/url.el: all three link-bug-reference->* converters
+  called embark-target-bug-reference-at-point, which is VOID - the
+  defun is ...-link-at-point (doom.d :35 carries the same bug); specs
+  pin the fixed path (tests/general/url-tests.el, new).
+  link-org->just-text gained its missing autoload cookie
+  (embark-org-link-map "c s" binds it).  Macro shape: embark-ace-action
+  lost doom's pointless eval-when-compile wrapper; both macros carry
+  cookies, loaddefs load before config.el so the :config map! resolves
+  them (probe-verified: generated ace/split defuns fboundp after embark
+  loads).  reddigg-view-comments / hnreader-comment /
+  youtube-sub-extractor rows stay runtime-void (parked packages).
+  Test-infra finds: Emacs 31's featurep no longer reads a let-bindable
+  `features' - fake features need function stubs (with-fake-feature in
+  tests/embark/embark-tests.el); value-less (defvar foo) marks specials
+  only file-locally, so suites stubbing package vars that module fns
+  LET-bind must use valued defvars (the embark-indicators lesson).
+  Verification: 402 specs (+30: tests/embark/ + the new
+  tests/general/url-tests.el), smoke 141 -> 143, probe green (deferral,
+  startup binds, url-type keymaps + finders, avy ?. glue, no +residue,
+  which-key-- internals present on the built-in copy, quarantine, no
+  stray minibuffer R prefix); *Warnings* on consult load shows
+  pre-existing consult-customize noise for two unported search fns
+  (search-module scope).
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -967,10 +1033,17 @@ config 385L, autoload ~715L. Depends on web-browsing; feeds clojure+chat.
 Unlocks SPC x l / SPC x t trees. Also un-voids insert-dash +
 insert-bracket-pair (org "[ SPC" / org+markdown "-" insert bindings wait
 on them since the org port).
-** TODO embark
-embark + embark-consult. config 303L, autoload 301L. Depends on
-web-browsing (+eww-*) and org (vulpea) for some actions.
-Unlocks =C-;= embark-act, vertico ";" subkeys (embark-collect/export).
+** DONE embark
+Ported (see Decisions log). embark + embark-consult (package-only
+wiring); SPC a / [remap describe-bindings] / minibuffer export rows
+bind at startup; url-action table on the lab renames with
+magit-clone-simple at "g c"; embark-project-search rides
+consult-ripgrep until search ports. Fixed on the way: url.el's void
+bug-reference converters (+ specs), ephemeral-act's minibuffer
+R-prefix pollution, link-org->just-text's missing cookie.
+reddigg/hnreader/youtube-sub action rows stay runtime-void (parked
+packages). C-; / SPC a / C-SPC embark-preview / vertico ";" subkeys /
+avy "." / SPC b a all live.
 ** TODO search
 consult-omni (branch develop, pinned, :files sources), tldr.
 LOCAL-REPO: slacko.el. config 69L. Depends on browser-hist (web-browsing).

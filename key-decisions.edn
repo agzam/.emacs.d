@@ -162,4 +162,7 @@
  ["leader" "SPC b t"] {:status :ported :note "browser-goto-tab, web-browsing module"}
  ["leader" "SPC b l"] {:status :ported :note "browser-copy-tab-link, web-browsing module"}
  ["leader" "SPC b y"] {:status :ported :note "navegosa-insert-link, web-browsing module"}
- ["leader" "SPC b a"] {:status :ported :note "browser-tab-act - embark-ephemeral-act stays runtime-void until the embark module ports (user verdict: port as-is)"}}
+ ["leader" "SPC b a"] {:status :ported :note "browser-tab-act - its embark-ephemeral-act call un-voided by the embark module port"}
+
+ ;; embark module port (2026-07) - closes the SPC a singleton
+ ["leader" "SPC a"] {:status :ported :note "embark-act - root-config leader row gated on :custom embark, bound at startup (doom kept it inside embark's :config; Actions which-key label kept)"}}

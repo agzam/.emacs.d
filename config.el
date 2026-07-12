@@ -309,6 +309,8 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
                      (if (evil-visual-state-p)
                          #'comment-or-uncomment-region
                        #'comment-line)))
+      (:when (modulep! :custom embark)
+        :desc "Actions" "a" #'embark-act)
       (:when (modulep! :custom shell)
         :desc "pop shell" "'" #'shell-pop
         :desc "choose shell" "\"" #'shell-pop-choose)

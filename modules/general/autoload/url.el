@@ -166,6 +166,7 @@ anything like: RFC 123, rfc-123, RFC123 or rfc123."
         (insert ":roam_refs: " url "\n")
         (insert ":END:\n")))))
 
+;;;###autoload
 (defun link-org->just-text ()
   "Convert link to simple text."
   (interactive)
@@ -186,7 +187,7 @@ anything like: RFC 123, rfc-123, RFC123 or rfc123."
 ;;;###autoload
 (defun link-bug-reference->link-org-mode ()
   (interactive)
-  (when-let* ((ref (embark-target-bug-reference-at-point))
+  (when-let* ((ref (embark-target-bug-reference-link-at-point))
               (url (nth 1 ref))
               (bounds (nthcdr 2 ref))
               (link (format "[[%s][%s]]"
@@ -199,7 +200,7 @@ anything like: RFC 123, rfc-123, RFC123 or rfc123."
 ;;;###autoload
 (defun link-bug-reference->link-markdown ()
   (interactive)
-  (when-let* ((ref (embark-target-bug-reference-at-point))
+  (when-let* ((ref (embark-target-bug-reference-link-at-point))
               (url (nth 1 ref))
               (bounds (nthcdr 2 ref))
               (link (let-plist (bisect-github-url url)
@@ -212,7 +213,7 @@ anything like: RFC 123, rfc-123, RFC123 or rfc123."
 ;;;###autoload
 (defun link-bug-reference->link-plain ()
   (interactive)
-  (when-let* ((ref (embark-target-bug-reference-at-point))
+  (when-let* ((ref (embark-target-bug-reference-link-at-point))
               (url (nth 1 ref))
               (bounds (nthcdr 2 ref)))
     (delete-region (car bounds)
