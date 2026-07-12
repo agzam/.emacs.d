@@ -117,45 +117,51 @@
   (setopt consult-hn-browse-fn #'consult-hn-reader)
   (transient-suffix-put 'consult-hn-transient (kbd "RET") :key "s-<return>"))
 
-(use-package hnreader
-  :ensure (hnreader :host github :repo "agzam/emacs-hnreader" :branch "major-mode")
-  :defer t
-  :hook (hnreader-mode . reddigg-hnreader-show-all-h)
-  :config
-  (map! :map hnreader-mode-map
-        "C-c C-o" #'hnreader-browse-nh-story-url
-        :n "yy" #'hnreader-copy-hn-story-url
-        :n "q" #'kill-buffer-and-window
-        :n "^" #'hnreader-goto-parent
-        (:localleader
-         "[[" #'hnreader-back
-         "]]" #'hnreader-more
-         (:prefix ("u" . "urls")
-          :desc "urls" "s" (cmd! (consult-line-collect-urls "ycombinator\\.com\\|view story in eww")))))
-
-  ;; no ranking numbers on front page
-  (advice-add 'hnreader--print-frontpage-item
-              :around #'hnreader-frontpage-item-no-rank-a))
-
-(use-package reddigg
-  :ensure (reddigg :host github :repo "agzam/emacs-reddigg" :branch "fetch-via-browser")
-  :defer t
-  :hook (reddigg-mode . reddigg-hnreader-show-all-h)
-  :config
-  ;; reddit 403-blocks Emacs's TLS fingerprint; fetch through the live
-  ;; browser on macOS, headless chromium elsewhere (needs one-time
-  ;; M-x reddigg-chromium-warmup)
-  (setq reddigg-fetch-function (if (eq system-type 'darwin)
-                                   #'reddigg--fetch-via-browser
-                                 #'reddigg--fetch-via-chromium)
-        reddigg-subs '(emacs clojure programming))
-  (map! :map reddigg-mode-map
-        "C-c C-o" #'reddigg-browse-current-sub-url
-        :n "yy" #'reddigg-copy-current-sub-url
-        :n "q" #'kill-buffer-and-window
-        (:localleader
-         (:prefix ("u" . "urls")
-          :desc "urls" "s" #'consult-line-collect-urls))))
+;; NOTE hnreader + reddigg DISABLED (2026-07): both forks are currently
+;; broken and their installs hung the CI smoke boot; fix the packages,
+;; then uncomment.  Their module helpers (autoload/reddigg-hnreader.el)
+;; and specs stay live - package-independent.  consult-hn's reader and
+;; process-external-url's hn/reddit branches are runtime-void meanwhile.
+;;
+;; (use-package hnreader
+;;   :ensure (hnreader :host github :repo "agzam/emacs-hnreader" :branch "major-mode")
+;;   :defer t
+;;   :hook (hnreader-mode . reddigg-hnreader-show-all-h)
+;;   :config
+;;   (map! :map hnreader-mode-map
+;;         "C-c C-o" #'hnreader-browse-nh-story-url
+;;         :n "yy" #'hnreader-copy-hn-story-url
+;;         :n "q" #'kill-buffer-and-window
+;;         :n "^" #'hnreader-goto-parent
+;;         (:localleader
+;;          "[[" #'hnreader-back
+;;          "]]" #'hnreader-more
+;;          (:prefix ("u" . "urls")
+;;           :desc "urls" "s" (cmd! (consult-line-collect-urls "ycombinator\\.com\\|view story in eww")))))
+;;
+;;   ;; no ranking numbers on front page
+;;   (advice-add 'hnreader--print-frontpage-item
+;;               :around #'hnreader-frontpage-item-no-rank-a))
+;;
+;; (use-package reddigg
+;;   :ensure (reddigg :host github :repo "agzam/emacs-reddigg" :branch "fetch-via-browser")
+;;   :defer t
+;;   :hook (reddigg-mode . reddigg-hnreader-show-all-h)
+;;   :config
+;;   ;; reddit 403-blocks Emacs's TLS fingerprint; fetch through the live
+;;   ;; browser on macOS, headless chromium elsewhere (needs one-time
+;;   ;; M-x reddigg-chromium-warmup)
+;;   (setq reddigg-fetch-function (if (eq system-type 'darwin)
+;;                                    #'reddigg--fetch-via-browser
+;;                                  #'reddigg--fetch-via-chromium)
+;;         reddigg-subs '(emacs clojure programming))
+;;   (map! :map reddigg-mode-map
+;;         "C-c C-o" #'reddigg-browse-current-sub-url
+;;         :n "yy" #'reddigg-copy-current-sub-url
+;;         :n "q" #'kill-buffer-and-window
+;;         (:localleader
+;;          (:prefix ("u" . "urls")
+;;           :desc "urls" "s" #'consult-line-collect-urls))))
 
 (after! (ol-eww hnreader)
   (defadvice! org-eww-open-other-window-a (orig-fun &rest args)

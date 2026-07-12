@@ -664,7 +664,13 @@ module layout).
   quarantine paths). Keydiff 93 -> 88 open / 85 broken / 82 resolved /
   parked 4 -> 2 / 0 regressions - SPC b h/t/l/y/a/e + SPC b y +
   SPC o r C-b closed, SPC o e re-verdicted :dropped, SPC j x un-voided
-  by the xwidget port.
+  by the xwidget port.  Post-push amendment: hnreader + reddigg
+  DISABLED (blocks commented in config.el) - both forks are currently
+  broken (user verdict, fix later) and their installs hung the CI
+  Linux smoke at 143/144 (macOS smoke was green); module helpers +
+  specs stay live (package-independent), consult-hn's reader and
+  process-external-url's hn/reddit branches runtime-void meanwhile;
+  smoke 144 -> 141.
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -944,6 +950,9 @@ local-dev-packages pattern (browser-hist.el + consult-hn extracted to
 expreg-transient browser-url inserters restored.  Unblocks
 writing/embark/search (eww-* helpers + browser-hist); their doom.d
 configs still use the pre-rename +names.
+CAVEAT: hnreader + reddigg use-package blocks are commented out - the
+forks are currently broken (their installs also hung CI smoke);
+re-enable in config.el once the packages are fixed.
 ** TODO writing
 jinx, sdcv, mw-thesaurus, google-translate (own fork+branch), define-it,
 separedit, youtube-sub-extractor, occult. LOCAL-REPO: spacehammer (symlink
