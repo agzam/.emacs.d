@@ -50,7 +50,11 @@
                  (apply p/shell {:continue true
                                  :extra-env {"SMOKE_RESULT_FILE" result
                                              ;; CI runners have no usable TERM
-                                             "TERM" "xterm-256color"}}
+                                             "TERM" "xterm-256color"
+                                             ;; a private/unreachable remote must fail the
+                                             ;; elpaca order, not sit at a git prompt the
+                                             ;; pty swallows until the watchdog
+                                             "GIT_TERMINAL_PROMPT" "0"}}
                         cmd)
                  (let [verdict (if (fs/exists? result) (slurp result) "NO RESULT MARKER\n")]
                    (print verdict)

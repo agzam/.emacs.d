@@ -666,11 +666,17 @@ module layout).
   SPC o r C-b closed, SPC o e re-verdicted :dropped, SPC j x un-voided
   by the xwidget port.  Post-push amendment: hnreader + reddigg
   DISABLED (blocks commented in config.el) - both forks are currently
-  broken (user verdict, fix later) and their installs hung the CI
-  Linux smoke at 143/144 (macOS smoke was green); module helpers +
-  specs stay live (package-independent), consult-hn's reader and
+  broken (user verdict, fix later); module helpers + specs stay live
+  (package-independent), consult-hn's reader and
   process-external-url's hn/reddit branches runtime-void meanwhile;
-  smoke 144 -> 141.
+  smoke 144 -> 141.  The CI smoke hang itself (600s watchdog, one
+  order never terminal, twice) turned out to be navegosa.el: the repo
+  was PRIVATE, so elpaca's anonymous https clone sat at a git
+  credential prompt the pty swallowed - invisible locally because
+  local-dev-packages builds in place.  Repo made public (user call);
+  GIT_TERMINAL_PROMPT=0 added to the smoke + keydump pty envs so a
+  private/unreachable remote now fails the order visibly instead of
+  hanging the boot.
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
