@@ -41,6 +41,20 @@ has fontified the current window."
                        (/= (point) p)))))
         regions))))
 
+;;;###autoload
+(defun expreg-transient--insert-browser-url ()
+  (interactive)
+  (when-let* ((url (browser-copy-tab-link))
+              (_ (string-match-p "^https?://"  url))
+              (rb (region-beginning))
+              (re (region-end))
+              (txt (buffer-substring-no-properties rb re)))
+    (delete-region rb re)
+    (pcase major-mode
+      ('org-mode (insert (org-link-make-string url txt)))
+      ('markdown-mode (markdown-insert-inline-link txt url))
+      (_ url))))
+
 ;; Ported ahead of lisp/sexp-transient.el (its original home in doom.d) -
 ;; move, don't duplicate, when that lib restores.
 (defun transient-layout-keys (prefix)
@@ -145,15 +159,16 @@ transient and optionally call an explicit CMD."
     ("; `" "code" (lambda () (interactive) (org-emphasize ?~)))
     ("; +" "strikethrough" (lambda () (interactive) (org-emphasize ?+)))]
    [("C-c l" "insert link" org-insert-link)
+    ("C-c L" "insert browser url" expreg-transient--insert-browser-url)
     ("C-c i" "insert org-roam link" vulpea-insert)
     ("; l" "insert link" org-insert-link)
+    ("; L" "insert browser url" expreg-transient--insert-browser-url)
     ("; q" "wrap in quote block"
      (lambda () (interactive) (org-wrap-in-block 'quote)))
     ("; c" "wrap in source block"
      (lambda () (interactive) (org-wrap-in-block 'src)))]]
   ;; Dropped until their modules port (doom.d stays the reference, see
-  ;; MIGRATION Decisions log): Markdown and Clojure sections,
-  ;; the browser-url inserters (web-browsing), and the Magit section -
-  ;; that one also collides with bypass "s"/"x", which Doom's dead
-  ;; conflict guard never caught.
+  ;; MIGRATION Decisions log): Markdown and Clojure sections, and the
+  ;; Magit section - that one also collides with bypass "s"/"x", which
+  ;; Doom's dead conflict guard never caught.
   )

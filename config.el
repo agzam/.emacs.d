@@ -407,8 +407,6 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
        :desc "link without id" "L" #'org-store-link-id-optional
        (:when (modulep! :custom notmuch)
          :desc "notmuch" "m" #'notmuch)
-       (:when (modulep! :custom web-browsing)
-         :desc "elfeed" "e" #'elfeed)
        (:when (modulep! :custom git)
          (:prefix ("g" . "git")
                   "h" #'gh-notify))
@@ -426,7 +424,8 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
         :desc "personal note" "N" (cmd! (open-journal 'personal (org-read-date nil t)))
         :desc "org-roam-ui in xwidget" "w" #'org-roam-toggle-ui-xwidget
         :desc "org-roam-ui in browser" "W" #'org-roam-ui-in-browser
-        "C-b" #'browser-create-roam-node-for-active-tab))
+        (:when (modulep! :custom web-browsing)
+          "C-b" #'browser-create-roam-node-for-active-tab)))
 
       (:prefix ("p" . "projects")
                "b" #'consult-project-buffer

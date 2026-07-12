@@ -160,8 +160,8 @@
      (sql . t)
      (sqlite . t)))
 
-  ;; youtube videos played in mpv (mpv-open ports with web-browsing;
-  ;; plain browser until then)
+  ;; youtube videos played in mpv (web-browsing); plain browser when
+  ;; that module is off
   (org-link-set-parameters
    "yt" :follow (lambda (path)
                   (let ((url (concat "https:" path)))

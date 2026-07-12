@@ -608,6 +608,63 @@ module layout).
   advice pending, quarantine paths). Keydiff 102 -> 93 open / 87
   broken / 78 -> 81 resolved / 0 regressions - SPC x g subtree +
   SPC o c g off the open list.
+- [2026-07] web-browsing module ported.  Keep-set: eww glue (shr
+  setopts, rename hook/advice, mode-map + localleader), browser-hist,
+  consult-hn (+ consult-hn-transient require, reader fn, s-return),
+  reddigg + hnreader (darwin fetch-via-browser, show-all hook, quadrant
+  advice), navegosa, rfc-mode, subed, mpv helpers + transient,
+  xwidget helpers (inert without an xwidgets build), yt.el, readable/.
+  Dropped (2026-07 decision, unused, git-resurrectable): elfeed (SohumB
+  fork) + elfeed-org/elfeed-tube/elfeed-tube-mpv, yeetube;
+  autoload/elfeed.el whole, elfeed.org asset stays in doom.d; lab
+  SPC o e bind removed, ledger row :dropped.  mpv PROMOTED to an
+  explicit package (was transitive via elfeed-tube-mpv); mpv-transient
+  lost its two elfeed-tube-mpv suffixes ("f" follow / "w" where - void
+  after the drop), layout pinned by spec + probe.  Renames (plus-ban):
+  +eww-{jump-to-url-on-page,open-in-other-window,copy-current-url,
+  increase-font-size,decrease-font-size} -> eww-*, +process-external-url
+  -> process-external-url, +browse-url -> browse-url-externally,
+  mpv-open+ -> mpv-open (lab C-x m + org yt: placeholders expected it),
+  subed-mpv-play-from-file+ -> subed-mpv-play-media (naive de-plus
+  collides with subed's own play-from-file), shr-put-image* ->
+  shr-put-sliced-image, +navegosa-...-space-a -> navegosa-...-space-a;
+  file reddig+hnreader.el -> reddigg-hnreader.el.  doom.d
+  writing/embark/search configs still reference the old names - rename
+  at their ports (completion's dash-docs.el was already lab-renamed).
+  LOCAL-REPO audit: consult-hn/reddigg/navegosa in sync with GitHub
+  (navegosa README-only dirty), doom.d's browser-hist submodule 2
+  BEHIND origin/main, nothing unpushed anywhere; browser-hist.el +
+  consult-hn extracted to ~/GitHub/agzam (fresh clones, user-approved);
+  reddigg recipe pins :branch fetch-via-browser (fork features -
+  fetch-via-browser/chromium-warmup - live only there, master is
+  upstream's); all four in local-dev-packages.  readable/ asset moved
+  in-tree (extract.cljs + package.json), but npm install/node_modules
+  QUARANTINED to a doom-cache-dir/readable/ workdir (files copied there
+  before install); fixed doom.d's npm bootstrap - shell-command was
+  handed format args without format, so it never ran.  Guards:
+  jinx-mode call now fboundp-gated (writing unported), org-cliplink
+  fboundp-gated in browser-insert-link-from-active-tab's linux branch
+  (org long-tail), browser-tab-act keeps its embark-ephemeral-act call
+  runtime-void until embark ports (user verdict: port as-is).
+  navegosa deferred via :commands (eager in doom.d, no reason found).
+  Latent doom.d bugs fixed: subed-view-plain-text cookie typo
+  ;;;;;###autoload (void localleader ",v" bind), eww--rename-buffer's
+  (eq "" title) never true for fresh strings (untitled pages now fall
+  back to the url).  consult-line-collect-urls requires consult at
+  call time (gptel-log-find precedent).  expreg-transient browser-url
+  inserters restored (Org rows + expreg-transient--insert-browser-url).
+  Test-hygiene fix while landing: buttercup :var slots are lexical, so
+  tests/git/bug-reference-tests.el leaked its modified
+  bug-reference-bug-regexp into later suites - rewritten with dynamic
+  lets (buttercup already warned).  Verification: 372 specs (+34,
+  tests/web-browsing/), smoke 135 -> 144 packages (+8 keep-set,
+  +promise via hnreader/reddigg), 0 failed/blocked, probe green (binds
+  resolve incl. SPC o r C-b, packages deferred at boot incl. navegosa,
+  mpv-transient layout void-free, no elfeed/yeetube/+eww residue,
+  quarantine paths). Keydiff 93 -> 88 open / 85 broken / 82 resolved /
+  parked 4 -> 2 / 0 regressions - SPC b h/t/l/y/a/e + SPC b y +
+  SPC o r C-b closed, SPC o e re-verdicted :dropped, SPC j x un-voided
+  by the xwidget port.
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -627,6 +684,16 @@ resumes from this section alone:
      Never load-file lab files into Doom.  dump-bindings-load-autoloads
      stays nil there (no force-loading in a live session) - doom-side
      :void-suffix detection is best-effort; keydiff only reads lab flags.
+     POST SESSION-SWITCH (whenever sittings move into the lab instance
+     - see Infra debt "Session switch"; no live Doom session to eval
+     in): dump the Doom side via boot mode against the Doom install -
+     =KEYDUMP_OUT=~/.cache/emacs-lab/doom-keys.eld TERM=xterm-256color
+     script -q /dev/null emacs -nw --init-directory ~/.emacs.d -l
+     ~/.config/emacs-lab/scripts/dump-bindings.el= (the script is
+     standalone vanilla elisp, safe in a throwaway Doom boot; boot mode
+     force-loads autoloads, so doom-side :void-suffix detection gets
+     sharper - keydiff still only reads lab flags).  Untested flow:
+     sanity-check the entry count (~624) on first use.
    - Lab side: =bb keydump= (pty boot; KEYDUMP_REQUIRE env forces
      features whose maps bind lazily).
 2. =bb keydiff= - org report at ~/.cache/emacs-lab/keydiff.org (generated,
@@ -663,10 +730,11 @@ Cluster checklist (open counts as of 2026-07 pilot; =bb keydiff= is truth):
   writing-module material (SPC x l / x t trees etc.)
 - [ ] SPC c (15) - code/lsp
 - [ ] SPC o (15) - open/apps; roam/org tree resolved with the org port,
-  o c g closed with the ai port, SPC o r C-b parked (web-browsing) -
-  the rest waits on macos/chat/eval/notmuch
+  o c g closed with the ai port, o r C-b + o e settled with the
+  web-browsing port - the rest waits on macos/chat/eval/notmuch
 - [ ] SPC s (10) - search
-- [ ] SPC b (8) - buffers
+- [ ] SPC b (8) - buffers; browser rows closed with the web-browsing
+  port, 2 left (consult-projectile row, s-d rename verdict)
 - [ ] motion [ / motion ] (9+9), normal [ / normal ] (5+5)
 - [X] SPC t :: closed - 8 verdicts; flycheck parked on :checkers
 - [X] SPC g :: closed with the git module port - 4 verdicts;
@@ -788,6 +856,22 @@ desktop-path, ...). Done so far: org-roam/vulpea dbs, treemacs persist
 pair.
 
 * Infra debt
+** TODO Session switch (daily driver -> lab)
+Deliberately deferred (2026-07, post ai port): lab is self-hosting but
+the daemon plumbing isn't done - lab starts NO emacs server today.
+Prerequisites, in order:
+1. server-start in lab + socket decision: either lab takes the default
+   socket (Doom daemon must stop first) or lab runs =server-name= "lab"
+   and every emacsclient consumer passes =-s lab=.
+2. Repoint the death-contraptions elisp-eval MCP (its server.bb drives
+   emacsclient) at the chosen socket.
+3. Safety inversion: live-session protections move to lab; Doom becomes
+   the disposable reference (AGENTS.md hard-boundary section flips).
+4. Doom-side keydumps switch to dump-bindings.el boot mode (documented
+   in Key clusters step 1).
+One-time costs already wired: Claude OAuth re-auth (cache under
+doom-cache-dir) and the eca server download (doom-data-dir).
+Until this clears, sittings stay Doom-hosted.
 ** TODO Undo: persistence (undo-fu-session), maybe vundo
 Built-in =undo-redo= already covers evil (=evil-undo-system=); plain
 undo-fu is redundant on modern Emacs. The remaining value of Doom's
@@ -845,21 +929,21 @@ org-download, org-contrib, the 2 mp3 assets, org-capture frame infra
 (spacehammer flow), org-refile/org-avy commands, org-pretty-mode
 (org-present), export-to-clipboard helpers, edit-indirect-guess-mode-fn+.
 Feeds embark (vulpea-*), now unblocked.
-browser-create-roam-node-for-active-tab parked on web-browsing.
+browser-create-roam-node-for-active-tab landed with the web-browsing port.
 ** DONE ai
 Ported (see Decisions log): gptel, eca, mcp, gptel-agent,
 gptel-anthropic-oauth + parseedn; gptel-tools/gptel-anthropic-oauth
 vendored under modules/ai/. Dropped: whisper, gptel-quick, ob-gptel,
 llm-tool-collection, ragmacs, shell-maker, acp, agent-shell,
 claude-code. =C-x g= / =SPC x g= / =SPC o c g= live.
-** TODO web-browsing
-eww (built-in), elfeed (SohumB fork+branch), elfeed-org/tube/tube-mpv,
-rfc-mode, yeetube, subed (:files), hnreader (own fork).
-LOCAL-REPO: browser-hist, consult-hn, emacs-reddig, navegosa.el.
-readable/ cljs helper (npm deps). config 289L, autoload 9 files ~1110L.
-Port BEFORE writing/embark/search (provides +eww-* and browser-hist).
-Restore expreg-transient's browser-url inserters (dropped with the slim,
-doom.d expreg.el is the reference).
+** DONE web-browsing
+Ported (see Decisions log).  elfeed stack + yeetube dropped, mpv
+promoted to explicit, four local repos on the recipe +
+local-dev-packages pattern (browser-hist.el + consult-hn extracted to
+~/GitHub/agzam), readable/ npm workdir quarantined to the cache dir,
+expreg-transient browser-url inserters restored.  Unblocks
+writing/embark/search (eww-* helpers + browser-hist); their doom.d
+configs still use the pre-rename +names.
 ** TODO writing
 jinx, sdcv, mw-thesaurus, google-translate (own fork+branch), define-it,
 separedit, youtube-sub-extractor, occult. LOCAL-REPO: spacehammer (symlink
@@ -1013,10 +1097,12 @@ Gotchas learned live:
   at ~/GitHub/agzam/github-topics (cloned off the submodule preserving the
   then-unpushed dce3530, origin re-pointed to GitHub; pushed 2026-07,
   upstream tracks) and ag-themes at ~/GitHub/agzam/ag-themes.el (af440d2,
-  already in sync with GitHub at extraction). Remaining doom.d-embedded
-  locals (let-plist, evilify-edebug, gptel-*, ...) get the same treatment
-  when their modules port; the doom.d submodules dissolve when the cord
-  is cut.
+  already in sync with GitHub at extraction). browser-hist.el + consult-hn
+  followed at the web-browsing port - fresh clones (the submodules held
+  nothing unpushed; doom.d's browser-hist was 2 behind origin/main).
+  Remaining doom.d-embedded locals (let-plist, evilify-edebug, gptel-*,
+  ...) get the same treatment when their modules port; the doom.d
+  submodules dissolve when the cord is cut.
 
 Settled: general's bare let-plist uses (autoload/url.el x4, autoload/misc.el)
 resolve at call time via the elisp module's loaddefs macro-autoload. The git
@@ -1025,9 +1111,9 @@ module had rewritten its own uses with plist-get before that existed.
 * Assets to relocate
 - snippets: currently read from ~/.doom.d/snippets (62 snippets); localize
   to lab when cutting the cord
-- org module mp3s, writing abbrev_defs,
-  web-browsing readable/ (npm deps); elisp templates/ relocated with its
-  module (2026-07)
+- org module mp3s, writing abbrev_defs; elisp templates/ and
+  web-browsing readable/ relocated with their modules (2026-07;
+  readable's npm install/node_modules quarantined to the cache dir)
 
 * Cross-module port ordering constraints
 - web-browsing before: writing, embark, search

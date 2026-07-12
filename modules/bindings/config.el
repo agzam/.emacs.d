@@ -12,7 +12,8 @@
 ;; vendored here too, pruned per the SPC h audit (key-decisions.edn).
 ;; Deviation: the :term ghostel o-t/T block is gone (those commands never
 ;; existed upstream) and the :term eshell toggle row too - shell-pop owns
-;; popping (SPC '); SPC o e stays free for elfeed (web-browsing port).
+;; popping (SPC '); SPC o e stays unbound - elfeed was dropped at the
+;; web-browsing port.
 ;;; Code:
 
 ;; From modules/config/default/config.el.

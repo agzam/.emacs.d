@@ -55,7 +55,7 @@
  ["leader" "SPC z f"] {:status :improved :note "frame-zoom-transient slimmed to font/text-scale/full-height; WM-era resize suffixes dropped, doom/*-font-size -> font-size-*"}
 
  ;; org module port (2026-07) - SPC o roam/org tree resolved by the port itself
- ["leader" "SPC o r C-b"] {:status :deferred :note "browser-create-roam-node-for-active-tab - waits on web-browsing"}
+ ["leader" "SPC o r C-b"] {:status :ported :note "browser-create-roam-node-for-active-tab, web-browsing module"}
  ["leader" "SPC r c"] {:status :dropped :note "+corfu-kill-frames - corfu machinery removed config-wide (Decisions log)"}
 
  ;; SPC g - git module port (2026-07)
@@ -138,7 +138,7 @@
  ["leader" "SPC p '"] {:status :ported :note "shell-pop-in-project-root - same name, root resolution rebuilt on project.el (projectile dropped)"}
  ["leader" "SPC p !"] {:status :improved :note "project-shell-command over projectile-run-shell-command-in-root (projectile dropped)"}
  ["leader" "SPC p &"] {:status :improved :note "project-async-shell-command over projectile-run-async-shell-command-in-root (projectile dropped)"}
- ["leader" "SPC o e"] {:status :deferred :note "elfeed - waits on web-browsing; lab's void eshell-toggle row removed, shell-pop owns popping"}
+ ["leader" "SPC o e"] {:status :dropped :note "elfeed dropped at the web-browsing port (unused; git-resurrectable); lab's void eshell-toggle row removed earlier, shell-pop owns popping"}
  ["leader" "SPC o E"] {:status :improved :note "eshell-here - thin project-aware opener over +eshell/here"}
 
  ;; plus-affix sweep (2026-07) - lab names de-plussed, doom.d keeps the + names
@@ -155,4 +155,11 @@
  ["leader" "SPC x g c"] {:status :ported :note "eca, ai module"}
  ["leader" "SPC x g e"] {:status :improved :note "gptel-improve-text-transient - de-plussed rename of doom.d's +gptel-improve-text-transient"}
  ["leader" "SPC x g n"] {:status :improved :note "open-gptel - de-plussed rename of doom.d's gptel+"}
- ["leader" "SPC o c g"] {:status :improved :note "open-gptel - de-plussed rename of doom.d's gptel+"}}
+ ["leader" "SPC o c g"] {:status :improved :note "open-gptel - de-plussed rename of doom.d's gptel+"}
+
+ ;; web-browsing module port (2026-07) - closes the SPC b browser rows
+ ["leader" "SPC b h"] {:status :ported :note "browser-hist-search, web-browsing module"}
+ ["leader" "SPC b t"] {:status :ported :note "browser-goto-tab, web-browsing module"}
+ ["leader" "SPC b l"] {:status :ported :note "browser-copy-tab-link, web-browsing module"}
+ ["leader" "SPC b y"] {:status :ported :note "navegosa-insert-link, web-browsing module"}
+ ["leader" "SPC b a"] {:status :ported :note "browser-tab-act - embark-ephemeral-act stays runtime-void until the embark module ports (user verdict: port as-is)"}}
