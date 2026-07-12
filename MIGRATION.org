@@ -883,7 +883,14 @@ module layout).
   Keydiff 77 -> 74 open / 70 broken / 10 parked / 90 resolved /
   0 regressions - SPC s cluster CLOSED (4 rename rows :improved, 6
   lookup rows + link-hint + vundo parked :deferred), SPC n * and
-  SPC f d :improved, SPC * exact-matched.
+  SPC f d :improved, SPC * exact-matched.  Post-push amendment: CI
+  smoke failed on slacko - its Package-Requires pinned (emacs "30.2")
+  while CI runs the 30.1 floor; local 31 masked it (the gptel-tools
+  floor lesson repeated, this time caught by CI not foresight).
+  Floor lowered to 30.1 upstream (slacko 37c9018; 30.x point releases
+  are bugfix-only, the pin was the dev-box version).  Check
+  Package-Requires floors against CI's 30.1 at every future own-package
+  port.
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
