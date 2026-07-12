@@ -31,9 +31,15 @@
 ;; TODO: Doom's font machinery (doom-font & friends) isn't vendored; set the
 ;; faces directly until the UI port.  Original:
 ;;   doom-font (font-spec :family "Fira Code" :size 16)
+;;   doom-serif-font (font-spec :family "Fira Code" :size 16)
 ;;   doom-variable-pitch-font (font-spec :family "Noto Sans" :size 18)
+;; fixed-pitch/-serif must be pinned like Doom pins them (fixed-pitch <-
+;; doom-font): user specs outrank themes, and ag-themes-spacemacs-light
+;; carries a stale fixed-pitch family (uninstalled font -> Skia fallback).
 (push '(font . "Fira Code-16") default-frame-alist)
 (custom-set-faces
+ '(fixed-pitch ((t (:family "Fira Code" :width normal))))
+ '(fixed-pitch-serif ((t (:family "Fira Code"))))
  '(variable-pitch ((t (:family "Noto Sans" :height 1.125)))))
 
 (defun fonts-relative-height-h (&rest _)

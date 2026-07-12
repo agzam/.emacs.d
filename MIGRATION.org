@@ -1123,6 +1123,16 @@ Resolved with the frames lib port: config.el face bridge +
 =font-size-increase/decrease/reset= over the default face height;
 doom-font vars stay unvendored. Consequence: =doom-big-font-mode= will
 never exist - the SPC t sitting must drop or replace SPC t b.
+Amendment (2026-07): the bridge was incomplete - Doom also pins
+fixed-pitch <- doom-font and fixed-pitch-serif <- doom-serif-font
+(lisp/doom-emacs.el:1137), a user-theme spec that outranks themes.
+Without it, ag-themes-spacemacs-light's stale =fixed-pitch :family
+"JetBrains Mono"= (font not installed; ag-themes-base16-ocean carries
+the same line) won in the lab and NS fell back to Skia - org
+blocks/code rendered PROPORTIONAL. Bridge now pins fixed-pitch (:width
+normal shadows the theme's expanded) + fixed-pitch-serif to Fira Code;
+GUI probe shows resolution byte-identical to Doom. The theme-side rot
+is flagged for an ag-themes upstream fix.
 ** DONE Theme: colors module
 Ported (see Decisions log). circadian owns day/night loading off
 doom-init-ui-hook; base16-theme was missing from this list (packages.el
