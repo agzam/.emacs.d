@@ -130,4 +130,13 @@
  ["leader" "SPC h b i"] {:status :ported :note "which-key-show-minor-mode-keymap, b subtree"}
  ["leader" "SPC h b k"] {:status :ported :note "which-key-show-keymap, b subtree"}
  ["leader" "SPC h b m"] {:status :ported :note "which-key-show-major-mode, b subtree"}
- ["leader" "SPC h b t"] {:status :ported :note "which-key-show-top-level, b subtree"}}
+ ["leader" "SPC h b t"] {:status :ported :note "which-key-show-top-level, b subtree"}
+
+ ;; shell module port (2026-07) - closes the SPC ' / SPC " singletons
+ ["leader" "SPC '"] {:status :ported :note "shell-pop, custom shell module"}
+ ["leader" "SPC \""] {:status :ported :note "shell-pop-choose, custom shell module"}
+ ["leader" "SPC p '"] {:status :ported :note "shell-pop-in-project-root - same name, root resolution rebuilt on project.el (projectile dropped)"}
+ ["leader" "SPC p !"] {:status :improved :note "project-shell-command over projectile-run-shell-command-in-root (projectile dropped)"}
+ ["leader" "SPC p &"] {:status :improved :note "project-async-shell-command over projectile-run-async-shell-command-in-root (projectile dropped)"}
+ ["leader" "SPC o e"] {:status :deferred :note "elfeed - waits on web-browsing; lab's void eshell-toggle row removed, shell-pop owns popping"}
+ ["leader" "SPC o E"] {:status :improved :note "eshell-here - thin project-aware opener over +eshell/here"}}

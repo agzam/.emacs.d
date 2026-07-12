@@ -516,6 +516,31 @@ module layout).
   116 -> 121 packages, 0 failed/blocked; keydiff untouched (107 open /
   90 broken / 3 parked / 0 regressions); the agzam in-place checkouts
   stayed clean through the builds.
+- [2026-07] shell module ported (registry slot after org).  Adjudicated
+  drops, all git-resurrectable: eshell-aliases-file setq (target never
+  existed - Doom :term eshell's default alias alist folded in as the
+  effective set, minus bd/cdp whose targets aren't ported), Hyprland env
+  refresh (Linux-only), mise (installed-but-inert in doom.d), yuck-mode,
+  shrink-path (prompt pwd falls back to abbreviate-file-name).  :term
+  eshell fold-in: aliases + write-suppression advice + prompt (renamed
+  eshell-default-prompt-fn, faces eshell-prompt-pwd/-git-branch).
+  shell-pop-in-project-root rebuilt on project.el, same name; eshell-here
+  is a thin project-aware opener; the vendored void eshell-toggle row and
+  the invented :term ghostel block left the bindings tree (those ghostel
+  commands never existed upstream - real entries are ghostel/
+  ghostel-project, M-x surface like doom.d).  zoxide-find pulled ahead
+  from the unported search module (relocates with it).  Names born
+  plus-free per the no-plus-affix rule: eshell-clear-buffer,
+  eshell-export-output.  eshell-atuin installs unconditionally, activates
+  behind executable-find (smoke determinism); mxp ansi hook kept with a
+  provenance comment (~/GitHub/agzam/mxp drives it via emacsclient).
+  kkp's tty-setup hook fires in pty probes (CSI u query visible in raw
+  tty output) but *Warnings* stays clean - no gating needed.  Coverage:
+  shell-tests + eshell-tests suites (16 specs; the find-file-visit-truename
+  + /private/var symlink gotcha pinned in the fontify specs).  Smoke
+  121 -> 127 packages, 0 failed/blocked.  Keydiff: 107 -> 102 open,
+  90 -> 88 broken, 71 -> 74 resolved, +1 parked (SPC o e deferred to
+  elfeed), 0 regressions; SPC ' / SPC " clusters off the table.
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -584,13 +609,13 @@ Cluster checklist (open counts as of 2026-07 pilot; =bb keydiff= is truth):
 - [ ] SPC f (6), SPC n (6), normal z (3)
 - [X] SPC T :: closed with the colors module port - 2 verdicts (the
   renamed cycle-themes pair)
-- [ ] singletons: SPC " ' a i l q
+- [ ] singletons: SPC a i l q (" and ' closed with the shell module port)
 ** TODO Retire key-audit tooling (last cluster closed)
 Fold ledger verdicts into the Decisions log; delete scripts/dump-bindings.el,
 scripts/keydiff.clj, key-decisions.edn (+ its .gitignore whitelist line),
 the keydump/keydiff bb tasks, and tests/scripts/.
-Proximity (post SPC h): open clusters left - SPC b/c/f/n/o/p/s/x, the
-g/z/[/] trees, and the singletons row.
+Proximity (post shell): open clusters left - SPC b/c/f/n/o/p/s/x, the
+g/z/[/] trees, and the singletons row (SPC " ' now closed).
 
 * Testing & CI
 - =bb test= - buttercup suites from tests/ (buttercup auto-installed into
@@ -805,10 +830,12 @@ autoload/ (no local repos - straight-era workaround retired), macrostep +
 eros added explicitly, buttercup stays a bb-deps concern (nothing installs
 it at runtime). Rode along: helpful/golden-ratio/lorem-ipsum/consult-symbol
 in the root layer, smartparens base, the *scratch* replacement.
-** TODO shell
-shell-pop, ghostel+evil-ghostel (:files split), eshell-atuin, mise, kkp,
-vimrc-mode, yuck-mode. doom-emacs-dir eshell aliases path -> relocate.
-Unlocks SPC ' / SPC " (shell-pop tree). config 120L.
+** DONE shell
+Ported (see Decisions log). shell-pop, ghostel+evil-ghostel (:files split),
+eshell-atuin, kkp, vimrc-mode; mise and yuck-mode dropped. Doom :term eshell
+aliases/prompt folded in; the aliases-file relocate note resolved by dropping
+the setq - the file never existed, the folded alist was the effective set.
+shell-pop-in-project-root rebuilt on project.el. Closed SPC ' / SPC ".
 ** DONE tree-sitter
 Ported (see Decisions log). treesit block gated to Emacs 31 (CI's 30.1
 lacks the API), grammar ensure-installed deferred to consumer load so the
@@ -878,7 +905,8 @@ Each needs a lab decision; bindings tree + registry already assume them.
 - :emacs ibuffer :: groups/icons; general module has own ibuffer config -
   maybe drop Doom's.
 - :emacs electric, tramp :: small defaults; likely inline into config.el.
-- :term eshell :: aliases/prompt; fold into shell module port.
+- :term eshell :: aliases/prompt folded into the shell module port
+  (2026-07); registry entry stays for the bindings-tree guard.
 - :checkers syntax +childframe :: flycheck + posframe; their config disables
   global-flycheck - decide scope.
 - :checkers grammar :: langtool/writegood; likely drop (writing module covers).

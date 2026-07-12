@@ -10,6 +10,9 @@
 ;; no project.el analog were dropped.
 ;; Deviation: the help-map surgery from modules/config/default/config.el is
 ;; vendored here too, pruned per the SPC h audit (key-decisions.edn).
+;; Deviation: the :term ghostel o-t/T block is gone (those commands never
+;; existed upstream) and the :term eshell toggle row too - shell-pop owns
+;; popping (SPC '); SPC o e stays free for elfeed (web-browsing port).
 ;;; Code:
 
 ;; From modules/config/default/config.el.
@@ -660,9 +663,6 @@
         :desc "Open directory in dirvish"    "/" #'dirvish
         :desc "Project sidebar"              "p" #'dirvish-side
         :desc "Find file in project sidebar" "P" #'dired-dirvish-side-and-follow)
-       (:when (modulep! :term ghostel)
-        :desc "Toggle ghostel popup"  "t" #'ghostel-toggle
-        :desc "Open ghostel here"     "T" #'ghostel-here)
        (:when (modulep! :term shell)
         :desc "Toggle shell popup"    "t" #'shell-toggle
         :desc "Open shell here"       "T" #'shell-here)
@@ -673,7 +673,6 @@
         :desc "Toggle vterm popup"    "t" #'vterm-toggle
         :desc "Open vterm here"       "T" #'vterm-here)
        (:when (modulep! :term eshell)
-        :desc "Toggle eshell popup"   "e" #'eshell-toggle
         :desc "Open eshell here"      "E" #'eshell-here)
        (:when (modulep! :os macos)
         :desc "Reveal in Finder"           "o" #'macos-reveal-in-finder
