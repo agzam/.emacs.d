@@ -151,11 +151,11 @@ build-in-place to clone."
 ;; Mac and Linux), then config.el; config.el may `load!' extra +files.
 ;; The module list itself is explicit, in this exact order.
 (defvar active-modules
-  `("evil" "bindings" "lookup" "git" "general" "completion" "embark" "colors" "modeline" "tab-bar" "elisp" "search" "dired" "ai" "web-browsing" "tree-sitter" "lsp" "clojure" "org" "shell" "writing" "yaml"
+  `(evil bindings lookup git general completion embark colors modeline tab-bar elisp search dired ai web-browsing tree-sitter lsp clojure org shell writing yaml
     ;; darwin-only tail - Doom's (:if (featurep :system 'macos) ...)
     ;; jira after osx: its browse autoload rides the web-browsing + git
     ;; module fns (loaded above), and it defers on org (loaded above).
-    ,@(when (eq system-type 'darwin) '("osx" "jira")))
+    ,@(when (eq system-type 'darwin) '(osx jira)))
   "Modules under modules/, loaded in this exact order.
 bindings (Doom's :config default) precedes the :custom ports, like in doom!;
 lookup (Doom's :tools lookup core) rides right behind it; lsp < clojure < org

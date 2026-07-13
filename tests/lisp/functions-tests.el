@@ -27,7 +27,7 @@
   (it "re-runs the init.el layers in order, then processes elpaca queues"
     ;; let*: the hook lambdas must lexically capture `calls'
     (let* ((calls nil)
-           (active-modules '("mod-a" "mod-b"))
+           (active-modules '(mod-a mod-b))
            (custom-file "/probe/custom.el")
            (doom-before-reload-hook (list (lambda () (push '(hook before) calls))))
            (doom-after-reload-hook (list (lambda () (push '(hook after) calls)))))
@@ -43,7 +43,7 @@
       (expect (nreverse calls) :to-equal
               '((hook before)
                 (load "doom-defaults") (load "functions")
-                (module "mod-a") (module "mod-b")
+                (module mod-a) (module mod-b)
                 (load "config") (load "custom.el")
                 (elpaca)
                 (hook after)))))
