@@ -86,7 +86,15 @@
       slacko-creds-gpg-file (concat doom-cache-dir "slacko-creds.gpg")
       ;; tab-bar module: desktop files live with the rest of the session
       ;; state (the module presets desktop-dirname to match)
-      desktop-path (list doom-state-dir))
+      desktop-path (list doom-state-dir)
+      ;; git module: the request package derives its curl cookie jar from
+      ;; request-storage-directory, which defaults inside user-emacs-directory
+      request-storage-directory (concat doom-cache-dir "request/")
+      ;; tree-sitter module: Emacs 31 `treesit-ensure-installed' installs
+      ;; compiled grammars into the first writable `treesit-extra-load-path'
+      ;; entry, else user-emacs-directory/tree-sitter - keep the .dylib blobs
+      ;; (un-greppable build artifacts) in the cache
+      treesit-extra-load-path (list (expand-file-name "tree-sitter" doom-cache-dir)))
 
 (defvar doom-disabled-packages nil)
 

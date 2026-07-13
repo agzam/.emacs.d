@@ -17,7 +17,8 @@
     (dolist (var '(savehist-file save-place-file recentf-save-file
                    bookmark-default-file project-list-file
                    transient-history-file auto-save-list-file-prefix
-                   url-cache-directory eshell-directory-name))
+                   url-cache-directory eshell-directory-name
+                   request-storage-directory))
       (expect (file-in-directory-p (symbol-value var) user-emacs-directory)
               :to-be nil)))
   (it "points state files at the quarantine dirs"
@@ -26,6 +27,15 @@
     (expect (file-in-directory-p tramp-persistency-file-name doom-cache-dir)
             :to-be-truthy)
     (expect (file-in-directory-p url-configuration-directory doom-data-dir)
+            :to-be-truthy))
+  (it "redirects package build artifacts (request jar, tree-sitter grammars)"
+    ;; request derives its curl cookie jar from request-storage-directory;
+    ;; treesit installs .dylib grammars into treesit-extra-load-path's first
+    ;; writable entry.  Both defaulted inside user-emacs-directory.
+    (expect (file-in-directory-p request-storage-directory doom-cache-dir)
+            :to-be-truthy)
+    (expect (car treesit-extra-load-path) :to-be-truthy)
+    (expect (file-in-directory-p (car treesit-extra-load-path) doom-cache-dir)
             :to-be-truthy)))
 
 (describe "switch-frame hook machinery"
