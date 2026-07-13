@@ -24,7 +24,8 @@ module layout).
   evil-org), shell, writing (jinx/translate/dictionaries/prisma),
   search (consult-omni/tldr/slacko),
   tab-bar (workspace transients + desktop persistence, no packages),
-  yaml (yaml-mode/jinja2/highlight-indent-guides/yaml-pro)
+  yaml (yaml-mode/jinja2/highlight-indent-guides/yaml-pro),
+  pdf (pdf-tools w/ upstream continuous-scroll + saveplace/org-noter/nov)
 - user layer :: config.el (leader tree, globals), lisp/functions.el
   incl. reload-config (SPC h r r; doom/reload analogue - re-runs
   defaults/modules/config in place, elpaca picks up new packages; restart
@@ -1324,6 +1325,50 @@ module layout).
   lsp-pyright + deps; lua-mode built-in adds none) 0 failed/blocked, live
   autoload sanity green (renames resolve, +python-/py- names gone,
   friar/awesomewm-repl unbound, python--path-to-dotted round-trips).
+- [2026-07] pdf module ported (registry slot after yaml, trailing the common
+  list; org-noter defers on org and nov rides writing's translate/jinx
+  autoloads, both loaded ahead).  HEADLINE - continuous scroll is UPSTREAM
+  now: vedang/pdf-tools ships lisp/pdf-roll.el (autoloaded
+  pdf-view-roll-minor-mode, lighter " Continuous") as of v1.2.0 (2025-12) /
+  v1.3.0 (2026-01), so the dalanicolai fork + its pdf-roll branch AND the
+  separate image-roll package are BOTH dropped - the roll code was absorbed
+  into pdf-roll.el, which only requires pdf-view (0 image-roll refs in the
+  repo).  Recipe tracks vedang's default branch; :files keeps
+  build/{Makefile,server} so epdfinfo still compiles at first PDF open.  The
+  fork-era <wheel-up>/<wheel-down> remaps in pdf-view-roll-minor-mode-map are
+  dropped: the upstream mode drives the wheel via mwheel-scroll-{up,down}-
+  function.  pdf-view-continuous (the "s c" toggle) is a distinct,
+  long-standing per-line variable and survives untouched, so both scroll
+  features remain.  epdfinfo builds at RUNTIME (pdf-tools-install-noverify +
+  the graceful pdf--install-epdfinfo-a advice), never at elpaca build time -
+  CI smoke never opens a PDF, and the binary lands in the package build dir
+  under .local (self-contained, no quarantine).  Kept: saveplace-pdf-view
+  (reopen at last page), org-noter (settings + the 3 window/scroll advices),
+  nov (epub).  Dropped: calibredb (unused, user call), image-roll (obsolete).
+  Added: hide-mode-line - Doom pulled it via :ui, the lab had no consumer
+  until the annotation-list mode-line.  Cross-module resolutions:
+  translate-at-point-smart un-parked into writing/autoload/google-translate.el
+  (its only consumer is nov's localleader "T"; the deferred
+  google-translate-posframe file is pulled in via require at call time -
+  doom.d loaded google-translate eagerly); org-mode-map localleader "n" ->
+  org-noter-transient restored (doom.d org config.el:80, the "waits for pdf"
+  deferral) and pdf-view-mode-map localleader "n" too; SPC n e -> org-noter
+  filled from the pdf module - Doom's row is guarded by
+  (modulep! :lang org +noter), structurally false in the lab (org is :custom),
+  so the owning module fills the pruned slot (SPC n r roam-tree precedent).
+  Renames (plus-affix sweep + when-let*): org-noter-anchor-to-current-page+ ->
+  -page, +pdf--install-epdfinfo-a -> pdf--install-epdfinfo-a, the org-noter
+  scroll helpers' when-let -> when-let*.  doom.d rot fixed: nov-text-width was
+  set to 100 then clobbered with t in one setopt - kept t (the effective
+  value, fill-the-window with visual-line-mode).  Verification: 625 specs
+  (+26: tests/pdf/{pdf,nov,org-noter} + 2 tests/writing translate-at-point-
+  smart; packages provide-stubbed, cl-letf spies, org-noter-transient suffix
+  walk), bb lint 202/0, smoke 198 -> 205 packages (pdf-tools + tablist +
+  saveplace-pdf-view + org-noter + nov + hide-mode-line) 0 failed/blocked,
+  probe PROBE-OK (25 checks: pdf-roll shipped + roll mode autoloaded, every
+  module command fboundp, .pdf/.epub/%PDF wiring, SPC n e + org/pdf
+  localleader resolved via the evil aux keymap with a "," "." control, no new
+  *Warnings*).
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -1693,8 +1738,9 @@ insert-bracket-pair un-voided (org "[ SPC" still rides vulpea's config,
 doom.d-parity).  Unblocked: clojure (spacehammer-monroe), chat (jinx).
 Parked with their modules: grip block (:lang markdown), lsp-marksman +
 harper activation (lsp; the after! lsp-mode harper registration ported
-inert), menu-bar clock/pomodoro fn (org long-tail),
-translate-at-point-smart (pdf).
+inert), menu-bar clock/pomodoro fn (org long-tail).
+translate-at-point-smart landed with the pdf module (2026-07) - it lives in
+writing/autoload/google-translate.el, nov's localleader "T" is its consumer.
 ** DONE embark
 Ported (see Decisions log). embark + embark-consult (package-only
 wiring); SPC a / [remap describe-bindings] / minibuffer export rows
@@ -1767,10 +1813,17 @@ notmuch (gh), org-mime, ol-notmuch, consult-notmuch. modulep! conditionals
 inside packages need static resolution. doom-real-buffer-functions (shim).
 ** TODO chat
 telega. jinx dep (writing). config 38L.
-** TODO pdf
-pdf-tools (dalanicolai pdf-roll fork, custom :files/build), image-roll,
-saveplace-pdf-view, org-noter, calibredb, nov. config 186L.
-Build step (epdfinfo) - elpaca :build test case.
+** DONE pdf
+Ported (see Decisions log).  Continuous scroll is UPSTREAM now
+(vedang/pdf-tools ships pdf-roll.el / pdf-view-roll-minor-mode as of v1.2.0,
+2025-12), so the dalanicolai pdf-roll fork branch AND image-roll are dropped;
+the recipe tracks vedang's default branch and keeps build/{Makefile,server}
+for the runtime epdfinfo compile (first PDF open, never at elpaca build time).
+Kept: saveplace-pdf-view, org-noter, nov.  Dropped: calibredb (unused, user
+call).  Added: hide-mode-line (annotation-list mode-line).  Cross-module:
+translate-at-point-smart un-parked into writing; org-mode-map + pdf-view-mode-
+map localleader "n" and SPC n e wired to org-noter (SPC n e fills the slot
+Doom's (modulep! :lang org +noter) guard prunes in the :custom-org lab).
 ** DONE jira
 posframe + LOCAL-REPO go-jira. config 46L.
 Ported (2026-07). Darwin-only, mirroring doom.d's

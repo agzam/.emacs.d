@@ -210,3 +210,17 @@ text like: \"2023 was a better year than 2021\" would translate to:
   (interactive)
   (goto-char (point-min))
   (push-button (forward-button 2)))
+
+;;;###autoload
+(defun translate-at-point-smart ()
+  "Translate the region or the word/sentence at point via the posframe UI.
+Un-parked from doom.d with the pdf module (nov's localleader T), its only
+consumer.  The posframe file is deferred here (doom.d loaded google-translate
+eagerly), so pull it in before reaching for its text-grab helper."
+  (interactive)
+  (require 'google-translate-posframe)
+  (when-let* ((text (google-translate-posframe--get-text-to-translate)))
+    (google-translate-translate
+     google-translate-default-source-language
+     google-translate-default-target-language
+     text)))

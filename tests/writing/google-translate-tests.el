@@ -11,6 +11,8 @@
 ;; the defcustoms/fns it reaches for.  Valued defvars - module fns let-bind
 ;; and setq them, so they must be special (the embark-indicators lesson).
 (provide 'google-translate)
+;; translate-at-point-smart requires this (deferred) fork file at call time.
+(provide 'google-translate-posframe)
 (defvar google-translate-default-source-language "auto")
 (defvar google-translate-default-target-language "en")
 
@@ -109,3 +111,26 @@
       (dolist (sym '(translate--set-source translate--set-target
                      translate--minibuffer translate--translate))
         (expect (fboundp sym) :to-be-truthy)))))
+
+(describe "translate-at-point-smart"
+  (it "translates the grabbed text via the posframe helper"
+    (let (received)
+      (cl-letf (((symbol-function 'google-translate-posframe--get-text-to-translate)
+                 (lambda () "hola"))
+                ((symbol-function 'google-translate-translate)
+                 (lambda (src tgt text &optional _)
+                   (setq received (list src tgt text)))))
+        (translate-at-point-smart)
+        (expect received
+                :to-equal (list google-translate-default-source-language
+                                google-translate-default-target-language
+                                "hola")))))
+
+  (it "does nothing when there is no text to translate"
+    (let (called)
+      (cl-letf (((symbol-function 'google-translate-posframe--get-text-to-translate)
+                 (lambda () nil))
+                ((symbol-function 'google-translate-translate)
+                 (lambda (&rest _) (setq called t))))
+        (translate-at-point-smart)
+        (expect called :to-be nil)))))

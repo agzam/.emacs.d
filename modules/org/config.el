@@ -61,8 +61,9 @@
 
   ;; doom.d rebuilt these on every org-mode-hook run (org-init-keybinds-h);
   ;; once after load is enough.  Deviations: the vertico guard is gone (the
-  ;; lab registry says :custom completion); org-noter ("n") waits for the
-  ;; pdf module.  org-cliplink "i L" restored with its 2026-07 pull-forward.
+  ;; lab registry says :custom completion); org-noter ("n") is autoloaded from
+  ;; the pdf module (its owner).  org-cliplink "i L" restored with its 2026-07
+  ;; pull-forward.
   (map! :map org-mode-map
         :n "[[" #'org-previous-visible-heading
         :n "]]" #'org-next-visible-heading
@@ -91,6 +92,8 @@
                   "n" #'org-next-link
                   "p" #'org-previous-link
                   "x" #'org-remove-link-at-point)
+         ;; org-noter-transient is autoloaded from the pdf module (its owner).
+         "n" #'org-noter-transient
          (:prefix ("o" . "open/Org")
                   "l" #'org-id-store-link
                   "L" #'org-store-link-id-optional)

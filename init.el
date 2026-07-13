@@ -120,7 +120,7 @@ build-in-place to clone."
          (:custom web-browsing) (:custom tree-sitter) (:custom lsp) (:custom clojure)
          (:custom python) (:custom lua)
          (:custom org) (:custom shell)
-         (:custom writing) (:custom yaml))
+         (:custom writing) (:custom yaml) (:custom pdf))
        (when (eq system-type 'darwin) '((:os macos) (:custom osx) (:custom jira)))))
 
 ;; Leader prefixes are read at bind time; set before doom-keybinds loads so
@@ -153,7 +153,7 @@ build-in-place to clone."
 ;; Mac and Linux), then config.el; config.el may `load!' extra +files.
 ;; The module list itself is explicit, in this exact order.
 (defvar active-modules
-  `(evil bindings lookup git general completion embark colors modeline tab-bar elisp search dired ai web-browsing tree-sitter lsp clojure python lua org shell writing yaml
+  `(evil bindings lookup git general completion embark colors modeline tab-bar elisp search dired ai web-browsing tree-sitter lsp clojure python lua org shell writing yaml pdf
     ;; darwin-only tail - Doom's (:if (featurep :system 'macos) ...)
     ;; jira after osx: its browse autoload rides the web-browsing + git
     ;; module fns (loaded above), and it defers on org (loaded above).
@@ -163,7 +163,8 @@ bindings (Doom's :config default) precedes the :custom ports, like in doom!;
 lookup (Doom's :tools lookup core) rides right behind it; lsp < clojure <
 python/lua < org keeps the doom! :custom order (python/lua ride behind lsp
 and clojure - they call lsp!, the lsp lookup handlers, and clojure's fennel
-monroe glue).")
+monroe glue).  pdf trails org and writing: org-noter defers on org, and the
+nov (epub) config rides writing's translate + jinx autoloads.")
 
 (defun generate-module-loaddefs (name auto-dir)
   "Return the loaddefs file for module NAME, regenerating it if stale.

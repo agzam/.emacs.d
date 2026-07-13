@@ -3,8 +3,9 @@
 ;; Ported from doom.d modules/custom/writing.  Dropped (git-resurrectable):
 ;; after! writegood-mode (rode Doom's :checkers grammar, not installed here),
 ;; after! grip-mode (parks with :lang markdown), lsp-marksman require (parks
-;; with lsp), menu-bar-item-set-clock-or-pomodoro (org-pomodoro long-tail),
-;; translate-at-point-smart (pdf module is its only consumer).
+;; with lsp), menu-bar-item-set-clock-or-pomodoro (org-pomodoro long-tail).
+;; translate-at-point-smart lives here now (below); it un-parked with the pdf
+;; module (nov's localleader T), its only consumer.
 ;; NOTE Own packages (google-translate, occult, prisma, wiktionary-bro,
 ;; spacehammer) declare GitHub recipes; `local-checkout-recipe' (init.el)
 ;; redirects them to local checkouts on machines that have them -
