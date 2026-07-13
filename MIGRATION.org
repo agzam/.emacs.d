@@ -1473,8 +1473,19 @@ saveplace-pdf-view, org-noter, calibredb, nov. config 186L.
 Build step (epdfinfo) - elpaca :build test case.
 ** TODO jira
 posframe + LOCAL-REPO go-jira. config 46L.
-** TODO osx
+** DONE osx
 ob-applescript, applescript-mode. 15L. Trivial.
+Ported (2026-07). Darwin-only: spliced into active-modules and
+doom-modules-enabled behind (eq system-type 'darwin) - the Doom :if
+equivalent. mac-right-option-modifier 'meta restored (doom-defaults'
+'none silently downgraded right-Opt+Backspace from M-DEL to DEL).
+Delta: ob-applescript merges into org-babel-load-languages instead of
+clobbering the org module's list like the doom.d original did.
+Also folds in the Doom os/macos subset: mdfind locate, ns-pop-up-frames,
+keychain auth-sources, trash, ns-auto-titlebar, and the open-with pair
+as macos-open-with/macos-open-in-default-program (the root config.el
+SPC f O binding was void until then). Dropped: emacs-mac-port-only
+scroll vars, iTerm/Transmit/LaunchBar open-with family.
 ** TODO learning
 exercism. 11L. Trivial.
 ** TODO python
@@ -1523,7 +1534,8 @@ Each needs a lab decision; bindings tree + registry already assume them.
 - :checkers syntax +childframe :: flycheck + posframe; their config disables
   global-flycheck - decide scope.
 - :checkers grammar :: langtool/writegood; likely drop (writing module covers).
-- :os macos :: open-with commands, env fixes (their osx module + macos deps).
+- :os macos :: folded into the custom osx module port (2026-07), see the
+  osx entry above for the kept/dropped split.
 - :lang emacs-lisp/json/markdown/sh :: port with respective language work;
   markdown +grip referenced by writing autoloads.
 

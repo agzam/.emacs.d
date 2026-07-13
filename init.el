@@ -117,7 +117,7 @@ build-in-place to clone."
          (:custom modeline) (:custom tab-bar) (:custom elisp) (:custom search) (:custom dired) (:custom ai)
          (:custom web-browsing) (:custom tree-sitter) (:custom org) (:custom shell)
          (:custom writing))
-       (when (eq system-type 'darwin) '((:os macos)))))
+       (when (eq system-type 'darwin) '((:os macos) (:custom osx)))))
 
 ;; Leader prefixes are read at bind time; set before doom-keybinds loads so
 ;; no module-level binding (or the which-key label) can capture the "SPC m"
@@ -148,7 +148,10 @@ build-in-place to clone."
 ;; Function files load first (sorted - raw directory order differs between
 ;; Mac and Linux), then config.el; config.el may `load!' extra +files.
 ;; The module list itself is explicit, in this exact order.
-(defvar active-modules '("evil" "bindings" "git" "general" "completion" "embark" "colors" "modeline" "tab-bar" "elisp" "search" "dired" "ai" "web-browsing" "tree-sitter" "org" "shell" "writing")
+(defvar active-modules
+  `("evil" "bindings" "git" "general" "completion" "embark" "colors" "modeline" "tab-bar" "elisp" "search" "dired" "ai" "web-browsing" "tree-sitter" "org" "shell" "writing"
+    ;; darwin-only tail - Doom's (:if (featurep :system 'macos) ...)
+    ,@(when (eq system-type 'darwin) '("osx")))
   "Modules under modules/, loaded in this exact order.
 bindings (Doom's :config default) precedes the :custom ports, like in doom!.")
 
