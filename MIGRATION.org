@@ -1273,6 +1273,57 @@ module layout).
   commands, both hook fns wired onto doom-load-theme-hook / org-mode-local-
   vars-hook, jinja2 .jinja + indent-on-save nil).  Keydiff untouched: all
   binds are yaml-pro-ts-mode-map-local, not leader/global.
+- [2026-07] python + lua modules ported together (frequent daily drivers,
+  user request; registry slots after clojure - both call lsp!, the lsp
+  lookup handlers, and clojure's fennel monroe glue).  Currency review
+  (2026): python's basedpyright + ruff + uv toolchain stands - lsp-pyright's
+  basedpyright API is unchanged (lsp-pyright-langserver-command
+  "basedpyright"), ruff's modern LSP is =ruff server=, uv is standard; the
+  Rust checkers (pyrefly 1.0 2026-05, ty 0.0.x beta) noted as emerging
+  options, basedpyright kept as the mature default.  BIGGEST find: lua-mode
+  is BUILT-IN as of Emacs 31 - immerrr's mode was upstreamed into
+  progmodes/lua-mode.el (FSF 2025-2026), carrying lua-indent-level and
+  lua-search-documentation; .lua maps to it with no lua-ts-mode remap.  So
+  :ensure nil, the MELPA lua-mode package dropped (lua-ts-mode is also
+  built-in; lua-mode kept per the user's config).  friar DROPPED: it drove
+  an AwesomeWM (Linux/X11 WM) fennel REPL off a /home/ag/.luarocks path -
+  useless on this macOS box, where the Lua/Fennel work is Hammerspoon, owned
+  by spacehammer (writing) + the clojure module's monroe glue.  Nothing
+  bound friar/awesomewm-repl (doom.d's "awesomewm config" dired shortcut is
+  a separate Linux-only bind, not ported); package + defalias +
+  friar-fennel-file-path setq all gone.  fennel-mode kept (MELPA, no
+  built-in): fennel-ls lsp client registered by hand (lsp-mode ships no
+  fennel client), the imenu->consult-imenu remap kept (fennel-ls has no
+  textDocument/documentSymbol), lookup handlers + darwin Hammerspoon docset;
+  lsp start via lsp! (deferred, guarded) over doom.d's bare lsp.  This
+  closes the clojure entry's "fennel map! waits on lua" deferral - the inert
+  :after fennel-mode monroe keymap now arms.  python renames (plus-ban):
+  +python-mode-lookup-handlers -> python-lookup-handlers-h (rewired to the
+  lab's lsp-lookup-definition-handler / lsp-lookup-references-handler /
+  consult-dash-doc), py-fully-qualified-symbol-at-point ->
+  python-fully-qualified-symbol-at-point (py- squats the python-mode.el
+  package namespace).  Dash-free: python--fqn-via-lsp's -some-> hover chain
+  rewritten with when-let* (the module's only dash use).  Deviations from
+  doom.d, all lab-robustness: the localleader map! and the ruff
+  python-fix-imports :override advice moved into the =python= block so they
+  arm on the first .py buffer instead of lsp-pyright's deferred load;
+  lsp-ruff-python-path set via =after! lsp-ruff= not doom.d's combined
+  setopt over an unloaded defcustom; the two duplicate ("f" . "format")
+  localleader prefixes merged.  doom.d rot fixed: antifennel-install's shell
+  string ended in a dangling "&&" (its cleanup rm was commented out) with a
+  mismatched 5th format arg - it would fail at the shell; dropped the
+  trailing && + extra arg (fnlfmt/fennel-ls installers were already right).
+  Ground-truthed as real (not rot), kept: magit-python-which-function +
+  magit-log-trace-definition-function (fboundp in current magit),
+  edit-indirect (transitive via separedit), the built-in python-fix-imports
+  (Emacs 30+, the advice target).  Verification: 599 specs (+18: tests/lua/
+  x9 incl. the antifennel trailing-&& regression + friar-drop guard,
+  tests/python/ x9 - path-to-dotted / resolve-project-module __init__ walk /
+  uri-to-module regexes / relative-import resolution / ruff command /
+  rename guards), bb lint 195/0, smoke 191 -> 198 packages (fennel-mode +
+  lsp-pyright + deps; lua-mode built-in adds none) 0 failed/blocked, live
+  autoload sanity green (renames resolve, +python-/py- names gone,
+  friar/awesomewm-repl unbound, python--path-to-dotted round-trips).
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -1760,13 +1811,23 @@ SPC f O binding was void until then). Dropped: emacs-mac-port-only
 scroll vars, iTerm/Transmit/LaunchBar open-with family.
 ** TODO learning
 exercism. 11L. Trivial.
-** TODO python
-lsp-pyright. autoload.el 294L (the actual logic). config 57L.
+** DONE python
+Ported (see Decisions log). python (built-in) + lsp-pyright (basedpyright +
+ruff + uv, toolchain current for 2026); autoload.el 294L folded into
+autoload/python.el (dash-free FQN via when-let*, plus-free renames:
+python-lookup-handlers-h, python-fully-qualified-symbol-at-point). Deviations:
+localleader map! + ruff python-fix-imports advice armed in the `python' block,
+lsp-ruff-python-path via after! lsp-ruff.
 ** TODO golang
 go-mode, gorepl-mode, gotest. set-lookup-handlers!/set-repl-handler!
 (stubs exist / add repl stub). 30L.
-** TODO lua
-lua-mode, fennel-mode, friar (:files lua+fnl). set-lookup-handlers! x2. 55L.
+** DONE lua
+Ported (see Decisions log). lua-mode is BUILT-IN as of Emacs 31 (immerrr's
+mode upstreamed into progmodes/; :ensure nil, MELPA package dropped);
+fennel-mode + fennel-ls kept (manual client registration, imenu remap);
+set-lookup-handlers! x2. friar DROPPED (AwesomeWM/Linux fennel REPL, unused
+on macOS - Hammerspoon owns Lua/Fennel via spacehammer + clojure's monroe).
+Activates the clojure module's inert :after fennel-mode monroe keymap.
 ** TODO webdev
 emmet, prettier.el, xref-js2, html-to-hiccup, jtsx, js-comint. 45L.
 ** DONE yaml
@@ -1890,3 +1951,7 @@ module had rewritten its own uses with plist-get before that existed.
 - lsp before clojure: satisfied - ported together 2026-07 (entangled;
   clojure autoloads call lsp-lookup-*, lsp-clojure-*, lsp-completion-at-
   point-maybe)
+- lsp + clojure before python + lua: satisfied - both landed 2026-07 after
+  clojure; python/lua call lsp! and the lsp lookup handlers, and lua's
+  fennel-mode arms the clojure module's inert :after fennel-mode monroe
+  keymap ("fennel map! waits on lua")
