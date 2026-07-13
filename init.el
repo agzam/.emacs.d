@@ -75,6 +75,7 @@
     (prisma . "~/GitHub/agzam/prisma.el")
     (wiktionary-bro . "~/GitHub/agzam/wiktionary-bro.el")
     (slacko . "~/GitHub/agzam/slacko.el")
+    (go-jira . "~/GitHub/agzam/go-jira.el")
     ;; the hammerspoon config IS the spacehammer checkout (doom.d symlinked it)
     (spacehammer . "~/.hammerspoon"))
   "Alist of own packages -> local checkout preferred over the GitHub recipe.")
@@ -118,7 +119,7 @@ build-in-place to clone."
          (:custom web-browsing) (:custom tree-sitter) (:custom lsp) (:custom clojure)
          (:custom org) (:custom shell)
          (:custom writing) (:custom yaml))
-       (when (eq system-type 'darwin) '((:os macos) (:custom osx)))))
+       (when (eq system-type 'darwin) '((:os macos) (:custom osx) (:custom jira)))))
 
 ;; Leader prefixes are read at bind time; set before doom-keybinds loads so
 ;; no module-level binding (or the which-key label) can capture the "SPC m"
@@ -152,7 +153,9 @@ build-in-place to clone."
 (defvar active-modules
   `("evil" "bindings" "lookup" "git" "general" "completion" "embark" "colors" "modeline" "tab-bar" "elisp" "search" "dired" "ai" "web-browsing" "tree-sitter" "lsp" "clojure" "org" "shell" "writing" "yaml"
     ;; darwin-only tail - Doom's (:if (featurep :system 'macos) ...)
-    ,@(when (eq system-type 'darwin) '("osx")))
+    ;; jira after osx: its browse autoload rides the web-browsing + git
+    ;; module fns (loaded above), and it defers on org (loaded above).
+    ,@(when (eq system-type 'darwin) '("osx" "jira")))
   "Modules under modules/, loaded in this exact order.
 bindings (Doom's :config default) precedes the :custom ports, like in doom!;
 lookup (Doom's :tools lookup core) rides right behind it; lsp < clojure < org

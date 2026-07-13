@@ -294,11 +294,13 @@ interns for lambda suffixes."
   ;; consult/vulpea/gptel suffixes aren't loadable in batch; the exact
   ;; key/command set is the rot net, fboundp coverage is probe territory
   (it "covers exactly the expected command set"
+    ;; go-jira-browse-default-board rides the darwin-only [:if ...] column;
+    ;; the layout walk ignores :if predicates, so it's always in the set.
     (expect (seq-uniq (tab-bar-tests--layout-symbols 'tab-bar-new-tab-transient))
             :to-have-same-items-as
             '(vulpea-find vulpea-backlinks open-gptel gh-notify
-              find-in-config-dir zoxide-find consult-buffer
-              consult-recent-file tab-bar-kill-tab))))
+              find-in-config-dir go-jira-browse-default-board zoxide-find
+              consult-buffer consult-recent-file tab-bar-kill-tab))))
 
 (describe "desktop quarantine"
   (it "desktop-path points into the (sandboxed) state dir"

@@ -1027,8 +1027,9 @@ module layout).
   open-journal/vulpea-find/vulpea-backlinks directly instead of
   general--simulate-keys (orr's "Backlinks" desc was rot - it lands on
   roam find), projects row rebuilt on project-prompt-project-dir +
-  dired; rows dropped: elfeed (package dropped), notmuch/telega/jira
-  (return with their modules), hnreader/reddigg (disabled forks), "ei"
+  dired; rows dropped: elfeed (package dropped), notmuch/telega
+  (return with their modules; jira's "jb" -> go-jira-browse-default-board
+  came back at the jira port 2026-07), hnreader/reddigg (disabled forks), "ei"
   emacs.d dired (doom-emacs-dir IS the config dir here).  Hints
   cleanup: named self-removing tab-bar-hints-off-h replaces doom.d's
   anonymous lambda that accumulated on transient-exit-hook and stayed
@@ -1694,8 +1695,31 @@ telega. jinx dep (writing). config 38L.
 pdf-tools (dalanicolai pdf-roll fork, custom :files/build), image-roll,
 saveplace-pdf-view, org-noter, calibredb, nov. config 186L.
 Build step (epdfinfo) - elpaca :build test case.
-** TODO jira
+** DONE jira
 posframe + LOCAL-REPO go-jira. config 46L.
+Ported (2026-07). Darwin-only, mirroring doom.d's
+(:if (featurep :system 'macos) jira): the browse autoload rides the
+web-browsing module's JXA browser fns (browser-get-tabs/-activate-tab).
+Spliced into active-modules and doom-modules-enabled behind
+(eq system-type 'darwin), after osx.  go-jira joined local-dev-packages
+(~/GitHub/agzam/go-jira.el - same in-place build as remoto.el; already a
+git checkout, doom.d symlinked it into the module dir).
+Deltas from doom.d:
+- Dropped the go-jira-browse-ticket-mode-map / -browser-ticket-mode-get-url
+  block: the package rewrite removed that mode; browsing now shells out to
+  the OS browser via go-jira-browse-ticket-url (view/board/edit modes stay).
+- Board defaults (go-jira-default-board-id 3018, -board-name "SAC Pipeline
+  (Pod 2)") moved from doom.d custom.el into config.el setopt, next to the
+  SAC search string; interactive go-jira-set-default-board still wins via
+  custom.el (loads last).  go-jira-default-project already defaults to SAC.
+- The two module autoloads gained (require 'go-jira): they call private,
+  cookie-less helpers (go-jira--find-exe, -ticket-arg-or-ticket-at-point)
+  that void-errored on a cold M-x under doom.d.
+- tab-bar new-tab transient's darwin-gated "jb" -> go-jira-browse-default-board
+  restored (the tab-bar port dropped it pending this module).
+Deps already present (markdown-mode/s/consult/posframe built transitively;
+jira CLI + jq on PATH).  Tests cover both module autoloads (branch matrix +
+the require fix) and the tab-bar entry.
 ** DONE osx
 ob-applescript, applescript-mode. 15L. Trivial.
 Ported (2026-07). Darwin-only: spliced into active-modules and
@@ -1811,6 +1835,9 @@ Gotchas learned live:
   google-translate/occult/prisma checkouts already existed there, all
   clean and pushed at the writing port (google-translate's improvements
   branch carries google-translate-posframe.el; master doesn't).
+  go-jira landed the same way at the jira port (2026-07): the checkout
+  already sat at ~/GitHub/agzam/go-jira.el (doom.d symlinked it into the
+  module dir), clean on main - just added to local-dev-packages.
 
 Settled: general's bare let-plist uses (autoload/url.el x4, autoload/misc.el)
 resolve at call time via the elisp module's loaddefs macro-autoload. The git

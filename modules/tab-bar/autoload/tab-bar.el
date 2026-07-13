@@ -204,6 +204,12 @@ resurrecting their buffers before the modes exist."
                            (or (bound-and-true-p magit-clone-default-directory)
                                "~/GitHub/")))))]
 
+   ;; darwin-only, like the jira module: go-jira-browse-default-board is only
+   ;; autoloaded there (:if (featurep :system 'macos)), so the column hides
+   ;; where the command doesn't exist.
+   [:if (lambda () (eq system-type 'darwin))
+    ("jb" "def. jira board" go-jira-browse-default-board)]
+
    [("p" "projects" (lambda ()
                       (interactive)
                       (dired (project-prompt-project-dir))))
