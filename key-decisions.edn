@@ -215,4 +215,4 @@
  ["leader" "SPC q F"] {:status :dropped :note "doom/kill-all-buffers - not part of the desktop story; scratch + window-cleanup cover fresh starts"}
  ["leader" "SPC q S"] {:status :dropped :note "doom/save-session named-file variant - single canonical session dir policy (desktop-path)"}
  ["leader" "SPC q L"] {:status :dropped :note "doom/load-session named-file variant - see SPC q S"}
- ["leader" "SPC q d"] {:status :deferred :note "restart-server - lab runs no emacs server yet (Infra debt: session switch)"}}
+ ["leader" "SPC q d"] {:status :improved :note "restart-server - renamed +default/restart-server port; landed with the session-switch server autostart"}}

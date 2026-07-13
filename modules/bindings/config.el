@@ -829,3 +829,37 @@
     (cl-pushnew `((,(format "\\`\\(?:C-w\\|%s w\\) m\\'" prefix-re))
                   nil . "maximize")
                 which-key-replacement-alist)))
+
+;;
+;;; Global text-manipulation keys (Doom config/default rows the vendoring
+;;; missed - found by the global-key sweep; the key audit only covers the
+;;; leader + evil prefix trees, so these were invisible to keydiff)
+
+(map! :gi "C-a" #'backward-to-bol-or-indent
+      :gi "C-e" #'forward-to-last-non-comment-or-eol
+      :gi [C-return] #'newline-below
+      :gi [C-S-return] #'newline-above
+      ;; explicit like Doom: the function-key translation to M-DEL isn't
+      ;; reliable across contexts
+      "M-<backspace>" #'backward-kill-word
+      :i "C-g" #'evil-escape
+      (:map minibuffer-local-map
+            "C-/" #'consult-history)
+      (:when (featurep :system 'macos)
+        :gi [s-backspace] #'backward-kill-to-bol-and-indent
+        :gi [s-left] #'backward-to-bol-or-indent
+        :gi [s-right] #'forward-to-last-non-comment-or-eol
+        :gi [s-return] #'newline-below
+        "s-/" #'comment-current-line
+        "s-c" #'evil-yank
+        "s-w" #'delete-window
+        "s-x" #'execute-extended-command
+        ;; consult-line over Doom's swiper row (ivy excised; swiper is
+        ;; bound-but-void rot in doom.d today)
+        "s-f" #'consult-line))
+
+;; org's C-a/C-e stay org-aware, like Doom's remaps
+(after! org
+  (map! :map org-mode-map
+        [remap backward-to-bol-or-indent] #'org-beginning-of-line
+        [remap forward-to-last-non-comment-or-eol] #'org-end-of-line))

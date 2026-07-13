@@ -1008,6 +1008,78 @@ module layout).
   the next-most-visible gap (five fboundp-gated url.el title-retrieval
   sites + web-browsing's org branch + the dropped "i L" localleader) -
   still parked on the long tail, flagged for its own pull-forward call.
+- [2026-07] SESSION SWITCH executed (Infra debt entry has the detail):
+  the lab is the daily driver now, Doom retired to a text-only porting
+  reference (AGENTS.md hard boundaries inverted).  Server plumbing:
+  guarded server-start on doom-after-init, default socket - the
+  elisp-eval MCP's server.bb runs plain =emacsclient --eval= (no -s
+  anywhere, verified), so it and every other emacsclient consumer (mxp,
+  Hammerspoon) work unchanged; restart-server ported (renamed
+  +default/restart-server), SPC q d ledger :deferred -> :improved.
+  Rode along: triage of the user-reported elpaca failures
+  (elpaca-use-package "Condition (finished . elpaca) failed", occult +
+  sdcv "Subprocess error", 95s/142s) - UPDATE-CYCLE failures, not boot
+  failures: all three builds exist on disk and the day's smoke runs were
+  0 failed/blocked.  elpaca-use-package builds out of the elpaca repo's
+  extensions/ (its failure is inherited from the =elpaca= order's own
+  fetch/rebuild), occult fetches over SSH (agent-less subprocess timeout
+  shape), sdcv clones from repo.or.cz (notoriously flaky, [tree:0]
+  filter).  Root-causing needs that session's *elpaca-log* - deferred to
+  the first lab-hosted sitting, which should re-run the cycle live; this
+  doubles as the still-open "one elpaca-manager update cycle" trial
+  gate.
+- [2026-07] CI smoke segfault root-caused and BYPASSED.  456a71b's smoke
+  died with "Fatal error 11" on both runs (deterministic; rerun same sha,
+  same byte-identical backtrace) while the batch test job passed.
+  Forensics: same nix emacs store path in passing and failing runs (env
+  drift excluded), no libgccjit in the closure (no native comp - eln
+  theories dead), addr2line against the exact CI binary (pulled from
+  emacs-ci.cachix into a throwaway nix container) resolved the crash to
+  fill_up_frame_row_with_spaces <- build_frame_matrix_from_window_tree <-
+  update_frame: Emacs 30.1's TTY frame-glyph-matrix padding - an upstream
+  C bug, not config logic.  Trigger matrix: install-heavy runs passed
+  (writing port), machinery-only runs passed (tab-bar port, zero new
+  packages), machinery + install-during-boot crashed at first redisplay.
+  Container repro fizzled (cold-boot network timeouts on arm64; a
+  compat-rooted dependency cascade under Rosetta x86) - abandoned per
+  cost/benefit.  Bypass, two-pronged: scripts/smoke-check.el sets
+  inhibit-redisplay for the whole CI pty boot (rendering was never the
+  probe's signal; markers are file-based) and the modeline anti-flash
+  blanking is now GUI-gated (a tty got mode-line-less windows handed to
+  exactly the crashing matrix code).  Floor policy unchanged: CI stays on
+  latest stable (30.1); local 31 is the dev-box exception.  Rode along:
+  fringe-mode call in position-frame-on-load-h fboundp-guarded (void on
+  fringe-less nox builds - the CI emacs; the "void fringe-mode" boot
+  message was pre-existing noise there).
+- [2026-07] global-key sweep (the M-DEL report): a FIFTH audit-blind
+  class - the key audit dumps leader + evil prefix trees only, so global
+  modifier keys never entered keydiff (the helpful remaps were the same
+  blindness).  One-shot matrix diff (global/insert/minibuffer/vertico
+  maps x M-/C-/C-M-/s- keys) between the live Doom session and a lab pty
+  dump; 26 rows, adjudicated: Doom config/default text-manipulation rows
+  the vendoring never carried are now ported plus-free into
+  bindings/autoload.el - backward-to-bol-or-indent /
+  forward-to-last-non-comment-or-eol (C-a/C-e/s-left/s-right, org keeps
+  org-aware remaps; eshell remaps skipped - eshell-bol obsolete 30.1),
+  backward-kill-to-bol-and-indent (s-backspace), newline-below/above
+  (C-RET/C-S-RET/s-RET), comment-current-line (s-/, over doom's
+  anonymous lambda), explicit M-<backspace> backward-kill-word (the
+  reported key; function-key translation to M-DEL isn't reliable),
+  :i C-g evil-escape, minibuffer C-/ consult-history, mac s-c/s-w/s-x
+  parity binds, s-f on consult-line (:improved - doom.d's swiper row is
+  ivy-era bound-but-void rot).  Doom rot fixed with a spec:
+  forward-to-last-non-comment-or-eol stored its bounce-back position in
+  the BACKWARD mover's variable, so returning from eol never worked.
+  Deviation: comment detection in the bol/eot helper uses plain
+  (nth 4 (syntax-ppss)) - doom-point-in-comment-p's 40 lines of
+  comment-opener edge cases stay unvendored.  Deliberate stands, no
+  action: M-r eval-whole-buffer placeholder, insert C-/
+  completion-at-point (complete-in-minibuffer died with corfu),
+  stock abort-minibuffers on C-g.  False negatives understood: the
+  C-RET-family dump rows miss because (kbd "C-RET") is the modified-char
+  form [67108877] while GUI/kkp produce [C-return] (Doom hits both via
+  its C-m translation layer); insert-map M-<backspace> resolves through
+  the global bind at runtime.
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -1020,23 +1092,20 @@ Workflow, one cluster per sitting - any future session (human or LLM)
 resumes from this section alone:
 1. Regenerate BOTH dumps at the start of a sitting; dumps are throwaway
    snapshots, never trust old ones.
-   - Doom side: eval the walker half of scripts/dump-bindings.el
-     (everything above its "Boot mode" section; standalone vanilla elisp,
-     pure functions) inline in the live Doom session, then
-     (dump-bindings "~/.cache/emacs-lab/doom-keys.eld").
-     Never load-file lab files into Doom.  dump-bindings-load-autoloads
-     stays nil there (no force-loading in a live session) - doom-side
-     :void-suffix detection is best-effort; keydiff only reads lab flags.
-     POST SESSION-SWITCH (whenever sittings move into the lab instance
-     - see Infra debt "Session switch"; no live Doom session to eval
-     in): dump the Doom side via boot mode against the Doom install -
+   - Doom side (post session-switch flow, ACTIVE since 2026-07 - no live
+     Doom session exists to eval in): dump via boot mode against the
+     retired Doom install -
      =KEYDUMP_OUT=~/.cache/emacs-lab/doom-keys.eld TERM=xterm-256color
      script -q /dev/null emacs -nw --init-directory ~/.emacs.d -l
      ~/.config/emacs-lab/scripts/dump-bindings.el= (the script is
      standalone vanilla elisp, safe in a throwaway Doom boot; boot mode
      force-loads autoloads, so doom-side :void-suffix detection gets
      sharper - keydiff still only reads lab flags).  Untested flow:
-     sanity-check the entry count (~624) on first use.
+     sanity-check the entry count (~624, the last live-session dump) on
+     first use.  Historical flow while Doom still ran: eval the walker
+     half (above the "Boot mode" section) inline in the live session,
+     dump-bindings-load-autoloads nil - the one sanctioned lab-code-in-
+     Doom exception, retired with the switch.
    - Lab side: =bb keydump= (pty boot; KEYDUMP_REQUIRE env forces
      features whose maps bind lazily).
 2. =bb keydiff= - org report at ~/.cache/emacs-lab/keydiff.org (generated,
@@ -1204,22 +1273,29 @@ Done so far: org-roam/vulpea dbs, treemacs persist pair, desktop-path
 (tab-bar port; elfeed db moot - package dropped).
 
 * Infra debt
-** TODO Session switch (daily driver -> lab)
-Deliberately deferred (2026-07, post ai port): lab is self-hosting but
-the daemon plumbing isn't done - lab starts NO emacs server today.
-Prerequisites, in order:
-1. server-start in lab + socket decision: either lab takes the default
-   socket (Doom daemon must stop first) or lab runs =server-name= "lab"
-   and every emacsclient consumer passes =-s lab=.
-2. Repoint the death-contraptions elisp-eval MCP (its server.bb drives
-   emacsclient) at the chosen socket.
-3. Safety inversion: live-session protections move to lab; Doom becomes
-   the disposable reference (AGENTS.md hard-boundary section flips).
-4. Doom-side keydumps switch to dump-bindings.el boot mode (documented
-   in Key clusters step 1).
+** DONE Session switch (daily driver -> lab)
+Executed 2026-07 (user call: config in good shape, port largely
+functional; the retired Doom instance won't run - its config stays a
+text-only reference).
+1. [X] server autostart: guarded server-start (server-running-p) on
+   doom-after-init-hook, DEFAULT socket - the Doom session ran the same
+   shape (non-daemon, "server", ground-truthed live before it retired).
+   restart-server ported alongside (renamed +default/restart-server,
+   bindings/autoload.el) - SPC q d un-parked.
+2. [X] elisp-eval MCP: NO repoint needed - server.bb drives plain
+   =emacsclient --eval= (no -s anywhere), default socket just works.
+   Same for the other emacsclient consumers (mxp, Hammerspoon).
+3. [X] safety inversion: AGENTS.md hard boundaries flipped - live-session
+   protections guard THIS config; ~/.doom.d + ~/.emacs.d are read-only
+   reference, never loaded into this session.
+4. [X] doom-side keydumps: boot mode is the active flow now (Key
+   clusters step 1); sanity-check ~624 entries on first use.
 One-time costs already wired: Claude OAuth re-auth (cache under
 doom-cache-dir) and the eca server download (doom-data-dir).
-Until this clears, sittings stay Doom-hosted.
+First-lab-sitting checklist: quit the Doom instance BEFORE the first lab
+boot (it holds the default socket; the guard would skip server-start),
+verify an emacsclient round trip, then debug the elpaca update-cycle
+failures live (see the elpaca-update trial gate note).
 ** TODO Undo: persistence (undo-fu-session), maybe vundo
 Built-in =undo-redo= already covers evil (=evil-undo-system=); plain
 undo-fu is redundant on modern Emacs. The remaining value of Doom's
@@ -1265,7 +1341,9 @@ Set in early-init when lsp module ports (Doom init.el had =setenv=).
 Flymake backend flagging let+if -> if-let* patterns; port with elisp module.
 ** TODO Trial gates still open
 - Linux parity: automated - the CI smoke job boots on ubuntu; keep it green
-- one elpaca-manager update cycle (fetch, review, merge)
+- one elpaca-manager update cycle (fetch, review, merge) - EXERCISED and
+  failing (elpaca-use-package/occult/sdcv; see the session-switch
+  Decisions entry): finish live in the lab, root-cause via *elpaca-log*
 - [X] local-repo recipe pattern proven with the git module port (remoto +
   github-topics build in place; see "Local :repo packages")
 

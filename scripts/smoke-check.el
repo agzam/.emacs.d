@@ -8,6 +8,15 @@
 (defvar smoke-result-file
   (or (getenv "SMOKE_RESULT_FILE") "/tmp/emacs-lab-smoke-result"))
 
+;; Emacs 30.1's tty redisplay can segfault while padding frame glyph rows
+;; (fill_up_frame_row_with_spaces <- build_frame_matrix_from_window_tree,
+;; symbolized from the exact CI binary) when elpaca's install UI redraws
+;; during boot.  Rendering was never this probe's signal - packages,
+;; config load and warnings are - so skip redisplay wholesale rather than
+;; tiptoe around an upstream C bug.  The marker is file-based; nothing
+;; here needs a drawn frame.
+(setq inhibit-redisplay t)
+
 (defun smoke-write-result ()
   "Dump elpaca statuses + warnings to `smoke-result-file' and exit."
   (let* ((statuses (mapcar (lambda (entry)

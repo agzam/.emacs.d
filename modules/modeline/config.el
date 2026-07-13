@@ -20,7 +20,10 @@
 ;;; Code:
 
 ;; Blank the stock modeline until doom-modeline takes over at UI init.
-(unless after-init-time
+;; GUI-only: anti-flash is a graphical concern, and handing tty redisplay
+;; mode-line-less windows during boot pokes Emacs 30.1's frame-matrix
+;; segfault (see the CI bypass note in scripts/smoke-check.el).
+(when (and (not after-init-time) (display-graphic-p))
   (setq-default mode-line-format nil))
 
 (use-package doom-modeline

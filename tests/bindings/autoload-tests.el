@@ -118,3 +118,93 @@
   (it "signals a user-error in non-file buffers"
     (with-temp-buffer
       (expect (yank-buffer-path) :to-throw 'user-error))))
+
+(describe "backward-to-bol-or-indent"
+  (it "cycles mid-line -> indentation -> bol -> back to indentation"
+    (with-temp-buffer
+      (emacs-lisp-mode)
+      (insert "  foo")
+      (let ((backward-to-bol--last-pt nil))
+        (goto-char (point-max))                 ; after "foo"
+        (backward-to-bol-or-indent)
+        (expect (point) :to-equal 3)            ; bot: before "f"
+        (backward-to-bol-or-indent)
+        (expect (point) :to-equal 1)            ; bol
+        (backward-to-bol-or-indent)
+        (expect (point) :to-equal 3)))))        ; bounce back to stored pt
+
+(describe "forward-to-last-non-comment-or-eol"
+  (it "jumps mid-line to the last non-comment char, then eol"
+    (with-temp-buffer
+      (emacs-lisp-mode)
+      (insert "(foo) ;; bar")
+      (let ((forward-to-eol--last-pt nil))
+        (goto-char 2)
+        (forward-to-last-non-comment-or-eol)
+        (expect (point) :to-equal 6)            ; eot: after ")"
+        (forward-to-last-non-comment-or-eol)
+        (expect (point) :to-equal (line-end-position)))))
+
+  (it "bounces back from eol to the stored position (doom rot fix)"
+    (with-temp-buffer
+      (emacs-lisp-mode)
+      (insert "(foo) ;; bar")
+      (let ((forward-to-eol--last-pt nil)
+            (inside-comment 10))                ; on "b" of bar
+        (goto-char inside-comment)
+        (forward-to-last-non-comment-or-eol)
+        (expect (point) :to-equal (line-end-position))
+        ;; the doom.d original stored this in the backward mover's
+        ;; variable, so this bounce always landed on eot instead
+        (forward-to-last-non-comment-or-eol)
+        (expect (point) :to-equal inside-comment)))))
+
+(describe "backward-kill-to-bol-and-indent"
+  (it "kills to bol (delete-region path without evil)"
+    (with-temp-buffer
+      (fundamental-mode)
+      (insert "first\nsecond line")
+      (goto-char (point-max))
+      (backward-kill-to-bol-and-indent)
+      (expect (buffer-substring-no-properties
+               (line-beginning-position) (line-end-position))
+              :to-match "^[ \t]*$"))))
+
+(describe "newline-below / newline-above"
+  (it "newline-below opens an indented line after the current one"
+    (with-temp-buffer
+      (emacs-lisp-mode)
+      (insert "(a)\n(b)")
+      (goto-char 2)
+      (newline-below)
+      (expect (count-lines (point-min) (point-max)) :to-equal 3)
+      (expect (line-number-at-pos) :to-equal 2)
+      (expect (buffer-substring-no-properties
+               (line-beginning-position) (line-end-position))
+              :to-equal "")))
+
+  (it "newline-above opens an indented line before the current one"
+    (with-temp-buffer
+      (emacs-lisp-mode)
+      (insert "(a)")
+      (goto-char 2)
+      (newline-above)
+      (expect (count-lines (point-min) (point-max)) :to-equal 2)
+      (expect (line-number-at-pos) :to-equal 1)
+      (expect (buffer-substring-no-properties
+               (point-min) (line-end-position))
+              :to-equal ""))))
+
+(describe "comment-current-line"
+  (it "comments and uncomments in place, point stays on the line"
+    (with-temp-buffer
+      (emacs-lisp-mode)
+      (insert "(foo)\n(bar)")
+      (goto-char 3)
+      (comment-current-line)
+      (expect (line-number-at-pos) :to-equal 1)
+      (expect (buffer-substring-no-properties 1 (line-end-position))
+              :to-match "^;+ ?(foo)")
+      (comment-current-line)
+      (expect (buffer-substring-no-properties 1 (line-end-position))
+              :to-equal "(foo)"))))

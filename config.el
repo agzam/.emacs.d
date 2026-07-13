@@ -122,7 +122,9 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
       (custom-set-faces '(mode-line-active ((t (:inherit mode-line)))))
 
       (init-visual-line-keys)
-      (fringe-mode '(6 . 0)))))
+      ;; void on fringe-less builds (tty-only/nox, e.g. the CI emacs)
+      (when (fboundp 'fringe-mode)
+        (fringe-mode '(6 . 0))))))
 
 (after! custom
   ;; in customize dialogs keep the elisp names
@@ -575,6 +577,16 @@ Unsafe with global `variable-pitch-mode'; see issue #8756."
 
 (after! epa
   (setopt epg-pinentry-mode 'loopback))
+
+;; Emacs server on the default socket, like the Doom session ran it: the
+;; elisp-eval MCP, mxp and Hammerspoon all drive plain emacsclient.  The
+;; guard keeps pty probes and stray second instances from stealing the
+;; socket while a live session owns it.
+(add-hook! 'doom-after-init-hook
+  (defun init-server-h ()
+    (require 'server)
+    (unless (server-running-p)
+      (server-start))))
 
 ;; Doom-core-provided packages in doom.d (its packages.el only unpinned
 ;; helpful); they ride the root layer next to their bindings - SPC h a/f/v

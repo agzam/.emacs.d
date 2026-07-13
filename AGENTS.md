@@ -1,17 +1,23 @@
 # Emacs config (Doom-inspired, Elpaca)
 
-Parallel trial config: Elpaca + vendored Doom macro layer. Lives entirely in
-this directory, launched with `emacs --init-directory ~/.config/emacs-lab`.
-The directory name is incidental; never leak it (or any invented project
-name) into code or prose.
+The daily-driver config (post session switch): Elpaca + vendored Doom macro
+layer. Lives entirely in this directory, launched with
+`emacs --init-directory ~/.config/emacs-lab`; runs the Emacs server on the
+default socket (elisp-eval MCP, mxp and Hammerspoon drive plain
+emacsclient). The directory name is incidental; never leak it (or any
+invented project name) into code or prose.
 
 ## Hard boundaries
 
-- NEVER touch `~/.emacs.d` (live Doom install) or `~/.doom.d` (live Doom
-  config) - both belong to the still-active daily driver.
-- NEVER load lab files into a running Doom session: same-named macros and
-  remapped dir variables will corrupt it. Verify via the smoke-boot pattern
-  below.
+- THIS session is the live working environment now - all live-session
+  hygiene (elisp-eval cleanup, no destructive tests in-session, probes in
+  throwaway `--init-directory` instances) protects it.
+- `~/.doom.d` and `~/.emacs.d` are the retired porting reference: consult
+  them as text only. NEVER modify them, and NEVER load their files into
+  this session - Doom's real module/dir plumbing would fight the vendored
+  compat layer the same way lab files used to corrupt Doom. The Doom
+  instance normally doesn't run; doom-side key dumps use dump-bindings.el
+  boot mode (MIGRATION "Key clusters").
 
 ## Naming: plain names, no invented prefixes
 
