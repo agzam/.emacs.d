@@ -2,9 +2,10 @@
 
 ;; Core slice of doom.d's org module: org, org-roam(+ui), the vulpea trio +
 ;; consult-vulpea, evil-org, org-modern-indent, org-appear, org-superstar
-;; (pulled out of the long tail - heading bullets are daily-visible).  The
-;; long tail (verb, anki-editor(+anki-gen), ob-* extras, org-pomodoro,
-;; toc-org, orgit(-forge), org-edit-indirect, ox-clip/ox-gfm, org-cliplink,
+;; (pulled out of the long tail - heading bullets are daily-visible),
+;; org-cliplink (pulled ahead 2026-07 - url.el title retrieval + "i L").
+;; The long tail (verb, anki-editor(+anki-gen), ob-* extras, org-pomodoro,
+;; toc-org, orgit(-forge), org-edit-indirect, ox-clip/ox-gfm,
 ;; org-download, org-contrib, the pomodoro mp3s) stays in doom.d - see
 ;; MIGRATION.org.  org-roam/vulpea db files live in doom-compat.el's
 ;; quarantine section.
@@ -60,8 +61,8 @@
 
   ;; doom.d rebuilt these on every org-mode-hook run (org-init-keybinds-h);
   ;; once after load is enough.  Deviations: the vertico guard is gone (the
-  ;; lab registry says :custom completion); org-noter ("n") and org-cliplink
-  ;; ("i L") bindings wait for their packages (pdf module / long tail).
+  ;; lab registry says :custom completion); org-noter ("n") waits for the
+  ;; pdf module.  org-cliplink "i L" restored with its 2026-07 pull-forward.
   (map! :map org-mode-map
         :n "[[" #'org-previous-visible-heading
         :n "]]" #'org-next-visible-heading
@@ -83,6 +84,7 @@
           :desc "final heading" "L" #'org-goto-bottommost-heading)
          (:prefix ("i" . "insert")
                   "l" #'org-insert-link
+                  "L" #'org-cliplink
                   "c" #'yank-from-clipboard)
          (:prefix ("l" . "links")
                   "i" #'org-id-store-link
@@ -376,6 +378,16 @@
           org-superstar-item-bullet-alist '((?* . ?⋆)
                                             (?+ . ?◦)
                                             (?- . ?•))))
+
+;; Pulled ahead of the org long tail (2026-07): five title-retrieval sites
+;; in general/autoload/url.el and web-browsing's org branch call into it.
+;; :commands covers org-cliplink-retrieve-title-synchronously explicitly -
+;; upstream only cookies the interactive commands, and the url.el helpers
+;; call the retriever without requiring the feature first.
+(use-package org-cliplink
+  :commands (org-cliplink
+             org-cliplink-capture
+             org-cliplink-retrieve-title-synchronously))
 
 (use-package org-modern-indent
   :ensure (org-modern-indent :host github :repo "jdtsmith/org-modern-indent")

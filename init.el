@@ -115,7 +115,8 @@ build-in-place to clone."
          ;; :custom entries appear here as their modules get ported.
          (:custom git) (:custom general) (:custom completion) (:custom embark) (:custom colors)
          (:custom modeline) (:custom tab-bar) (:custom elisp) (:custom search) (:custom dired) (:custom ai)
-         (:custom web-browsing) (:custom tree-sitter) (:custom org) (:custom shell)
+         (:custom web-browsing) (:custom tree-sitter) (:custom lsp) (:custom clojure)
+         (:custom org) (:custom shell)
          (:custom writing))
        (when (eq system-type 'darwin) '((:os macos) (:custom osx)))))
 
@@ -149,11 +150,13 @@ build-in-place to clone."
 ;; Mac and Linux), then config.el; config.el may `load!' extra +files.
 ;; The module list itself is explicit, in this exact order.
 (defvar active-modules
-  `("evil" "bindings" "git" "general" "completion" "embark" "colors" "modeline" "tab-bar" "elisp" "search" "dired" "ai" "web-browsing" "tree-sitter" "org" "shell" "writing"
+  `("evil" "bindings" "lookup" "git" "general" "completion" "embark" "colors" "modeline" "tab-bar" "elisp" "search" "dired" "ai" "web-browsing" "tree-sitter" "lsp" "clojure" "org" "shell" "writing"
     ;; darwin-only tail - Doom's (:if (featurep :system 'macos) ...)
     ,@(when (eq system-type 'darwin) '("osx")))
   "Modules under modules/, loaded in this exact order.
-bindings (Doom's :config default) precedes the :custom ports, like in doom!.")
+bindings (Doom's :config default) precedes the :custom ports, like in doom!;
+lookup (Doom's :tools lookup core) rides right behind it; lsp < clojure < org
+keeps the doom! :custom order.")
 
 (defun generate-module-loaddefs (name auto-dir)
   "Return the loaddefs file for module NAME, regenerating it if stale.

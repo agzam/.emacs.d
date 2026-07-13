@@ -18,8 +18,10 @@ module layout).
   completion, embark, colors (circadian stack), modeline (doom-modeline),
   elisp (eval/edebug/profiler + let-plist/evilify-edebug folded in),
   dired (treemacs suite), ai (gptel/eca/mcp), web-browsing,
-  tree-sitter, org (core slice: roam/vulpea/evil-org), shell,
-  writing (jinx/translate/dictionaries/prisma),
+  tree-sitter, lookup (:tools lookup core, rebuilt plus-free),
+  lsp (lsp-mode/lsp-ui/consult-lsp/dap-mode), clojure (cider/clj-refactor/
+  neil/cider-storm/monroe), org (core slice + org-cliplink: roam/vulpea/
+  evil-org), shell, writing (jinx/translate/dictionaries/prisma),
   search (consult-omni/tldr/slacko),
   tab-bar (workspace transients + desktop persistence, no packages)
 - user layer :: config.el (leader tree, globals), lisp/functions.el
@@ -36,6 +38,99 @@ module layout).
   GitHub workflow (test + smoke jobs on Emacs 30.1, cached elpaca dirs)
 
 * Decisions log
+- [2026-07] :tools lookup core vendored (new modules/lookup/, loads right
+  after bindings) - the decision that gated clojure and unblocks
+  golang/lua/consult-dash.  Verdict: rebuild, don't vendor Doom's module
+  wholesale.  set-lookup-handlers! + the dispatch engine (lookup--jump-to /
+  --run-handlers / --set-handler) + commands + xref/dumb-jump/ffap/
+  bug-reference/evil-goto backends ported near-verbatim, plus-free
+  (+lookup/definition -> lookup-definition, +lookup-*-functions ->
+  lookup-*-functions - so every SPC c / normal g / SPC s row the bindings
+  tree already carried resolves).  Deliberate trims: better-jumper ->
+  evil-set-jump (records the origin jump); the dictionary/thesaurus
+  default backends dropped (+dictionary never enabled in doom.d - they'd be
+  void in the default chains, a silent-skip Doom tolerated); the
+  ivy/helm online-provider frontends dropped (counsel/helm-only - the
+  provider alist keeps plain URL strings, 16 of them); project-search
+  backend rides consult-ripgrep (embark-project-search precedent) not
+  +vertico-file-search.  doom-compat gained doom-region-{active-p,
+  beginning,end} + doom-thing-at-point-or-region (lookup commands' at-point
+  grab) and modulep! learned -flag negation (SPC c lsp rows ride
+  :tools lsp -eglot).  The stub set-lookup-handlers! left doom-compat -
+  an autoload can't override an fboundp stub, so the real one had to move
+  to the module loaddefs (the ai-module harness-fn lesson, inverted).
+- [2026-07] lsp module ported (lsp-mode, lsp-ui, consult-lsp, dap-mode +
+  the useful runtime slice of Doom's :tools lsp +peek; registry slot
+  tree-sitter < lsp < clojure, doom!-faithful).  LSP_USE_PLISTS="1" in
+  early-init setenv (must be in the env for BOTH the elpaca byte-compile
+  and load - lsp-use-plists reads it at load, the compiled lsp-get
+  accessors bake it in).  lsp-booster json-parse advice is EAGER
+  (modules/lsp/autoload.el) - doom.d registered it from a lazily loaded
+  file, leaving a startup window where a booster-wrapped server's bytecode
+  output hit an unadvised parser; armed at boot now, no-op without the
+  binary.  Kept: deferred server shutdown (lsp-defer-server-shutdown-a),
+  the signature-stop-on-escape hook, the lsp-mode-hook localleader map,
+  set-lookup-handlers! 'lsp-mode.  That last one MOVED here from
+  consult-dash's :config (completion module) - doom.d registered it only
+  after the first consult-dash call, so lsp buffers opened earlier got no
+  lookup handlers (latent load-order bug).  lsp-ui installed but
+  manual-only (lsp-ui-manual-only-a suppresses auto-enable, doom.d ground
+  truth: its remove-hook! kept lsp-ui-mode off everywhere).  Dropped as
+  doom.d rot (git-resurrectable): lsp-ui-flycheck-list+ and its "ge"/q
+  binds - lsp-ui-mode never activates in live doom.d, so
+  lsp-ui-flycheck-list--update was void at runtime (bound-but-broken);
+  flycheck parked on :checkers anyway.  Doom's +lsp-optimization-mode
+  save/restore dance dropped - the root config.el already pins
+  read-process-output-max 10MB + gc-cons-threshold 200MB globally.
+  Renames: +lsp-completion-at-point -> lsp-completion-at-point-maybe (cape
+  combinator-safe), +default/lsp-command-map -> lsp-command-map-dispatch
+  (SPC c l - the map is a plain defvar keymap with no function cell, so
+  the row needs a dispatcher that loads lsp-mode then set-transient-map's
+  it; can't bind the bare map symbol).  lsp!/dap paths + session/server/
+  breakpoint files quarantined in doom-compat.el.  consult-lsp
+  c j/J rows un-guarded (vertico guard dropped - lab registry is
+  :custom completion, org-port precedent).
+- [2026-07] clojure module ported (clojure-mode, cider, clj-refactor,
+  clojars, neil, logview, datetime, cider-storm, monroe; registry slot
+  after lsp).  Entangled with lsp throughout - ported alongside so no
+  silent voids: clojure-lookup-handlers-h wires the lsp/cider handlers,
+  cape-cider-lsp-yas mixes cider-complete-at-point-maybe +
+  lsp-completion-at-point-maybe + yasnippet-capf, lsp-clojure-fqn-at-point
+  (lsp-request/lsp-make-* API, dash -some-> chain rewritten with
+  when-let*).  Projectile refs -> project.el: the root-file additions
+  become project-vc-extra-root-markers, projectile-project-root ->
+  doom-project-root.  Renames (plus-ban + package-namespace de-squat,
+  collision-checked live): +clojure/* -> bare (clojure-open-repl, ...),
+  cider-storm-storm-start-gui+ -> cider-storm-start-gui-styled and
+  lsp-clojure-show-project-tree+ -> lsp-clojure-project-tree-toggle (wrap
+  package commands), clojure-project-root-path+ ->
+  clojure-project-root-path-poly, separedit--*-clj-str-delimeters ->
+  clj-str-*-delimiters (typo + squat), spacehammer-monroe--* ->
+  hammerspoon-monroe-* (writing-port precedent), +cider-complete-at-point
+  -> cider-complete-at-point-maybe.  Kept where cider's namespace is free
+  (cider-switch-to-nrepl-buffer, kill-cider-buffers, cider-fqn-symbol-at-
+  point, cider-eval-sexp-at-point* keeps its star - plain name is cider's).
+  doom.d rot dropped: clojure-enable-fancify-symbols (spacemacs-era free
+  var), the duplicate cider-repl-display-in-current-window setq;
+  -partial -> apply-partially (dash-free).  spacehammer-monroe glue
+  unblocked (writing ported) - installs on darwin only, fennel-mode map!
+  waits on the lua module.  expreg-transient Clojure section restored
+  ("; c" wrap-rich-comment).  org-cliplink pulled ahead the same sitting
+  (warm-up) - package + "i L" localleader + url.el title-retrieval heal.
+  Verification: 560 specs (+63: tests/lookup/ x2, tests/lsp/ x2,
+  tests/clojure/ x4), smoke 164 -> 191 packages 0 failed/blocked, probe
+  green (191 pkgs, all binds resolve incl. SPC c a/l/r/o/S/j/J + c d/D/i/
+  k/t/W + evil gd/gD/gf/gI/K, no voids, booster+monroe advice armed at
+  boot, LSP_USE_PLISTS=1, quarantine x4, marker-path, no +residue, no new
+  *Warnings*).  Keydiff 59->51 open / 59->51 broken / 128 resolved /
+  0 regressions / 0 lab-only - SPC c code/lsp closed, SPC k parked
+  (sexp-transient), normal-g gd/gD/gI/gf :improved.  Test-infra lesson:
+  lookup--run-handlers uses condition-case-unless-debug (Doom's idiom) and
+  (get handler 'lookup-async) - buttercup forces debug-on-error (bind it
+  nil to test the catch) and handlers must be symbols not lambdas; the
+  marker-return path's set-window-configuration hard-aborts buttercup's
+  own runner window state, so it lives in the probe not the batch tier.
+  elpaca update cycle also closed this sitting (own Decisions entry).
 - [2026-07] doom-defaults.el vendored (the settings half of Doom v3's
   lisp/doom-emacs.el @8e4fbba): security/runtime defaults, editor + UI
   defaults, C-i/C-m GUI key translation, doom/escape, MODE-local-vars-hook,
@@ -1051,6 +1146,34 @@ module layout).
   fringe-mode call in position-frame-on-load-h fboundp-guarded (void on
   fringe-less nox builds - the CI emacs; the "void fringe-mode" boot
   message was pre-existing noise there).
+- [2026-07] elpaca update cycle completed live (first lab-hosted sitting) -
+  the trial gate closes.  All three reported failures root-caused via the
+  event log (this elpaca has an EVENT SYSTEM: per-order logs live in
+  =elpaca--event-log= as elpaca-event structs; the old =elpaca<-log= slot
+  is gone - query events by id, statuses still via =elpaca<-status=).
+  (1) occult: NOT the suspected ssh-agent env - the ssh fetch succeeds in
+  the GUI session (launchd SSH_AUTH_SOCK + keychain key resolution work);
+  the real failure was =elpaca--log-updates= running =git log ..@{u}= in
+  the ~/GitHub/agzam/occult.el checkout whose =main= had NO upstream
+  tracking configured ("fatal: no upstream configured for branch 'main'").
+  Fixed with =git branch --set-upstream-to=origin/main main=; audited all
+  13 local-dev checkouts - occult was the only one missing tracking.
+  (2) elpaca itself: =git merge --ff-only= died with "refusing to merge
+  unrelated histories" - the bootstrap installer clones elpaca with
+  =:depth 1=, and every subsequent fetch on the shallow repo lands
+  disconnected shallow islands (.git/shallow had accumulated ~47 grafts;
+  no merge-base with @{u}).  Fixed with a one-time =git fetch --unshallow=;
+  ff merges work from now on.  Watch for the same shape in any other
+  :depth-pinned repo that later needs updates.
+  (3) elpaca-use-package: pure inheritance - builds out of the elpaca
+  repo's extensions/, so its "Condition (finished . elpaca) failed" clears
+  once elpaca merges.  (Also learned: never queue two elpaca-merge calls
+  for orders sharing a source dir - concurrent git in one repo trips
+  index.lock; elpaca-merge-all's shared-dir blocking exists for this.)
+  sdcv (repo.or.cz, treeless filter) fetched clean this time - flaky host,
+  no action; treeless clones keep full commit history so their merges are
+  not at risk from the shallow trap.  Cycle result: fetch all 164, review
+  (2 upstream elpaca commits), merge - 164/164 finished, 0 failed.
 - [2026-07] global-key sweep (the M-DEL report): a FIFTH audit-blind
   class - the key audit dumps leader + evil prefix trees only, so global
   modifier keys never entered keydiff (the helpful remaps were the same
@@ -1080,6 +1203,41 @@ module layout).
   form [67108877] while GUI/kkp produce [C-return] (Doom hits both via
   its C-m translation layer); insert-map M-<backspace> resolves through
   the global bind at runtime.
+- [2026-07] transient inconsistencies swept - sexp-transient ported, two
+  expreg-transient regressions healed, one latent mpv bug fixed.
+  sexp-transient (SPC k) was bound but void (its lib never loaded);
+  restored as a LAZY general-module autoload
+  (general/autoload/sexp-transient.el, mirrors expreg.el) instead of the
+  planned eager =(load! "lisp/sexp-transient")= - keeps avy + edit-indirect
+  out of startup, matching the loaddefs-lazy contract.  The shared bypass
+  engine (transient-layout-keys + transient-bypass-keys) moved out of
+  expreg.el into lisp/transient-bypass.el - "don't duplicate" honored
+  without an eager lib.  Renames/drops: sp-eval-current-sexp ->
+  eval-current-sexp (doom.d user fn, renamed at the elisp port); dead
+  transient--all-layout-keys gone.  expreg fixes: Markdown section restored
+  (writing module now supplies markdown-wrap-code-generic/-collapsible +
+  stock markdown-insert-*), bypass "%" back to evilmi-jump-items
+  (evil-matchit ported) over the stop-gap evil-jump-item; Magit stays
+  dropped (bypass "s"/"x" collision).  Latent bug: mpv-transient (C-x m)
+  called transient-bypass-keys with no require - leaned on expreg.el
+  loading first, errored at open otherwise; now (require 'transient-bypass)
+  in mpv.el (a THIRD user the engine move surfaced).  Tests: new
+  tests/lisp/transient-bypass-tests.el (fixture engine specs) +
+  tests/general/sexp-transient-tests.el (prefix + command rot-net + the
+  eval-rename guard); expreg rot-nets extended for Markdown; mpv gains a
+  bypass-engine-available spec.  bb test 565/0; live setup-children probe on
+  expreg/sexp/mpv prefixes all clean (the doom.d "errored at open" class).
+  SPC k closed, SPC v note updated.
+  Keydiff follow-up (2026-07, lsp/clojure review): the bare keydump boot
+  flagged SPC k + SPC v :void-suffix (1 regression) - the restored
+  :if-gated Markdown/Clojure sections reference package commands
+  (markdown-insert-*, clojure-toggle-ignore, lsp-clojure-thread-*) that
+  aren't autoloaded, so they read void until their feature loads.  The live
+  setup-children probe missed it (packages already loaded there).  Fixed the
+  keydump-config, not the transients: KEYDUMP_REQUIRE gained markdown-mode,
+  clojure-mode, cider, lsp-clojure (the org/vertico false-void precedent).
+  Both rows drop off the diff as exact matches; keydiff back to 0
+  regressions.
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -1138,10 +1296,16 @@ Cluster checklist (open counts as of 2026-07 pilot; =bb keydiff= is truth):
 - [X] SPC p :: closed with the tab-bar port - browse/find-file-in-other-
   project trio implemented over project.el, discover-projects + 6
   projectile-only rows dropped, 8 project.el rows :improved
-- [ ] normal g (19)
+- [ ] normal g (12 open) - gd/gD/gI/gf lookup family :improved with the
+  lsp/clojure sitting; the rest is evil-mc (g z*), evil-numbers/lion,
+  evil-nerd-commenter, :tools eval (g R/r) - waits on those modules
 - [ ] SPC x (18) - gptel tree closed with the ai port; the 10 left are
   writing-module material (SPC x l / x t trees etc.)
-- [ ] SPC c (15) - code/lsp
+- [X] SPC c :: code/lsp rows closed with the lsp/clojure sitting - lookup
+  five (c d/D/i/k/t) + c W :improved (plus-ban renames), c l on the
+  lsp-command-map dispatcher, c j/J un-guarded consult-lsp-symbols
+  (vertico guard dropped, org-port precedent); the 5 still-broken rows
+  (c e/E/f/s/x) are :tools eval + :checkers, parked with those modules
 - [ ] SPC o (15) - open/apps; roam/org tree resolved with the org port,
   o c g closed with the ai port, o r C-b + o e settled with the
   web-browsing port - the rest waits on macos/chat/eval/notmuch
@@ -1208,6 +1372,14 @@ g/z/[/] trees, and SPC i (the last singleton).
     dash/s rewrites and the repo-regex fix, drawer lint, journal template
     + buffer-type detection, tiff->png advice, goto-bottommost-heading's
     currlevel-leak fix)
+  - lookup/lsp/clojure (2026-07) :: lookup dispatch + set-lookup-handlers!
+    + backends + online-provider (tests/lookup/); lsp booster json/command
+    advice + lsp! + lookup handlers + command-map dispatch (tests/lsp/);
+    cider fqn/completion/kill-buffers + polylith root, clojure str-delims/
+    unalign/wrap-rich-comment/imenu, monroe reconnect, tools alias/tree/
+    storm (tests/clojure/) - all with the package provide-stubbed or
+    cl-letf'd.  Batch-tier note: lookup--run-handlers' marker path lives
+    in the probe (its set-window-configuration aborts buttercup's runner).
   - smoke-only, and why :: evil module config and
     evil-ex-visual-star-search-a (need evil); expreg--line
     (needs a real display - batch frames are ~10 columns, visual-line fns
@@ -1260,17 +1432,22 @@ committed to:
 - =+evil{/,-}window-move-*= -> =window-move-*=
 - =+multiple-cursors/evil-mc-*= -> =mc-*=
 - =+vertico/switch-workspace-buffer= -> =switch-workspace-buffer=
-- =+default/lsp-command-map= -> real =lsp-command-map=,
-  =+default/insert-file-path= -> their =insert-file-path= (deliberate merges)
+- =+default/lsp-command-map= -> =lsp-command-map-dispatch= (loads lsp-mode
+  then set-transient-map's the real =lsp-command-map=, a defvar keymap with
+  no function cell - amended at the lsp port from the earlier "-> real
+  lsp-command-map" plan, which can't be a keybinding target),
+  =+default/insert-file-path= -> their =insert-file-path= (deliberate merge)
 - =doom/delete-backward-word= -> =delete-backward-word=
 - =doom-scratch-buffer= -> =scratch-buffer-create= (built-in
   =scratch-buffer= collision); =doom/*scratch-buffer= commands -> bare names
 - module flags (=+icons=, =+everywhere=, ...) are modulep! syntax - keep
 ** TODO Extend file quarantine as modules port
 New state-writing packages get their path vars redirected in
-doom-compat.el quarantine section (lsp session, dap, telega, ...).
+doom-compat.el quarantine section (telega, ...).
 Done so far: org-roam/vulpea dbs, treemacs persist pair, desktop-path
-(tab-bar port; elfeed db moot - package dropped).
+(tab-bar port; elfeed db moot - package dropped), lsp session +
+server-install-dir + eslint-choices, dap breakpoints + extension path
+(lsp module port).
 
 * Infra debt
 ** DONE Session switch (daily driver -> lab)
@@ -1305,15 +1482,18 @@ for tree visualization. The =after! undo-fu= block in config.el goes away
 if undo-fu itself never lands.
 ** DONE Smartparens base config
 Landed with the elisp sitting (see Decisions log): core vendored into
-general/config.el, the inert sp-pair block now active. sexp-transient still
-waits on avy + edit-indirect + clojure (its own TODO).
-** TODO Restore lisp/sexp-transient.el
-After smartparens + avy + edit-indirect exist, and after the clojure
-module - its eval/pp branches dispatch into cider, porting before would
-mean gutting them only to re-add. Re-add =(load! "lisp/sexp-transient")=
-to config.el. transient-bypass-keys already lives in
-general/autoload/expreg.el (dialect-aware rewrite) - move it back here,
-don't duplicate.
+general/config.el, the inert sp-pair block now active. sexp-transient
+restored 2026-07 (lazy general-module autoload; its own DONE entry below).
+** DONE Restore sexp-transient (as a lazy module autoload)
+Ported (see Decisions log).  Deviated from the plan above: NOT a re-added
+eager =(load! "lisp/sexp-transient")= lib, but a lazy general-module
+autoload (modules/general/autoload/sexp-transient.el, mirrors expreg.el) -
+the config's loaddefs machinery exists to keep transient prefixes lazy, and
+an eager lib would pull avy + edit-indirect into startup.  The shared bypass
+engine went to lisp/transient-bypass.el (required by expreg, sexp-transient
+AND mpv), not back into a sexp lib - honors "don't duplicate" without the
+eager load.  sp-eval-current-sexp -> eval-current-sexp (the elisp module's
+user fn); dead transient--all-layout-keys dropped.  SPC k closed.
 ** DONE Fonts machinery (stayed direct)
 Resolved with the frames lib port: config.el face bridge +
 =font-size-increase/decrease/reset= over the default face height;
@@ -1335,15 +1515,16 @@ doom-init-ui-hook; base16-theme was missing from this list (packages.el
 was truth). SPC T closed.
 ** DONE Root packages leftovers
 golden-ratio + lorem-ipsum landed with the elisp sitting; SPC w closed.
-** TODO LSP_USE_PLISTS env
-Set in early-init when lsp module ports (Doom init.el had =setenv=).
+** DONE LSP_USE_PLISTS env
+Set in early-init.el (=(setenv "LSP_USE_PLISTS" "1")=) with the lsp module
+port - in the env for both the elpaca byte-compile and load.
 ** TODO lisp/elisp-lint.el
 Flymake backend flagging let+if -> if-let* patterns; port with elisp module.
 ** TODO Trial gates still open
 - Linux parity: automated - the CI smoke job boots on ubuntu; keep it green
-- one elpaca-manager update cycle (fetch, review, merge) - EXERCISED and
-  failing (elpaca-use-package/occult/sdcv; see the session-switch
-  Decisions entry): finish live in the lab, root-cause via *elpaca-log*
+- [X] one elpaca-manager update cycle (fetch, review, merge) - completed
+  live 2026-07 (first lab-hosted sitting); all three failures root-caused,
+  see the update-cycle Decisions entry
 - [X] local-repo recipe pattern proven with the git module port (remoto +
   github-topics build in place; see "Local :repo packages")
 
@@ -1359,10 +1540,15 @@ org-cliplink, let-plist), though its top-level ghub require now resolves.
 Core slice ported - see Decisions log. SPC o r tree + SPC r r alive,
 vulpea-insert restored in expreg-transient. org-superstar joined the core
 slice later (daily-visible bullets; see the daily-driver fixes entry).
+org-cliplink pulled ahead 2026-07 (first lab-hosted sitting): package +
+"i L" localleader restored; the five url.el title-retrieval sites and
+web-browsing's org branch heal via :commands autoloads
+(org-cliplink-retrieve-title-synchronously carries no upstream cookie -
+the use-package :commands list covers it explicitly).
 Left for a long-tail sitting:
 verb, anki-editor(+anki-gen), ob-* extras (ob-async/http/mermaid),
 org-pomodoro, toc-org, orgit(-forge) (still back-fills the git deferral),
-org-edit-indirect, ox-clip/ox-gfm, org-cliplink (next-most-visible gap),
+org-edit-indirect, ox-clip/ox-gfm,
 org-download, org-contrib, the 2 mp3 assets, org-capture frame infra
 (spacehammer flow), org-refile/org-avy commands, org-pretty-mode
 (org-present), export-to-clipboard helpers, edit-indirect-guess-mode-fn+.
@@ -1455,13 +1641,16 @@ lacks the API), grammar ensure-installed deferred to consumer load so the
 'ask policy can't prompt mid pty boot, fold-all advice extracted to module
 autoload/. evil-matchit going live self-activated dired's
 evil-matchit-off-h guard (probe-verified).
-** TODO lsp
-lsp-mode, dap-mode (unpins). Removes Doom lookup hook (inert here).
-Combine with :tools lsp decision + LSP_USE_PLISTS + read-process-output-max.
-** TODO clojure
-cider, clj-refactor, clojars, neil, logview, datetime, cider-storm, monroe.
-+lookup-provider-url-alist (needs lookup decision), spacehammer-monroe
-(after writing). config 438L, autoload ~720L.
+** DONE lsp
+Ported (see Decisions log). lsp-mode/lsp-ui/consult-lsp/dap-mode + the
+useful slice of Doom :tools lsp +peek; LSP_USE_PLISTS + read-process-output-max
+handled; the lookup-handler registration moved out of consult-dash's
+:config (load-order fix). lsp-ui-flycheck-list+ dropped as doom.d rot.
+** DONE clojure
+Ported (see Decisions log). cider/clj-refactor/clojars/neil/logview/
+datetime/cider-storm/monroe; lookup handlers via the vendored core,
+projectile -> project.el, spacehammer-monroe unblocked (darwin-only,
+fennel map! waits on lua), expreg Clojure section + org-cliplink restored.
 ** TODO notmuch
 notmuch (gh), org-mime, ol-notmuch, consult-notmuch. modulep! conditionals
 inside packages need static resolution. doom-real-buffer-functions (shim).
@@ -1513,12 +1702,13 @@ rust-mode, rustic. 5L. Trivial.
 Each needs a lab decision; bindings tree + registry already assume them.
 - :emacs undo -> covered by infra undo item
 - :config default +smartparens -> covered by infra item
-- :tools lookup :: set-lookup-handlers! infra, +lookup-provider-url-alist,
-  K/gd muscle memory. Needed by completion (consult-dash), golang, lua,
-  clojure. Decide: vendor Doom lookup module vs thin own implementation.
+- :tools lookup :: DONE 2026-07 - vendored as modules/lookup/ (rebuild,
+  plus-free); set-lookup-handlers! + dispatch + backends + provider alist +
+  K/gd bindings. Unblocks golang/lua/consult-dash bindings.
 - :tools eval +overlay :: set-repl-handler!/set-eval-handler! + eros overlays.
   Needed by golang/nix REPL handlers.
-- :tools lsp +peek :: fold into custom lsp module port.
+- :tools lsp +peek :: DONE 2026-07 - folded into the custom lsp module
+  (deferred-shutdown, signature-stop, lookup handlers, manual-only lsp-ui).
 - :editor multiple-cursors :: evil-mc + evil-multiedit (evil-multiedit
   referenced by evil-escape excluded-states already).
 - :editor file-templates :: yasnippet templates infra; elisp module ships own.
@@ -1602,5 +1792,11 @@ module had rewritten its own uses with plist-get before that existed.
 - writing landed (2026-07): clojure (spacehammer-monroe) and chat (jinx)
   unblocked
 - org before: embark (vulpea actions)
-- lookup decision before: golang, lua, clojure, consult-dash bindings
-- smartparens before: sexp-transient, general sp-pairs activate
+- lookup decision before: golang, lua, clojure, consult-dash bindings -
+  satisfied, lookup core landed 2026-07 (clojure consumed it)
+- smartparens before: sexp-transient, general sp-pairs activate -
+  satisfied, sexp-transient restored 2026-07 (lazy autoload; avy +
+  edit-indirect stay out of startup)
+- lsp before clojure: satisfied - ported together 2026-07 (entangled;
+  clojure autoloads call lsp-lookup-*, lsp-clojure-*, lsp-completion-at-
+  point-maybe)

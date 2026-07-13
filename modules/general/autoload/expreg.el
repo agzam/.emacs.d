@@ -1,5 +1,7 @@
 ;;; custom/general/autoload/expreg.el -*- lexical-binding: t; -*-
 
+(require 'transient-bypass)
+
 ;;;###autoload
 (defun expreg--line ()
   "Return a list of regions containing surrounding sentences."
@@ -55,63 +57,6 @@ has fontified the current window."
       ('markdown-mode (markdown-insert-inline-link txt url))
       (_ url))))
 
-;; Ported ahead of lisp/sexp-transient.el (its original home in doom.d) -
-;; move, don't duplicate, when that lib restores.
-(defun transient-layout-keys (prefix)
-  "Return all keys in PREFIX's static layout.
-Walks both layout dialects, like the tests' walker: suffix plists live
-in the cdr (transient >= 0.8) or nested one level down (0.7.x)."
-  (let (keys)
-    (cl-labels
-        ((walk (node)
-           (cond
-            ((vectorp node) (mapc #'walk (append node nil)))
-            ((not (proper-list-p node)) nil)
-            ((keywordp (car node))
-             (when-let* ((key (plist-get node :key)))
-               (push key keys)))
-            (t (if-let* ((key (plist-get (cdr node) :key)))
-                   (push key keys)
-                 (mapc #'walk node))))))
-      (mapc #'walk (get prefix 'transient--layout)))
-    (nreverse keys)))
-
-(defun transient-bypass-keys (prefix key-specs)
-  "Create transient suffixes for PREFIX that act like plain keys.
-Sometimes a transient should let a key do exactly what it does outside
-of it, honoring major/minor mode maps.  Every spec in KEY-SPECS is
-either a string - invoke the command the key normally binds, exiting
-the transient - or (KEY TRANSIENT? &optional CMD) to stay in the
-transient and optionally call an explicit CMD."
-  (let ((existing-keys (transient-layout-keys prefix)))
-    (dolist (spec key-specs)
-      (let ((key (if (stringp spec) spec (car spec))))
-        (when (member key existing-keys)
-          (error "transient-bypass-keys: key %S conflicts with an explicit binding in `%S'"
-                 key prefix)))))
-  (transient-parse-suffixes
-   prefix
-   (mapcar
-    (lambda (key-map)
-      (let* ((key (if (stringp key-map) key-map (car key-map)))
-             (explicit-cmd (ignore-errors (nth 2 key-map)))
-             (transient? (and (listp key-map) (cadr key-map)))
-             (cmd (or explicit-cmd
-                      (lambda ()
-                        (interactive)
-                        (if transient?
-                            (call-interactively
-                             (or
-                              (lookup-key evil-normal-state-map (kbd key))
-                              (lookup-key evil-motion-state-map (kbd key))
-                              (lookup-key evil-visual-state-map (kbd key))
-                              (lookup-key (current-local-map) (kbd key))
-                              (lookup-key global-map (kbd key))))
-                          (general--simulate-keys nil key)))))
-             (desc (format "%s" key)))
-        (list key desc cmd :transient transient?)))
-    key-specs)))
-
 ;;;###autoload
 (transient-define-prefix expreg-transient ()
   "expand/contract"
@@ -134,7 +79,7 @@ transient and optionally call an explicit CMD."
         ("k" t evil-previous-visual-line)
         ("h" t evil-backward-char)
         ("l" t evil-forward-char)
-        ("%" t evil-jump-item)
+        ("%" t evilmi-jump-items)
         ("0" t evil-beginning-of-line)
         ("y" t evil-yank)
         ("o" t exchange-point-and-mark)
@@ -167,8 +112,27 @@ transient and optionally call an explicit CMD."
      (lambda () (interactive) (org-wrap-in-block 'quote)))
     ("; c" "wrap in source block"
      (lambda () (interactive) (org-wrap-in-block 'src)))]]
-  ;; Dropped until their modules port (doom.d stays the reference, see
-  ;; MIGRATION Decisions log): Markdown and Clojure sections, and the
-  ;; Magit section - that one also collides with bypass "s"/"x", which
-  ;; Doom's dead conflict guard never caught.
+  ["Markdown"
+   :if (lambda () (derived-mode-p 'markdown-mode))
+   :hide (lambda () (not transient-show-common-commands))
+   [("; *" "bold" markdown-insert-bold)
+    ("; b" "bold" markdown-insert-bold)
+    ("; /" "italic" markdown-insert-italic)
+    ("; i" "italic" markdown-insert-italic)
+    ("; `" "code" markdown-insert-code)
+    ("; +" "strikethrough" markdown-insert-strike-through)]
+   [("C-c l" "insert link" markdown-insert-link)
+    ("C-c L" "insert browser url" expreg-transient--insert-browser-url)
+    ("; l" "insert link" markdown-insert-link)
+    ("; L" "insert browser url" expreg-transient--insert-browser-url)
+    ("; c" "wrap in code block" markdown-wrap-code-generic)
+    ("; <" "wrap in collapsible" markdown-wrap-collapsible)]]
+  ["Clojure"
+   :if (lambda () (derived-mode-p 'clojure-mode))
+   :hide (lambda () (not transient-show-common-commands))
+   [("; c" "wrap comment" clojure-wrap-rich-comment)]]
+  ;; Magit section stays dropped (doom.d is the reference): it collides
+  ;; with bypass "s"/"x", which Doom's dead conflict guard never caught.
+  ;; Markdown restored with the writing module, Clojure with its own
+  ;; (2026-07).
   )

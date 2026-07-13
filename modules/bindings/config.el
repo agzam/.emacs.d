@@ -396,18 +396,16 @@
        (:when (modulep! :tools lsp -eglot)
         :desc "LSP Execute code action"              "a"   #'lsp-execute-code-action
         :desc "LSP Organize imports"                 "o"   #'lsp-organize-imports
-        :desc "LSP"                                  "l"   #'lsp-command-map
+        ;; lsp-command-map is a plain defvar keymap (no function cell) -
+        ;; the dispatcher loads lsp-mode and enters it.
+        :desc "LSP"                                  "l"   #'lsp-command-map-dispatch
         :desc "LSP Rename"                           "r"   #'lsp-rename
         :desc "Symbols"                              "S"   #'lsp-treemacs-symbols
-        (:when (modulep! :completion ivy)
-         :desc "Jump to symbol in current workspace" "j"   #'lsp-ivy-workspace-symbol
-         :desc "Jump to symbol in any workspace"     "J"   #'lsp-ivy-global-workspace-symbol)
-        (:when (modulep! :completion helm)
-         :desc "Jump to symbol in current workspace" "j"   #'helm-lsp-workspace-symbol
-         :desc "Jump to symbol in any workspace"     "J"   #'helm-lsp-global-workspace-symbol)
-        (:when (modulep! :completion vertico)
-         :desc "Jump to symbol in current workspace" "j"   #'consult-lsp-symbols
-         :desc "Jump to symbol in any workspace"     "J"   (cmd!! #'consult-lsp-symbols 'all-workspaces))
+        ;; ivy/helm variants excised; the vertico guard is dropped like the
+        ;; org port's consult-org-heading (lab registry says :custom
+        ;; completion, the guard silently pruned these).
+        :desc "Jump to symbol in current workspace" "j"   #'consult-lsp-symbols
+        :desc "Jump to symbol in any workspace"     "J"   (cmd!! #'consult-lsp-symbols 'all-workspaces)
         (:when (modulep! :ui treemacs +lsp)
          :desc "Errors list"                         "X"   #'lsp-treemacs-errors-list
          :desc "Incoming call hierarchy"             "y"   #'lsp-treemacs-call-hierarchy
@@ -431,7 +429,7 @@
        :desc "Send buffer/region to repl"            "s"   #'eval-buffer-or-region-in-repl
        :desc "Find type definition"                  "t"   #'lookup-type-definition
        :desc "Delete trailing whitespace"            "w"   #'delete-trailing-whitespace
-       :desc "Delete trailing newlines"              "W"   #'doom/delete-trailing-newlines
+       :desc "Delete trailing newlines"              "W"   #'delete-trailing-newlines
        :desc "List errors"                           "x"   #'diagnostics)
 
       ;;; <leader> d --- debugger

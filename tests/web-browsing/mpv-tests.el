@@ -28,7 +28,13 @@
               mpv-seek-backward mpv-seek-forward
               mpv-toggle-osc mpv-get-path mpv-toggle-subtitles
               mpv-speed-decrease mpv-speed-increase mpv-speed-reset
-              mpv-pause mpv-open mpv-kill))))
+              mpv-pause mpv-open mpv-kill)))
+
+  (it "pulls the shared bypass engine, not via expreg load order"
+    ;; mpv.el must (require 'transient-bypass) itself; this suite loads only
+    ;; mpv.el, so a dropped require would leave transient-bypass-keys void.
+    (expect (fboundp 'transient-bypass-keys) :to-be-truthy)
+    (expect (transient-bypass-keys 'mpv-transient '(("M-x"))) :to-be-truthy)))
 
 (describe "mpv-open"
   :var (calls)

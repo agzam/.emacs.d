@@ -242,3 +242,13 @@ the BACKWARD mover's variable, so returning from eol never worked."
   "Copy the current buffer's project-relative path to the kill ring."
   (interactive)
   (yank-buffer-path (doom-project-root)))
+
+;;;###autoload
+(defun delete-trailing-newlines ()
+  "Trim trailing newlines.
+Respects `require-final-newline'.  (Doom's doom/delete-trailing-newlines;
+the SPC c W row bound it void since the vendoring.)"
+  (interactive)
+  (save-excursion
+    (goto-char (point-max))
+    (delete-blank-lines)))

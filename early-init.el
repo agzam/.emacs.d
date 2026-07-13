@@ -45,6 +45,12 @@
 
 (setq read-process-output-max (* 64 1024))
 
+;; lsp-mode plist mode (lsp module): must be in the environment BOTH when
+;; elpaca byte-compiles lsp-mode (subprocesses inherit it from here) and at
+;; runtime (lsp-use-plists reads it at load).  Rebuilding lsp-mode without it
+;; while running with it (or vice versa) breaks lsp-get accessors.
+(setenv "LSP_USE_PLISTS" "1")
+
 ;; Emacs 31: silence unactionable if-let/when-let obsoletion and lexbind spam
 ;; (vendored Doom code and plenty of packages still trip these).
 (put 'if-let 'byte-obsolete-info nil)

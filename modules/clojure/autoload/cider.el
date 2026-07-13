@@ -1,0 +1,306 @@
+;;; modules/clojure/autoload/cider.el -*- lexical-binding: t; -*-
+
+;; Names kept from doom.d where the cider namespace is free (collision-checked
+;; against the package: cider-switch-to-nrepl-buffer, cider-clear-repl-buffers,
+;; cider-hide-repl-buffers, kill-cider-buffers, cider-fqn-symbol-at-point,
+;; cider-test-run-focused-test, cider-pprint-eval-sexp-at-point are all ours;
+;; cider-eval-sexp-at-point* keeps its star - plain name is cider's own).
+;; lsp-clojure--fqn-at-point de-privatized to lsp-clojure-fqn-at-point (ours,
+;; not the package's); its dash -some-> chain rewritten with when-let*.
+
+;;;###autoload
+(defun clojure-open-repl (&optional arg type)
+  "Open a Cider REPL for clojure and return the buffer."
+  (interactive "P")
+  ;; type is `clj' for clojure and `cljs' for clojurescript
+  ;; ... with no type specified, assume `clj'.
+  (let ((type (or type 'clj)))
+    (if-let* ((buffer (cider-current-repl type)))
+        (pop-to-buffer buffer)
+      (let ((process (cond ((eq type 'clj) (cider-jack-in-clj arg))
+                           ((eq type 'cljs) (cider-jack-in-cljs arg)))))
+        (message "Starting CIDER server for the first time...")
+        (while (and (process-live-p process)
+                    (not (cider-current-repl type)))
+          (sit-for 1))
+        (message "Starting CIDER server for the first time...done")
+        (pop-to-buffer (cider-current-repl type))))))
+
+;;;###autoload
+(defun clojure-open-cljs-repl (&optional arg)
+  "Open a Cider REPL for clojurescript and return the buffer."
+  (interactive "P")
+  (clojure-open-repl arg 'cljs))
+
+;;;###autoload
+(defun cider-switch-to-repl-and-switch-ns ()
+  "Switch to the REPL buffer, setting its ns to the current buffer's."
+  (interactive)
+  (cider-switch-to-repl-buffer t))
+
+;;;###autoload
+(defun cider-switch-to-nrepl-buffer ()
+  "Switch to the hidden nREPL server buffer in another window."
+  (interactive)
+  (when-let* ((nrepl-buf (nrepl-make-buffer-name
+                          (nrepl--make-hidden-name nrepl-server-buffer-name-template)
+                          nil :no-dup)))
+    (switch-to-buffer-other-window nrepl-buf)))
+
+;;;###autoload
+(defun cider-clear-repl-buffers ()
+  "Clears both repl and nrepl output"
+  (interactive)
+  (let ((origin-buf (current-buffer))
+        (cider-buf (cider-current-repl nil 'ensure)))
+    (switch-to-buffer cider-buf)
+    (cider-repl-clear-buffer)
+    (when (not (eq origin-buf cider-buf))
+      (select-window (get-buffer-window origin-buf)))
+    (when-let* ((nrepl-buf (nrepl-make-buffer-name
+                            (nrepl--make-hidden-name nrepl-server-buffer-name-template)
+                            nil :no-dup)))
+      (set-buffer nrepl-buf)
+      (comint-clear-buffer))))
+
+;;;###autoload
+(defun cider-fqn-symbol-at-point ()
+  "Return fully qualified symbol at point"
+  (when (cider-connected-p)
+    (let* ((ns (cider-current-ns))
+           (_ (cider-sync-tooling-eval
+               (format "(require '%s)" ns)))
+           (sym (cider-symbol-at-point t))
+           (res (cider-sync-tooling-eval
+                 (format "`(%s)" sym) ns)))
+      (if res
+          (string-trim
+           (replace-regexp-in-string
+            "[()]" ""
+            (nrepl-dict-get res "value")))
+        (error "can't resolve ns")))))
+
+;;;###autoload
+(defun lsp-clojure-fqn-at-point ()
+  "Return fully qualified Clojure symbol at point via clojure-lsp.
+Tries cursorInfo/raw first (structured data), falls back to hover parsing."
+  (or
+   ;; Primary: structured clj-kondo analysis from cursorInfo/raw
+   (condition-case nil
+       (when-let* ((info (lsp-request
+                          "clojure/cursorInfo/raw"
+                          (lsp-make-clojure-cursor-info-params
+                           :textDocument (lsp-make-text-document-identifier
+                                          :uri (lsp--buffer-uri))
+                           :position (lsp-make-position
+                                      :line (1- (line-number-at-pos))
+                                      :character (current-column)))))
+                   (elements (lsp-get info :elements))
+                   (first-entry (aref elements 0))
+                   (element (lsp-get first-entry :element)))
+         (or
+          ;; Clojure vars: :name + (:to or :ns)
+          (when-let* ((name (lsp-get element :name)))
+            (let ((ns (or (lsp-get element :to)
+                          (lsp-get element :ns))))
+              (if (and ns (not (string-empty-p ns)))
+                  (format "%s/%s" ns name)
+                name)))
+          ;; Java interop: :class + :method-name
+          (when-let* ((class (lsp-get element :class)))
+            (if-let* ((method (lsp-get element :method-name)))
+                (format "%s/%s" class method)
+              class))))
+     (error nil))
+   ;; Fallback: parse hover markdown
+   (when-let* ((cnt (lsp:hover-contents
+                     (lsp--send-request
+                      (lsp--make-request "textDocument/hover"
+                                         (lsp--text-document-position-params)))))
+               (s (or (plist-get cnt :value)
+                      (gethash "value" cnt)))
+               (code-line (when (string-match "```clojure\n\\(.*\\)" s)
+                            (match-string 1 s))))
+     (or
+      (when (string-match "\\([a-zA-Z][a-zA-Z0-9._$-]*/[a-zA-Z0-9._*+!?<>=&#'-]+\\)" code-line)
+        (match-string 1 code-line))
+      (when (string-match "\\([a-zA-Z*+!_?-][a-zA-Z0-9._*+!?<>=&#'-]*\\)" code-line)
+        (match-string 1 code-line))))))
+
+;;;###autoload
+(defun clj-fully-qualified-symbol-at-point (&optional for-req callback)
+  "Gets fully qualified Clojure symbol at point. If FOR-REQ argument passed
+gets the name suitable for :require of ns declaration."
+  (interactive "P")
+  (let* ((use-results (lambda (x)
+                        (if callback
+                            (funcall callback x)
+                          (progn
+                            (message x)
+                            (kill-new x)
+                            x))))
+         (sym (cond ((cider-connected-p)
+                     (cider-fqn-symbol-at-point))
+
+                    ((and (bound-and-true-p lsp-mode) (lsp-workspaces))
+                     (lsp-clojure-fqn-at-point))
+
+                    (t (message "Neither lsp nor cider are connected")))))
+    (if for-req  ; want ns header name, e.g.: "[foo.core :as foo]"
+        (if-let* ((m (string-match "^\\(.*\\)\\/" sym))) ; anything before the slash
+            (let* ((suffix (match-string 1 sym)) ; 'foo.core' of 'foo.core/my-thing'
+                   ;; grep for '[foo.core :as ...' in the project
+                   (grepped (string-trim
+                             (shell-command-to-string
+                              (format
+                               "rg --glob '*.clj' --max-count 1 --no-filename '\\[%s :as' %s"
+                               suffix
+                               (doom-project-root))))))
+              (if-let* ((m (string-match "\\[.*\\]" grepped))
+                        (res (match-string 0 grepped)))
+                  (run-with-timer 0.04 nil use-results res)
+                (run-with-timer 0.04 nil use-results (format "[%s :as ]" suffix))))
+          (funcall use-results sym))
+      (funcall use-results sym))))
+
+;;;###autoload
+(defun cider-hide-repl-buffers ()
+  (interactive)
+  (when-let* ((repl-buffer-win (get-buffer-window (cider-current-repl))))
+    (quit-window nil repl-buffer-win))
+  (when-let* ((nrepl-buf-win (get-buffer-window
+                              (nrepl-make-buffer-name
+                               (nrepl--make-hidden-name nrepl-server-buffer-name-template)
+                               nil :no-dup))))
+    (quit-window nil nrepl-buf-win)))
+
+;;;###autoload
+(defun cider-test-run-focused-test ()
+  "Run test around point."
+  (interactive)
+  (cider-load-buffer)
+  (cider-test-run-test))
+
+;;;###autoload
+(defun cider-test-result-buffer-quit ()
+  "Quit test popup and immediately focus on the REPL."
+  (interactive)
+  (quit-restore-window (selected-window))
+  (cider-switch-to-repl-buffer))
+
+;;;###autoload
+(defun cider-pprint-eval-sexp-at-point ()
+  (interactive)
+  (let ((evil-move-beyond-eol t))
+    (save-excursion
+      (when (looking-at "(\\|\\[\\|{")
+        (forward-char))
+      (when-let* ((end-sexp (plist-get (sp-get-enclosing-sexp) :end)))
+        (goto-char end-sexp))
+      (call-interactively 'cider-pprint-eval-last-sexp))))
+
+;;;###autoload
+(defun kill-cider-buffers (&optional arg)
+  "Kill all CIDER buffers in the project.
+Won't ask any questions. Useful to execute when Emacs gets stuck.
+With ARG, kills all buffers, not only in the current project"
+  (interactive "P")
+  (let ((blist
+         (if arg
+             (progn
+               (message "killing all CIDER REPLs")
+               (seq-filter
+                (lambda (e) (string-match "\\*cider\\|\\*nrepl" (buffer-name e)))
+                (buffer-list)))
+           (when-let* ((rs (cider-repls)))
+             (message "killing REPLs for %s" (cider-current-dir))
+             (append rs (list (get-buffer
+                               (nrepl-make-buffer-name
+                                (nrepl--make-hidden-name
+                                 nrepl-server-buffer-name-template)
+                                nil :no-dup)))))))
+        (kill-buffer-query-functions nil))
+    (thread-last
+      blist
+      (seq-map #'get-buffer-window)
+      (seq-remove #'null)
+      (seq-do (lambda (w) (quit-window :kill w))))
+    (seq-do #'kill-buffer blist)))
+
+;;;###autoload
+(defun cider-complete-at-point-maybe ()
+  "`cider-complete-at-point', or nil when cider isn't connected.
+Safe to mix into capf combinators that outlive the connection."
+  (when (cider-connected-p)
+    (cider-complete-at-point)))
+
+;;;###autoload
+(defun cider-eval-sexp-at-point* ()
+  (interactive)
+  (if (looking-at "[])}]")
+      (progn
+        (forward-char)
+        (cider-eval-last-sexp))
+    (progn
+      (unless (looking-at "[[({]")
+        (sp-beginning-of-sexp)
+        (backward-char))
+      (cider-eval-sexp-at-point))))
+
+;;;###autoload
+(defun clojure-set-completion-at-point-h ()
+  (setq-local completion-styles '(orderless
+                                  partial-completion
+                                  cider))
+
+  (defalias 'cape-cider-lsp-yas
+    (cape-capf-super #'cider-complete-at-point-maybe
+                     #'lsp-completion-at-point-maybe
+                     #'yasnippet-capf))
+
+  (add-to-list 'completion-at-point-functions #'cape-cider-lsp-yas)
+  (setq-local completion-at-point-functions
+              (seq-difference
+               completion-at-point-functions
+               '(lsp-completion-at-point
+                 cider-complete-at-point
+                 yasnippet-capf)))
+  (cape-completion-at-point-functions-h))
+
+;;;###autoload
+(defun clojure-project-root-path-poly (&optional dir-name)
+  "Polylith-aware `clojure-project-root-path'.
+By default cider-jack-in grabs the first deps.edn it finds, which isn't
+great for Polylith projects - prefer the workspace root when present."
+  (if-let* ((poly-root (locate-dominating-file "." "workspace.edn")))
+      (clojure-project-root-path poly-root)
+    (clojure-project-root-path dir-name)))
+
+;;;###autoload
+(defun org-edit-special-for-clojure-a (ofn &optional arg)
+  "Advising function for editing clojure blocks that respect :nrepl-host header."
+  (let ((find-matching-session
+         (lambda (host port sessions)
+           (let ((rx (format ".*\\:%s\\:%s" host port)))
+             (seq-find (lambda (x)
+                         (string-match-p rx (car x)))
+                       sessions)))))
+    (if-let* ((el (org-element-at-point))
+              (src-p (eq 'src-block (org-element-type (org-element-context el))))
+              (clj-p (string= "clojure" (org-element-property :language el)))
+              (nrepl (alist-get
+                      :nrepl-host
+                      (nth 2 (org-babel-get-src-block-info))))
+              (nrepl-str (if (numberp nrepl) (number-to-string nrepl) nrepl))
+              (_ (string-match "\\(.*\\):\\([0-9]+\\)" nrepl-str))
+              (host (match-string 1 nrepl-str))
+              (port (match-string 2 nrepl-str)))
+        (progn
+          (funcall ofn arg)
+          (if-let* ((ses (funcall find-matching-session
+                                  host port
+                                  (sesman-sessions 'CIDER))))
+              (sesman-link-session 'CIDER ses)
+            (cider-connect-clj (list :host host
+                                     :port (string-to-number port)))))
+      (funcall ofn arg))))

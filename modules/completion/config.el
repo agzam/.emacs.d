@@ -458,13 +458,11 @@
   :commands (consult-dash)
   :config
   (map! :map consult-dash-embark-keymap
-        :n "b" #'browse-url)
+        :n "b" #'browse-url))
 
-  (set-lookup-handlers! 'lsp-mode
-    :definition #'lsp-lookup-definition-handler
-    :references #'lsp-lookup-references-handler
-    :documentation #'consult-dash-doc
-    :implementations '(lsp-find-implementation :async t)
-    :type-definition #'lsp-find-type-definition))
+;; The set-lookup-handlers! 'lsp-mode call that doom.d kept here (inside
+;; consult-dash's :config) moved to modules/lsp/config.el - here it only
+;; registered after the first consult-dash invocation, so earlier lsp
+;; buffers got no lookup handlers (2026-07 lsp port).
 
 ;;; completion.el ends here

@@ -3,15 +3,11 @@
 ;; Port of ~/.doom.d/config.el.  Loaded LAST (after all modules), mirroring
 ;; Doom's user-config ordering, so these bindings and settings win.
 ;; TODO markers note the pieces awaiting their module ports:
-;; theme (colors), doom-font machinery, sexp-transient (smartparens/avy/
-;; edit-indirect), undo-fu.
+;; theme (colors), doom-font machinery, undo-fu.
 ;;; Code:
 
 (setq user-full-name "Ag Ibragimov"
       user-mail-address "agzam.ibragimov@gmail.com")
-
-;; TODO: (load! "lisp/sexp-transient") - hard-requires smartparens, avy and
-;; edit-indirect at load; restore once those port.  SPC k is void until then.
 
 ;; TODO: (setopt doom-theme 'ag-themes-spacemacs-light) - ag-themes live in
 ;; the colors module; default theme until it ports.

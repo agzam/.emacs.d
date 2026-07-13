@@ -31,7 +31,7 @@
 
  ;; void-suffix hardening finds (2026-07) - rot inside bound transients
  ["leader" "SPC w ."] {:status :ported :note "window-transient - the g suffix resolved when golden-ratio landed"}
- ["leader" "SPC v"] {:status :improved :note "expreg-transient rebuilt: bypass engine (transient-bypass-keys) ported in - it was void, SPC v errored at open; unported-module suffixes slimmed away (Decisions log)"}
+ ["leader" "SPC v"] {:status :improved :note "expreg-transient rebuilt: bypass engine now in lisp/transient-bypass.el (shared); Markdown section + evilmi-jump-items % restored as their modules landed (writing, evil-matchit); Magit stays dropped (bypass s/x collision) (Decisions log)"}
 
  ;; SPC t - toggle cluster (2026-07)
  ["leader" "SPC t b"] {:status :dropped :note "doom-big-font-mode dead (Decisions log: fonts stay direct)"}
@@ -215,4 +215,23 @@
  ["leader" "SPC q F"] {:status :dropped :note "doom/kill-all-buffers - not part of the desktop story; scratch + window-cleanup cover fresh starts"}
  ["leader" "SPC q S"] {:status :dropped :note "doom/save-session named-file variant - single canonical session dir policy (desktop-path)"}
  ["leader" "SPC q L"] {:status :dropped :note "doom/load-session named-file variant - see SPC q S"}
- ["leader" "SPC q d"] {:status :improved :note "restart-server - renamed +default/restart-server port; landed with the session-switch server autostart"}}
+ ["leader" "SPC q d"] {:status :improved :note "restart-server - renamed +default/restart-server port; landed with the session-switch server autostart"}
+ ;; SPC c + normal g lookup/lsp rows - lsp/clojure sitting (2026-07).
+ ;; The :tools lookup core is vendored (modules/lookup/); its commands
+ ;; rebuild Doom's +lookup/* on lsp/cider/xref directly.  All are :improved,
+ ;; not :ported - the plus-ban renames the symbol, so the command names
+ ;; differ from Doom's (the search-module rename-row precedent).
+ ["leader" "SPC c d"] {:status :improved :note "lookup-definition over +lookup/definition (plus-ban rename; :tools lookup core vendored)"}
+ ["leader" "SPC c D"] {:status :improved :note "lookup-references over +lookup/references"}
+ ["leader" "SPC c i"] {:status :improved :note "lookup-implementations over +lookup/implementations"}
+ ["leader" "SPC c k"] {:status :improved :note "lookup-documentation over +lookup/documentation"}
+ ["leader" "SPC c t"] {:status :improved :note "lookup-type-definition over +lookup/type-definition"}
+ ["leader" "SPC c l"] {:status :improved :note "lsp-command-map-dispatch loads lsp-mode then enters the real lsp-command-map; doom's +default/lsp-command-map merged it into a command - the map is a plain defvar keymap with no function cell"}
+ ["leader" "SPC c W"] {:status :improved :note "delete-trailing-newlines over doom/delete-trailing-newlines (plus-ban vendor); the row was bound-but-void since the vendoring"}
+ ["leader" "SPC c j"] {:status :improved :note "consult-lsp-symbols - lab-only: doom.d's (modulep! :completion vertico) guard pruned it (registry uses :custom completion), guard dropped like the org port's consult-org-heading"}
+ ["leader" "SPC c J"] {:status :improved :note "consult-lsp-symbols all-workspaces (cmd!!) - lab-only, see SPC c j"}
+ ["normal" "g d"] {:status :improved :note "lookup-definition over +lookup/definition - :editor evil's gd, gated on :tools lookup (now ported)"}
+ ["normal" "g D"] {:status :improved :note "lookup-references over +lookup/references (gD)"}
+ ["normal" "g I"] {:status :improved :note "lookup-implementations over +lookup/implementations (gI)"}
+ ["normal" "g f"] {:status :improved :note "lookup-file over +lookup/file (gf)"}
+ ["leader" "SPC k"] {:status :ported :note "sexp-transient restored as a lazy general-module autoload (not the planned eager load! lib); shared bypass engine extracted to lisp/transient-bypass.el; sp-eval-current-sexp -> eval-current-sexp (Decisions log)"}}

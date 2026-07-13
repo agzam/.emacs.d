@@ -61,6 +61,15 @@
       ;; treemacs defaults both under user-emacs-directory/.cache/
       treemacs-persist-file (concat doom-cache-dir "treemacs-persist")
       treemacs-last-error-persist-file (concat doom-cache-dir "treemacs-last-error-persist")
+      ;; lsp module: session/state files default under user-emacs-directory,
+      ;; server installs under its .cache/ (Doom put sessions in cache, server
+      ;; downloads in data - same split here); dap keeps breakpoints and
+      ;; VSCode extension downloads there too
+      lsp-session-file (concat doom-cache-dir "lsp-session")
+      lsp-server-install-dir (concat doom-data-dir "lsp/")
+      lsp-eslint-library-choices-file (concat doom-cache-dir "lsp-eslint-choices")
+      dap-breakpoints-file (concat doom-cache-dir "dap-breakpoints")
+      dap-utils-extension-path (concat doom-data-dir "dap-extension/")
       ;; ai module: token caches + eca server binary default inside
       ;; user-emacs-directory; lab keeps its own copies - sharing Doom's
       ;; OAuth tokens.el invites refresh-token rotation races.
@@ -102,11 +111,19 @@ Set in init.el; powers the `modulep!' shim.")
 
 (defmacro modulep! (category &optional module &rest flags)
   "Lab shim of Doom's `modulep!'; absolute form only.
-Relative flag checks (modulep! +flag) must be resolved at port time."
++flag requires the flag present, -flag requires its + form absent (Doom
+semantics; the SPC c lsp rows ride on -eglot).  Relative flag checks
+(modulep! +flag) must be resolved at port time."
   (unless (keywordp category)
     (error "modulep! shim only supports (modulep! :category module +flags...)"))
   `(when-let* ((entry (doom-module--entry ,category ',module)))
-     (cl-every (lambda (flag) (memq flag (cddr entry))) ',flags)))
+     (cl-every (lambda (flag)
+                 (let ((name (symbol-name flag)))
+                   (if (string-prefix-p "-" name)
+                       (not (memq (intern (concat "+" (substring name 1)))
+                                  (cddr entry)))
+                     (memq flag (cddr entry)))))
+               ',flags)))
 
 ;;; * Logging stub
 
@@ -652,9 +669,68 @@ Lab version on top of project.el (Doom used projectile)."
   (when-let* ((project (project-current nil dir)))
     (project-root project)))
 
-(defun set-lookup-handlers! (modes &rest plist)
-  "Stub until the :tools lookup module is ported."
-  (ignore modes plist))
+;; set-lookup-handlers! lives in modules/lookup/autoload/lookup.el now (the
+;; loaddefs autoload would lose to a stub defun here - `autoload' never
+;; overrides an fboundp symbol).
+
+(defun doom-region-active-p ()
+  "Return non-nil if selection is active.
+Detects evil visual mode as well."
+  (declare (side-effect-free t))
+  (or (use-region-p)
+      (and (bound-and-true-p evil-local-mode)
+           (evil-visual-state-p))))
+
+(defun doom-region-beginning ()
+  "Return beginning position of selection.
+Uses `evil-visual-beginning' if available."
+  (declare (side-effect-free t))
+  (or (and (bound-and-true-p evil-local-mode)
+           (evil-visual-state-p)
+           (markerp evil-visual-beginning)
+           (marker-position evil-visual-beginning))
+      (region-beginning)))
+
+(defun doom-region-end ()
+  "Return end position of selection.
+Uses `evil-visual-end' if available."
+  (declare (side-effect-free t))
+  (or (and (bound-and-true-p evil-local-mode)
+           (evil-visual-state-p)
+           (markerp evil-visual-end)
+           (marker-position evil-visual-end))
+      (region-end)))
+
+(defun doom-thing-at-point-or-region (&optional thing prompt)
+  "Grab the current selection, THING at point, or xref identifier at point.
+
+Returns THING if it is a string. Otherwise, if nothing is found at point and
+PROMPT is non-nil, prompt for a string (if PROMPT is a string it'll be used as
+the prompting string). Returns nil if all else fails.
+
+NOTE: Don't use THING for grabbing symbol-at-point. The xref fallback is smarter
+in some cases."
+  (declare (side-effect-free t))
+  (cond ((stringp thing)
+         thing)
+        ((doom-region-active-p)
+         (buffer-substring-no-properties
+          (doom-region-beginning)
+          (doom-region-end)))
+        (thing
+         (thing-at-point thing t))
+        ((require 'xref nil t)
+         ;; Eglot, nox (a fork of eglot), and elpy implementations for
+         ;; `xref-backend-identifier-at-point' betray the documented purpose of
+         ;; the interface. Eglot/nox return a hardcoded string and elpy prepends
+         ;; the line number to the symbol.
+         (if (memq (xref-find-backend) '(eglot elpy nox))
+             (thing-at-point 'symbol t)
+           ;; A little smarter than using `symbol-at-point', though in most
+           ;; cases, xref ends up using `symbol-at-point' anyway.
+           (xref-backend-identifier-at-point (xref-find-backend))))
+        (prompt
+         (read-string (if (stringp prompt) prompt "")))))
 
 (defun doom-recenter-a (&rest _)
   "Generic advice for recentering the window (typically :after other fns)."

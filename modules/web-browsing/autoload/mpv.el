@@ -1,5 +1,9 @@
 ;;; modules/web-browsing/autoload/mpv.el -*- lexical-binding: t; -*-
 
+;; mpv-transient's bypass section needs the shared engine; requiring it here
+;; drops the old latent dependency on expreg.el having loaded first.
+(require 'transient-bypass)
+
 ;;;###autoload
 (defun mpv-speed-reset ()
   (interactive)
