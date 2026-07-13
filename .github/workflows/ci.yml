@@ -22,7 +22,7 @@ jobs:
       - name: Cache test deps
         uses: actions/cache@v6
         with:
-          path: ~/.cache/emacs-lab/test-elpa
+          path: .local/.cache/test-elpa
           key: test-elpa-${{ runner.os }}-${{ hashFiles('bb.edn') }}
       - run: bb ci
 
@@ -44,8 +44,8 @@ jobs:
         uses: actions/cache@v6
         with:
           path: |
-            ~/.local/share/emacs-lab
-            ~/.cache/emacs-lab/eln
+            .local/elpaca
+            .local/.cache/eln
           # yamllint disable-line rule:line-length
           key: elpaca-${{ runner.os }}-${{ hashFiles('init.el', 'modules/**/config.el') }}
           restore-keys: |

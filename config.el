@@ -38,24 +38,34 @@
  '(fixed-pitch-serif ((t (:family "Fira Code"))))
  '(variable-pitch ((t (:family "Noto Sans" :height 1.125)))))
 
-(defun fonts-relative-height-h (&rest _)
-  "Restore reverted PR doomemacs/doomemacs#8733 locally.
-Converts baked-in absolute `:height' of `fixed-pitch' and siblings
-into ratios so `text-scale-mode' and `font-size-increase'
-cascade into `:inherit fixed-pitch' faces (e.g. `org-block').
-Unsafe with global `variable-pitch-mode'; see issue #8756."
-  (dolist (frame (frame-list))
-    (when (display-multi-font-p frame)
-      (let ((dh (face-attribute 'default :height frame)))
-        (when (and (integerp dh) (< 0 dh))
-          (dolist (face '(fixed-pitch fixed-pitch-serif variable-pitch))
-            (let ((fh (face-attribute face :height frame)))
-              (when (integerp fh)
-                (set-face-attribute face frame :height
-                                    (/ (float fh) dh))))))))))
-
-(add-hook 'after-setting-font-hook #'fonts-relative-height-h)
-(add-hook 'enable-theme-functions  #'fonts-relative-height-h)
+;; DISABLED 2026-07 (see MIGRATION "Fonts machinery"): a confirmed no-op in
+;; the lab, commented pending confirmation before deletion.  It restores
+;; reverted Doom PR #8733 - rewriting INTEGER :height on fixed-pitch/siblings
+;; into default-relative ratios so text-scale/font-size-increase cascade into
+;; :inherit fixed-pitch faces (org-block).  Those absolute integer heights
+;; came from Doom's doom-font machinery, which the lab does not vendor:
+;; ag-themes pins fixed-pitch :height 1.0 and config sets variable-pitch 1.125
+;; (both floats), fixed-pitch-serif stays unspecified - no integer ever reaches
+;; the hook, so its body never fires.  Re-enable if some theme/font path bakes
+;; an absolute integer height and org/code stops scaling with the font zoom.
+;; (defun fonts-relative-height-h (&rest _)
+;;   "Restore reverted PR doomemacs/doomemacs#8733 locally.
+;; Converts baked-in absolute `:height' of `fixed-pitch' and siblings
+;; into ratios so `text-scale-mode' and `font-size-increase'
+;; cascade into `:inherit fixed-pitch' faces (e.g. `org-block').
+;; Unsafe with global `variable-pitch-mode'; see issue #8756."
+;;   (dolist (frame (frame-list))
+;;     (when (display-multi-font-p frame)
+;;       (let ((dh (face-attribute 'default :height frame)))
+;;         (when (and (integerp dh) (< 0 dh))
+;;           (dolist (face '(fixed-pitch fixed-pitch-serif variable-pitch))
+;;             (let ((fh (face-attribute face :height frame)))
+;;               (when (integerp fh)
+;;                 (set-face-attribute face frame :height
+;;                                     (/ (float fh) dh))))))))))
+;;
+;; (add-hook 'after-setting-font-hook #'fonts-relative-height-h)
+;; (add-hook 'enable-theme-functions  #'fonts-relative-height-h)
 
 (setopt display-line-numbers-type t)
 (remove-hook! (prog-mode text-mode conf-mode) #'display-line-numbers-mode)

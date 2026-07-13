@@ -14,14 +14,11 @@
 
 (defvar doom-emacs-dir user-emacs-directory)
 (defvar doom-user-dir user-emacs-directory)
-(defvar doom-local-dir
-  (expand-file-name "emacs-lab/" (or (getenv "XDG_DATA_HOME") "~/.local/share")))
-(defvar doom-data-dir (expand-file-name "data/" doom-local-dir))
-(defvar doom-state-dir
-  (expand-file-name "emacs-lab/" (or (getenv "XDG_STATE_HOME") "~/.local/state")))
+(defvar doom-local-dir (expand-file-name ".local/" user-emacs-directory))
+(defvar doom-data-dir (expand-file-name "etc/" doom-local-dir))
+(defvar doom-state-dir (expand-file-name "state/" doom-local-dir))
 (defvar doom-profile-state-dir doom-state-dir)
-(defvar doom-cache-dir
-  (expand-file-name "emacs-lab/" (or (getenv "XDG_CACHE_HOME") "~/.cache")))
+(defvar doom-cache-dir (expand-file-name ".cache/" doom-local-dir))
 
 (dolist (dir (list doom-local-dir doom-data-dir doom-state-dir doom-cache-dir))
   (make-directory dir t))

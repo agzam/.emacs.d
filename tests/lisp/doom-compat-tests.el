@@ -7,20 +7,20 @@
                                   "helper.el")))
 (require 'buttercup)
 
-(describe "the XDG sandbox (helper self-check)"
+(describe "the sandbox (helper self-check)"
   (it "keeps every doom dir inside the test sandbox"
     (dolist (dir (list doom-local-dir doom-data-dir doom-state-dir doom-cache-dir))
       (expect (file-in-directory-p dir test-sandbox-dir) :to-be-truthy))))
 
 (describe "file quarantine"
-  (it "redirects state files outside user-emacs-directory"
+  (it "keeps state files under doom-local-dir (the git-ignored .local/)"
     (dolist (var '(savehist-file save-place-file recentf-save-file
                    bookmark-default-file project-list-file
                    transient-history-file auto-save-list-file-prefix
                    url-cache-directory eshell-directory-name
                    request-storage-directory))
-      (expect (file-in-directory-p (symbol-value var) user-emacs-directory)
-              :to-be nil)))
+      (expect (file-in-directory-p (symbol-value var) doom-local-dir)
+              :to-be-truthy)))
   (it "points state files at the quarantine dirs"
     (expect (file-in-directory-p savehist-file doom-state-dir) :to-be-truthy)
     (expect (file-in-directory-p save-place-file doom-state-dir) :to-be-truthy)

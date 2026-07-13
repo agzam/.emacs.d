@@ -9,16 +9,15 @@
 ;; Elpaca replaces package.el entirely.
 (setq package-enable-at-startup nil)
 
-;; Keep this directory pristine: everything machine-written lives in XDG dirs
-;; (Doom's quarantine strategy).  Defined this early so the eln redirect and
-;; the Elpaca bootstrap can use them; doom-compat's defvars concur.
-(defvar doom-local-dir
-  (expand-file-name "emacs-lab/" (or (getenv "XDG_DATA_HOME") "~/.local/share")))
-(defvar doom-data-dir (expand-file-name "data/" doom-local-dir))
-(defvar doom-state-dir
-  (expand-file-name "emacs-lab/" (or (getenv "XDG_STATE_HOME") "~/.local/state")))
-(defvar doom-cache-dir
-  (expand-file-name "emacs-lab/" (or (getenv "XDG_CACHE_HOME") "~/.cache")))
+;; Keep the tracked config pristine: everything machine-written lives under
+;; .local/ (git-ignored), relative to this config dir - so the config is
+;; location-independent (~/.emacs.d, or a throwaway --init-directory).
+;; Defined this early so the eln redirect and the Elpaca bootstrap can use
+;; them; doom-compat's defvars concur.
+(defvar doom-local-dir (expand-file-name ".local/" user-emacs-directory))
+(defvar doom-data-dir (expand-file-name "etc/" doom-local-dir))
+(defvar doom-state-dir (expand-file-name "state/" doom-local-dir))
+(defvar doom-cache-dir (expand-file-name ".cache/" doom-local-dir))
 
 ;; Native-comp artifacts.
 (when (and (featurep 'native-compile)

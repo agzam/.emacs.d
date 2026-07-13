@@ -1,11 +1,11 @@
 # Emacs config (Doom-inspired, Elpaca)
 
-The daily-driver config (post session switch): Elpaca + vendored Doom macro
-layer. Lives entirely in this directory, launched with
-`emacs --init-directory ~/.config/emacs-lab`; runs the Emacs server on the
+The daily-driver config: Elpaca + vendored Doom macro layer. Lives at
+`~/.emacs.d`, launched with plain `emacs`; runs the Emacs server on the
 default socket (elisp-eval MCP, mxp and Hammerspoon drive plain
-emacsclient). The directory name is incidental; never leak it (or any
-invented project name) into code or prose.
+emacsclient). Machine state (packages, cache, state) lives under
+`~/.emacs.d/.local/` (git-ignored). Never leak an invented project name
+into code or prose.
 
 ## Hard boundaries
 
@@ -101,12 +101,12 @@ invented project name) into code or prose.
   which sandboxes the XDG dirs before doom-compat derives its paths - tests
   never touch the real cache/state.
 - Ad-hoc smoke checks: the /tmp elisp file + kitty tab pattern still applies
-  (`TERM=xterm-256color emacs -nw --init-directory ~/.config/emacs-lab -l
+  (`TERM=xterm-256color emacs -nw --init-directory ~/.emacs.d -l
   /tmp/check.el`, marker on `elpaca-after-init-hook`, `kill-emacs`). Always
   capture `*Warnings*` and elpaca statuses (`(elpaca--queued)` is an alist of
   `(ID . E)`; status via `elpaca<-status`) - no `ignore-errors` around checks.
 - `check-parens` every edited file (`eca--check-parens-file`).
 - Deleting an `autoload/*.el` does NOT invalidate the generated loaddefs
   cache (the mtime check only sees newer files) - also remove
-  `~/.cache/emacs-lab/autoloads/NAME.el`.
+  `~/.emacs.d/.local/.cache/autoloads/NAME.el`.
 - MIGRATION.org tracks the porting plan; update it as modules land.

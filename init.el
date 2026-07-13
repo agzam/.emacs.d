@@ -1,7 +1,8 @@
 ;;; init.el --- Elpaca + vendored Doom macros -*- lexical-binding: t; -*-
 ;;; Commentary:
-;; Parallel trial config, fully isolated from ~/.doom.d.  Launch with:
-;;   emacs --init-directory ~/.config/emacs-lab
+;; Personal config (Elpaca + a vendored Doom macro layer) at ~/.emacs.d,
+;; isolated from ~/.doom.d (the retired porting reference).  All machine
+;; state lives under ~/.emacs.d/.local/ (git-ignored).
 ;;; Code:
 
 ;;; Elpaca bootstrap (installer 0.12, verbatim from upstream README)

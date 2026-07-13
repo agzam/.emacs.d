@@ -6,9 +6,9 @@
   :init (do (def root (str (fs/parent (fs/canonicalize
                                        (or (System/getProperty "babashka.config")
                                            *file*)))))
-            (def test-elpa (str (fs/expand-home "~/.cache/emacs-lab/test-elpa"))))
+            (def test-elpa (str (fs/path root ".local" ".cache" "test-elpa"))))
 
-  deps {:doc "Install test deps (buttercup, parseedn) into ~/.cache/emacs-lab/test-elpa"
+  deps {:doc "Install test deps (buttercup, parseedn) into .local/.cache/test-elpa"
         :task (p/shell "emacs" "-Q" "--batch"
                        "--eval" (format "(setq package-user-dir %s)" (pr-str test-elpa))
                        "--eval" "(require 'package)"
@@ -63,7 +63,7 @@
                      (System/exit 1))))}
 
   keydump {:doc "Dump the lab's resolved bindings (pty boot) for the key audit"
-           :task (let [out (str (fs/expand-home "~/.cache/emacs-lab/lab-keys.eld"))
+           :task (let [out (str (fs/path root ".local" ".cache" "lab-keys.eld"))
                        macos? (str/includes? (str/lower-case (System/getProperty "os.name")) "mac")
                        emacs-args ["emacs" "-nw" "--init-directory" root
                                    "-l" (str (fs/path root "scripts" "dump-bindings.el"))]

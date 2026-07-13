@@ -6,7 +6,7 @@ modules land (see AGENTS.md for porting conventions - naming, quarantine,
 module layout).
 
 * Ported so far
-- core :: elpaca bootstrap (repos/builds in ~/.local/share/emacs-lab/), doom-compat
+- core :: elpaca bootstrap (repos/builds in ~/.emacs.d/.local/elpaca/), doom-compat
   (macros, first-hooks incl. switch-frame, modulep!, quarantine), doom-keybinds
   (map!, SPC/"," leaders), doom-defaults (baseline editor/UI defaults,
   doom/escape, MODE-local-vars hooks, built-ins: recentf/saveplace/so-long/
@@ -1485,6 +1485,23 @@ server-install-dir + eslint-choices, dap breakpoints + extension path
 (lsp module port).
 
 * Infra debt
+** DONE Relocation to ~/.emacs.d (cord cut)
+Executed 2026-07 (user call: backed up ~/.doom.d, moved config to
+~/.emacs.d).  The four doom-*-dir defvars (early-init.el + the doom-compat.el
+mirror) now derive from =user-emacs-directory/.local/= instead of
+=XDG + "emacs-lab"=, so the config is location-independent and all machine
+state consolidates under one git-ignored tree:
+=~/.emacs.d/.local/{elpaca,elpa,.cache,etc,state}=.  doom-local-dir ->
+=.local/=, doom-cache-dir -> =.local/.cache/=, doom-data-dir -> =.local/etc/=,
+doom-state-dir -> =.local/state/=.  Test sandbox flipped with it: helper.el
+binds user-emacs-directory (was the XDG setenv trio), and the quarantine
+self-check now asserts state lives UNDER doom-local-dir (was "outside
+user-emacs-directory" - the move inverted it).  Tooling repointed: bb.edn
+test-elpa + keydump out, keydiff.clj cache-dir, ci.yml caches -> the new
+.local paths.  Old scattered dirs (~/.cache/emacs-lab, ~/.local/share/
+emacs-lab, ~/.local/state/emacs-lab) deleted after the first ~/.emacs.d boot
+reinstalled elpaca fresh.  .gitignore needed no change - the whitelist
+already ignores the new .local/.
 ** DONE Session switch (daily driver -> lab)
 Executed 2026-07 (user call: config in good shape, port largely
 functional; the retired Doom instance won't run - its config stays a
@@ -1544,6 +1561,14 @@ blocks/code rendered PROPORTIONAL. Bridge now pins fixed-pitch (:width
 normal shadows the theme's expanded) + fixed-pitch-serif to Fira Code;
 GUI probe shows resolution byte-identical to Doom. The theme-side rot
 is flagged for an ag-themes upstream fix.
+Amendment (2026-07): the companion fonts-relative-height-h hook (Doom PR
+#8733 restoration) is commented out in config.el - a confirmed no-op here.
+It only rewrites INTEGER :height on fixed-pitch/-serif/variable-pitch, but
+ag-themes pins fixed-pitch :height 1.0 and config.el sets variable-pitch
+1.125 (both floats); fixed-pitch-serif stays unspecified - no integer ever
+reaches it. Doom needed it because doom-font baked absolute heights, which
+the lab doesn't vendor. Candidate for deletion once daily theme/zoom use
+confirms org/code blocks still scale with font-size-increase.
 ** DONE Theme: colors module
 Ported (see Decisions log). circadian owns day/night loading off
 doom-init-ui-hook; base16-theme was missing from this list (packages.el

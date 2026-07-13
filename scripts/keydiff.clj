@@ -10,7 +10,7 @@
          '[clojure.java.io :as io]
          '[clojure.string :as str])
 
-(def cache-dir (str (System/getProperty "user.home") "/.cache/emacs-lab/"))
+(def cache-dir (str (System/getProperty "user.home") "/.emacs.d/.local/.cache/"))
 (def doom-dump (or (System/getenv "KEYDIFF_DOOM") (str cache-dir "doom-keys.eld")))
 (def lab-dump (or (System/getenv "KEYDIFF_LAB") (str cache-dir "lab-keys.eld")))
 (def ledger-file "key-decisions.edn")
