@@ -23,7 +23,8 @@ module layout).
   neil/cider-storm/monroe), org (core slice + org-cliplink: roam/vulpea/
   evil-org), shell, writing (jinx/translate/dictionaries/prisma),
   search (consult-omni/tldr/slacko),
-  tab-bar (workspace transients + desktop persistence, no packages)
+  tab-bar (workspace transients + desktop persistence, no packages),
+  yaml (yaml-mode/jinja2/highlight-indent-guides/yaml-pro)
 - user layer :: config.el (leader tree, globals), lisp/functions.el
   incl. reload-config (SPC h r r; doom/reload analogue - re-runs
   defaults/modules/config in place, elpaca picks up new packages; restart
@@ -1238,6 +1239,39 @@ module layout).
   clojure-mode, cider, lsp-clojure (the org/vertico false-void precedent).
   Both rows drop off the diff as exact matches; keydiff back to 0
   regressions.
+- [2026-07] yaml module ported (registry slot after writing, before the
+  darwin osx tail; (:custom yaml)).  Packages: yaml-mode, jinja2-mode,
+  highlight-indent-guides, yaml-pro (GitHub pin, like doom.d).  Picked as
+  the next module for being fully self-contained: no new stub infra (unlike
+  golang/nix, which want set-repl-handler! from :tools eval) and no cross-
+  module entanglement (unlike lua's friar/fennel-ls + the clojure module's
+  inert fennel map!).  It also closes a designed integration point - the
+  tree-sitter module already ensures the yaml grammar lazily on yaml-pro
+  load (with-eval-after-load 'yaml-pro treesit-ensure-installed 'yaml; that
+  treesit block is 31-gated, CI's 30.1 skips it, grammar present locally).
+  Deltas from doom.d: doom-theme is undefined here (doom-defaults dropped
+  it), so highlight-indent-guides' initial face refresh guards on
+  custom-enabled-themes instead - a theme is enabled by the first yaml-mode
+  open (the colors module's own ring anchor); doom-load-theme-hook already
+  exists and carries the ongoing refresh.  The two hook fns extracted to
+  modules/yaml/autoload/highlight-indent-guides.el for the batch tier
+  (tree-sitter fold precedent) and de-plussed: +indent-guides-init-faces-h
+  -> indent-guides-init-faces-h, +indent-guides-disable-maybe-h ->
+  indent-guides-disable-maybe-h; both added from highlight-indent-guides'
+  :config (not module top level) so the theme refresh only fires once the
+  package - and thus highlight-indent-guides-auto-set-faces - is loaded.
+  highlight-indent-guides-method/-suppress-auto-error stay setq in :init
+  (custom types undefined pre-load); jinja2-enable-indent-on-save is setopt
+  in :config (loaded defcustom).  yaml-pro-ts-mode-map keeps doom.d's binds
+  verbatim ([remap imenu] -> yaml-pro-jump, C-c C-f unbound, evil :n subtree
+  nav/fold/move).  Verification: 571 specs (+6, tests/yaml/highlight-indent-
+  guides-tests.el: display-graphic-p face gate + org-indent disable logic),
+  bb lint 186/0, smoke 195 packages 0 failed/blocked no new *Warnings*, live
+  probe 30/30 (yaml-mode + yaml-pro-ts-mode + highlight-indent-guides active
+  on a .yaml buffer, grammar ready, plain + evil-normal binds resolve to real
+  commands, both hook fns wired onto doom-load-theme-hook / org-mode-local-
+  vars-hook, jinja2 .jinja + indent-on-save nil).  Keydiff untouched: all
+  binds are yaml-pro-ts-mode-map-local, not leader/global.
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -1686,9 +1720,13 @@ go-mode, gorepl-mode, gotest. set-lookup-handlers!/set-repl-handler!
 lua-mode, fennel-mode, friar (:files lua+fnl). set-lookup-handlers! x2. 55L.
 ** TODO webdev
 emmet, prettier.el, xref-js2, html-to-hiccup, jtsx, js-comint. 45L.
-** TODO yaml
-yaml-mode, jinja2-mode, highlight-indent-guides, yaml-pro. doom-theme var
-reference (define or guard). 61L.
+** DONE yaml
+Ported (see Decisions log). yaml-mode, jinja2-mode, highlight-indent-guides,
+yaml-pro (GitHub pin). doom-theme reference guarded on custom-enabled-themes;
+the two highlight-indent-guides hook fns extracted plus-free to autoload/;
+yaml-pro-ts-mode rides the tree-sitter module's already-wired yaml grammar
+ensure. No new stub infra needed - the reason it went ahead of golang/nix
+(set-repl-handler!) and lua (friar/fennel-ls/spacehammer entanglement).
 ** TODO nix
 nix-mode, nix-update. set-repl-handler! stub. 35L.
 ** TODO java

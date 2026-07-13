@@ -117,7 +117,7 @@ build-in-place to clone."
          (:custom modeline) (:custom tab-bar) (:custom elisp) (:custom search) (:custom dired) (:custom ai)
          (:custom web-browsing) (:custom tree-sitter) (:custom lsp) (:custom clojure)
          (:custom org) (:custom shell)
-         (:custom writing))
+         (:custom writing) (:custom yaml))
        (when (eq system-type 'darwin) '((:os macos) (:custom osx)))))
 
 ;; Leader prefixes are read at bind time; set before doom-keybinds loads so
@@ -150,7 +150,7 @@ build-in-place to clone."
 ;; Mac and Linux), then config.el; config.el may `load!' extra +files.
 ;; The module list itself is explicit, in this exact order.
 (defvar active-modules
-  `("evil" "bindings" "lookup" "git" "general" "completion" "embark" "colors" "modeline" "tab-bar" "elisp" "search" "dired" "ai" "web-browsing" "tree-sitter" "lsp" "clojure" "org" "shell" "writing"
+  `("evil" "bindings" "lookup" "git" "general" "completion" "embark" "colors" "modeline" "tab-bar" "elisp" "search" "dired" "ai" "web-browsing" "tree-sitter" "lsp" "clojure" "org" "shell" "writing" "yaml"
     ;; darwin-only tail - Doom's (:if (featurep :system 'macos) ...)
     ,@(when (eq system-type 'darwin) '("osx")))
   "Modules under modules/, loaded in this exact order.
