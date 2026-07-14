@@ -1397,6 +1397,32 @@ module layout).
   workspace quarantine all pinned), +6 specs (632 total, 0 failed).  bb lint
   206/0, smoke 205 -> 209 packages (rustic + lsp-java + 2 rust deps) 0
   failed/blocked.  Registry slot: after lua, ahead of org.
+- [2026-07] :editor multiple-cursors ported (evil-mc + evil-multiedit; iedit
+  rides in as evil-multiedit's dep with iedit-toggle-key-default nil to free
+  C-; for embark - Doom's vertico guard dropped, the lab is :custom embark).
+  Renames (plus-free): mc-toggle-cursors, mc-toggle-cursor-here, mc-undo-cursor,
+  mc-dont-reinit-vars-a, mc-make-repeatable-a, mc-clear-cursors-h.  Carried:
+  evil-mc's HACK setup (undo its perpetual-minor-mode design, upstream #6021),
+  smartparens cursor-var integration, doom-escape clearing, repeatable-with-
+  count advice, the C-n/C-p key-map, evil-escape-mode incompatible.  Dropped as
+  dead/unreferenced: the (after! multiple-cursors-core ...) block (the non-evil
+  multiple-cursors package isn't installed in the evil branch), the :mc
+  ex-command + its two defvars + the eval operator handler + the +evil:align/
+  :mc property forwards.  evil-mc-custom-known-commands trimmed to commands the
+  lab has (company/undo-fu/evil-numbers/ess/eval/lispy return with their
+  modules; the bol-eol movers use the renamed backward-to-bol-or-indent /
+  forward-to-last-non-comment-or-eol).  (featurep :system 'linux) ->
+  (eq system-type 'gnu/linux) for the bar cursor.  Lesson: evil-define-command
+  can't ride the generated loaddefs (built-in make-autoload doesn't know it,
+  Doom's explicit-autoload-path trick doesn't survive the lab's path rewrite),
+  so mc-toggle-cursor-here / mc-undo-cursor are eager in config.el (evil loads
+  first); plain mc-toggle-cursors stays a lazy batch-tested autoload.  Slot
+  after general (smartparens).  Coverage: 3 mc-toggle-cursors specs (evil-mc
+  stubbed); config.el is evil-dependent -> smoke + probe.  Un-voids the gz
+  cluster + evil-multiedit (visual R, M-d/M-D, C-M-d).  Verified: 635 specs 0
+  failed, bb lint 209/0, smoke 209 -> 212 packages (evil-mc/evil-multiedit/
+  iedit) 0 failed/blocked, probe 20/20 (bindings resolve, whitelist trimmed,
+  incompatible-modes correct, no new *Warnings*).
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -1456,8 +1482,9 @@ Cluster checklist (open counts as of 2026-07 pilot; =bb keydiff= is truth):
   project trio implemented over project.el, discover-projects + 6
   projectile-only rows dropped, 8 project.el rows :improved
 - [ ] normal g (12 open) - gd/gD/gI/gf lookup family :improved with the
-  lsp/clojure sitting; the rest is evil-mc (g z*), evil-numbers/lion,
-  evil-nerd-commenter, :tools eval (g R/r) - waits on those modules
+  lsp/clojure sitting; g z* closed with the multiple-cursors port; the rest is
+  evil-numbers/lion, evil-nerd-commenter, :tools eval (g R/r) - waits on those
+  modules
 - [ ] SPC x (18) - gptel tree closed with the ai port; the 10 left are
   writing-module material (SPC x l / x t trees etc.)
 - [X] SPC c :: code/lsp rows closed with the lsp/clojure sitting - lookup
@@ -1949,8 +1976,8 @@ Each needs a lab decision; bindings tree + registry already assume them.
   Needed by golang/nix REPL handlers.
 - :tools lsp +peek :: DONE 2026-07 - folded into the custom lsp module
   (deferred-shutdown, signature-stop, lookup handlers, manual-only lsp-ui).
-- :editor multiple-cursors :: evil-mc + evil-multiedit (evil-multiedit
-  referenced by evil-escape excluded-states already).
+- :editor multiple-cursors :: DONE 2026-07 - evil-mc + evil-multiedit (+ iedit
+  dep); see Decisions log.
 - :editor file-templates :: yasnippet templates infra; elisp module ships own.
 - :ui window-select :: ace-window (SPC w W/M/D bindings reference it).
 - :ui zen :: writeroom-mode (+ config.el writeroom guards already ported).
