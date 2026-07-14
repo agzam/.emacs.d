@@ -123,6 +123,7 @@
         "TAB" nil
         :n "<tab>" nil)
   (add-hook! 'eca-chat-mode-hook
+    #'eca-compact-modeline-icons-h
     (defun eca-set-completions-at-point-h ()
       (cl-delete 'yasnippet-capf completion-at-point-functions))
     (defun eca-set-keybindings-h ()
@@ -159,8 +160,9 @@
             (:localleader
              "w w" #'eca-toggle-workspaces)))
     (defun eca-chat-mode-markup-no-hiding-h ()
-      (markdown-toggle-markup-hiding -1)))
-  (add-hook 'eca-chat-mode-hook #'eca-compact-modeline-icons-h))
+      (markdown-toggle-markup-hiding -1))
+    (defun eca-chat-mode-scroll-margin-h ()
+      (set-local 'scroll-margin 1))))
 
 (use-package mcp
   :ensure (mcp :host github :repo "lizqwerscott/mcp.el")
