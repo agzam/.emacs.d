@@ -195,6 +195,10 @@ resurrecting their buffers before the modes exist."
    [("gt" "gptel" open-gptel)
     ("gn" "gh-notify" gh-notify)]
 
+   ;; apps/chat column: elfeed dropped (web-browsing), notmuch waits on its
+   ;; module; telega restored with the chat port
+   [("t" "telega" telega)]
+
    [("ed" "config" find-in-config-dir)
     ("D" "dotfile.org" (lambda ()
                          (interactive)

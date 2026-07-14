@@ -92,7 +92,11 @@
       ;; compiled grammars into the first writable `treesit-extra-load-path'
       ;; entry, else user-emacs-directory/tree-sitter - keep the .dylib blobs
       ;; (un-greppable build artifacts) in the cache
-      treesit-extra-load-path (list (expand-file-name "tree-sitter" doom-cache-dir)))
+      treesit-extra-load-path (list (expand-file-name "tree-sitter" doom-cache-dir))
+      ;; chat module: emojify downloads its emoji-image sets under
+      ;; user-emacs-directory/emojis/ by default (Doom's :ui emoji relocates
+      ;; the same way)
+      emojify-emojis-dir (concat doom-data-dir "emojis/"))
 
 (defvar doom-disabled-packages nil)
 

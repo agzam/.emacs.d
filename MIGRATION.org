@@ -1457,6 +1457,38 @@ module layout).
   modules/lookup/autoload/commands.el.  Coverage: +11 specs (elisp/lsp/lookup/
   writing lookup handlers) -> 646 specs 0 failed, bb lint 218/0, smoke 212
   0 failed/blocked.
+- [2026-07] chat module ported (telega, the Telegram tdlib client; registry
+  slot after writing - its jinx dep).  elpaca recipe pins :files (:defaults
+  "contrib" "etc" "server" "Makefile") - elpaca's :defaults omit etc/ (glyphs)
+  and server/ (C source), leaving telega-server-build no sources; deps
+  visual-fill-column (already in via zen) + transient resolve from
+  Package-Requires.  The telega-server C binary still builds on first M-x
+  telega (tdlib at /opt/homebrew/opt/tdlib on darwin, /usr on linux, via
+  telega-server-libs-prefix).  Renames drop the doom.d lg- author prefix:
+  lg-telega-chat-update-h -> telega-chat-update-h, lg-telega-root-mode-h ->
+  telega-root-mode-h (telega-chat-mode-h was already plain).  Collision-checked
+  live: telega owns none of the three -h names and runs telega-chat-update-hook
+  with one arg (matching the (_) arity).  Dropped as doom.d rot: the
+  :hook (telega-chat . jinx-mode) - telega defines no telega-chat-hook
+  (source-verified), so it never fired; jinx-mode already rides
+  telega-chat-mode-h.  emojify (chat emoji + the global SPC i e insert) was
+  only transitively present via code-review; declared explicitly here and its
+  emojify-emojis-dir quarantined to doom-data-dir/emojis/ (default was
+  user-emacs-directory/emojis/ - Doom's :ui emoji relocates the same).
+  telega-directory left at ~/.telega (outside the repo, no quarantine rule;
+  preserves the Telegram session - the retired Doom never runs to contend).
+  setq -> setopt (telega defcustoms), (featurep :system 'macos/'linux) ->
+  (eq system-type ...), commented telega-use-docker dropped.  Cross-module:
+  SPC l SPC's tab-bar-new-tab-transient telega entry restored (parked at the
+  tab-bar port like the jira jb board; elfeed stays dropped, notmuch waits on
+  its module), test rot-net set + spec updated.  Autoload
+  telega-extract-and-attach-video kept plus-free (yt-extract-video-y-entonces
+  from web-browsing + telega-chatbuf-attach-video; its when-let* url-default
+  cleaned).  Verified live: telega built clean (etc/server/contrib present,
+  0 *Warnings*), require runs the :config with every setopt/binding/hook
+  landing incl. evil :i s-<return> -> telega-chatbuf-input-send.  Coverage:
+  +3 specs (tests/chat/telega-tests.el) -> 653 specs 0 failed, smoke 212 -> 213
+  0 failed/blocked, diagnostics clean.
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -1900,8 +1932,10 @@ fennel map! waits on lua), expreg Clojure section + org-cliplink restored.
 ** TODO notmuch
 notmuch (gh), org-mime, ol-notmuch, consult-notmuch. modulep! conditionals
 inside packages need static resolution. doom-real-buffer-functions (shim).
-** TODO chat
-telega. jinx dep (writing). config 38L.
+** DONE chat
+Ported (see Decisions log).  telega (Telegram tdlib client); the dead jinx
+:hook dropped; emojify made explicit + quarantined; telega-directory left at
+its ~/.telega default (outside the repo).
 ** DONE pdf
 Ported (see Decisions log).  Continuous scroll is UPSTREAM now
 (vedang/pdf-tools ships pdf-roll.el / pdf-view-roll-minor-mode as of v1.2.0,
