@@ -25,7 +25,8 @@ module layout).
   search (consult-omni/tldr/slacko),
   tab-bar (workspace transients + desktop persistence, no packages),
   yaml (yaml-mode/jinja2/highlight-indent-guides/yaml-pro),
-  pdf (pdf-tools w/ upstream continuous-scroll + saveplace/org-noter/nov)
+  pdf (pdf-tools w/ upstream continuous-scroll + saveplace/org-noter/nov),
+  java (lsp-java), rust (rustic + rust-analyzer)
 - user layer :: config.el (leader tree, globals), lisp/functions.el
   incl. reload-config (SPC h r r; doom/reload analogue - re-runs
   defaults/modules/config in place, elpaca picks up new packages; restart
@@ -1369,6 +1370,33 @@ module layout).
   module command fboundp, .pdf/.epub/%PDF wiring, SPC n e + org/pdf
   localleader resolved via the evil aux keymap with a "," "." control, no new
   *Warnings*).
+- [2026-07] rust + java modules ported together (both trivial, lsp-only, no
+  new stub infra).  2026 tooling re-verified before porting: rustic
+  (brotzeit) over rust-mode driving rust-analyzer through lsp-mode is still
+  the mainstream Rust stack (rls/racer deprecated); lsp-java (Eclipse JDT LS,
+  milestone 1.57) is still the standard lsp-mode Java client and declares
+  java-ts-mode support.  Unused-package sweep: rust-mode dropped as an
+  explicit declaration (rustic's Package-Requires pulls it - elpaca installs
+  it transitively; doom.d's `(package! rust-mode)' was redundant), and
+  doom.d's double `:mode' (rust-mode then rustic-mode on the same regex)
+  collapsed to rustic-mode, the feature-bearing major mode.  Both route lsp
+  through `lsp!' (the deferred entry every language module shares) rather than
+  doom.d's mechanisms: rust sets rustic-lsp-setup-p nil so rustic's own
+  auto-setup can't start a second client; java hooks java-ts-mode + java-mode
+  plainly (python-port precedent) instead of java-mode-local-vars-hook.  The
+  rust-analyzer (built-in lsp-rust.el) and JDT (lsp-java) clients both
+  register via lsp-mode's lsp-client-packages on server start, so no manual
+  client wiring.  rust-ts-mode stays out of treesit-enabled-modes (rustic-mode
+  isn't tree-sitter-based upstream yet); java-ts-mode was already in it.
+  Quarantine: lsp-java-workspace-dir (defaults under user-emacs-directory)
+  redirected to doom-data-dir; the JDT server-install-dir derives from the
+  already-quarantined lsp-server-install-dir.  Coverage: tests/rust +
+  tests/java config suites (use-package reduced to its :init/:config side
+  effects via a new use-package-body-forms helper in tests/helper.el - the
+  package-name set, lsp!-on-hooks wiring, rustic-lsp-setup-p nil, and the java
+  workspace quarantine all pinned), +6 specs (632 total, 0 failed).  bb lint
+  206/0, smoke 205 -> 209 packages (rustic + lsp-java + 2 rust deps) 0
+  failed/blocked.  Registry slot: after lua, ahead of org.
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -1578,7 +1606,7 @@ doom-compat.el quarantine section (telega, ...).
 Done so far: org-roam/vulpea dbs, treemacs persist pair, desktop-path
 (tab-bar port; elfeed db moot - package dropped), lsp session +
 server-install-dir + eslint-choices, dap breakpoints + extension path
-(lsp module port).
+(lsp module port), lsp-java-workspace-dir (java module port).
 
 * Infra debt
 ** DONE Relocation to ~/.emacs.d (cord cut)
@@ -1892,12 +1920,23 @@ ensure. No new stub infra needed - the reason it went ahead of golang/nix
 (set-repl-handler!) and lua (friar/fennel-ls/spacehammer entanglement).
 ** TODO nix
 nix-mode, nix-update. set-repl-handler! stub. 35L.
-** TODO java
-lsp-java. 8L. Trivial.
+** DONE java
+Ported (see Decisions log). lsp-java (Eclipse JDT LS) - still the standard
+lsp-mode Java client in 2026; the built-in java-ts-mode is auto-enabled via
+the tree-sitter module's treesit-enabled-modes. lsp starts through `lsp!' on
+java-ts-mode + java-mode (python-port precedent, replacing doom.d's
+java-mode-local-vars-hook). lsp-java-workspace-dir quarantined in
+doom-compat.el (defaults under user-emacs-directory); server-install-dir
+rides the already-quarantined lsp-server-install-dir.
 ** TODO flutter
 dart-mode, lsp-dart, flutter. set-ligatures! (stub or drop). 53L.
-** TODO rust
-rust-mode, rustic. 5L. Trivial.
+** DONE rust
+Ported (see Decisions log). rustic over rust-mode + rust-analyzer via lsp-mode
+- still the 2026 mainstream (rls/racer deprecated). rust-mode dropped as an
+explicit package (rustic pulls it transitively - the doom.d declaration was
+redundant); doom.d's double :mode collapses to rustic-mode. lsp via `lsp!'
+with rustic-lsp-setup-p nil (single entry point). rust-ts-mode kept out of
+treesit-enabled-modes (rustic-mode is not tree-sitter-based upstream yet).
 
 * Official Doom modules: port or drop
 Each needs a lab decision; bindings tree + registry already assume them.

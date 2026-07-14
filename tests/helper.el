@@ -52,4 +52,17 @@ runs)."
       (unless (keywordp (car node))
         (mapcan #'transient-layout-commands node))))))
 
+(defun use-package-body-forms (args &rest keywords)
+  "Collect forms under each of KEYWORDS in a `use-package' arglist ARGS.
+Lets a stubbed `use-package' run just the :init/:config side effects in tests."
+  (mapcan
+   (lambda (kw)
+     (let ((tail (cdr (memq kw args)))
+           forms)
+       (while (and tail (not (keywordp (car tail))))
+         (push (car tail) forms)
+         (setq tail (cdr tail)))
+       (nreverse forms)))
+   keywords))
+
 (provide 'test-helper)

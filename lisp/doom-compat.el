@@ -67,6 +67,7 @@
       lsp-eslint-library-choices-file (concat doom-cache-dir "lsp-eslint-choices")
       dap-breakpoints-file (concat doom-cache-dir "dap-breakpoints")
       dap-utils-extension-path (concat doom-data-dir "dap-extension/")
+      lsp-java-workspace-dir (concat doom-data-dir "java-workspace/")
       ;; ai module: token caches + eca server binary default inside
       ;; user-emacs-directory; lab keeps its own copies - sharing Doom's
       ;; OAuth tokens.el invites refresh-token rotation races.
