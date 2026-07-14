@@ -56,6 +56,10 @@
         "ec" #'edebug-eval-current-sexp))
 
 (after! elisp-mode
+  ;; K -> the symbol's helpful buffer, in Emacs (not the online fallback).
+  (set-lookup-handlers! '(emacs-lisp-mode lisp-interaction-mode lisp-data-mode
+                          helpful-mode inferior-emacs-lisp-mode)
+    :documentation #'elisp-lookup-documentation)
   (add-hook! 'scratch-buffer-created-hook
     (defun flycheck-off-h ()
       ;; fboundp: flycheck waits on :checkers

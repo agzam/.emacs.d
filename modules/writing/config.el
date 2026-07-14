@@ -68,6 +68,11 @@
      (direction . right)
      (window . root))))
 
+;; K in prose defines the word at point (sdcv offline, Wiktionary fallback)
+;; instead of a code-doc search - see writing/autoload/lookup.el.
+(set-lookup-handlers! '(org-mode markdown-mode gfm-mode)
+  :documentation #'prose-lookup-documentation)
+
 ;; Deferred, unlike doom.d's startup (require 'google-translate): the module
 ;; autoload file requires the package instead, so the transient and helpers
 ;; still find its defcustoms on first use.

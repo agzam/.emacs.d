@@ -1435,6 +1435,28 @@ module layout).
   scaling.  Coverage: 3 specs (remap, idempotency, buffer-locality), verified
   alongside the multiple-cursors port (635 specs 0 failed, bb lint 209/0,
   smoke 212 0 failed/blocked).
+- [2026-07] lookup upgraded to in-Emacs, state-of-the-art K across every
+  target mode (elisp, clojure, python, fennel, lua, rust, org, markdown).
+  In-Emacs guarantee: lookup-open-url-fn -> eww and the online backend is off
+  the default lookup-documentation-functions, so K only ever renders in Emacs
+  (helpful, lsp hover -> *lsp-help*, cider/clojuredocs, fennel, sdcv, or a Dash
+  docset via eww) - never a system browser; an unhandled mode gets a message,
+  not a web search.  New handlers: elisp-lookup-documentation (helpful, ported
+  from Doom's +emacs-lisp-lookup-documentation minus its module branch) on the
+  elisp/helpful modes; lsp-lookup-documentation (lsp-describe-thing-at-point
+  first, consult-dash-doc fallback, returns 'deferred so it owns its window)
+  replaces consult-dash-doc as the lsp-mode :documentation handler - fixes rust
+  (rust-analyzer, no Rust docset needed) and upgrades python and every LSP
+  language uniformly; lua -> consult-dash-doc + a "Lua" docset (activated on
+  lua-mode, auto-installing on first miss) instead of lua-search-documentation's
+  external browser; prose-lookup-documentation (sdcv offline, wiktionary-bro fallback,
+  'deferred) on org/markdown/gfm so K defines the word at point.  Wired the
+  three SPC s keys the bindings referenced but nothing defined:
+  lookup-in-all-docsets (consult-dash over every installed docset),
+  lookup-dictionary-definition (sdcv), lookup-synonyms (mw-thesaurus), in
+  modules/lookup/autoload/commands.el.  Coverage: +11 specs (elisp/lsp/lookup/
+  writing lookup handlers) -> 646 specs 0 failed, bb lint 218/0, smoke 212
+  0 failed/blocked.
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:

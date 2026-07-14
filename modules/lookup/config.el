@@ -7,13 +7,18 @@
 ;; consumers (lsp module, clojure module) were already written against these
 ;; names.  2026-07 lookup verdict - see MIGRATION.org Decisions log.
 ;;
-;; Deliberately not vendored: docsets glue (+docsets was never enabled in
-;; doom.d; consult-dash-doc covers documentation), dictionary/thesaurus
-;; backends (+dictionary never enabled - their backend fns would be void in
-;; the default chains, a silent-skip Doom tolerated), ivy/helm online
-;; backends (+lookup--online-backend-google/duckduckgo - counsel/helm only;
-;; the provider alist keeps plain URL strings), better-jumper (evil-set-jump
-;; records the origin jump instead).
+;; K (`lookup-documentation') is in-Emacs only: every target mode registers a
+;; handler that renders inside Emacs (helpful, lsp hover -> *lsp-help*, cider,
+;; fennel, sdcv, or a Dash docset via eww), the online backend is off the
+;; default chain, and `lookup-open-url-fn' is eww - so K never spawns a
+;; system browser.
+;;
+;; Not vendored from Doom: the +docsets / +dictionary machinery.  The three
+;; SPC s commands that referenced it (lookup-in-all-docsets,
+;; lookup-dictionary-definition, lookup-synonyms) are lab-native thin wrappers
+;; over consult-dash / sdcv / mw-thesaurus, in this module's autoload/commands.el.
+;; Also dropped: the ivy/helm online provider frontends (the alist keeps plain
+;; URL strings) and better-jumper (evil-set-jump records the origin jump).
 
 (defvar lookup-provider-url-alist
   '(("Google"            "https://google.com/search?q=%s")
@@ -40,8 +45,10 @@
 
 Used by `lookup-online'.")
 
-(defvar lookup-open-url-fn #'browse-url
-  "Function to use to open search urls.")
+(defvar lookup-open-url-fn #'eww-browse-url
+  "Function to use to open search urls.
+Defaults to eww so no lookup path (K's fallback, the SPC s online
+providers) ever hands off to a system browser - results stay in Emacs.")
 
 (defvar lookup-definition-functions
   '(lookup-xref-definitions-backend-fn
@@ -70,10 +77,15 @@ Stops at the first function to return non-nil or change the current
 window/point.  See `set-lookup-handlers!' about adding to this list.")
 
 (defvar lookup-documentation-functions
-  '(lookup-online-backend-fn)
+  ()
   "Functions for `lookup-documentation' to try.
 Stops at the first function to return non-nil or change the current
-window/point.  See `set-lookup-handlers!' about adding to this list.")
+window/point.  See `set-lookup-handlers!' about adding to this list.
+
+Intentionally has no global fallback: every mode we care about registers
+an in-Emacs :documentation handler (helpful, lsp hover, cider, sdcv, dash
+via eww), so K never falls through to an external browser.  Unhandled
+modes get a \"no handler\" message rather than a web search.")
 
 (defvar lookup-file-functions
   '(lookup-bug-reference-backend-fn

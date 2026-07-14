@@ -51,4 +51,9 @@
   ;; Built-in `lua-indent-level' defaults to 4 otherwise.
   (setq lua-indent-level 2)
   :config
-  (set-lookup-handlers! 'lua-mode :documentation #'lua-search-documentation))
+  ;; K -> the Lua docset via consult-dash (renders in eww), not
+  ;; lua-search-documentation's external system browser.
+  (set-lookup-handlers! 'lua-mode :documentation #'consult-dash-doc)
+  (add-hook! lua-mode
+    (defun lua-mode-activate-docset-h ()
+      (dash-docs-activate-docset "Lua"))))

@@ -73,6 +73,33 @@
         (expect (lsp-lookup-references-handler t) :to-equal 'deferred)
         (expect (plist-get req :context) :to-equal '(:includeDeclaration t))))))
 
+(describe "lsp-lookup-documentation"
+  (it "shows the analyzer hover when lsp is live"
+    (let (hover dash)
+      (cl-letf (((symbol-function 'lsp-describe-thing-at-point) (lambda () (setq hover t)))
+                ((symbol-function 'consult-dash-doc) (lambda (_) (setq dash t))))
+        (let ((lsp-mode t))
+          (expect (lsp-lookup-documentation "sym") :to-be 'deferred))
+        (expect hover :to-be t)
+        (expect dash :to-be nil))))
+
+  (it "falls back to the offline docset search when there is no hover"
+    (let (dash)
+      (cl-letf (((symbol-function 'lsp-describe-thing-at-point)
+                 (lambda () (user-error "No content at point.")))
+                ((symbol-function 'consult-dash-doc) (lambda (id) (setq dash id))))
+        (let ((lsp-mode t))
+          (lsp-lookup-documentation "sym"))
+        (expect dash :to-equal "sym"))))
+
+  (it "uses the docset search when lsp is off in the buffer"
+    (let (dash)
+      (cl-letf (((symbol-function 'consult-dash-doc) (lambda (id) (setq dash id))))
+        (with-temp-buffer
+          (setq-local lsp-mode nil)
+          (lsp-lookup-documentation "sym"))
+        (expect dash :to-equal "sym")))))
+
 (describe "lsp-command-map-dispatch"
   (it "loads lsp-mode and installs the transient map"
     (let (armed)

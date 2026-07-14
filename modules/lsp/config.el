@@ -97,7 +97,9 @@
   (set-lookup-handlers! 'lsp-mode
     :definition #'lsp-lookup-definition-handler
     :references #'lsp-lookup-references-handler
-    :documentation #'consult-dash-doc
+    ;; K -> analyzer hover in *lsp-help* first (rust-analyzer, pyright, ...),
+    ;; falling back to the offline docset search; both render in Emacs.
+    :documentation #'lsp-lookup-documentation
     :implementations '(lsp-find-implementation :async t)
     :type-definition #'lsp-find-type-definition)
 

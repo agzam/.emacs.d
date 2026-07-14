@@ -46,6 +46,21 @@ SPC c l row can't bind it directly - this is doom.d's
     'deferred))
 
 ;;;###autoload
+(defun lsp-lookup-documentation (identifier)
+  "Show documentation for the symbol at point via the LSP hover, in Emacs.
+`lsp-describe-thing-at-point' renders the analyzer's hover into *lsp-help*.
+When the workspace has no hover for point (or lsp is off) this falls back
+to `consult-dash-doc', so the offline docsets still answer.  A
+`lookup-documentation' handler; IDENTIFIER is forwarded to the fallback."
+  (if (bound-and-true-p lsp-mode)
+      (condition-case _
+          ;; 'deferred: lsp-describe-thing-at-point owns its *lsp-help* window,
+          ;; so the dispatcher must not restore the window config over it.
+          (progn (lsp-describe-thing-at-point) 'deferred)
+        ((user-error error) (consult-dash-doc identifier)))
+    (consult-dash-doc identifier)))
+
+;;;###autoload
 (defun lsp-completion-at-point-maybe ()
   "`lsp-completion-at-point', or nil when lsp-mode is off in this buffer.
 Safe to mix into capf combinators that outlive the lsp session."

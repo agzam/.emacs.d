@@ -128,3 +128,18 @@
 (describe "lookup-definition (command)"
   (it "user-errors with nothing under point"
     (expect (lookup-definition nil) :to-throw 'user-error)))
+
+(describe "lookup-documentation (in-Emacs guarantee)"
+  ;; The default `lookup-documentation-functions' has no online backend, so a
+  ;; mode with no :documentation handler must fail loudly in Emacs rather than
+  ;; hand the query to a browser.
+  (it "errors and opens no browser when nothing can document the symbol"
+    (let ((lookup-documentation-functions nil)
+          (browsed nil))
+      (cl-letf (((symbol-function 'browse-url) (lambda (&rest _) (setq browsed 'external)))
+                ((symbol-function 'eww-browse-url) (lambda (&rest _) (setq browsed 'eww))))
+        (with-temp-buffer
+          (insert "sym")
+          (goto-char (point-min))
+          (expect (lookup-documentation "sym") :to-throw 'user-error)
+          (expect browsed :to-be nil))))))
