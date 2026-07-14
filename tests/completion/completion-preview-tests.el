@@ -18,6 +18,12 @@
     (setq-local completion-preview--overlay ov)
     ov))
 
+(defun face-heights (face)
+  "Return the list of :height values present in FACE, a face spec.
+Handles a bare attribute plist, a single face symbol, or a list of faces."
+  (let ((faces (if (keywordp (car-safe face)) (list face) (ensure-list face))))
+    (delq nil (mapcar (lambda (f) (and (consp f) (plist-get f :height))) faces))))
+
 (describe "completion-preview--superscript"
   (it "renders multi-digit numbers with superscript glyphs"
     (expect (completion-preview--superscript 42) :to-equal "⁴²")
@@ -40,10 +46,32 @@
              (hl-pos (string-match "preamble" str)))
         (expect str :to-match "prefix")
         (expect str :to-match "presume")
-        (expect (get-text-property hl-pos 'face str) :to-equal 'highlight)
+        (expect (memq 'highlight
+                      (ensure-list (get-text-property hl-pos 'face str)))
+                :to-be-truthy)
         ;; 7 candidates, page size 5, on page 1: only a right arrow.
         (expect str :to-match " →")
         (expect (string-match-p "← " str) :to-be nil))))
+  (it "wraps the whole line, numbers included, in the outer echo height"
+    ;; The outer height must compose onto the numbers too: the inner ratio and
+    ;; the outer scale are both float :heights on the number, so shrinking the
+    ;; line shrinks the numbers with it (the whole point of the pager's design).
+    (with-temp-buffer
+      (insert "pre")
+      (set-preview-overlay
+       1 4
+       'completion-preview-common "pre"
+       'completion-preview-suffixes '("fix" "sume")
+       'completion-preview-index 0)
+      (let* ((completion-preview-echo-height 0.5)
+             (completion-preview-echo-number-height 2.0)
+             (str (completion-preview--echo-string))
+             (num-heights (face-heights (get-text-property 0 'face str)))
+             (body-pos (string-match "prefix" str))
+             (body-heights (face-heights (get-text-property body-pos 'face str))))
+        (expect (member completion-preview-echo-height num-heights) :to-be-truthy)
+        (expect (member completion-preview-echo-number-height num-heights) :to-be-truthy)
+        (expect body-heights :to-equal (list completion-preview-echo-height)))))
   (it "pages past the fold with a left arrow"
     (with-temp-buffer
       (insert "pre")

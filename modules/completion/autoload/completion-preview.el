@@ -14,8 +14,17 @@
   "Face for the index number shown before each echo-list candidate."
   :group 'completion-preview)
 
-(defvar completion-preview-echo-number-height 1.1
-  "Height multiplier applied to the superscript echo-list index numbers.")
+(defvar completion-preview-echo-height 0.75
+  "Outer height multiplier applied to the whole echo-list string, numbers included.
+The jank control: shrinking the entire line (superscript index glyphs and all)
+keeps the tall numbers within the echo-area line so the mode line does not jump.
+Composes multiplicatively with `completion-preview-echo-number-height'.")
+
+(defvar completion-preview-echo-number-height 1.2
+  "Height of the superscript index numbers relative to the candidate text.
+A ratio: values above 1.0 make the numbers larger than the text.  It is then
+scaled down together with everything else by `completion-preview-echo-height',
+so the on-screen number height is the product of the two.")
 
 (defconst completion-preview--superscripts ["⁰" "¹" "²" "³" "⁴" "⁵" "⁶" "⁷" "⁸" "⁹"]
   "Superscript glyphs for digits 0-9.")
@@ -37,7 +46,10 @@ Lets M-l double as an accept key without losing its slurp binding."
 (defun completion-preview--echo-string ()
   "Return the echo string for the current preview page, or nil when inactive.
 Shows the page of up to `completion-preview-echo-max' candidates containing
-the current one (highlighted), each prefixed with its 1-based on-page index."
+the current one (highlighted), each prefixed with its 1-based on-page index.
+The numbers carry an inner `completion-preview-echo-number-height' ratio and
+the whole string is then wrapped in `completion-preview-echo-height'; the two
+float heights compose multiplicatively."
   (when (bound-and-true-p completion-preview--overlay)
     (let* ((ov completion-preview--overlay)
            (common (or (overlay-get ov 'completion-preview-common) ""))
@@ -56,10 +68,13 @@ the current one (highlighted), each prefixed with its 1-based on-page index."
                                        (concat common (nth i sufs)))
                            collect (concat num (if (= i idx)
                                                    (propertize cand 'face 'highlight)
-                                                 cand)))))
-      (concat (and (< 0 start) "← ")
-              (mapconcat #'identity cands "  ")
-              (and (< end total) " →")))))
+                                                 cand))))
+           (str (concat (and (< 0 start) "← ")
+                        (mapconcat #'identity cands "  ")
+                        (and (< end total) " →"))))
+      (add-face-text-property 0 (length str)
+                              `(:height ,completion-preview-echo-height) nil str)
+      str)))
 
 ;;;###autoload
 (defun completion-preview-echo-candidates (&rest _)
