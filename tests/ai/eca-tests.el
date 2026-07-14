@@ -66,3 +66,39 @@
             (with-temp-file f (insert "just a markdown file\n"))
             (expect (eca-archive--read-meta f) :to-be nil))
         (delete-file f)))))
+
+(describe "eca-compact-modeline-icons-h"
+  ;; Regression: ECA's trust/elapsed mode-line segments use color emoji
+  ;; taller than the text font.  With doom-modeline's height bar pinned to
+  ;; 1px nothing clamps the line, so eca windows floated to ~33px while
+  ;; ordinary windows stayed 26px.  This hook caps those faces per-buffer.
+  (it "adds a 0.7 :height remap for each emoji-bearing face"
+    (with-temp-buffer
+      (eca-compact-modeline-icons-h)
+      (dolist (face '(eca-chat-trust-on-face
+                      eca-chat-trust-off-face
+                      eca-chat-elapsed-time-face))
+        (let ((entry (assq face face-remapping-alist)))
+          (expect entry :not :to-be nil)
+          (expect (seq-some (lambda (s)
+                              (and (consp s) (equal (plist-get s :height) 0.7)))
+                            (cdr entry))
+                  :to-be-truthy)))))
+
+  (it "is idempotent - repeat runs never stack remaps (the hook fires twice)"
+    (with-temp-buffer
+      (dotimes (_ 3) (eca-compact-modeline-icons-h))
+      (dolist (face '(eca-chat-trust-on-face
+                      eca-chat-trust-off-face
+                      eca-chat-elapsed-time-face))
+        (let* ((entry (assq face face-remapping-alist))
+               (heights (seq-filter (lambda (s)
+                                      (and (consp s) (plist-member s :height)))
+                                    (cdr entry))))
+          (expect (length heights) :to-equal 1)))))
+
+  (it "keeps the remap buffer-local so minibuffer/other buffers are untouched"
+    (with-temp-buffer
+      (eca-compact-modeline-icons-h)
+      (with-temp-buffer
+        (expect (assq 'eca-chat-trust-on-face face-remapping-alist) :to-be nil)))))

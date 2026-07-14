@@ -1423,6 +1423,18 @@ module layout).
   failed, bb lint 209/0, smoke 209 -> 212 packages (evil-mc/evil-multiedit/
   iedit) 0 failed/blocked, probe 20/20 (bindings resolve, whitelist trimmed,
   incompatible-modes correct, no new *Warnings*).
+- [2026-07] eca chat mode-line emoji height capped.  The trust/elapsed
+  segments render Apple Color Emoji taller than the text font (~33px vs 26px
+  elsewhere), and doom-modeline pins its height bar to 1px so nothing else
+  clamps the line - eca windows floated above the rest.
+  eca-compact-modeline-icons-h remaps the three faces (eca-chat-trust-on-face,
+  eca-chat-trust-off-face, eca-chat-elapsed-time-face) to :height 0.7,
+  buffer-local so the minibuffer completion annotations reusing the elapsed
+  face stay full size, and guarded against re-adding since eca-chat-mode-hook
+  fires twice per buffer.  A follow-up to the completion-preview echo-line
+  scaling.  Coverage: 3 specs (remap, idempotency, buffer-locality), verified
+  alongside the multiple-cursors port (635 specs 0 failed, bb lint 209/0,
+  smoke 212 0 failed/blocked).
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:

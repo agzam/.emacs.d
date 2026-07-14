@@ -110,6 +110,22 @@ sibling notifications from the same process-filter batch."
   (format "eca-chat - %s" (or title "Empty chat")))
 
 ;;;###autoload
+(defun eca-compact-modeline-icons-h ()
+  "Scale the trust/elapsed emoji so the chat mode line matches other windows.
+Their color-emoji glyphs (Apple Color Emoji) are taller than the text
+font, and doom-modeline's height bar is pinned to 1px, so nothing else
+clamps the line - it floats up to the emoji height (~33px vs 26px
+elsewhere).  The remap is buffer-local, so the minibuffer completion
+annotations that reuse the elapsed face are untouched.  Runs from
+`eca-chat-mode-hook', which fires twice per buffer, hence the guard
+against re-adding a remap that would stack multiplicatively."
+  (dolist (face '(eca-chat-trust-on-face
+                  eca-chat-trust-off-face
+                  eca-chat-elapsed-time-face))
+    (unless (assq face face-remapping-alist)
+      (face-remap-add-relative face :height 0.7))))
+
+;;;###autoload
 (defadvice! eca-chat-new-buffer-name-a (_session)
   "Override chat buffer naming to use a readable title."
   :override 'eca-chat-new-buffer-name

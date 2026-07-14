@@ -159,7 +159,8 @@
             (:localleader
              "w w" #'eca-toggle-workspaces)))
     (defun eca-chat-mode-markup-no-hiding-h ()
-      (markdown-toggle-markup-hiding -1))))
+      (markdown-toggle-markup-hiding -1)))
+  (add-hook 'eca-chat-mode-hook #'eca-compact-modeline-icons-h))
 
 (use-package mcp
   :ensure (mcp :host github :repo "lizqwerscott/mcp.el")
