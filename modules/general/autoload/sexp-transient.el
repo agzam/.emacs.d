@@ -3,9 +3,13 @@
 ;; Port of doom.d lisp/sexp-transient.el.  A lazy general-module autoload
 ;; (mirrors expreg.el) instead of an eagerly loaded lisp/ lib: the prefix and
 ;; its helpers load on first SPC k.  smartparens is globally on by then; avy
-;; and edit-indirect stay lazy and load only when their commands first run -
-;; so nothing here hard-requires them (that also keeps the file loadable in
-;; the bare -Q batch test env).  The avy sexp orders register via
+;; and edit-indirect stay lazy: the avy sexp commands `require' avy at call
+;; time (avy-jump carries no autoload cookie upstream, so it is void until avy
+;; loads), edit-indirect loads when its command first runs - nothing here
+;; hard-requires them at load, which keeps the file loadable in the bare -Q
+;; batch test env.  avy's dynamic vars are forward-declared below so the let
+;; bindings stay dynamic even when this file is byte-compiled before avy is
+;; present.  The avy sexp orders register via
 ;; with-eval-after-load.  The shared transient-bypass-keys engine lives in
 ;; lisp/transient-bypass.el (required here, not duplicated).  Deviations from
 ;; doom.d: sp-eval-current-sexp -> eval-current-sexp (the elisp module's user
@@ -60,20 +64,35 @@
      #'edit-indirect-region
      (car reg) (cadr reg) t)))
 
+;; avy-jump is not autoloaded and avy's dynamic vars are only special once avy
+;; loads; forward-declare them so the let bindings below bind dynamically even
+;; when this file is byte-compiled before avy is present.
+(defvar avy-command)
+(defvar avy-style)
+(defvar avy-all-windows)
+(defvar avy-action)
+
 ;;;###autoload
 (defun avy-goto-beg-sexp ()
-  "Use avy to jump to a beginning of sexp."
+  "Use avy to jump to the beginning of a sexp in the current window."
   (interactive)
-  (let* ((avy-command this-command) ; for look up in avy-orders-alist
-         (avy-style 'post))
+  (require 'avy)
+  (let ((avy-command this-command)  ; for look up in avy-orders-alist
+        (avy-style 'post)
+        (avy-all-windows nil)       ; scope to the current window only
+        (avy-action nil))           ; land on the paren, not a leaked action
     (avy-jump "(+\\|\\[+\\|{+" :window-flip nil)))
 
 ;;;###autoload
 (defun avy-goto-end-sexp ()
-  "Use avy to jump to a end of sexp."
+  "Use avy to jump to the end of a sexp in the current window."
   (interactive)
-  (let* ((avy-command this-command)
-         (avy-style 'post))
+  (require 'avy)
+  (let ((avy-command this-command)
+        (avy-style 'post)
+        (avy-all-windows nil)
+        ;; let-bound so the :action below cannot leak into the next avy call
+        (avy-action nil))
     (avy-jump "\\([^])}>]+\\)[])}]+"
               :window-flip nil
               :action (lambda (pt)
@@ -134,8 +153,8 @@
         ("f" t) ("F" t) ("T" t)
         ("/" t))))]
   ["sexp"
-   [("a" "avy" avy-goto-beg-sexp :transient t)
-    ("A" "avy" avy-goto-end-sexp :transient t)]
+   [("a" "avy (" avy-goto-beg-sexp :transient t)
+    ("A" "avy )" avy-goto-end-sexp :transient t)]
    [("w" "wrap" sp-wrap-sexp :transient t)
     ("W" "unwrap" sp-unwrap-sexp :transient t)
     ("=" "reindent" sp-reindent :transient t)]

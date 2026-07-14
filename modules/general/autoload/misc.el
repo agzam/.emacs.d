@@ -108,7 +108,8 @@ narrowed to."
 (defun find-in-config-dir ()
   "Jump to a file anywhere under `user-emacs-directory'."
   (interactive)
-  (let ((default-directory user-emacs-directory))
+  (let ((default-directory user-emacs-directory)
+        (vertico-preselect 'prompt))
     (project-find-file)))
 
 ;;;###autoload

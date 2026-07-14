@@ -52,6 +52,20 @@ runs)."
       (unless (keywordp (car node))
         (mapcan #'transient-layout-commands node))))))
 
+(defun transient-layout-suffix-alist (node)
+  "Collect (COMMAND . DESCRIPTION) suffix pairs from a transient layout NODE.
+Same traversal and dialect handling as `transient-layout-commands', but keeps
+each suffix's description alongside its command."
+  (cond
+   ((vectorp node)
+    (mapcan #'transient-layout-suffix-alist (append node nil)))
+   ((proper-list-p node)
+    (let ((pl (if (keywordp (car node)) node (cdr node))))
+      (if-let* ((cmd (plist-get pl :command)))
+          (list (cons cmd (plist-get pl :description)))
+        (unless (keywordp (car node))
+          (mapcan #'transient-layout-suffix-alist node)))))))
+
 (defun use-package-body-forms (args &rest keywords)
   "Collect forms under each of KEYWORDS in a `use-package' arglist ARGS.
 Lets a stubbed `use-package' run just the :init/:config side effects in tests."
