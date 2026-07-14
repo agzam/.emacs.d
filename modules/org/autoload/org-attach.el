@@ -1,6 +1,31 @@
 ;;; modules/org/autoload/org-attach.el -*- lexical-binding: t; -*-
-;; Core-slice survivors of doom.d org/autoload/org-attach.el; the gallery/
-;; insert-link helpers wait on org-download and Doom browse infra.
+;; doom.d org/autoload/org-attach.el, minus the still-parked gallery helpers
+;; (open-gallery-from-attachments, find-file-in-attachments, attach-icon-for).
+;; org-attach-file-and-insert-link is the org-download consumer.
+
+;;;###autoload
+(defun org-attach-file-and-insert-link (path)
+  "Download the file at PATH and insert an org link at point.
+PATH can be a URL, a local file path, or a base64-encoded data URI."
+  (interactive "sUri/file: ")
+  (unless (eq major-mode 'org-mode)
+    (user-error "Not in an org buffer"))
+  (require 'org-download)
+  (condition-case-unless-debug e
+      (let ((raw-uri (url-unhex-string path)))
+        (cond ((string-match-p "^data:image/png;base64," path)
+               (org-download-dnd-base64 path nil))
+              ((image-type-from-file-name raw-uri)
+               (org-download-image raw-uri))
+              ((let ((new-path (expand-file-name (org-download--fullname raw-uri))))
+                 (if (string-match-p
+                      (concat "^" (regexp-opt '("http" "https" "nfs" "ftp" "file")) ":/")
+                      path)
+                     (url-copy-file raw-uri new-path)
+                   (copy-file path new-path))
+                 (org-download-insert-link raw-uri new-path)))))
+    (error
+     (user-error "Failed to attach file: %s" (error-message-string e)))))
 
 ;;;###autoload
 (defun yank-media--tiff-as-png-a (orig-fun mimetype data)

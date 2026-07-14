@@ -20,8 +20,9 @@ module layout).
   dired (treemacs suite), ai (gptel/eca/mcp), web-browsing,
   tree-sitter, lookup (:tools lookup core, rebuilt plus-free),
   lsp (lsp-mode/lsp-ui/consult-lsp/dap-mode), clojure (cider/clj-refactor/
-  neil/cider-storm/monroe), org (core slice + org-cliplink: roam/vulpea/
-  evil-org), shell, writing (jinx/translate/dictionaries/prisma),
+  neil/cider-storm/monroe), org (roam/vulpea/evil-org + long tail:
+  anki/ob-*/pomodoro/toc-org/orgit/ox-*/download), shell,
+  writing (jinx/translate/dictionaries/prisma),
   search (consult-omni/tldr/slacko),
   tab-bar (workspace transients + desktop persistence, no packages),
   yaml (yaml-mode/jinja2/highlight-indent-guides/yaml-pro),
@@ -1489,6 +1490,36 @@ module layout).
   landing incl. evil :i s-<return> -> telega-chatbuf-input-send.  Coverage:
   +3 specs (tests/chat/telega-tests.el) -> 653 specs 0 failed, smoke 212 -> 213
   0 failed/blocked, diagnostics clean.
+- [2026-07] org long tail ported - the org module's deferred remainder.
+  anki-editor (pinned to the anki-editor/anki-editor fork - it ships
+  anki-editor-ui.el, louietan's original doesn't; +anki-editor-ui bundled
+  via :ensure nil, +anki-gen), ob-async (doom.d installed but never required
+  it - dead weight; :after org now loads it so :async header-args dispatch),
+  ob-http, ob-mermaid, org-edit-indirect, org-pomodoro, toc-org,
+  orgit(-forge), ox-gfm, ox-clip, org-download.  ox-gfm's org-export-with-toc
+  nil moved back out of the org block into ox-gfm (undoing the core-slice
+  fold-in).  Consumer helpers restored (renamed off +org/):
+  org-export-to-clipboard-as-rich-text (+ private org--yank-html-buffer) for
+  ox-clip, org-attach-file-and-insert-link for org-download - mode/branch
+  dispatch is stub-tested, the clipboard/download I/O smoke-only.  The 2
+  pomodoro mp3s copied into modules/org/ (tracked assets; the whitelist
+  covers them, ~/.doom.d left untouched), sounds resolved via
+  user-emacs-directory.  org-roam/vulpea db-location redirects moved OUT of
+  the doom-compat quarantine block to sit inline with their packages (the
+  user's point: their own customizations, not Doom's - both still target
+  doom-local-dir, so nothing writes into user-emacs-directory; a sanctioned
+  deviation from the "redirects live in quarantine" convention).  Dropped:
+  the menu-bar clock/pomodoro indicator (spacehammer hs.styledtext glue - old
+  cruft, per user), the C-x p p global bind (belongs to popup-other here),
+  edit-indirect-guess-mode-fn+ (doom.d set edit-indirect-guess-mode-function
+  to it but never defined it anywhere - a live-broken ref), anki.el's
+  anki-editor-push-tree (config binds anki-editor-push-notes inline).  Still
+  parked: verb, org-contrib, org-capture frame infra (spacehammer flow),
+  org-refile/org-avy, org-pretty-mode (org-present), the plain
+  org-export-to-clipboard.  Verified: bb lint 223/0, +7 specs
+  (org-export-tests + org-attach-file-and-insert-link) -> 660 specs 0 failed,
+  smoke 213 -> 229 packages (htmlize + alert/gntp/log4e pulled transitively)
+  0 failed/blocked, diagnostics clean.
 
 * Key clusters
 The key audit kills the "binding X silently missing" whack-a-mole:
@@ -1696,7 +1727,8 @@ committed to:
 ** TODO Extend file quarantine as modules port
 New state-writing packages get their path vars redirected in
 doom-compat.el quarantine section (telega, ...).
-Done so far: org-roam/vulpea dbs, treemacs persist pair, desktop-path
+Done so far: org-roam/vulpea dbs (2026-07: relocated inline into the org
+module, out of the quarantine block), treemacs persist pair, desktop-path
 (tab-bar port; elfeed db moot - package dropped), lsp session +
 server-install-dir + eslint-choices, dap breakpoints + extension path
 (lsp module port), lsp-java-workspace-dir (java module port).
@@ -1809,27 +1841,28 @@ Flymake backend flagging let+if -> if-let* patterns; port with elisp module.
 ** DONE git
 Ported (see Decisions log). Left behind on purpose: git-timemachine +
 smerge (the :emacs vc fold-in decision, SPC g t parked), orgit/orgit-forge
-(org module), consult-gh config + embark glue (disabled upstream / embark),
+(now ported in the org module), consult-gh config + embark glue (disabled upstream / embark),
 gist (commented out in doom.d). let-plist stays unported - git-module
 consumers rewritten with plist-get; url.el keeps waiting (embark, dash,
 org-cliplink, let-plist), though its top-level ghub require now resolves.
-** DONE org (core slice; long tail pending)
-Core slice ported - see Decisions log. SPC o r tree + SPC r r alive,
-vulpea-insert restored in expreg-transient. org-superstar joined the core
-slice later (daily-visible bullets; see the daily-driver fixes entry).
-org-cliplink pulled ahead 2026-07 (first lab-hosted sitting): package +
-"i L" localleader restored; the five url.el title-retrieval sites and
-web-browsing's org branch heal via :commands autoloads
-(org-cliplink-retrieve-title-synchronously carries no upstream cookie -
-the use-package :commands list covers it explicitly).
-Left for a long-tail sitting:
-verb, anki-editor(+anki-gen), ob-* extras (ob-async/http/mermaid),
-org-pomodoro, toc-org, orgit(-forge) (still back-fills the git deferral),
-org-edit-indirect, ox-clip/ox-gfm,
-org-download, org-contrib, the 2 mp3 assets, org-capture frame infra
-(spacehammer flow), org-refile/org-avy commands, org-pretty-mode
-(org-present), export-to-clipboard helpers, edit-indirect-guess-mode-fn+.
-Feeds embark (vulpea-*), now unblocked.
+** DONE org
+Core slice + former long tail ported - see Decisions log. SPC o r tree +
+SPC r r alive, vulpea-insert restored in expreg-transient. org-superstar
+joined the core slice later (daily-visible bullets). org-cliplink pulled
+ahead 2026-07 ("i L"; url.el title-retrieval + web-browsing's org branch
+heal via :commands autoloads).
+Long-tail sitting (2026-07) landed: anki-editor (+anki-editor-ui,
++anki-gen), ob-async/http/mermaid, org-edit-indirect, org-pomodoro (+mp3s),
+toc-org, orgit(-forge), ox-gfm, ox-clip (+org-export-to-clipboard-as-rich-text),
+org-download (+org-attach-file-and-insert-link).  org-roam/vulpea db paths
+moved out of the doom-compat quarantine block to sit inline with their
+packages (own dbs under doom-local-dir).
+Dropped: menu-bar clock/pomodoro indicator, the C-x p p global bind (now
+popup-other), edit-indirect-guess-mode-fn+ (never defined in doom.d).
+Still parked: verb, org-contrib, org-capture frame infra (spacehammer flow),
+org-refile/org-avy commands, org-pretty-mode (org-present), the plain
+org-export-to-clipboard (the rich-text variant is in).
+Feeds embark (vulpea-*).
 browser-create-roam-node-for-active-tab landed with the web-browsing port.
 ** DONE ai
 Ported (see Decisions log): gptel, eca, mcp, gptel-agent,

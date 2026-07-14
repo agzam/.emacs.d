@@ -1,14 +1,12 @@
 ;;; modules/org/config.el -*- lexical-binding: t; -*-
 
-;; Core slice of doom.d's org module: org, org-roam(+ui), the vulpea trio +
-;; consult-vulpea, evil-org, org-modern-indent, org-appear, org-superstar
-;; (pulled out of the long tail - heading bullets are daily-visible),
-;; org-cliplink (pulled ahead 2026-07 - url.el title retrieval + "i L").
-;; The long tail (verb, anki-editor(+anki-gen), ob-* extras, org-pomodoro,
-;; toc-org, orgit(-forge), org-edit-indirect, ox-clip/ox-gfm,
-;; org-download, org-contrib, the pomodoro mp3s) stays in doom.d - see
-;; MIGRATION.org.  org-roam/vulpea db files live in doom-compat.el's
-;; quarantine section.
+;; doom.d's org module ported to vanilla: org, org-roam(+ui), the vulpea trio
+;; + consult-vulpea, evil-org, org-modern-indent, org-appear, org-superstar,
+;; org-cliplink, plus the former long tail - anki-editor(+ui, +anki-gen),
+;; ob-async/http/mermaid, org-edit-indirect, org-pomodoro (+mp3s), toc-org,
+;; orgit(-forge), ox-clip/ox-gfm, org-download.  org-roam/vulpea db paths sit
+;; inline with their packages (own dbs under doom-local-dir).  Still parked in
+;; doom.d (see MIGRATION.org): verb, org-contrib.
 
 ;; org builds via elpaca's own menu (elpaca-menu-org generates
 ;; org-version/loaddefs) - doom.d's straight :pre-build fake is obsolete.
@@ -140,10 +138,7 @@
           org-html-validation-link nil
           org-latex-prefer-user-labels t
           org-ascii-text-width 900 ; don't wrap text
-          org-ascii-links-to-notes nil
-          ;; from doom.d's ox-gfm block (package still in the long tail);
-          ;; it applied from org load there too, ox-gfm was :after org
-          org-export-with-toc nil)
+          org-ascii-links-to-notes nil)
   (add-to-list 'org-export-backends 'md)
 
   (setopt org-capture-bookmark nil)
@@ -215,7 +210,8 @@
   (setopt
    org-roam-v2-ack t
    org-roam-directory org-default-folder
-   ;; org-roam-db-location lives in doom-compat.el's quarantine section
+   ;; own db, kept out of user-emacs-directory and off the live Doom session's
+   org-roam-db-location (concat doom-local-dir "org-roam.db")
    org-roam-dailies-directory "daily/" ; kept for org-roam-ui graph rendering
 
    ;; org-mode doesn't know how to properly export with roam links
@@ -422,11 +418,12 @@
   ;; defines it before the autoload machinery re-dispatches.
   :commands (open-journal vulpea-journal-note)
   :config
-  ;; vulpea-db-location lives in doom-compat.el's quarantine section
   (setopt vulpea-db-sync-directories (list org-default-folder)
           vulpea-buffer-alias-property "ROAM_ALIASES"
           vulpea-db-parse-method 'single-temp-buffer
-          vulpea-db-sync-scan-on-enable 'async)
+          vulpea-db-sync-scan-on-enable 'async
+          ;; own db, kept out of user-emacs-directory and off the live Doom's
+          vulpea-db-location (concat doom-local-dir "vulpea.db"))
 
   ;; Hide journal file-level nodes ("April 2026 personal notes") from
   ;; vulpea-find/vulpea-insert. All headings inside journal files
@@ -561,3 +558,91 @@
   :after (consult vulpea)
   :config
   (consult-vulpea-mode 1))
+
+;;; former long tail - ported 2026-07
+
+(use-package anki-editor
+  ;; the fork that ships anki-editor-ui.el; louietan's original doesn't
+  :ensure (anki-editor :host github :repo "anki-editor/anki-editor")
+  :commands (anki-editor-mode anki-editor-push-notes)
+  :config
+  (setopt anki-editor-create-decks t      ; create a deck if it doesn't exist
+          anki-editor-org-tags-as-anki-tags t)
+
+  (defvar anki-editor-mode-map (make-sparse-keymap))
+  (map! :map anki-editor-mode-map
+        :localleader
+        (:prefix ("a" . "anki")
+                 "p" (cmd! (anki-editor-push-notes 'tree))))
+  (add-to-list 'minor-mode-map-alist '(anki-editor-mode anki-editor-mode-map)))
+
+(use-package anki-editor-ui
+  :ensure nil  ; ships inside anki-editor
+  :after anki-editor)
+
+(use-package anki-gen
+  :ensure (anki-gen :host github :repo "agzam/anki-gen.el")
+  :after org)
+
+;; doom.d installed ob-async but never required it (dead); :after org loads it
+;; so ":async" header-args actually dispatch
+(use-package ob-async
+  :after org)
+
+(use-package ob-http
+  :after org
+  :commands org-babel-execute:http)
+
+(use-package ob-mermaid
+  :after org
+  :config
+  ;; needs the mermaid-js/mermaid-cli "mmdc" binary
+  (when-let* ((mmdc (executable-find "mmdc")))
+    (setopt ob-mermaid-cli-path mmdc)))
+
+(use-package org-edit-indirect
+  :ensure (org-edit-indirect :host github :repo "agzam/org-edit-indirect.el")
+  :defer t
+  :hook (org-mode . org-edit-indirect-mode))
+;; doom.d set edit-indirect-guess-mode-function to edit-indirect-guess-mode-fn+,
+;; which was never defined anywhere - dropped rather than port a void ref.
+
+(use-package org-pomodoro
+  :after org
+  :config
+  ;; C-x p p (doom.d's global bind) now belongs to popup-other; pomodoro is
+  ;; M-x / embark reachable.  Menu-bar clock indicator dropped.
+  (setopt org-pomodoro-start-sound-p t
+          org-pomodoro-killed-sound-p t
+          org-pomodoro-audio-player (format "%s -volume 50" (executable-find "mplayer"))
+          org-pomodoro-start-sound
+          (expand-file-name "modules/org/pomodoro__race-start.mp3" user-emacs-directory)
+          org-pomodoro-short-break-sound
+          (expand-file-name "modules/org/pomodoro__break-over.mp3" user-emacs-directory)))
+
+(use-package toc-org
+  :after org
+  :config
+  (setopt toc-org-hrefify-default "gh"))
+
+;; org<->magit link types; need both stacks loaded (magit/forge own the git
+;; module).  orgit-forge back-fills the forge deferral.
+(use-package orgit
+  :after (org magit))
+
+(use-package orgit-forge
+  :after (orgit forge))
+
+(use-package ox-gfm
+  :after org
+  :config
+  (setopt org-export-with-toc nil))
+
+;; consumer: org-export-to-clipboard-as-rich-text (org/autoload/org-export.el)
+(use-package ox-clip
+  :commands (ox-clip-formatted-copy ox-clip-image-to-clipboard))
+
+;; consumer: org-attach-file-and-insert-link (org/autoload/org-attach.el);
+;; its own autoloads (org-download-clipboard/-screenshot) stay reachable
+(use-package org-download
+  :defer t)
