@@ -41,6 +41,14 @@ e.g. Ubuntu, Arch; or macOS 15.5, etc."
       string-trim
       (concat (cadr cmd+prefix)))))
 
+(defun transient-remap-suffix-key (prefix from to)
+  "In transient PREFIX, rebind the suffix on key FROM to key TO.
+No-op when FROM is absent, so `reload-config' re-running against an
+already-remapped layout can't error.  FROM and TO are transient's key
+strings like \"RET\", not `kbd' output, which it will not match."
+  (when (ignore-errors (transient-get-suffix prefix from))
+    (transient-suffix-put prefix from :key to)))
+
 ;; Doom hook names kept: vendored doom-keybinds.el registers on the before
 ;; hook (which-key replacement-alist reset).
 (defvar doom-before-reload-hook nil

@@ -115,7 +115,7 @@
   (cl-defun consult-hn-reader (&key hn-object-url &allow-other-keys)
     (hnreader-comment hn-object-url))
   (setopt consult-hn-browse-fn #'consult-hn-reader)
-  (transient-suffix-put 'consult-hn-transient (kbd "RET") :key "s-<return>"))
+  (transient-remap-suffix-key 'consult-hn-transient "RET" "s-<return>"))
 
 ;; NOTE hnreader + reddigg DISABLED (2026-07): both forks are currently
 ;; broken and their installs hung the CI smoke boot; fix the packages,

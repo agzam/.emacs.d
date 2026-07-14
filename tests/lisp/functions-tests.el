@@ -6,6 +6,7 @@
           (locate-dominating-file (or load-file-name buffer-file-name)
                                   "helper.el")))
 (require 'buttercup)
+(require 'transient)
 
 (load-module-file "lisp/functions.el")
 
@@ -78,3 +79,46 @@
                 (expect (length (window-list)) :to-equal count))))
         (delete-other-windows)
         (kill-buffer buf)))))
+
+(describe "transient-remap-suffix-key"
+  ;; Two throwaway prefixes mirror gptel's two keying shapes: a key defined on
+  ;; the suffix itself (like `gptel--suffix-send') and a key defined inline in
+  ;; the layout (like gptel-tools' confirm).  transient is built-in, so no
+  ;; package is needed here.
+  (before-each
+    (transient-define-suffix probe-suffix-on-def ()
+      :key "RET" :description "send"
+      (interactive))
+    (transient-define-prefix probe-menu-inherited ()
+      "probe" [(probe-suffix-on-def)])
+    (transient-define-prefix probe-menu-in-layout ()
+      "probe" [("RET" "confirm" ignore)]))
+  (after-each
+    (dolist (s '(probe-suffix-on-def probe-menu-inherited probe-menu-in-layout
+                 probe-menu-no-ret))
+      (when (fboundp s) (fmakunbound s))
+      (put s 'transient--prefix nil)
+      (put s 'transient--layout nil)))
+
+  (it "remaps whether the key lives on the suffix or in the layout"
+    (transient-remap-suffix-key 'probe-menu-inherited "RET" "s-<return>")
+    (transient-remap-suffix-key 'probe-menu-in-layout "RET" "s-<return>")
+    (expect (ignore-errors (transient-get-suffix 'probe-menu-inherited "s-<return>"))
+            :to-be-truthy)
+    (expect (ignore-errors (transient-get-suffix 'probe-menu-in-layout "s-<return>"))
+            :to-be-truthy)
+    (expect (ignore-errors (transient-get-suffix 'probe-menu-inherited "RET")) :to-be nil)
+    (expect (ignore-errors (transient-get-suffix 'probe-menu-in-layout "RET")) :to-be nil))
+
+  (it "is idempotent - a second run (as reload-config triggers) does not error"
+    (transient-remap-suffix-key 'probe-menu-inherited "RET" "s-<return>")
+    (expect (transient-remap-suffix-key 'probe-menu-inherited "RET" "s-<return>")
+            :not :to-throw)
+    (expect (ignore-errors (transient-get-suffix 'probe-menu-inherited "s-<return>"))
+            :to-be-truthy))
+
+  (it "no-ops on a prefix without the FROM key"
+    (transient-define-prefix probe-menu-no-ret ()
+      "probe" [("x" "x" ignore)])
+    (expect (transient-remap-suffix-key 'probe-menu-no-ret "RET" "s-<return>")
+            :not :to-throw)))

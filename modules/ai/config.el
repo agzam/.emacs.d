@@ -31,9 +31,10 @@
    gptel-highlight-methods '(face))
 
   (after! gptel-transient
-    ;; `gptel-tools' is gptel's transient prefix, not the vendored package.
-    (transient-suffix-put 'gptel-menu (kbd "RET") :key "s-<return>")
-    (transient-suffix-put 'gptel-tools (kbd "RET") :key "s-<return>"))
+    ;; RET stays a newline in the chat buffer; send/confirm move to
+    ;; s-<return>.  (`gptel-tools' is gptel's prefix, not the vendored package.)
+    (transient-remap-suffix-key 'gptel-menu "RET" "s-<return>")
+    (transient-remap-suffix-key 'gptel-tools "RET" "s-<return>"))
 
   (setf (alist-get 'org-mode gptel-prompt-prefix-alist) "* ")
 
@@ -104,6 +105,47 @@
           eca-chat-custom-behavior nil
           eca-chat-parent-mode 'markdown-mode
           eca-api-response-timeout 15)
+
+  ;; Upstream reuses (replaces) the first visible eca window for every new
+  ;; chat and leans on `display-buffer-in-direction' relative to whatever is
+  ;; selected, so a new session lands unpredictably and hides the chat that
+  ;; was there.  Force two rules instead: reuse only a window already showing
+  ;; this exact buffer, otherwise split a fresh window to the right of the
+  ;; current one - never covering another eca chat.
+  (defadvice! eca-chat-display-buffer-right-a (buffer)
+    "Show each eca chat in its own window right of the current one."
+    :override #'eca-chat--display-buffer
+    (let ((window
+           (or (get-buffer-window buffer)
+               (display-buffer
+                buffer
+                `((display-buffer-in-direction)
+                  (direction . right)
+                  (window-width . ,eca-chat-window-width))))))
+      (when (and (window-live-p window) eca-chat-focus-on-open)
+        (select-window window))
+      window))
+
+  ;; `eca-chat--key-pressed-deletion' guards the prompt boundary by dinging
+  ;; on any deletion at the prompt-field start, ignoring direction.  That
+  ;; swallows the forward `delete-char' that evil-invert-char (~),
+  ;; evil-replace (r), evil-delete-char (x) and evil-substitute (s) issue, so
+  ;; they prepend instead of replacing the first char.  Let those forward
+  ;; operators through at the boundary; everything else still hits the guard.
+  ;; Remove once the upstream fix (same idea) lands.
+  (defadvice! eca-chat-allow-forward-delete-a (orig-fn side-effect-fn &rest args)
+    "Allow forward deletions to remove the first prompt char."
+    :around #'eca-chat--key-pressed-deletion
+    (let ((prompt-ov (and (derived-mode-p 'eca-chat-mode)
+                          (eca-chat--prompt-field-ov))))
+      (if (and prompt-ov
+               (memq this-command '(evil-invert-char evil-replace
+                                    evil-delete-char evil-substitute))
+               (= (point) (overlay-start prompt-ov))
+               (not (eobp))
+               (not (get-text-property (point) 'eca-chat-item-str-length)))
+          (apply side-effect-fn args)
+        (apply orig-fn side-effect-fn args))))
 
   (defcustom eca-archive-dir "~/Sync/org/eca/"
     "Directory where ECA chats are archived as Markdown."
