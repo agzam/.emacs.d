@@ -202,8 +202,18 @@ Rebuilt from `embark-url-config' by `embark-setup-url-types'.")
             (define-key (symbol-value keymap-name) (kbd (car action)) (cdr action)))
           ;; Register the keymap for this target type
           (add-to-list 'embark-keymap-alist (cons type keymap-name))))))
-  ;; Register our ONE universal target finder
-  (add-to-list 'embark-target-finders 'embark-target-url-at-point))
+  ;; Register our ONE universal target finder.  `thing-at-point' reports a URL
+  ;; even on bug-reference / shr / goto-address buttons (via their `*-url' text
+  ;; property), so this catch-all must run AFTER the specialized finders that
+  ;; prepend to the front (bug-reference-link, markdown-link, org-block, RFC,
+  ;; jira, remoto) yet BEFORE embark's generic file/identifier finders that
+  ;; would mis-grab a URL.  Splicing it right ahead of the file finder keeps the
+  ;; slot stable no matter the module load order or how often this reruns; a
+  ;; plain front `add-to-list' jumps ahead of the specialized finders on rerun.
+  (cl-callf2 cons 'embark-target-url-at-point
+    (nthcdr (or (cl-position 'embark-target-file-at-point embark-target-finders)
+                (length embark-target-finders))
+            embark-target-finders)))
 
 ;;;###autoload
 (defun embark-target-org-block ()

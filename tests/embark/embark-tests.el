@@ -75,7 +75,27 @@
              :to-equal 1)
      ;; foreign finders survive the rerun cleanup
      (expect (memq 'preexisting-finder embark-target-finders)
-             :to-be-truthy))))
+             :to-be-truthy)))
+
+  (it "keeps the universal finder after specialized finders, before the file finder"
+    ;; The greedy url catch-all (`thing-at-point' matches bug-reference / shr
+    ;; buttons too) must lose to the specialized finders that prepend to the
+    ;; front, yet beat embark's generic file finder - and stay put on rerun.
+    (let ((embark-url-config test-url-config)
+          (embark-url-map (make-sparse-keymap))
+          (embark-keymap-alist nil)
+          (embark-url-patterns nil)
+          (embark-target-finders
+           '(specialized-finder embark-target-file-at-point)))
+      (embark-setup-url-types)
+      (embark-setup-url-types)          ; rerun must not reshuffle the slot
+      (let ((url-idx (cl-position 'embark-target-url-at-point embark-target-finders))
+            (spec-idx (cl-position 'specialized-finder embark-target-finders))
+            (file-idx (cl-position 'embark-target-file-at-point embark-target-finders)))
+        (expect (cl-count 'embark-target-url-at-point embark-target-finders)
+                :to-equal 1)
+        (expect (< spec-idx url-idx) :to-be-truthy)
+        (expect (< url-idx file-idx) :to-be-truthy)))))
 
 (describe "embark-target-url-at-point"
   (it "classifies a url via the pattern table"
