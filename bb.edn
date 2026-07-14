@@ -6,7 +6,27 @@
   :init (do (def root (str (fs/parent (fs/canonicalize
                                        (or (System/getProperty "babashka.config")
                                            *file*)))))
-            (def test-elpa (str (fs/path root ".local" ".cache" "test-elpa"))))
+            (def test-elpa (str (fs/path root ".local" ".cache" "test-elpa")))
+            (defn emacs-server-up?
+              "True when a running Emacs server answers on the default socket."
+              []
+              (zero? (:exit (p/shell {:continue true :out :string :err :string}
+                                     "emacsclient" "--eval" "nil"))))
+            (defn follow-progress
+              "Stream LOGFILE to stdout as it grows until an UPDATE- marker.
+Return 0 on UPDATE-DONE, 1 on any other marker or once DEADLINE-MS elapses."
+              [logfile deadline-ms]
+              (let [deadline (+ (System/currentTimeMillis) deadline-ms)]
+                (loop [pos 0]
+                  (let [content (if (fs/exists? logfile) (slurp logfile) "")
+                        n (count content)]
+                    (when (< pos n) (print (subs content pos n)) (flush))
+                    (cond
+                      (re-find (re-pattern "(?m)^UPDATE-DONE\\b") content) 0
+                      (re-find (re-pattern "(?m)^UPDATE-(FAILED|TIMEOUT|ERROR)\\b") content) 1
+                      (< deadline (System/currentTimeMillis))
+                      (do (println "\nupdate: gave up waiting for Emacs to finish") 1)
+                      :else (do (Thread/sleep 250) (recur n))))))))
 
   deps {:doc "Install test deps (buttercup, parseedn) into .local/.cache/test-elpa"
         :task (p/shell "emacs" "-Q" "--batch"
@@ -61,6 +81,44 @@
                    (flush)
                    (when-not (str/starts-with? verdict "SMOKE-OK")
                      (System/exit 1))))}
+
+  update {:doc "Update every Elpaca package: drives the running Emacs live (streamed, no restart) if its server is up, else headless --batch (restart after). Like `doom sync -u'."
+          :task (if (emacs-server-up?)
+                  ;; Server up: run the update INSIDE the live Emacs so it picks
+                  ;; up changes without a restart.  emacsclient kicks it off
+                  ;; async (returns at once), then we tail the progress file.
+                  (let [logfile (str (fs/create-temp-file {:prefix "emacs-lab-update"}))
+                        driver (str (fs/path root "scripts" "elpaca-live-update.el"))
+                        {:keys [exit err]}
+                        (p/shell {:continue true :out :string :err :string}
+                                 "emacsclient" "--eval"
+                                 (format "(progn (load %s) (elpaca-live-update-start %s))"
+                                         (pr-str driver) (pr-str logfile)))]
+                    (println "update: driving the running Emacs (live, no restart needed)...")
+                    (if (zero? exit)
+                      (System/exit (follow-progress logfile (* 40 60 1000)))
+                      (do (println "update: could not start in-session update:" (str/trim (str err)))
+                          (System/exit 1))))
+                  ;; Server down (e.g. CI): plain --batch, no pty, pipeable.
+                  ;; --batch does not auto-load user init, so early-init + init
+                  ;; are loaded explicitly before the driver.
+                  (do
+                    (println "update: no Emacs server; updating headlessly in --batch (restart Emacs after to apply)...")
+                    (let [{:keys [exit]}
+                          (p/shell {:continue true
+                                    ;; an unreachable remote must fail the order,
+                                    ;; not block on a git credential prompt
+                                    :extra-env {"GIT_TERMINAL_PROMPT" "0"}}
+                                   "emacs" "-Q" "--batch"
+                                   "--init-directory" root
+                                   "-l" (str (fs/path root "early-init.el"))
+                                   "-l" (str (fs/path root "init.el"))
+                                   "-l" (str (fs/path root "scripts" "elpaca-update.el")))]
+                      (System/exit exit))))}
+
+  docsets {:doc "Install/update the Dash docsets the config expects (batch, like doom.d's `make dash-docsets')"
+           :task (p/shell "emacs" "-Q" "--batch"
+                          "-l" (str (fs/path root "scripts" "install-docsets.el")))}
 
   keydump {:doc "Dump the lab's resolved bindings (pty boot) for the key audit"
            :task (let [out (str (fs/path root ".local" ".cache" "lab-keys.eld"))
