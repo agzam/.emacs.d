@@ -120,38 +120,5 @@ Return 0 on UPDATE-DONE, 1 on any other marker or once DEADLINE-MS elapses."
            :task (p/shell "emacs" "-Q" "--batch"
                           "-l" (str (fs/path root "scripts" "install-docsets.el")))}
 
-  keydump {:doc "Dump the lab's resolved bindings (pty boot) for the key audit"
-           :task (let [out (str (fs/path root ".local" ".cache" "lab-keys.eld"))
-                       macos? (str/includes? (str/lower-case (System/getProperty "os.name")) "mac")
-                       emacs-args ["emacs" "-nw" "--init-directory" root
-                                   "-l" (str (fs/path root "scripts" "dump-bindings.el"))]
-                       cmd (if macos?
-                             (into ["script" "-q" "/dev/null"] emacs-args)
-                             ["script" "-qec" (str/join " " emacs-args) "/dev/null"])]
-                   (fs/delete-if-exists out)
-                   (apply p/shell {:continue true
-                                   :extra-env {"KEYDUMP_OUT" out
-                                               ;; deferred maps need their feature loaded first;
-                                               ;; org: its autoloads omit commands transients
-                                               ;; reference (org-insert-link), false void-suffix.
-                                               ;; markdown-mode/clojure-mode/cider/lsp-clojure:
-                                               ;; the :if-gated Markdown+Clojure sections of
-                                               ;; expreg-transient (SPC v) and sexp-transient
-                                               ;; (SPC k) reference their package commands
-                                               ;; (markdown-insert-*, clojure-toggle-ignore,
-                                               ;; lsp-clojure-thread-*) - not autoloaded, so a
-                                               ;; false void-suffix without the require
-                                               "KEYDUMP_REQUIRE" "evil,org,vertico,markdown-mode,clojure-mode,cider,lsp-clojure"
-                                               "TERM" "xterm-256color"}}
-                          cmd)
-                   (if (fs/exists? out)
-                     (println "keydump:" out)
-                     (do (println "keydump: boot produced no dump") (System/exit 1))))}
-
-  keydiff {:doc "Diff the Doom/lab binding dumps against key-decisions.edn"
-           :task (System/exit
-                  (:exit (p/shell {:dir root :continue true}
-                                  "bb" (str (fs/path root "scripts" "keydiff.clj")))))}
-
   ci {:doc "deps + lint + test (the fast tier; smoke is a separate job)"
       :depends [deps lint test]}}}

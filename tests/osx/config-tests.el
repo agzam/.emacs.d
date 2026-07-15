@@ -65,3 +65,32 @@
                  (lambda (&rest args) (setq captured args) '(0 . ""))))
         (macos-open-with "Finder" "/tmp/x")
         (expect captured :to-equal '("open" "-a" "Finder" "/tmp/x"))))))
+
+(describe "macos-reveal-in-finder"
+  (it "opens the current directory in Finder"
+    (let (captured)
+      (cl-letf (((symbol-function 'doom-call-process)
+                 (lambda (&rest args) (setq captured args) '(0 . ""))))
+        (let ((default-directory "/tmp/reveal-me/"))
+          (macos-reveal-in-finder))
+        (expect (seq-take captured 3) :to-equal '("open" "-a" "Finder"))
+        (expect (nth 3 captured) :to-match "reveal-me")))))
+
+(describe "macos-reveal-project-in-finder"
+  (it "reveals the project root inside a project"
+    (let (captured)
+      (cl-letf (((symbol-function 'doom-call-process)
+                 (lambda (&rest args) (setq captured args) '(0 . "")))
+                ((symbol-function 'project-current) (lambda (&rest _) 'proj))
+                ((symbol-function 'project-root) (lambda (_) "/tmp/projroot/")))
+        (macos-reveal-project-in-finder)
+        (expect (nth 2 captured) :to-equal "Finder")
+        (expect (nth 3 captured) :to-match "projroot"))))
+  (it "falls back to default-directory outside a project"
+    (let (captured)
+      (cl-letf (((symbol-function 'doom-call-process)
+                 (lambda (&rest args) (setq captured args) '(0 . "")))
+                ((symbol-function 'project-current) (lambda (&rest _) nil)))
+        (let ((default-directory "/tmp/noproj/"))
+          (macos-reveal-project-in-finder))
+        (expect (nth 3 captured) :to-match "noproj")))))

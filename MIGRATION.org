@@ -5,6 +5,54 @@ Reshuffle headings to set priority; port top-down. Keep entries updated as
 modules land (see AGENTS.md for porting conventions - naming, quarantine,
 module layout).
 
+* Migration concluded (2026-07)
+The Doom -> vanilla-Elpaca port is done: 31 active modules, the key audit
+void-free (=bb keydump= reports 0 void leader/evil-prefix entries), the naming
+sweep complete, and the key-audit scaffolding retired (ledger + dumper +
+differ + the keydump/keydiff bb tasks + tests/scripts/ deleted; the
+near-verbatim exemption on =modules/bindings/config.el= is lifted - it is the
+lab's own leader tree now).
+
+Final key disposition - the last void =doom/*= leader rows, adjudicated so the
+tree loads clean:
+- Ported plain-named :: =sudo-find-file= / =sudo-this-file= / =sudo-save-buffer=
+  (SPC f u/U, SPC b u; general/autoload/files.el), =macos-reveal-in-finder= /
+  =macos-reveal-project-in-finder= (SPC o o/O; osx/autoload/open.el).
+- Dropped (Dired/explicit commands already cover, or the command was gone) ::
+  copy/move/delete-this-file (SPC f C/D/R), toggle-narrow-buffer (SPC b -),
+  kill-all/other/buried-buffers (SPC b K/O/Z), the emacs.d/private-config
+  browse+find rows (SPC f e/E/p/P - SPC f e d =find-in-config-dir= plus
+  yank/insert-path cover it), the iTerm/Transmit/LaunchBar senders (the SPC o s
+  tree), org-notes-search/headlines + org-toggle-last-clock (SPC n s/S/c - SPC
+  n is a narrow prefix here), org-export-to-clipboard plain (SPC n y; the RTF
+  variant SPC n Y stays), lookup-in-docsets (SPC s k; SPC s K all-docsets
+  stays), link-hint-open-link (SPC s l + the help/info/apropos/geiser-doc "o"
+  rows).
+
+** Post-migration backlog
+Feature work, not migration blockers - the config stands on its own without
+these. Each restores the parked leader rows when its foundation lands.
+- :tools eval +overlay :: set-eval-handler!/set-repl-handler! + eros overlays.
+  Restores SPC c e/E/s (eval buffer/region/repl) and SPC o r/R (repl); blocks
+  golang/nix REPL handlers.
+- formatter (:editor format / apheleia) :: restores SPC c f.
+- :checkers syntax :: flycheck + posframe (user verdict: flycheck over
+  flymake). Restores SPC c x (diagnostics) and SPC t f (flycheck-mode).
+- :tools debugger :: restores SPC o d.
+- :emacs vc :: git-timemachine + smerge, folded into the git module. Restores
+  SPC g t.
+- :emacs undo :: undo-fu-session (persistent undo), maybe vundo. Restores
+  SPC s u.
+- link-hint :: restores SPC s l and the read-only-mode "o" jumps.
+- Dash docsets :: restores the buffer-scoped SPC s k alongside SPC s K.
+- Language/tool modules :: golang, webdev, nix, flutter, notmuch, learning
+  (per-module TODOs under "Custom modules" / "Official Doom modules").
+- lisp/elisp-lint.el :: the let+if -> if-let* flymake backend.
+- Theme/font :: ag-themes default theme + the doom-font machinery (config.el
+  TODOs).
+- Test gaps :: unit suites for the smoke-only behaviour files and the untested
+  evil module (see "Testing & CI"); tracked, not blocking.
+
 * Ported so far
 - core :: elpaca bootstrap (repos/builds in ~/.emacs.d/.local/elpaca/), doom-compat
   (macros, first-hooks incl. switch-frame, modulep!, quarantine), doom-keybinds
@@ -1522,100 +1570,46 @@ module layout).
   0 failed/blocked, diagnostics clean.
 
 * Key clusters
-The key audit kills the "binding X silently missing" whack-a-mole:
-mechanical keymap dumps diffed per cluster, every differing entry gets an
-explicit verdict in key-decisions.edn (:ported / :improved / :dropped /
-:deferred + note). Migration-scoped tooling - retire when the last cluster
-closes (teardown TODO below).
+RETIRED at conclusion (2026-07).  The key audit killed the "binding X
+silently missing" whack-a-mole: mechanical keymap dumps (scripts/dump-
+bindings.el) diffed per cluster (scripts/keydiff.clj) against a verdict
+ledger (key-decisions.edn), driven by =bb keydump= / =bb keydiff=.  All of
+that is deleted now (see the DONE teardown below); the checklist stays as the
+closed-out record.  Verdict vocabulary was :ported / :improved / :dropped /
+:deferred; coverage was the leader tree + evil g/z/[/] prefix trees.
 
-Workflow, one cluster per sitting - any future session (human or LLM)
-resumes from this section alone:
-1. Regenerate BOTH dumps at the start of a sitting; dumps are throwaway
-   snapshots, never trust old ones.
-   - Doom side (post session-switch flow, ACTIVE since 2026-07 - no live
-     Doom session exists to eval in): dump via boot mode against the
-     retired Doom install -
-     =KEYDUMP_OUT=~/.cache/emacs-lab/doom-keys.eld TERM=xterm-256color
-     script -q /dev/null emacs -nw --init-directory ~/.emacs.d -l
-     ~/.config/emacs-lab/scripts/dump-bindings.el= (the script is
-     standalone vanilla elisp, safe in a throwaway Doom boot; boot mode
-     force-loads autoloads, so doom-side :void-suffix detection gets
-     sharper - keydiff still only reads lab flags).  Untested flow:
-     sanity-check the entry count (~624, the last live-session dump) on
-     first use.  Historical flow while Doom still ran: eval the walker
-     half (above the "Boot mode" section) inline in the live session,
-     dump-bindings-load-autoloads nil - the one sanctioned lab-code-in-
-     Doom exception, retired with the switch.
-   - Lab side: =bb keydump= (pty boot; KEYDUMP_REQUIRE env forces
-     features whose maps bind lazily).
-2. =bb keydiff= - org report at ~/.cache/emacs-lab/keydiff.org (generated,
-   never hand-edited), console shows open/broken/parked/regression counts
-   per cluster; exit 1 on regressions (a :ported entry that drifted).
-   Broken = bound to a void command, or a transient prefix whose layout
-   references void suffix commands (lab dump marks those :void /
-   :void-suffix); only a :deferred verdict parks one, other verdicts
-   can't silence it.
-3. Pick an unchecked cluster below. For each open entry record a verdict
-   in key-decisions.edn and port/improve as decided - the binding itself
-   is what closes a diff entry; a :ported ledger line is optional
-   bookkeeping that buys drift detection. Rerun 1-2 until the cluster
-   shows 0 open, tick it here, put session-worthy calls in the
-   Decisions log.
-
-Module-port rule: when a module lands, flip its :deferred ledger entries
-and re-review its cluster. Coverage: leader tree + evil g/z/[/] prefix
-trees; localleader and mode-local maps get scoped dumps later if needed.
-
-Cluster checklist (open counts as of 2026-07 pilot; =bb keydiff= is truth):
-- [X] SPC w :: pilot - 12 verdicts; ace-window keys went live with the
-  dired port (W/D/M :ported, C-S-w/C-c :dropped), golden-ratio landed with
-  the elisp sitting - cluster fully closed, off the diff table
-- [X] SPC h :: closed - help-map surgery vendored into bindings/config.el
-  (b subtree on built-in which-key, describe-* drift matched, T on the
-  renamed toggle-profiler); h p d broken fix (stock describe-package);
-  stock d/P/C-h kept over Doom's rebinds, woman over man-or-woman; the
-  3 lab-only rows verdicted or structural - off the diff table
-- [X] SPC p :: closed with the tab-bar port - browse/find-file-in-other-
-  project trio implemented over project.el, discover-projects + 6
-  projectile-only rows dropped, 8 project.el rows :improved
-- [ ] normal g (12 open) - gd/gD/gI/gf lookup family :improved with the
-  lsp/clojure sitting; g z* closed with the multiple-cursors port; the rest is
-  evil-numbers/lion, evil-nerd-commenter, :tools eval (g R/r) - waits on those
-  modules
-- [ ] SPC x (18) - gptel tree closed with the ai port; the 10 left are
-  writing-module material (SPC x l / x t trees etc.)
-- [X] SPC c :: code/lsp rows closed with the lsp/clojure sitting - lookup
-  five (c d/D/i/k/t) + c W :improved (plus-ban renames), c l on the
-  lsp-command-map dispatcher, c j/J un-guarded consult-lsp-symbols
-  (vertico guard dropped, org-port precedent); the 5 still-broken rows
-  (c e/E/f/s/x) are :tools eval + :checkers, parked with those modules
-- [ ] SPC o (15) - open/apps; roam/org tree resolved with the org port,
-  o c g closed with the ai port, o r C-b + o e settled with the
-  web-browsing port - the rest waits on macos/chat/eval/notmuch
-- [X] SPC s :: closed with the search module port - 4 rename rows
-  :improved, the lookup six + link-hint + vundo parked :deferred;
-  SPC * exact-matched, SPC f d + SPC n * :improved on the way
-- [ ] SPC b (8) - buffers; browser rows closed with the web-browsing
-  port, 2 left (consult-projectile row, s-d rename verdict)
-- [ ] motion [ / motion ] (9+9), normal [ / normal ] (5+5)
-- [X] SPC t :: closed - 8 verdicts; flycheck parked on :checkers
-- [X] SPC g :: closed with the git module port - 4 verdicts;
-  git-timemachine parked on the :emacs vc fold-in decision
-- [X] SPC r :: closed with the org module port - r r on vulpea-find, the
-  vertico-repeat pair was false-open (KEYDUMP_REQUIRE gained vertico),
-  r c corfu leftover dropped
-- [ ] SPC f (6), SPC n (6), normal z (3)
-- [X] SPC T :: closed with the colors module port - 2 verdicts (the
-  renamed cycle-themes pair)
-- [ ] singletons: SPC i (a closed with the embark port; l + q closed
-  with the tab-bar port - q d parked on the session switch; " and '
-  closed with the shell module port)
-** TODO Retire key-audit tooling (last cluster closed)
-Fold ledger verdicts into the Decisions log; delete scripts/dump-bindings.el,
-scripts/keydiff.clj, key-decisions.edn (+ its .gitignore whitelist line),
-the keydump/keydiff bb tasks, and tests/scripts/.
-Proximity (post tab-bar): open clusters left - SPC b/c/f/n/o/x, the
-g/z/[/] trees, and SPC i (the last singleton).
+Cluster checklist - ALL CLOSED at conclusion (2026-07). The final =bb keydump=
+is void-free; parked rows moved to the Post-migration backlog above. Pilot
+notes kept as history, checkboxes flipped.
+- [X] SPC w :: pilot - 12 verdicts; ace-window W/D/M :ported, C-S-w/C-c
+  :dropped, golden-ratio landed with the elisp sitting
+- [X] SPC h :: help-map surgery vendored + pruned; stock d/P/C-h kept
+- [X] SPC p :: tab-bar port - project.el trio, 6 projectile rows dropped
+- [X] normal g :: gd/gD/gI/gf lookup :improved; g z* multiple-cursors;
+  evil-numbers/lion + eval (g R/r) rows are backlog (:tools eval)
+- [X] SPC x :: gptel (ai) + writing (x l / x t) trees closed
+- [X] SPC c :: lookup/lsp rows :improved; c e/E/f/s/x removed to backlog
+  (:tools eval + formatter + :checkers)
+- [X] SPC o :: roam/apps closed; o o/O reveal :ported; o d/R (debugger/repl)
+  and the macos send-to-app tree removed (backlog / dropped)
+- [X] SPC s :: search rows :improved; s l/k/u (link-hint/docsets/vundo)
+  removed to backlog; s K all-docsets stays
+- [X] SPC b :: browser rows closed; b u sudo-save :ported; b -/K/O/Z dropped
+- [X] motion [ / ] , normal [ / ] :: void-free (evil prefix trees)
+- [X] SPC t :: 8 verdicts; t f flycheck removed to backlog (:checkers)
+- [X] SPC g :: git port - 4 verdicts; g t git-timemachine removed (backlog
+  :emacs vc)
+- [X] SPC r :: org port - r r vulpea-find, r c corfu leftover dropped
+- [X] SPC f :: f u/U sudo :ported; f C/D/R/e/E/p/P dropped
+- [X] SPC n :: n s/S/c/y removed (SPC n is a narrow prefix here; RTF y stays)
+- [X] normal z :: void-free
+- [X] SPC T :: colors port - cycle-themes pair
+- [X] singletons :: SPC i and a/l/q/'/" closed with embark/tab-bar/shell ports
+** DONE Retire key-audit tooling (last cluster closed)
+Done at conclusion (2026-07): deleted scripts/dump-bindings.el,
+scripts/keydiff.clj, key-decisions.edn (+ its .gitignore whitelist line), the
+keydump/keydiff bb tasks, and tests/scripts/.  Verdicts folded into the Final
+key disposition under "Migration concluded" above.
 
 * Testing & CI
 - =bb test= - buttercup suites from tests/ (buttercup auto-installed into
@@ -2150,8 +2144,10 @@ resolve at call time via the elisp module's loaddefs macro-autoload. The git
 module had rewritten its own uses with plist-get before that existed.
 
 * Assets to relocate
-- snippets: currently read from ~/.doom.d/snippets (62 snippets); localize
-  to lab when cutting the cord
+- snippets: DONE (2026-07) - the library (85 files across clojure/elisp/js/
+  js2/markdown/org/rjsx modes) copied into ~/.emacs.d/snippets/ (tracked;
+  ~/.doom.d untouched); yas-snippet-dirs repointed off ~/.doom.d in
+  completion/config.el
 - org module mp3s; elisp templates/, web-browsing readable/ and writing
   abbrev_defs relocated with their modules (2026-07; readable's npm
   install/node_modules quarantined to the cache dir, abbrev_defs tracked

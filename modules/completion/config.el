@@ -412,8 +412,8 @@
   (map! :map yas-minor-mode-map
         "M-j" #'yas-next-field
         "M-k" #'yas-prev-field)
-  ;; Share the snippet library with the Doom config for now.
-  (add-to-list 'yas-snippet-dirs "~/.doom.d/snippets/")
+  ;; Personal snippet library, in-tree since the Doom cord was cut.
+  (add-to-list 'yas-snippet-dirs (expand-file-name "snippets/" user-emacs-directory))
   (add-to-list 'hippie-expand-try-functions-list 'yas-hippie-try-expand)
   (yas-reload-all)
   (yas-global-mode +1)

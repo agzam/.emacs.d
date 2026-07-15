@@ -28,3 +28,18 @@ and the OS default program."
   "Open the current file in its default macOS program."
   (interactive)
   (macos-open-with))
+
+;;;###autoload
+(defun macos-reveal-in-finder ()
+  "Reveal the current directory in Finder."
+  (interactive)
+  (macos-open-with "Finder" default-directory))
+
+;;;###autoload
+(defun macos-reveal-project-in-finder ()
+  "Reveal the current project root (or `default-directory') in Finder."
+  (interactive)
+  (macos-open-with "Finder"
+                   (if-let* ((proj (project-current)))
+                       (project-root proj)
+                     default-directory)))

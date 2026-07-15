@@ -3,13 +3,16 @@
 ;; Vendored from Doom Emacs (MIT License, Copyright (c) 2014-2026 Henrik
 ;; Lissner), modules/config/default/+evil-bindings.el @ doomemacs 8e4fbba.
 ;; modulep! guards prune against `doom-modules-enabled' (see init.el), so the
-;; SPC tree matches the old Doom setup key for key.  Commands from modules not
-;; yet ported stay bound but void until their module arrives.
+;; SPC tree matches the old Doom setup key for key.
+;; Migration conclusion (2026-07): the remaining void doom/* rows were
+;; adjudicated - useful ones ported plain-named (sudo-*, macos-reveal-*), the
+;; rest dropped or parked in MIGRATION.org's post-migration backlog.  The
+;; audited trees (leader + evil g/z/[/]) are void-free.
 ;; Deviation: the <leader> p tree is rebound from projectile to built-in
 ;; project.el commands (projectile is not part of this config); entries with
 ;; no project.el analog were dropped.
 ;; Deviation: the help-map surgery from modules/config/default/config.el is
-;; vendored here too, pruned per the SPC h audit (key-decisions.edn).
+;; vendored here too, pruned per the SPC h key audit.
 ;; Deviation: the :term ghostel o-t/T block is gone (those commands never
 ;; existed upstream) and the :term eshell toggle row too - shell-pop owns
 ;; popping (SPC '); SPC o e stays unbound - elfeed was dropped at the
@@ -124,12 +127,7 @@
         `(menu-item "Go to the next field" org-table-next-field
           :filter ,(lambda (cmd) (when (org-at-table-p) cmd)))))
 
-      (:after help :map help-mode-map
-       :n "o"       #'link-hint-open-link)
-      (:after info :map Info-mode-map
-       :n "o"       #'link-hint-open-link)
       (:after apropos :map apropos-mode-map
-       :n "o"       #'link-hint-open-link
        :n "TAB"     #'forward-button
        :n [tab]     #'forward-button
        :n [backtab] #'backward-button)
@@ -137,8 +135,6 @@
        [escape]  #'View-quit-all)
       (:after man :map Man-mode-map
        :n "q"    #'kill-current-buffer)
-      (:after geiser-doc :map geiser-doc-mode-map
-       :n "o"    #'link-hint-open-link)
 
       (:unless (modulep! :input layout +bepo)
        (:after (evil-org evil-easymotion)
@@ -274,7 +270,7 @@
 ;;; Help map
 
 ;; From modules/config/default/config.el help-map surgery, pruned by the
-;; SPC h audit (key-decisions.edn): doom introspection dropped; stock d/P/C-h
+;; SPC h key audit: doom introspection dropped; stock d/P/C-h
 ;; kept over Doom's rebinds; woman - +default/man-or-woman resolves to it on
 ;; macOS anyway.
 (define-key! help-map
@@ -358,7 +354,6 @@
 
       ;;; <leader> b --- buffer
       (:prefix-map ("b" . "buffer")
-       :desc "Toggle narrowing"            "-"   #'doom/toggle-narrow-buffer
        :desc "Previous buffer"             "["   #'previous-buffer
        :desc "Next buffer"                 "]"   #'next-buffer
        (:when (modulep! :ui workspaces)
@@ -372,24 +367,21 @@
        :desc "Kill buffer"                 "d"   #'kill-current-buffer
        :desc "ibuffer"                     "i"   #'ibuffer
        :desc "Kill buffer"                 "k"   #'kill-current-buffer
-       :desc "Kill all buffers"            "K"   #'doom/kill-all-buffers
        :desc "Switch to last buffer"       "l"   #'evil-switch-to-windows-last-buffer
        :desc "Set bookmark"                "m"   #'bookmark-set
        :desc "Delete bookmark"             "M"   #'bookmark-delete
        :desc "Next buffer"                 "n"   #'next-buffer
        :desc "New empty buffer"            "N"   #'evil-buffer-new
-       :desc "Kill other buffers"          "O"   #'doom/kill-other-buffers
        :desc "Previous buffer"             "p"   #'previous-buffer
        :desc "Revert buffer"               "r"   #'revert-buffer
        :desc "Rename buffer"               "R"   #'rename-buffer
        :desc "Save buffer"                 "s"   #'basic-save-buffer
        :desc "Save all buffers"            "S"   #'evil-write-all
-       :desc "Save buffer as root"         "u"   #'doom/sudo-save-buffer
+       :desc "Save buffer as root"         "u"   #'sudo-save-buffer
        :desc "Pop up scratch buffer"       "x"   #'open-scratch-buffer
        :desc "Switch to scratch buffer"    "X"   #'switch-to-scratch-buffer
        :desc "Yank buffer"                 "y"   #'yank-buffer-contents
-       :desc "Bury buffer"                 "z"   #'bury-buffer
-       :desc "Kill buried buffers"         "Z"   #'doom/kill-buried-buffers)
+       :desc "Bury buffer"                 "z"   #'bury-buffer)
 
       ;;; <leader> c --- code
       (:prefix-map ("c" . "code")
@@ -421,16 +413,11 @@
        :desc "Recompile"                             "C"   #'recompile
        :desc "Jump to definition"                    "d"   #'lookup-definition
        :desc "Jump to references"                    "D"   #'lookup-references
-       :desc "Evaluate buffer/region"                "e"   #'eval-buffer-or-region
-       :desc "Evaluate & replace region"             "E"   #'eval-replace-region
-       :desc "Format buffer/region"                  "f"   #'format-region-or-buffer
        :desc "Find implementations"                  "i"   #'lookup-implementations
        :desc "Jump to documentation"                 "k"   #'lookup-documentation
-       :desc "Send buffer/region to repl"            "s"   #'eval-buffer-or-region-in-repl
        :desc "Find type definition"                  "t"   #'lookup-type-definition
        :desc "Delete trailing whitespace"            "w"   #'delete-trailing-whitespace
-       :desc "Delete trailing newlines"              "W"   #'delete-trailing-newlines
-       :desc "List errors"                           "x"   #'diagnostics)
+       :desc "Delete trailing newlines"              "W"   #'delete-trailing-newlines)
 
       ;;; <leader> d --- debugger
       (:when (modulep! :tools debugger)
@@ -463,24 +450,17 @@
       ;;; <leader> f --- file
       (:prefix-map ("f" . "file")
        :desc "Open project editorconfig"   "c"   #'editorconfig-find-current-editorconfig
-       :desc "Copy this file"              "C"   #'doom/copy-this-file
        :desc "Find directory"              "d"   #'dired-prompt
-       :desc "Delete this file"            "D"   #'doom/delete-this-file
-       :desc "Find file in emacs.d"        "e"   #'doom/find-file-in-emacsd
-       :desc "Browse emacs.d"              "E"   #'doom/browse-in-emacsd
        :desc "Find file"                   "f"   #'find-file
        :desc "Find file from here"         "F"   #'find-file-under-here
        (:when (modulep! :config literate)
          :desc "Open heading in literate config" "h" #'literate-find-heading)
        :desc "Locate file"                 "l"   #'locate
-       :desc "Find file in private config" "p"   #'doom/find-file-in-private-config
-       :desc "Browse private config"       "P"   #'doom/open-private-config
        :desc "Recent files"                "r"   #'recentf-open-files
-       :desc "Rename/move file"            "R"   #'doom/move-this-file
        :desc "Save file"                   "s"   #'basic-save-buffer
        :desc "Save file as..."             "S"   #'write-file
-       :desc "Sudo find file"              "u"   #'doom/sudo-find-file
-       :desc "Sudo this file"              "U"   #'doom/sudo-this-file
+       :desc "Sudo find file"              "u"   #'sudo-find-file
+       :desc "Sudo this file"              "U"   #'sudo-this-file
        :desc "Yank file path"              "y"   #'yank-buffer-path
        :desc "Yank file path from project" "Y"   #'yank-buffer-path-relative-to-project)
 
@@ -489,7 +469,6 @@
        :desc "Revert file"                 "R"   #'vc-revert
        :desc "Copy link to remote"         "y"   #'vc-git-link-kill
        :desc "Copy link to homepage"       "Y"   #'vc-git-link-kill-homepage
-       :desc "Git time machine"            "t"   #'git-timemachine-toggle
        (:when (modulep! :ui vc-gutter)
         :desc "Revert hunk at point"      "r"   #'vc-gutter-save-and-revert-hunk
         :desc "Stage hunk at point"       "s"   #'vc-gutter-stage-hunk
@@ -584,7 +563,6 @@
               ((modulep! :completion ivy)      #'ivy-bibtex)
               ((modulep! :completion helm)     #'helm-bibtex)))
 
-       :desc "Toggle last org-clock"        "c" #'org-toggle-last-clock
        :desc "Cancel current org-clock"     "C" #'org-clock-cancel
        (:when (modulep! :ui deft)
         :desc "Open deft"                   "d" #'deft)
@@ -599,10 +577,7 @@
        :desc "Goto capture"                 "N" #'org-capture-goto-target
        :desc "Active org-clock"             "o" #'org-clock-goto
        :desc "Todo list"                    "t" #'org-todo-list
-       :desc "Search notes"                 "s" #'org-notes-search
-       :desc "Search org agenda headlines"  "S" #'org-notes-headlines
        :desc "View search"                  "v" #'org-search-view
-       :desc "Org export to clipboard"        "y" #'org-export-to-clipboard
        :desc "Org export to clipboard as RTF" "Y" #'org-export-to-clipboard-as-rich-text
 
        (:when (or (modulep! :lang org +roam)
@@ -646,11 +621,8 @@
         :desc "Tags search"    "m"  #'org-tags-view
         :desc "View search"    "v"  #'org-search-view)
        :desc "Default browser"    "b"  #'browse-url-of-file
-       :desc "Start a debugger"   "d"  #'debugger-start
        :desc "New frame"          "f"  #'make-frame
        :desc "Select frame"       "F"  #'select-frame-by-name
-       :desc "REPL"               "r"  #'open-repl-other-window
-       :desc "REPL (same window)" "R"  #'open-repl-same-window
        :desc "Dired"              "-"  #'dired-jump
        (:when (modulep! :ui neotree)
         :desc "Project sidebar"              "p" #'neotree-open
@@ -675,14 +647,7 @@
         :desc "Open eshell here"      "E" #'eshell-here)
        (:when (modulep! :os macos)
         :desc "Reveal in Finder"           "o" #'macos-reveal-in-finder
-        :desc "Reveal project in Finder"   "O" #'macos-reveal-project-in-finder
-        (:prefix ("s" . "send to application")
-         :desc "Send to Transmit"           "t" #'macos-send-to-transmit
-         :desc "Send project to Transmit"   "T" #'macos-send-project-to-transmit
-         :desc "Send to Launchbar"          "l" #'macos-send-to-launchbar
-         :desc "Send project to Launchbar"  "L" #'macos-send-project-to-launchbar
-         :desc "Open in iTerm"              "i" #'macos-open-in-iterm
-         :desc "Open in new iTerm window"   "I" #'macos-open-in-iterm-new-window))
+        :desc "Reveal project in Finder"   "O" #'macos-reveal-project-in-finder)
        (:when (modulep! :tools docker)
         :desc "Docker" "D" #'docker)
        (:when (modulep! :tools llm)
@@ -775,13 +740,11 @@
        :desc "Jump to symbol in open buffers" "I"
        (cond ((modulep! :completion vertico)   #'consult-imenu-multi)
              ((modulep! :completion helm)      #'helm-imenu-in-all-buffers))
-       :desc "Jump to visible link"         "l" #'link-hint-open-link
        :desc "Jump to link"                 "L" #'ffap-menu
        :desc "Jump list"                    "j" #'evil-show-jumps
        :desc "Jump to bookmark"             "m" #'bookmark-jump
        :desc "Look up online"               "o" #'lookup-online
        :desc "Look up online (w/ prompt)"   "O" #'lookup-online-select
-       :desc "Look up in local docsets"     "k" #'lookup-in-docsets
        :desc "Look up in all docsets"       "K" #'lookup-in-all-docsets
        :desc "Search project"               "p" #'search-project
        :desc "Search other project"         "P" #'search-other-project
@@ -792,16 +755,12 @@
              ((modulep! :completion ivy)       #'swiper-isearch-thing-at-point)
              ((modulep! :completion helm)      #'swiper-isearch-thing-at-point))
        :desc "Dictionary"                   "t" #'lookup-dictionary-definition
-       :desc "Thesaurus"                    "T" #'lookup-synonyms
-       :desc "Undo history"                 "u"
-       (cond ((modulep! :emacs undo +tree)     #'undo-tree-visualize)
-             ((modulep! :emacs undo)           #'vundo)))
+       :desc "Thesaurus"                    "T" #'lookup-synonyms)
 
       ;;; <leader> t --- toggle
       (:prefix-map ("t" . "toggle")
        :desc "Fill Column Indicator"        "c" #'global-display-fill-column-indicator-mode
        :desc "Diff Highlights (Git Gutter)" "d" #'diff-hl-mode
-       :desc "Flycheck"                     "f" #'flycheck-mode
        (:when (modulep! :ui indent-guides)
         :desc "Indent guides"              "i" #'indent-bars-mode)
        :desc "Indent style"                 "I" #'toggle-indent-style
@@ -830,8 +789,8 @@
 
 ;;
 ;;; Global text-manipulation keys (Doom config/default rows the vendoring
-;;; missed - found by the global-key sweep; the key audit only covers the
-;;; leader + evil prefix trees, so these were invisible to keydiff)
+;;; missed - found by the global-key sweep; the (retired) key audit only
+;;; covered the leader + evil prefix trees, so these were invisible to it)
 
 (map! :gi "C-a" #'backward-to-bol-or-indent
       :gi "C-e" #'forward-to-last-non-comment-or-eol
