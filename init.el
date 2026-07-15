@@ -230,3 +230,4 @@ autoload.el is loaded eagerly and must be load-safe."
 (load custom-file 'noerror 'nomessage)
 
 ;;; init.el ends here
+(put 'narrow-to-region 'disabled nil)
