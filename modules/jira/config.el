@@ -26,6 +26,12 @@
   ;; here; the package rewrite dropped that mode (browsing now shells out to the
   ;; OS browser via `go-jira-browse-ticket-url'), so that block is gone.
 
+  (setopt go-jira-status-face-alist
+          '(("On Hold"     . (:foreground "#adbaba" :weight bold))
+            ("In Progress" . (:foreground "#13702a"))
+            ("Code Review" . (:foreground "#c678dd"))
+            ("Validation"  . (:foreground "#7878dd"))))
+
   (add-hook! '(org-mode-hook
                markdown-mode-hook
                prog-mode-hook
@@ -52,6 +58,8 @@
 
   (after! embark
     (map! :map go-jira-embark-jira-ticket-map
+          (:prefix ("j" . "jira")
+           :desc "change status" "s" #'go-jira-change-status)
           (:prefix ("b" . "browse")
            :desc "view" "b" #'go-jira-view-ticket
            :desc "in browser" "o" #'go-jira-browse-ticket-url)
