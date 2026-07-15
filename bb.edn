@@ -26,7 +26,14 @@ Return 0 on UPDATE-DONE, 1 on any other marker or once DEADLINE-MS elapses."
                       (re-find (re-pattern "(?m)^UPDATE-(FAILED|TIMEOUT|ERROR)\\b") content) 1
                       (< deadline (System/currentTimeMillis))
                       (do (println "\nupdate: gave up waiting for Emacs to finish") 1)
-                      :else (do (Thread/sleep 250) (recur n))))))))
+                      :else (do (Thread/sleep 250) (recur n)))))))
+            (defn tty-color?
+              "True when ANSI color should be emitted: our stdout is a real
+terminal (or ELPACA_UPDATE_COLOR=1 forces it) and NO_COLOR is unset."
+              []
+              (and (str/blank? (or (System/getenv "NO_COLOR") ""))
+                   (or (some? (System/console))
+                       (= "1" (System/getenv "ELPACA_UPDATE_COLOR"))))))
 
   deps {:doc "Install test deps (buttercup, parseedn) into .local/.cache/test-elpa"
         :task (p/shell "emacs" "-Q" "--batch"
@@ -92,8 +99,9 @@ Return 0 on UPDATE-DONE, 1 on any other marker or once DEADLINE-MS elapses."
                         {:keys [exit err]}
                         (p/shell {:continue true :out :string :err :string}
                                  "emacsclient" "--eval"
-                                 (format "(progn (load %s) (elpaca-live-update-start %s))"
-                                         (pr-str driver) (pr-str logfile)))]
+                                 (format "(progn (load %s) (elpaca-live-update-start %s nil %s))"
+                                         (pr-str driver) (pr-str logfile)
+                                         (if (tty-color?) "t" "nil")))]
                     (println "update: driving the running Emacs (live, no restart needed)...")
                     (if (zero? exit)
                       (System/exit (follow-progress logfile (* 40 60 1000)))
@@ -108,7 +116,8 @@ Return 0 on UPDATE-DONE, 1 on any other marker or once DEADLINE-MS elapses."
                           (p/shell {:continue true
                                     ;; an unreachable remote must fail the order,
                                     ;; not block on a git credential prompt
-                                    :extra-env {"GIT_TERMINAL_PROMPT" "0"}}
+                                    :extra-env (cond-> {"GIT_TERMINAL_PROMPT" "0"}
+                                                 (tty-color?) (assoc "ELPACA_UPDATE_COLOR" "1"))}
                                    "emacs" "-Q" "--batch"
                                    "--init-directory" root
                                    "-l" (str (fs/path root "early-init.el"))
