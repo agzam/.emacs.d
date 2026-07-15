@@ -561,7 +561,38 @@
       [remap imenu] #'ibuffer-jump-to-buffer
       :n "su" #'ibuffer-filter-by-unsaved-file-buffers
       :n "sF" #'ibuffer-filter-by-file-buffers
-      :n "s*" #'ibuffer-filter-by-non-special-buffers)
+      :n "s*" #'ibuffer-filter-by-non-special-buffers
+      ;; "," is ibuffer-toggle-sorting-mode by default; the localleader prefix
+      ;; shadows it in normal state, so it lives under ",st" below.
+      (:localleader
+       :desc "refresh"         "r" #'ibuffer-update
+       :desc "save marked"     "S" #'ibuffer-do-save
+       :desc "delete marked"   "D" #'ibuffer-do-delete
+       (:prefix ("f" . "filter")
+        :desc "unsaved"        "u" #'ibuffer-filter-by-unsaved-file-buffers
+        :desc "file buffers"   "f" #'ibuffer-filter-by-file-buffers
+        :desc "non-special"    "*" #'ibuffer-filter-by-non-special-buffers
+        :desc "by mode"        "m" #'ibuffer-filter-by-used-mode
+        :desc "by name"        "n" #'ibuffer-filter-by-name
+        :desc "by content"     "c" #'ibuffer-filter-by-content
+        :desc "pop"            "p" #'ibuffer-pop-filter
+        :desc "disable all"    "d" #'ibuffer-filter-disable)
+       (:prefix ("g" . "group")
+        :desc "by VC root"     "v" #'ibuffer-vc-set-filter-groups-by-vc-root
+        :desc "by mode"        "m" #'ibuffer-set-filter-groups-by-mode
+        :desc "clear"          "x" #'ibuffer-clear-filter-groups)
+       (:prefix ("s" . "sort")
+        :desc "recency"        "r" #'ibuffer-do-sort-by-recency
+        :desc "alphabetic"     "a" #'ibuffer-do-sort-by-alphabetic
+        :desc "size"           "s" #'ibuffer-do-sort-by-size
+        :desc "major mode"     "m" #'ibuffer-do-sort-by-major-mode
+        :desc "invert"         "i" #'ibuffer-invert-sorting
+        :desc "cycle mode"     "t" #'ibuffer-toggle-sorting-mode)
+       (:prefix ("m" . "mark")
+        :desc "by mode"        "m" #'ibuffer-mark-by-mode
+        :desc "modified"       "*" #'ibuffer-mark-modified-buffers
+        :desc "by name regexp" "n" #'ibuffer-mark-by-name-regexp
+        :desc "unmark all"     "u" #'ibuffer-unmark-all-marks)))
 
 (map! :map occur-mode-map
       :n "f" #'occur-mode-display-occurrence)

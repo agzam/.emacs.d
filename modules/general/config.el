@@ -154,7 +154,10 @@
                   expreg--paragraph-defun
                   expreg--markdown-subtree)))
 
-(after! ibuf-ext
+;; Loading ibuffer doesn't pull in ibuf-ext, where define-ibuffer-filter and
+;; the grouping vars live; require it so the filters below actually define.
+(after! ibuffer
+  (require 'ibuf-ext)
   (setopt
    ibuffer-old-time 8 ; buffer considered old after that many hours
    ibuffer-group-buffers-by 'projects
@@ -249,6 +252,10 @@
                       (encode-coding-string text 'utf-8) t)))
         (send-string-to-terminal
          (format "\033]52;c;%s\007" base64))))))
+
+;; VC-root filter groups, used by the sidebar hook and the ",g v" binding.
+(use-package ibuffer-vc
+  :after ibuffer)
 
 (use-package ibuffer-sidebar
   :defer t
