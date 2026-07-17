@@ -15,6 +15,13 @@
 
 (require 'elpaca)
 (require 'cl-lib)
+;; The changelog and local-rebuild helpers sit next to this file.  The live
+;; driver is `load'ed by `bb update' via emacsclient, so resolve them relative
+;; to this file, loading each only if the running session lacks it.
+(dolist (lib '("elpaca-update-report" "elpaca-local"))
+  (unless (featurep (intern lib))
+    (load (expand-file-name lib (file-name-directory (or load-file-name buffer-file-name)))
+          nil 'nomessage)))
 
 (defvar elpaca-live-update--log nil "File the caller tails for progress.")
 (defvar elpaca-live-update--total 0 "Packages expected to reach a terminal status.")
@@ -26,10 +33,18 @@
   "Pre-update map of source dir -> HEAD sha, for the changelog.")
 (defvar elpaca-live-update--reported nil
   "Hash of source dirs whose changelog block has already been emitted.")
-(defvar elpaca-live-update--pulled nil
-  "Names of unchanged packages accumulated for the next `pulled:' line.")
-(defconst elpaca-live-update--pulled-width 72
-  "Flush the pending `pulled:' line once it would grow past this many columns.")
+(defvar elpaca-live-update--batcher nil
+  "Shared `pulled:'-line batcher (see `elpaca-update-report-batcher').")
+(defvar elpaca-live-update--locals-rebuilt nil
+  "Non-nil once the post-update local-package rebuild phase has run.")
+(defvar elpaca-live-update--persist nil
+  "Persistent append-log path this run tees to, or nil when disabled.")
+(defvar elpaca-live-update--heartbeat-interval 10
+  "Seconds the pending set may sit unchanged before a heartbeat line is emitted.")
+(defvar elpaca-live-update--last-sig nil
+  "Last pending-work signature, for detecting a stalled or slow queue.")
+(defvar elpaca-live-update--last-change nil
+  "`float-time' at which the pending signature last changed.")
 
 (defun elpaca-live-update--emit (fmt &rest args)
   "Append a formatted line to the progress file."
@@ -38,21 +53,12 @@
                   nil elpaca-live-update--log 'append 'silent)))
 
 (defun elpaca-live-update--flush-pulled ()
-  "Emit and clear any pending unchanged-package names as one `pulled:' line."
-  (when elpaca-live-update--pulled
-    (elpaca-live-update--emit "pulled: %s"
-                              (string-join (nreverse elpaca-live-update--pulled) ", "))
-    (setq elpaca-live-update--pulled nil)))
+  "Flush pending unchanged-package names as one `pulled:' line."
+  (elpaca-update-report-flush elpaca-live-update--batcher #'elpaca-live-update--emit))
 
 (defun elpaca-live-update--note-pulled (name)
-  "Add NAME to the pending `pulled:' line, flushing first if it would overflow.
-Batching keeps the stream alive - names still appear promptly - without
-spending a whole line on each of the (usually many) unchanged packages."
-  (when (and elpaca-live-update--pulled     ; 8 = width of the "pulled: " prefix
-             (< elpaca-live-update--pulled-width
-                (+ 8 (length (string-join (cons name elpaca-live-update--pulled) ", ")))))
-    (elpaca-live-update--flush-pulled))
-  (push name elpaca-live-update--pulled))
+  "Batch NAME into the pending `pulled:' line, flushing on overflow first."
+  (elpaca-update-report-note elpaca-live-update--batcher #'elpaca-live-update--emit name))
 
 (defun elpaca-live-update--changes-for (e)
   "Return E's changelog block, once per shared source dir, else nil."
@@ -81,14 +87,6 @@ spending a whole line on each of the (usually many) unchanged packages."
    "%s" (elpaca-update-report--paint
          "31" (concat "failed: " (symbol-name (elpaca<-id e))))))
 
-(defun elpaca-live-update--terminal-p ()
-  "Non-nil once every queued package has reached a terminal status."
-  (cl-every (lambda (q)
-              (cl-every (lambda (cell)
-                          (memq (elpaca<-status (cdr cell)) '(finished failed)))
-                        (elpaca-q<-elpacas q)))
-            elpaca--queues))
-
 (defun elpaca-live-update--cleanup ()
   "Cancel timers, drop subscribers, restore `elpaca-log-functions'."
   (when elpaca-live-update--poll (cancel-timer elpaca-live-update--poll))
@@ -100,7 +98,7 @@ spending a whole line on each of the (usually many) unchanged packages."
     (setq elpaca-log-functions elpaca-live-update--saved-log-fns
           elpaca-live-update--saved-log-fns 'unset))
   (setq elpaca-update-report-color nil
-        elpaca-live-update--pulled nil))
+        elpaca-live-update--batcher nil))
 
 (defun elpaca-live-update--finish ()
   "Flush the trailing `pulled:' names, emit the summary marker, and clean up.
@@ -115,6 +113,61 @@ progress regex still anchors."
                                   "UPDATE-FAILED" "UPDATE-DONE")
                               elpaca-live-update--total updated
                               elpaca-live-update--failed)))
+
+(defun elpaca-live-update--heartbeat (pending elapsed)
+  "Emit a `still working' line naming PENDING packages unchanged for ELAPSED secs."
+  (elpaca-live-update--flush-pulled)
+  (elpaca-live-update--emit
+   "still working (%ds, %d pending): %s"
+   (round elapsed) (length pending)
+   (elpaca-update-report-format-pending pending)))
+
+(defun elpaca-live-update--run-local-rebuilds ()
+  "Rebuild on-disk-changed build-in-place locals; finish now when none need it.
+Announces what it waits on and resets the heartbeat clock so the wait is timed
+afresh.  Queuing rebuilds makes the queue non-terminal again, so the poll keeps
+ticking until they settle."
+  (if-let* ((rebuilt (elpaca-local-rebuild-changed
+                      (lambda (fmt &rest args)
+                        (elpaca-live-update--flush-pulled)
+                        (apply #'elpaca-live-update--emit fmt args)))))
+      (progn
+        (elpaca-live-update--emit "waiting for %d local rebuild(s): %s"
+                                  (length rebuilt)
+                                  (mapconcat #'symbol-name rebuilt ", "))
+        (setq elpaca-live-update--last-sig nil))
+    (elpaca-live-update--finish)))
+
+(defun elpaca-live-update--advance ()
+  "Poll tick: surface slow/stalled work, run the rebuild phase, then finish.
+Heartbeats keep the run from ever going silent: whenever the pending set sits
+unchanged past `elpaca-live-update--heartbeat-interval' - a slow compile, or a
+genuinely wedged package - it says exactly what it is waiting on.  Once the
+queue settles it rebuilds on-disk-changed locals as a second phase (a git
+update skips a build-in-place checkout whose merge moved no HEAD), which makes
+the queue non-terminal again, so the poll keeps ticking and only writes the
+terminal marker once that too has settled."
+  (let* ((now (float-time))
+         (pending (elpaca-update-report-pending))
+         (sig (elpaca-update-report-format-pending pending)))
+    ;; Self-heal a reload mid-run: seed the heartbeat clock when unset.
+    (unless elpaca-live-update--last-change
+      (setq elpaca-live-update--last-sig sig
+            elpaca-live-update--last-change now))
+    (cond
+     ((not (equal sig elpaca-live-update--last-sig))
+      (setq elpaca-live-update--last-sig sig
+            elpaca-live-update--last-change now))
+     ((and pending
+           (>= (- now elpaca-live-update--last-change)
+               elpaca-live-update--heartbeat-interval))
+      (elpaca-live-update--heartbeat pending (- now elpaca-live-update--last-change))
+      (setq elpaca-live-update--last-change now)))
+    (when (null pending)
+      (if elpaca-live-update--locals-rebuilt
+          (elpaca-live-update--finish)
+        (setq elpaca-live-update--locals-rebuilt t)
+        (elpaca-live-update--run-local-rebuilds)))))
 
 ;;;###autoload
 (defun elpaca-live-update-start (logfile &optional packages color)
@@ -133,7 +186,15 @@ UPDATE-DONE / UPDATE-FAILED line."
               elpaca-live-update--total (if packages (length packages)
                                           (length (elpaca--queued)))
               elpaca-live-update--failed 0
-              elpaca-live-update--pulled nil)
+              elpaca-live-update--batcher (elpaca-update-report-batcher)
+              elpaca-live-update--locals-rebuilt nil
+              elpaca-live-update--persist (elpaca-update-report-open-session "live")
+              elpaca-live-update--heartbeat-interval
+              (max 1 (string-to-number (or (getenv "ELPACA_UPDATE_HEARTBEAT") "10")))
+              elpaca-live-update--last-sig nil
+              elpaca-live-update--last-change (float-time)
+              ;; honor the caller's tty-color? verdict (cleared in --cleanup)
+              elpaca-update-report-color color)
         (write-region "" nil logfile nil 'silent) ; truncate
         (elpaca-live-update--emit "update: %d package(s) queued"
                                   elpaca-live-update--total)
@@ -157,9 +218,7 @@ UPDATE-DONE / UPDATE-FAILED line."
             (dolist (p packages) (elpaca-update p t))
           (elpaca-update-all t))
         (setq elpaca-live-update--poll
-              (run-at-time 1 1 (lambda ()
-                                 (when (elpaca-live-update--terminal-p)
-                                   (elpaca-live-update--finish)))))
+              (run-at-time 1 1 #'elpaca-live-update--advance))
         t)
     (error
      (elpaca-live-update--emit "UPDATE-ERROR %s" (error-message-string err))

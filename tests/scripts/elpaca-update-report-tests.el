@@ -201,4 +201,129 @@ Return a plist (:dir DIR :revs (SHA...)) with revs oldest-first."
         (expect (elpaca-update-report-block 'fake (make-hash-table :test 'equal))
                 :to-be nil)))))
 
+(describe "elpaca-update-report pulled-line batcher"
+  (it "collects names into a single pulled: line on flush"
+    (let ((b (elpaca-update-report-batcher 72)) out)
+      (let ((emit (lambda (fmt &rest args) (push (apply #'format fmt args) out))))
+        (elpaca-update-report-note b emit "aa")
+        (elpaca-update-report-note b emit "bb")
+        (expect out :to-be nil)               ; buffered, nothing emitted yet
+        (elpaca-update-report-flush b emit)
+        (expect out :to-equal '("pulled: aa, bb")))))
+
+  (it "auto-flushes once a line would overflow the width"
+    (let ((b (elpaca-update-report-batcher 12)) out)
+      (let ((emit (lambda (fmt &rest args) (push (apply #'format fmt args) out))))
+        (elpaca-update-report-note b emit "aaaa")
+        (elpaca-update-report-note b emit "bbbb") ; overflow: flush aaaa, buffer bbbb
+        (elpaca-update-report-flush b emit)
+        (expect (nreverse out) :to-equal '("pulled: aaaa" "pulled: bbbb")))))
+
+  (it "flushing an empty batcher emits nothing"
+    (let ((b (elpaca-update-report-batcher)) (n 0))
+      (elpaca-update-report-flush b (lambda (&rest _) (cl-incf n)))
+      (expect n :to-equal 0))))
+
+(describe "elpaca-update-report-format-pending"
+  (it "renders id=status pairs joined by commas"
+    (expect (elpaca-update-report-format-pending '((a . queued) (b . building)))
+            :to-equal "a=queued, b=building"))
+  (it "caps the list and counts the remainder"
+    (expect (elpaca-update-report-format-pending '((a . x) (b . x) (c . x)) 2)
+            :to-equal "a=x, b=x, … +1 more"))
+  (it "is empty for no pending work"
+    (expect (elpaca-update-report-format-pending nil) :to-equal "")))
+
+(describe "elpaca-update-report-log-file"
+  (it "defaults to /tmp/elpaca-update.log when unset"
+    (let ((process-environment (cons "ELPACA_UPDATE_LOG_FILE" process-environment)))
+      (expect (elpaca-update-report-log-file) :to-equal "/tmp/elpaca-update.log")))
+  (it "treats an empty value as disabled"
+    (let ((process-environment (cons "ELPACA_UPDATE_LOG_FILE=" process-environment)))
+      (expect (elpaca-update-report-log-file) :to-be nil)))
+  (it "honors an explicit path"
+    (let ((process-environment (cons "ELPACA_UPDATE_LOG_FILE=/x/y.log" process-environment)))
+      (expect (elpaca-update-report-log-file) :to-equal "/x/y.log"))))
+
+(describe "elpaca-update-report-log-max-bytes"
+  (it "defaults to 2 MiB when unset"
+    (let ((process-environment (cons "ELPACA_UPDATE_LOG_MAX_BYTES" process-environment)))
+      (expect (elpaca-update-report-log-max-bytes) :to-equal (* 2 1024 1024))))
+  (it "honors the env override"
+    (let ((process-environment (cons "ELPACA_UPDATE_LOG_MAX_BYTES=4096" process-environment)))
+      (expect (elpaca-update-report-log-max-bytes) :to-equal 4096)))
+  (it "clamps a negative cap to 0 (grow forever)"
+    (let ((process-environment (cons "ELPACA_UPDATE_LOG_MAX_BYTES=-1" process-environment)))
+      (expect (elpaca-update-report-log-max-bytes) :to-equal 0))))
+
+(describe "elpaca-update-report-tee"
+  (it "appends a line, stripping ANSI color"
+    (let ((f (make-temp-file "eur-tee")))
+      (unwind-protect
+          (progn
+            (elpaca-update-report-tee f (concat (string 27) "[33mabc" (string 27) "[0m"))
+            (elpaca-update-report-tee f "plain")
+            (expect (with-temp-buffer (insert-file-contents f) (buffer-string))
+                    :to-equal "abc\nplain\n"))
+        (delete-file f))))
+  (it "is a no-op for a nil file"
+    (expect (elpaca-update-report-tee nil "x") :to-be nil))
+  (it "never signals when the target is unwritable"
+    (expect (elpaca-update-report-tee "/no/such/dir/x.log" "x") :to-be nil)))
+
+(describe "elpaca-update-report-open-session"
+  (it "appends a labelled session header and returns the file"
+    (let* ((f (make-temp-file "eur-session"))
+           (process-environment
+            (append (list (concat "ELPACA_UPDATE_LOG_FILE=" f)
+                          "ELPACA_UPDATE_LOG_MAX_BYTES=0")
+                    process-environment)))
+      (unwind-protect
+          (progn
+            (expect (elpaca-update-report-open-session "live") :to-equal f)
+            (expect (with-temp-buffer (insert-file-contents f) (buffer-string))
+                    :to-match "^===== update session .* \\[live\\]$"))
+        (delete-file f))))
+  (it "returns nil when persistence is disabled"
+    (let ((process-environment (cons "ELPACA_UPDATE_LOG_FILE=" process-environment)))
+      (expect (elpaca-update-report-open-session "live") :to-be nil))))
+
+(describe "elpaca-update-report--trim-log"
+  (it "drops whole oldest sessions to fit under max, keeping the newest"
+    (let ((f (make-temp-file "eur-trim")))
+      (unwind-protect
+          (progn
+            (with-temp-buffer
+              (insert "===== update session S1 [x]\n" (make-string 200 ?a) "\n")
+              (insert "===== update session S2 [x]\n" (make-string 200 ?b) "\n")
+              (insert "===== update session S3 [x]\n" (make-string 200 ?c) "\n")
+              (write-region (point-min) (point-max) f nil 'silent))
+            (elpaca-update-report--trim-log f 300)
+            (let ((out (with-temp-buffer (insert-file-contents f) (buffer-string))))
+              (expect out :to-match "older sessions trimmed")
+              (expect out :to-match "S3")
+              (expect out :not :to-match "S1")
+              (expect out :to-match "^===== update session S")))
+        (delete-file f))))
+  (it "leaves a single oversized session intact (a session is atomic)"
+    (let ((f (make-temp-file "eur-trim1")))
+      (unwind-protect
+          (progn
+            (with-temp-buffer
+              (insert "===== update session S1 [x]\n" (make-string 500 ?a) "\n")
+              (write-region (point-min) (point-max) f nil 'silent))
+            (elpaca-update-report--trim-log f 100)
+            (expect (with-temp-buffer (insert-file-contents f) (buffer-string))
+                    :to-match "S1"))
+        (delete-file f))))
+  (it "is a no-op when max is 0 (grow forever)"
+    (let ((f (make-temp-file "eur-trim0")))
+      (unwind-protect
+          (progn
+            (write-region "big\n" nil f nil 'silent)
+            (elpaca-update-report--trim-log f 0)
+            (expect (with-temp-buffer (insert-file-contents f) (buffer-string))
+                    :to-equal "big\n"))
+        (delete-file f)))))
+
 ;;; tests/scripts/elpaca-update-report-tests.el ends here

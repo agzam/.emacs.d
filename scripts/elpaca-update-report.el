@@ -157,5 +157,141 @@ Nil when E's repo is absent from SNAPSHOT or its HEAD did not move."
      dir (elpaca-update-report--url e) old
      (elpaca-update-report--head dir) indent)))
 
+;;; Progress streaming: batch unchanged-package names into `pulled:' lines
+
+;; Both drivers report the (usually many) unchanged packages the same way - a
+;; running `pulled: a, b, c' line rather than a whole line each - so the
+;; batching lives here.  A batcher is a (PENDING-NAMES . WIDTH) cons the caller
+;; threads through `-note'/`-flush'.  EMIT is any (EMIT FMT &rest ARGS) sink
+;; that writes one line: stdout for the headless driver, the tailed logfile for
+;; the live one.
+
+(defun elpaca-update-report-batcher (&optional width)
+  "Return a fresh `pulled:' batcher, flushing once a line passes WIDTH columns."
+  (cons nil (or width 72)))
+
+(defun elpaca-update-report-flush (batcher emit)
+  "Emit BATCHER's pending names as one `pulled:' line via EMIT, then clear them.
+EMIT is called as (EMIT FMT &rest ARGS) and writes exactly one line."
+  (when (car batcher)
+    (funcall emit "pulled: %s" (string-join (nreverse (car batcher)) ", "))
+    (setcar batcher nil)))
+
+(defun elpaca-update-report-note (batcher emit name)
+  "Add NAME to BATCHER, first flushing via EMIT if the line would overflow.
+The 8 covers the width of the `pulled: ' prefix the flush prepends."
+  (when (and (car batcher)
+             (< (cdr batcher)
+                (+ 8 (length (string-join (cons name (car batcher)) ", ")))))
+    (elpaca-update-report-flush batcher emit))
+  (push name (car batcher)))
+
+;;; Pending-work summary: what the update is still waiting on
+
+;; Both drivers wait for the async queue to settle.  When nothing has settled
+;; for a while - a slow compile, or a genuinely wedged package - the driver
+;; must still say what it is waiting on rather than sit mute.  These turn the
+;; live queue into a short "id=status, …" line; the runtime collector needs a
+;; live Elpaca, the formatter is pure so the shape stays unit-testable.
+
+(defun elpaca-update-report-pending ()
+  "Return (ID . STATUS) for every queued package not yet finished or failed."
+  (when (fboundp 'elpaca--queued)
+    (let (out)
+      (dolist (cell (elpaca--queued))
+        (let ((status (elpaca<-status (cdr cell))))
+          (unless (memq status '(finished failed))
+            (push (cons (car cell) status) out))))
+      (nreverse out))))
+
+(defun elpaca-update-report-format-pending (pending &optional limit)
+  "Render PENDING - a list of (ID . STATUS) - as one compact `id=status' line.
+At most LIMIT entries are shown (default 6); any remainder is counted."
+  (let* ((limit (or limit 6))
+         (n (length pending))
+         (shown (if (> n limit) (cl-subseq pending 0 limit) pending)))
+    (concat (mapconcat (lambda (c) (format "%s=%s" (car c) (cdr c))) shown ", ")
+            (and (> n limit) (format ", … +%d more" (- n limit))))))
+
+;;; Persistent append-log: every session teed to one growing, trimmed file
+
+;; Beyond the per-run streaming, keep a durable record: every session appended
+;; to one file so past updates can be diffed and blamed after the fact.  It is
+;; deliberately belt-and-suspenders - every write is guarded, because a broken
+;; log (unwritable /tmp, full disk) must never be what derails an update.  The
+;; file grows across sessions and is trimmed a whole session at a time so it
+;; never straddles a boundary, staying greppable plain text (ANSI stripped).
+
+(defconst elpaca-update-report--log-marker "===== update session "
+  "Line prefix that marks a session boundary in the persistent log.")
+
+(defun elpaca-update-report-log-file ()
+  "Persistent-log path from ELPACA_UPDATE_LOG_FILE (default /tmp/elpaca-update.log).
+An explicitly empty value disables persistence (returns nil)."
+  (let ((f (getenv "ELPACA_UPDATE_LOG_FILE")))
+    (cond ((null f) "/tmp/elpaca-update.log")
+          ((string-empty-p f) nil)
+          (t f))))
+
+(defun elpaca-update-report-log-max-bytes ()
+  "Byte cap for the persistent log from ELPACA_UPDATE_LOG_MAX_BYTES.
+Defaults to 2 MiB; 0 disables trimming so the log grows without bound."
+  (max 0 (string-to-number
+          (or (getenv "ELPACA_UPDATE_LOG_MAX_BYTES")
+              (number-to-string (* 2 1024 1024))))))
+
+(defun elpaca-update-report--trim-log (file max)
+  "Trim FILE to under MAX bytes by dropping whole oldest sessions.
+No-op when MAX is 0, the file is missing, or it already fits.  A lone session
+bigger than MAX is left whole - a session is the atomic unit - and a note
+records that older sessions were dropped."
+  (when (and file (> max 0) (file-exists-p file)
+             (> (file-attribute-size (file-attributes file)) max))
+    (with-temp-buffer
+      (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
+      (let ((drop (- (position-bytes (point-max)) max))
+            (marker (concat "^" (regexp-quote elpaca-update-report--log-marker)))
+            cut)
+        (goto-char (point-min))
+        ;; Past the first session's own header, find the earliest later header
+        ;; that leaves the remainder within MAX, and cut the file there.
+        (when (re-search-forward marker nil t)
+          (while (and (not cut) (re-search-forward marker nil t))
+            (when (>= (- (position-bytes (match-beginning 0)) 1) drop)
+              (setq cut (match-beginning 0)))))
+        (when cut
+          (delete-region (point-min) cut)
+          (goto-char (point-min))
+          (insert (format "===== [older sessions trimmed to keep under %d bytes] =====\n"
+                          max))
+          (let ((coding-system-for-write 'utf-8))
+            (write-region (point-min) (point-max) file nil 'silent)))))))
+
+(defun elpaca-update-report-open-session (label)
+  "Trim the persistent log, append a header for LABEL, and return the log path.
+Returns nil when persistence is disabled or the header could not be written -
+in which case the caller simply skips teeing.  Never signals."
+  (when-let* ((file (elpaca-update-report-log-file)))
+    (condition-case nil
+        (progn
+          (elpaca-update-report--trim-log file (elpaca-update-report-log-max-bytes))
+          (write-region (format "%s%s [%s]\n" elpaca-update-report--log-marker
+                                (format-time-string "%Y-%m-%d %H:%M:%S") label)
+                        nil file 'append 'silent)
+          file)
+      (error nil))))
+
+(defun elpaca-update-report-tee (file text)
+  "Append TEXT as one ANSI-stripped line to persistent-log FILE.
+No-op when FILE is nil; never signals, so a failed write cannot stall a run."
+  (when file
+    (condition-case nil
+        (write-region
+         (concat (replace-regexp-in-string
+                  (concat (string 27) "\\[[0-9;]*m") "" text)
+                 "\n")
+         nil file 'append 'silent)
+      (error nil))))
+
 (provide 'elpaca-update-report)
 ;;; scripts/elpaca-update-report.el ends here
