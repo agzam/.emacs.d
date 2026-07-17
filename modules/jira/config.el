@@ -59,7 +59,8 @@
   (after! embark
     (map! :map go-jira-embark-jira-ticket-map
           (:prefix ("j" . "jira")
-           :desc "change status" "s" #'go-jira-change-status)
+           :desc "change status" "s" #'go-jira-change-status
+           :desc "assign"        "a" #'go-jira-assign)
           (:prefix ("b" . "browse")
            :desc "view" "b" #'go-jira-view-ticket
            :desc "in browser" "o" #'go-jira-browse-ticket-url)
