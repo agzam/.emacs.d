@@ -1568,6 +1568,19 @@ these. Each restores the parked leader rows when its foundation lands.
   (org-export-tests + org-attach-file-and-insert-link) -> 660 specs 0 failed,
   smoke 213 -> 229 packages (htmlize + alert/gntp/log4e pulled transitively)
   0 failed/blocked, diagnostics clean.
+- [2026-07] reddigg re-enabled (web-browsing).  Its use-package block -
+  parked with hnreader when both forks were called broken - is back,
+  built in place from the ~/GitHub/agzam/emacs-reddigg checkout
+  (local-dev-packages redirect; the recipe still pins :branch
+  fetch-via-browser for non-checkout machines).  Elpaca pulled promise
+  transitively (ht already present, org built-in) - the deps question is
+  answered: it reads Package-Requires and queues the menu packages.
+  darwin fetch-via-browser default, subs emacs/clojure/programming,
+  show-all hook + mode-map localleader restored.  embark reddit-link row
+  + process-external-url's reddit branch went live; hnreader stays parked
+  (its row/branch runtime-void).  Verified: bb lint 227/0, bb test 717
+  specs 0 failed, smoke 232 packages 0 failed/blocked (reddigg + promise
+  freshly built, reddigg symlinked to the checkout).
 
 * Key clusters
 RETIRED at conclusion (2026-07).  The key audit killed the "binding X
@@ -1872,9 +1885,9 @@ local-dev-packages pattern (browser-hist.el + consult-hn extracted to
 expreg-transient browser-url inserters restored.  Unblocks
 writing/embark/search (eww-* helpers + browser-hist); their doom.d
 configs still use the pre-rename +names.
-CAVEAT: hnreader + reddigg use-package blocks are commented out - the
-forks are currently broken (their installs also hung CI smoke);
-re-enable in config.el once the packages are fixed.
+CAVEAT: the hnreader use-package block stays commented out - the fork is
+currently broken; re-enable in config.el once it is fixed.  reddigg was
+re-enabled [2026-07], built in place from its ~/GitHub/agzam checkout.
 ** DONE writing
 Ported (see Decisions log).  jinx, sdcv, mw-thesaurus, google-translate
 (fork, :branch improvements, posframe UI rides the build), define-it,
@@ -1897,9 +1910,9 @@ magit-clone-simple at "g c"; embark-project-search rides
 consult-ripgrep until search ports. Fixed on the way: url.el's void
 bug-reference converters (+ specs), ephemeral-act's minibuffer
 R-prefix pollution, link-org->just-text's missing cookie.
-reddigg/hnreader/youtube-sub action rows stay runtime-void (parked
-packages). C-; / SPC a / C-SPC embark-preview / vertico ";" subkeys /
-avy "." / SPC b a all live.
+hnreader/youtube-sub action rows stay runtime-void (parked packages);
+reddigg's reddit-link row went live when reddigg re-enabled. C-; / SPC a
+/ C-SPC embark-preview / vertico ";" subkeys / avy "." / SPC b a all live.
 ** DONE search
 Ported (see Decisions log). consult-omni UNPINNED on develop (:files
 recipe, canonical sources API, keys over auth-host->pass, filter-args
