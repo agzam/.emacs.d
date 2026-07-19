@@ -117,31 +117,27 @@
   (setopt consult-hn-browse-fn #'consult-hn-reader)
   (transient-remap-suffix-key 'consult-hn-transient "RET" "s-<return>"))
 
-;; NOTE hnreader DISABLED (2026-07): the fork is currently broken; fix
-;; the package, then uncomment.  Its helpers live in the shared
-;; autoload/reddigg-hnreader.el (package-independent, stays live) and
-;; consult-hn's reader + process-external-url's hn branch are
-;; runtime-void meanwhile.
-;;
-;; (use-package hnreader
-;;   :ensure (hnreader :host github :repo "agzam/emacs-hnreader" :branch "major-mode")
-;;   :defer t
-;;   :hook (hnreader-mode . reddigg-hnreader-show-all-h)
-;;   :config
-;;   (map! :map hnreader-mode-map
-;;         "C-c C-o" #'hnreader-browse-nh-story-url
-;;         :n "yy" #'hnreader-copy-hn-story-url
-;;         :n "q" #'kill-buffer-and-window
-;;         :n "^" #'hnreader-goto-parent
-;;         (:localleader
-;;          "[[" #'hnreader-back
-;;          "]]" #'hnreader-more
-;;          (:prefix ("u" . "urls")
-;;           :desc "urls" "s" (cmd! (consult-line-collect-urls "ycombinator\\.com\\|view story in eww")))))
-;;
-;;   ;; no ranking numbers on front page
-;;   (advice-add 'hnreader--print-frontpage-item
-;;               :around #'hnreader-frontpage-item-no-rank-a))
+;; hnreader clones from GitHub (no local checkout); the pinned :branch is
+;; the fork's major-mode work (dedicated mode + keymap), not upstream master.
+(use-package hnreader
+  :ensure (hnreader :host github :repo "agzam/emacs-hnreader" :branch "major-mode")
+  :defer t
+  :hook (hnreader-mode . reddigg-hnreader-show-all-h)
+  :config
+  (map! :map hnreader-mode-map
+        "C-c C-o" #'hnreader-browse-nh-story-url
+        :n "yy" #'hnreader-copy-hn-story-url
+        :n "q" #'kill-buffer-and-window
+        :n "^" #'hnreader-goto-parent
+        (:localleader
+         "[[" #'hnreader-back
+         "]]" #'hnreader-more
+         (:prefix ("u" . "urls")
+          :desc "urls" "s" (cmd! (consult-line-collect-urls "ycombinator\\.com\\|view story in eww")))))
+
+  ;; no ranking numbers on front page
+  (advice-add 'hnreader--print-frontpage-item
+              :around #'hnreader-frontpage-item-no-rank-a))
 
 ;; reddigg builds in place from ~/GitHub/agzam/emacs-reddigg
 ;; (local-dev-packages redirect); the pinned :branch is what non-checkout

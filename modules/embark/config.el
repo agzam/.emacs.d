@@ -96,8 +96,6 @@
        :pattern "https\\:\\/\\/www.reddit.com\\/.*"
        :actions (("b b" . reddigg-view-comments)
                  ("RET" . reddigg-view-comments)))
-      ;; hnreader use-package block is commented out in web-browsing
-      ;; (broken fork) - this row stays runtime-void until it returns
       (hackernews-link
        :pattern "https\\:\\/\\/news.ycombinator.com\\/.*"
        :actions (("b b" . hnreader-comment)
