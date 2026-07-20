@@ -41,3 +41,14 @@ If JIRA-TICKET is not provided, uses ticket at point or prompts."
   (let* ((ticket (or (go-jira--ticket-arg-or-ticket-at-point jira-ticket)
                      (read-string "Gimme the JIRA ticket to search: "))))
     (github-topics-find-prs ticket)))
+
+;;;###autoload
+(defun go-jira-search-slack-threads (&optional jira-ticket)
+  "Search Slack threads for JIRA-TICKET.
+If JIRA-TICKET is not provided, uses ticket at point or prompts.
+Doubles as an Embark action on a Jira ticket at point."
+  (interactive)
+  (require 'go-jira)
+  (let ((ticket (or (go-jira--ticket-arg-or-ticket-at-point jira-ticket)
+                    (read-string "Gimme the JIRA ticket to search: "))))
+    (slacko-search ticket)))

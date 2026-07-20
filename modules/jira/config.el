@@ -60,12 +60,14 @@
     (map! :map go-jira-embark-jira-ticket-map
           (:prefix ("j" . "jira")
            :desc "change status" "s" #'go-jira-change-status
-           :desc "assign"        "a" #'go-jira-assign)
+           :desc "assign"        "a" #'go-jira-assign
+           :desc "PRs"           "p" #'go-jira-find-pull-requests-on-github)
           (:prefix ("b" . "browse")
            :desc "view" "b" #'go-jira-view-ticket
            :desc "in browser" "o" #'go-jira-browse-ticket-url)
           (:prefix ("f" . "find")
-           :desc "GH PRs" "g" #'go-jira-find-pull-requests-on-github)
+           :desc "GH PRs"        "g" #'go-jira-find-pull-requests-on-github
+           :desc "Slack Threads" "s" #'go-jira-search-slack-threads)
           (:prefix ("c" . "convert")
            :desc "link" "l" #'go-jira-ticket->link
            :desc "link+desc" "d" #'go-jira-ticket->num+description

@@ -102,5 +102,27 @@
           (go-jira-find-pull-requests-on-github)
           (expect searched :to-equal "SAC-7"))))))
 
+(describe "go-jira-search-slack-threads"
+  (it "searches Slack for the ticket at point"
+    (with-fake-feature 'go-jira
+      (let (searched)
+        (cl-letf (((symbol-function 'go-jira--ticket-arg-or-ticket-at-point)
+                   (lambda (arg) (or arg "SAC-42")))
+                  ((symbol-function 'slacko-search)
+                   (lambda (tkt &optional _host) (setq searched tkt))))
+          (go-jira-search-slack-threads)
+          (expect searched :to-equal "SAC-42")))))
+
+  (it "prompts when no ticket is resolvable"
+    (with-fake-feature 'go-jira
+      (let (searched)
+        (cl-letf (((symbol-function 'go-jira--ticket-arg-or-ticket-at-point)
+                   (lambda (_) nil))
+                  ((symbol-function 'read-string) (lambda (&rest _) "SAC-7"))
+                  ((symbol-function 'slacko-search)
+                   (lambda (tkt &optional _host) (setq searched tkt))))
+          (go-jira-search-slack-threads)
+          (expect searched :to-equal "SAC-7"))))))
+
 (provide 'jira-tests)
 ;;; tests/jira/jira-tests.el ends here
