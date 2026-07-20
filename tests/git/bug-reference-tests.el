@@ -23,7 +23,10 @@
               :to-be-truthy)
       (expect (string-match-p bug-reference-bug-regexp "no reference here")
               :to-be nil)
-      (expect bug-reference-url-format :to-be #'bug-reference-url-format-fn))))
+      (expect bug-reference-url-format :to-be #'bug-reference-url-format-fn)))
+  (it "wires an action onto the bug-reference button category"
+    (init-bug-reference-mode-settings)
+    (expect (get 'bug-reference 'action) :to-be #'bug-reference-button-action)))
 
 (describe "bug-reference-url-format-fn"
   (it "builds the GitHub issue url from the match"
@@ -36,3 +39,24 @@
         (re-search-forward bug-reference-bug-regexp)
         (expect (bug-reference-url-format-fn)
                 :to-equal "https://github.com/agzam/spacehammer/issues/101")))))
+
+(describe "bug-reference-button-action"
+  (it "browses the reference url when its overlay-button is pushed"
+    ;; Emacs 31 makes ref overlays actionless buttons; the wired action must
+    ;; route `push-button' to the reference's url.
+    (let ((bug-reference-bug-regexp bug-reference-bug-regexp)
+          (bug-reference-url-format bug-reference-url-format)
+          browsed)
+      (cl-letf (((symbol-function 'browse-url)
+                 (lambda (url &rest _) (setq browsed url))))
+        (init-bug-reference-mode-settings)
+        (with-temp-buffer
+          (insert "see agzam/foo#12 here")
+          (goto-char (point-min))
+          (re-search-forward bug-reference-bug-regexp)
+          (let ((ov (make-overlay (match-beginning 0) (match-end 0))))
+            (overlay-put ov 'category 'bug-reference)
+            (overlay-put ov 'button ov)
+            (overlay-put ov 'bug-reference-url "https://example.test/12"))
+          (push-button (match-beginning 0))))
+      (expect browsed :to-equal "https://example.test/12"))))

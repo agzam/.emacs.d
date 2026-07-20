@@ -13,7 +13,17 @@
     "\\([A-Za-z0-9_.-]+\\)"  ; repo
     "#\\([0-9]+\\)"          ; hash prefixed ticket number
     "\\)"))
-  (setq bug-reference-url-format #'bug-reference-url-format-fn))
+  (setq bug-reference-url-format #'bug-reference-url-format-fn)
+  ;; `bug-reference' overlays are buttons with no `action', so `push-button'
+  ;; callers (evil-ret, org RET) would `funcall' nil.  Supply one.
+  (put 'bug-reference 'action #'bug-reference-button-action))
+
+;;;###autoload
+(defun bug-reference-button-action (button)
+  "Visit the bug reference of BUTTON.
+Adapts `bug-reference-push-button' (which takes a position) to the
+button `action' convention so `push-button' works on references."
+  (bug-reference-push-button (overlay-start button)))
 
 ;;;###autoload
 (defun bug-reference-url-format-fn ()
