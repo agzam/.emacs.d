@@ -3,7 +3,11 @@
 ;; Vendored from Doom Emacs (MIT License, Copyright (c) 2014-2026 Henrik
 ;; Lissner), modules/doom/compat/+keybinds.el @ doomemacs/doomemacs 8e4fbba.
 ;; Changes: Doom lifecycle hooks remapped to doom-compat bridges, module
-;; system references removed, which-key comes from Emacs core.
+;; system references removed, which-key comes from Emacs core.  `map!' :desc on
+;; a terminal key embeds the label in the keymap as a (DESC . DEF) menu item
+;; (built-in which-key reads it directly, so embark's prefix-stripped
+;; sub-keymaps keep their labels); prefix labels stay global replacements so
+;; layered leader prefixes across modules still merge instead of clobbering.
 ;;; Code:
 
 (require 'doom-compat)
@@ -304,12 +308,17 @@ For example, :nvi will map to (list \\='normal \\='visual \\='insert). See
       (cond ((and (listp def)
                   (keywordp (car-safe (setq unquoted (doom-unquote def)))))
              (setq def (list 'quote (plist-put unquoted :which-key desc))))
-            ((setq def (cons 'list
-                             (if (and (equal key "")
-                                      (null def))
-                                 `(:ignore t :which-key ,desc)
-                               (plist-put (general--normalize-extended-def def)
-                                          :which-key desc))))))))
+            ;; Label a prefix through a global which-key replacement rather than
+            ;; rebinding the prefix key to a fresh labeled keymap: the same
+            ;; leader prefixes are built up across several modules, and a fresh
+            ;; keymap would drop the keys another module already bound here.
+            ((and (equal key "") (null def))
+             (setq def (cons 'list `(:ignore t :which-key ,desc))))
+            ;; Embed a terminal key's label in the keymap itself as a
+            ;; (DESC . DEF) menu item, so which-key still shows it when embark
+            ;; displays a sub-keymap with the prefix stripped -- a global
+            ;; replacement keyed on the whole key sequence can't match there.
+            ((setq def `(cons ,desc ,def))))))
   (dolist (state states)
     (push (list key def)
           (alist-get state doom--map-batch-forms)))
