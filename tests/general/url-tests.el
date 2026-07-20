@@ -49,32 +49,33 @@
         (goto-char (point-min))
         (expect (embark-target-bug-reference-link-at-point) :to-be nil)))))
 
-;; The three converters below used to call the void
-;; embark-target-bug-reference-at-point (missing -link-; doom.d still has
-;; that bug) - each spec pins the fixed call path end to end.
+;; Each converter expands the org/repo#N reference to its GitHub URL and
+;; uses that URL as the link target - a raw ref target is not clickable and
+;; breaks the reverse converters (bisect-github-url errors on non-urls).
 
 (describe "link-bug-reference->link-plain"
-  (it "completes and rewrites the reference in place"
+  (it "expands the reference to its GitHub issue URL in place"
     (with-bug-ref-fixture
-     (expect (link-bug-reference->link-plain) :not :to-throw)
-     (expect (buffer-string) :to-equal "fix agzam/foo#12 soon"))))
+     (link-bug-reference->link-plain)
+     (expect (buffer-string)
+             :to-equal "fix https://github.com/agzam/foo/issues/12 soon"))))
 
 (describe "link-bug-reference->link-org-mode"
-  (it "wraps the reference in an org link with the gh title"
+  (it "wraps the GitHub URL in an org link with the gh title"
     (with-bug-ref-fixture
      (cl-letf (((symbol-function 'get-gh-item-title)
                 (lambda (&rest _) "PR title")))
        (link-bug-reference->link-org-mode))
      (expect (buffer-string)
-             :to-equal "fix [[agzam/foo#12][PR title]] soon"))))
+             :to-equal
+             "fix [[https://github.com/agzam/foo/issues/12][PR title]] soon"))))
 
 (describe "link-bug-reference->link-markdown"
-  (it "wraps the reference in a markdown link with the gh title"
+  (it "wraps the GitHub URL in a markdown link with the gh title"
     (with-bug-ref-fixture
      (cl-letf (((symbol-function 'get-gh-item-title)
-                (lambda (&rest _) "PR title"))
-               ((symbol-function 'bisect-github-url)
-                (lambda (&rest _) '(:org "agzam" :repo "foo" :pull "12"))))
+                (lambda (&rest _) "PR title")))
        (link-bug-reference->link-markdown))
      (expect (buffer-string)
-             :to-equal "fix [PR title](agzam/foo#12) soon"))))
+             :to-equal
+             "fix [PR title](https://github.com/agzam/foo/issues/12) soon"))))

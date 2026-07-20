@@ -40,6 +40,20 @@
         (expect (bug-reference-url-format-fn)
                 :to-equal "https://github.com/agzam/spacehammer/issues/101")))))
 
+(describe "bug-reference->github-url"
+  (it "expands an org/repo#N ref string to its GitHub issue url"
+    (let ((bug-reference-bug-regexp bug-reference-bug-regexp)
+          (bug-reference-url-format bug-reference-url-format))
+      (init-bug-reference-mode-settings)
+      (expect (bug-reference->github-url "qlik-trial/stitch-menagerie-service#576")
+              :to-equal
+              "https://github.com/qlik-trial/stitch-menagerie-service/issues/576")))
+  (it "returns nil for a non-reference string"
+    (let ((bug-reference-bug-regexp bug-reference-bug-regexp)
+          (bug-reference-url-format bug-reference-url-format))
+      (init-bug-reference-mode-settings)
+      (expect (bug-reference->github-url "just some words") :to-be nil))))
+
 (describe "bug-reference-button-action"
   (it "browses the reference url when its overlay-button is pushed"
     ;; Emacs 31 makes ref overlays actionless buttons; the wired action must

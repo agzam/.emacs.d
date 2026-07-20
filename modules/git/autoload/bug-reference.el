@@ -26,12 +26,29 @@ button `action' convention so `push-button' works on references."
   (bug-reference-push-button (overlay-start button)))
 
 ;;;###autoload
+(defun bug-reference-github-issue-url (org project ticket)
+  "GitHub issue URL for ORG/PROJECT#TICKET.
+A blank ORG falls back to `bug-reference-default-org'.  GitHub redirects
+the /issues/ form to /pull/ so it resolves pull requests too."
+  (format "https://github.com/%s/%s/issues/%s"
+          (if (or (null org) (string-blank-p org))
+              bug-reference-default-org
+            org)
+          project ticket))
+
+;;;###autoload
 (defun bug-reference-url-format-fn ()
   "GitHub issue URL for the last `bug-reference-bug-regexp' match."
-  (let* ((org (match-string-no-properties 2))
-         (project (match-string-no-properties 3))
-         (ticket (match-string-no-properties 4))
-         (org (if (or (null org) (string-blank-p org))
-                  bug-reference-default-org
-                org)))
-    (format "https://github.com/%s/%s/issues/%s" org project ticket)))
+  (bug-reference-github-issue-url (match-string-no-properties 2)
+                                  (match-string-no-properties 3)
+                                  (match-string-no-properties 4)))
+
+;;;###autoload
+(defun bug-reference->github-url (ref)
+  "GitHub issue URL for a bug REF string like \"org/repo#123\".
+Returns nil when REF is not a bug reference.  Re-matches against REF
+rather than the buffer, so it is safe to call away from point."
+  (when (string-match bug-reference-bug-regexp ref)
+    (bug-reference-github-issue-url (match-string-no-properties 2 ref)
+                                    (match-string-no-properties 3 ref)
+                                    (match-string-no-properties 4 ref))))

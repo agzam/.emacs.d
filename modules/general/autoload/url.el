@@ -188,7 +188,7 @@ anything like: RFC 123, rfc-123, RFC123 or rfc123."
 (defun link-bug-reference->link-org-mode ()
   (interactive)
   (when-let* ((ref (embark-target-bug-reference-link-at-point))
-              (url (nth 1 ref))
+              (url (bug-reference->github-url (nth 1 ref)))
               (bounds (nthcdr 2 ref))
               (link (format "[[%s][%s]]"
                             url
@@ -201,12 +201,12 @@ anything like: RFC 123, rfc-123, RFC123 or rfc123."
 (defun link-bug-reference->link-markdown ()
   (interactive)
   (when-let* ((ref (embark-target-bug-reference-link-at-point))
-              (url (nth 1 ref))
+              (url (bug-reference->github-url (nth 1 ref)))
               (bounds (nthcdr 2 ref))
-              (link (let-plist (bisect-github-url url)
-                      (format "[%s](%s)"
-                              (get-gh-item-title url)
-                              url))))
+              (link (format "[%s](%s)"
+                            (or (get-gh-item-title url)
+                                (org-cliplink-retrieve-title-synchronously url))
+                            url)))
     (delete-region (car bounds) (cdr bounds))
     (insert link)))
 
@@ -214,7 +214,7 @@ anything like: RFC 123, rfc-123, RFC123 or rfc123."
 (defun link-bug-reference->link-plain ()
   (interactive)
   (when-let* ((ref (embark-target-bug-reference-link-at-point))
-              (url (nth 1 ref))
+              (url (bug-reference->github-url (nth 1 ref)))
               (bounds (nthcdr 2 ref)))
     (delete-region (car bounds)
                    (cdr bounds))
