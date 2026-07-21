@@ -81,6 +81,7 @@
     (wiktionary-bro . "~/GitHub/agzam/wiktionary-bro.el")
     (slacko . "~/GitHub/agzam/slacko.el")
     (go-jira . "~/GitHub/agzam/go-jira.el")
+    (khalendario . "~/GitHub/agzam/khalendario.el")
     ;; the hammerspoon config IS the spacehammer checkout (doom.d symlinked it)
     (spacehammer . "~/.hammerspoon"))
   "Alist of own packages -> local checkout preferred over the GitHub recipe.")

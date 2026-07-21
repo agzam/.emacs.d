@@ -646,3 +646,23 @@
 ;; its own autoloads (org-download-clipboard/-screenshot) stay reachable
 (use-package org-download
   :defer t)
+
+;; El Khalendario - explicit Org <-> Google Calendar sync.  Placement is
+;; pluggable and left to the consumer; flat-daily files pulled events
+;; under level-1 "YYYY-MM-DD Weekday" headings - the exact shape
+;; journal-template gives daily notes - so events land under their day.
+;; A per-file #+GCAL_PLACEMENT:/#+GCAL_CALENDAR: still overrides this.
+(use-package khalendario
+  :ensure (khalendario :host github :repo "agzam/khalendario.el")
+  :defer t
+  :init
+  (setq khalendario-placement-strategy #'khalendario-placement-flat-daily)
+  (map! :map org-mode-map
+        :localleader
+        (:prefix ("k" . "khalendario")
+         :desc "pull events" "f" #'khalendario-pull
+         :desc "push entry/region" "p" #'khalendario-push
+         :desc "push buffer" "b" #'khalendario-push-buffer
+         :desc "sync file" "s" #'khalendario-sync
+         :desc "delete at point" "d" #'khalendario-delete-at-point
+         :desc "verify auth" "v" #'khalendario-verify-auth)))
