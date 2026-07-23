@@ -17,10 +17,12 @@
 ;; loadable (and unit-testable) without it.
 (require 'elpaca nil t)
 
-(defvar elpaca-update-report-color nil
+(defvar elpaca-update-report-color (and (getenv "ELPACA_UPDATE_COLOR") t)
   "When non-nil, wrap changelog shas and dates in ANSI SGR color codes.
-The drivers set this per run from a flag `bb update' raises only when its own
-stdout is a terminal, so a piped or redirected update stays plain.")
+`bb update' exports ELPACA_UPDATE_COLOR to the headless driver only when its
+own stdout is a terminal, so the default is right there; the live driver - a
+long-running server whose environment predates the run - overrides this per
+run from its start argument, so a piped or redirected update stays plain.")
 
 (defun elpaca-update-report--paint (code s)
   "Wrap S in ANSI SGR CODE (e.g. \"33\") when `elpaca-update-report-color' is on.
@@ -156,6 +158,20 @@ Nil when E's repo is absent from SNAPSHOT or its HEAD did not move."
     (elpaca-update-report--render
      dir (elpaca-update-report--url e) old
      (elpaca-update-report--head dir) indent)))
+
+(defun elpaca-update-report-block-once (e snapshot seen &optional indent)
+  "Changelog block for E, at most once per source dir across calls.
+SEEN is a hash table threading already-reported dirs between calls - both
+drivers dedup this way, because packages built from one repo (a monorepo, or
+a package plus its extensions) would otherwise repeat the same block.  Nil
+when SNAPSHOT is not a hash table (the update never reached its baseline),
+E's dir is unknown or already in SEEN, or its HEAD did not move."
+  (when-let* (((hash-table-p snapshot))
+              (dir (ignore-errors (elpaca<-source-dir e)))
+              ((not (gethash dir seen)))
+              (changes (elpaca-update-report-block e snapshot indent)))
+    (puthash dir t seen)
+    changes))
 
 ;;; Progress streaming: batch unchanged-package names into `pulled:' lines
 

@@ -201,6 +201,39 @@ Return a plist (:dir DIR :revs (SHA...)) with revs oldest-first."
         (expect (elpaca-update-report-block 'fake (make-hash-table :test 'equal))
                 :to-be nil)))))
 
+(describe "elpaca-update-report-block-once"
+  (let (dir revs)
+    (before-each
+      (let ((repo (elpaca-update-report-tests--repo '("first" "second"))))
+        (setq dir (plist-get repo :dir) revs (plist-get repo :revs))))
+    (after-each (delete-directory dir t))
+
+    (it "renders a moved package once, then dedups its source dir"
+      (let ((snapshot (make-hash-table :test 'equal))
+            (seen (make-hash-table :test 'equal)))
+        (puthash dir (nth 0 revs) snapshot)
+        (cl-letf (((symbol-function 'elpaca<-source-dir) (lambda (_e) dir))
+                  ((symbol-function 'elpaca--url) (lambda (_e) nil)))
+          (expect (elpaca-update-report-block-once 'pkg snapshot seen)
+                  :to-match "1 commit")
+          ;; second package from the same repo: the extension case
+          (expect (elpaca-update-report-block-once 'pkg-extras snapshot seen)
+                  :to-be nil))))
+
+    (it "does not mark a dir seen when its HEAD did not move"
+      (let ((snapshot (make-hash-table :test 'equal))
+            (seen (make-hash-table :test 'equal)))
+        (puthash dir (nth 1 revs) snapshot)
+        (cl-letf (((symbol-function 'elpaca<-source-dir) (lambda (_e) dir))
+                  ((symbol-function 'elpaca--url) (lambda (_e) nil)))
+          (expect (elpaca-update-report-block-once 'pkg snapshot seen) :to-be nil)
+          (expect (gethash dir seen) :to-be nil))))
+
+    (it "tolerates a nil snapshot (update aborted before its baseline)"
+      (expect (elpaca-update-report-block-once
+               'pkg nil (make-hash-table :test 'equal))
+              :to-be nil))))
+
 (describe "elpaca-update-report pulled-line batcher"
   (it "collects names into a single pulled: line on flush"
     (let ((b (elpaca-update-report-batcher 72)) out)

@@ -40,49 +40,36 @@
 (defvar elpaca-live-update--persist nil
   "Persistent append-log path this run tees to, or nil when disabled.")
 (defvar elpaca-live-update--heartbeat-interval 10
-  "Seconds the pending set may sit unchanged before a heartbeat line is emitted.")
-(defvar elpaca-live-update--last-sig nil
-  "Last pending-work signature, for detecting a stalled or slow queue.")
-(defvar elpaca-live-update--last-change nil
-  "`float-time' at which the pending signature last changed.")
+  "Seconds of silence before a heartbeat line is emitted.")
+(defvar elpaca-live-update--last-emit nil
+  "`float-time' of the most recent emitted line; the silence heartbeat keys on it.")
 
 (defun elpaca-live-update--emit (fmt &rest args)
-  "Append a formatted line to the progress file."
+  "Append a formatted line to the progress file, mirroring the persistent log."
   (when elpaca-live-update--log
-    (write-region (concat (apply #'format fmt args) "\n")
-                  nil elpaca-live-update--log 'append 'silent)))
-
-(defun elpaca-live-update--flush-pulled ()
-  "Flush pending unchanged-package names as one `pulled:' line."
-  (elpaca-update-report-flush elpaca-live-update--batcher #'elpaca-live-update--emit))
-
-(defun elpaca-live-update--note-pulled (name)
-  "Batch NAME into the pending `pulled:' line, flushing on overflow first."
-  (elpaca-update-report-note elpaca-live-update--batcher #'elpaca-live-update--emit name))
-
-(defun elpaca-live-update--changes-for (e)
-  "Return E's changelog block, once per shared source dir, else nil."
-  (when-let* (((hash-table-p elpaca-live-update--snapshot))
-              (dir (ignore-errors (elpaca<-source-dir e)))
-              ((not (gethash dir elpaca-live-update--reported)))
-              (changes (elpaca-update-report-block e elpaca-live-update--snapshot)))
-    (puthash dir t elpaca-live-update--reported)
-    changes))
+    (let ((line (apply #'format fmt args)))
+      (setq elpaca-live-update--last-emit (float-time))
+      (write-region (concat line "\n")
+                    nil elpaca-live-update--log 'append 'silent)
+      (elpaca-update-report-tee elpaca-live-update--persist line))))
 
 (defun elpaca-live-update--on-finished (e)
   "Batch E into the running `pulled:' line, or break out its commit block."
-  (if-let* ((changes (elpaca-live-update--changes-for e)))
+  (if-let* ((changes (elpaca-update-report-block-once
+                      e elpaca-live-update--snapshot elpaca-live-update--reported)))
       (progn
-        (elpaca-live-update--flush-pulled)
+        (elpaca-update-report-flush elpaca-live-update--batcher
+                                    #'elpaca-live-update--emit)
         (elpaca-live-update--emit
          "pulled: %s\n%s"
          (elpaca-update-report--paint "1" (symbol-name (elpaca<-id e))) changes))
-    (elpaca-live-update--note-pulled (symbol-name (elpaca<-id e)))))
+    (elpaca-update-report-note elpaca-live-update--batcher #'elpaca-live-update--emit
+                               (symbol-name (elpaca<-id e)))))
 
 (defun elpaca-live-update--on-failed (e)
   "Report E failing, after flushing any pending `pulled:' names."
   (cl-incf elpaca-live-update--failed)
-  (elpaca-live-update--flush-pulled)
+  (elpaca-update-report-flush elpaca-live-update--batcher #'elpaca-live-update--emit)
   (elpaca-live-update--emit
    "%s" (elpaca-update-report--paint
          "31" (concat "failed: " (symbol-name (elpaca<-id e))))))
@@ -106,7 +93,7 @@ The marker line stays plain - no color prefix - so the caller's `^UPDATE-'
 progress regex still anchors."
   (let ((updated (if (hash-table-p elpaca-live-update--reported)
                      (hash-table-count elpaca-live-update--reported) 0)))
-    (elpaca-live-update--flush-pulled)
+    (elpaca-update-report-flush elpaca-live-update--batcher #'elpaca-live-update--emit)
     (elpaca-live-update--cleanup)
     (elpaca-live-update--emit "%s %d package(s) processed, %d updated, %d failed"
                               (if (< 0 elpaca-live-update--failed)
@@ -114,56 +101,42 @@ progress regex still anchors."
                               elpaca-live-update--total updated
                               elpaca-live-update--failed)))
 
-(defun elpaca-live-update--heartbeat (pending elapsed)
-  "Emit a `still working' line naming PENDING packages unchanged for ELAPSED secs."
-  (elpaca-live-update--flush-pulled)
-  (elpaca-live-update--emit
-   "still working (%ds, %d pending): %s"
-   (round elapsed) (length pending)
-   (elpaca-update-report-format-pending pending)))
-
 (defun elpaca-live-update--run-local-rebuilds ()
   "Rebuild on-disk-changed build-in-place locals; finish now when none need it.
-Announces what it waits on and resets the heartbeat clock so the wait is timed
-afresh.  Queuing rebuilds makes the queue non-terminal again, so the poll keeps
-ticking until they settle."
+Announcing what it waits on also refreshes the silence clock, so the wait is
+timed afresh.  Queuing rebuilds makes the queue non-terminal again, so the
+poll keeps ticking until they settle."
   (if-let* ((rebuilt (elpaca-local-rebuild-changed
                       (lambda (fmt &rest args)
-                        (elpaca-live-update--flush-pulled)
+                        (elpaca-update-report-flush elpaca-live-update--batcher
+                                                    #'elpaca-live-update--emit)
                         (apply #'elpaca-live-update--emit fmt args)))))
-      (progn
-        (elpaca-live-update--emit "waiting for %d local rebuild(s): %s"
-                                  (length rebuilt)
-                                  (mapconcat #'symbol-name rebuilt ", "))
-        (setq elpaca-live-update--last-sig nil))
+      (elpaca-live-update--emit "waiting for %d local rebuild(s): %s"
+                                (length rebuilt)
+                                (mapconcat #'symbol-name rebuilt ", "))
     (elpaca-live-update--finish)))
 
 (defun elpaca-live-update--advance ()
-  "Poll tick: surface slow/stalled work, run the rebuild phase, then finish.
-Heartbeats keep the run from ever going silent: whenever the pending set sits
-unchanged past `elpaca-live-update--heartbeat-interval' - a slow compile, or a
-genuinely wedged package - it says exactly what it is waiting on.  Once the
-queue settles it rebuilds on-disk-changed locals as a second phase (a git
-update skips a build-in-place checkout whose merge moved no HEAD), which makes
-the queue non-terminal again, so the poll keeps ticking and only writes the
-terminal marker once that too has settled."
-  (let* ((now (float-time))
-         (pending (elpaca-update-report-pending))
-         (sig (elpaca-update-report-format-pending pending)))
-    ;; Self-heal a reload mid-run: seed the heartbeat clock when unset.
-    (unless elpaca-live-update--last-change
-      (setq elpaca-live-update--last-sig sig
-            elpaca-live-update--last-change now))
-    (cond
-     ((not (equal sig elpaca-live-update--last-sig))
-      (setq elpaca-live-update--last-sig sig
-            elpaca-live-update--last-change now))
-     ((and pending
-           (>= (- now elpaca-live-update--last-change)
-               elpaca-live-update--heartbeat-interval))
-      (elpaca-live-update--heartbeat pending (- now elpaca-live-update--last-change))
-      (setq elpaca-live-update--last-change now)))
-    (when (null pending)
+  "Poll tick: surface silent stretches, run the rebuild phase, then finish.
+Heartbeats keep the run from ever going silent: whenever nothing has been
+emitted for `elpaca-live-update--heartbeat-interval' - a slow compile, or a
+genuinely wedged package - a line says exactly what is still pending, via the
+same silence-keyed helper the headless driver uses.  Once the queue settles it
+rebuilds on-disk-changed locals as a second phase (a git update skips a
+build-in-place checkout whose merge moved no HEAD), which makes the queue
+non-terminal again, so the poll keeps ticking and only writes the terminal
+marker once that too has settled."
+  (let ((pending (elpaca-update-report-pending)))
+    ;; Self-heal a reload mid-run: seed the silence clock when unset.
+    (unless elpaca-live-update--last-emit
+      (setq elpaca-live-update--last-emit (float-time)))
+    (if pending
+        (when-let* ((line (elpaca-update-report-heartbeat-line
+                           pending elpaca-live-update--last-emit
+                           elpaca-live-update--heartbeat-interval)))
+          (elpaca-update-report-flush elpaca-live-update--batcher
+                                      #'elpaca-live-update--emit)
+          (elpaca-live-update--emit "%s" line))
       (if elpaca-live-update--locals-rebuilt
           (elpaca-live-update--finish)
         (setq elpaca-live-update--locals-rebuilt t)
@@ -191,8 +164,7 @@ UPDATE-DONE / UPDATE-FAILED line."
               elpaca-live-update--persist (elpaca-update-report-open-session "live")
               elpaca-live-update--heartbeat-interval
               (max 1 (string-to-number (or (getenv "ELPACA_UPDATE_HEARTBEAT") "10")))
-              elpaca-live-update--last-sig nil
-              elpaca-live-update--last-change (float-time)
+              elpaca-live-update--last-emit (float-time)
               ;; honor the caller's tty-color? verdict (cleared in --cleanup)
               elpaca-update-report-color color)
         (write-region "" nil logfile nil 'silent) ; truncate

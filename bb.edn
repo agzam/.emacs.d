@@ -14,19 +14,30 @@
                                      "emacsclient" "--eval" "nil"))))
             (defn follow-progress
               "Stream LOGFILE to stdout as it grows until an UPDATE- marker.
-Return 0 on UPDATE-DONE, 1 on any other marker or once DEADLINE-MS elapses."
+Return 0 on UPDATE-DONE, 1 on any other marker or once DEADLINE-MS elapses.
+Tails from a persistent offset instead of re-reading the whole file each
+tick; the trailing partial line is carried over so a marker split across
+two reads still matches its line anchor."
               [logfile deadline-ms]
               (let [deadline (+ (System/currentTimeMillis) deadline-ms)]
-                (loop [pos 0]
-                  (let [content (if (fs/exists? logfile) (slurp logfile) "")
-                        n (count content)]
-                    (when (< pos n) (print (subs content pos n)) (flush))
-                    (cond
-                      (re-find (re-pattern "(?m)^UPDATE-DONE\\b") content) 0
-                      (re-find (re-pattern "(?m)^UPDATE-(FAILED|TIMEOUT|ERROR)\\b") content) 1
-                      (< deadline (System/currentTimeMillis))
-                      (do (println "\nupdate: gave up waiting for Emacs to finish") 1)
-                      :else (do (Thread/sleep 250) (recur n)))))))
+                (with-open [raf (java.io.RandomAccessFile. (str logfile) "r")]
+                  (loop [carry ""]
+                    (let [avail (- (.length raf) (.getFilePointer raf))
+                          chunk (when (pos? avail)
+                                  (let [buf (byte-array avail)]
+                                    (.readFully raf buf)
+                                    (String. buf java.nio.charset.StandardCharsets/UTF_8)))
+                          seen (str carry chunk)]
+                      (when chunk (print chunk) (flush))
+                      (cond
+                        (re-find (re-pattern "(?m)^UPDATE-DONE\\b") seen) 0
+                        (re-find (re-pattern "(?m)^UPDATE-(FAILED|TIMEOUT|ERROR)\\b") seen) 1
+                        (< deadline (System/currentTimeMillis))
+                        (do (println "\nupdate: gave up waiting for Emacs to finish") 1)
+                        :else (do (Thread/sleep 250)
+                                  (recur (if-let [nl (str/last-index-of seen "\n")]
+                                           (subs seen (inc nl))
+                                           seen)))))))))
             (defn tty-color?
               "True when ANSI color should be emitted: our stdout is a real
 terminal (or ELPACA_UPDATE_COLOR=1 forces it) and NO_COLOR is unset."

@@ -25,9 +25,6 @@
 (defvar elpaca-update--snapshot nil
   "Pre-update map of source dir -> HEAD sha, captured before merging.")
 
-;; Color when bb signals our stdout is a terminal.
-(setq elpaca-update-report-color (and (getenv "ELPACA_UPDATE_COLOR") t))
-
 ;; Open the persistent append-log up front so even the earliest lines land in
 ;; it; nil (disabled or unwritable) just turns teeing into a no-op.
 (defvar elpaca-update--persist (elpaca-update-report-open-session "headless")
@@ -36,19 +33,15 @@
 (defun elpaca-update--changelog ()
   "Print the commits pulled in for every changed package; return the count."
   (let ((seen (make-hash-table :test 'equal)) (n 0))
-    (when (hash-table-p elpaca-update--snapshot)
-      (dolist (cell (elpaca--queued))
-        (let* ((e (cdr cell))
-               (dir (ignore-errors (elpaca<-source-dir e))))
-          (when (and dir (not (gethash dir seen)))
-            (when-let* ((changes (elpaca-update-report-block e elpaca-update--snapshot)))
-              (puthash dir t seen)
-              (when (zerop n) (princ "\nupdated packages:\n"))
-              (cl-incf n)
-              (princ (format "  %s\n%s\n"
-                             (elpaca-update-report--paint
-                              "1" (symbol-name (elpaca<-id e)))
-                             changes)))))))
+    (dolist (cell (elpaca--queued))
+      (when-let* ((changes (elpaca-update-report-block-once
+                            (cdr cell) elpaca-update--snapshot seen)))
+        (when (zerop n) (princ "\nupdated packages:\n"))
+        (cl-incf n)
+        (princ (format "  %s\n%s\n"
+                       (elpaca-update-report--paint
+                        "1" (symbol-name (elpaca<-id (cdr cell))))
+                       changes))))
     n))
 
 (defun elpaca-update--report (updated)
@@ -69,6 +62,9 @@ UPDATED is the count of packages that actually changed this run."
 ;; changelog at the end still prints the commits per changed package.
 (defvar elpaca-update--batcher (elpaca-update-report-batcher)
   "Batcher accumulating settled package names into `pulled:' lines.")
+
+(defvar elpaca-update--last-emit nil
+  "`float-time' of the most recent emitted line; the silence heartbeat keys on it.")
 
 (defun elpaca-update--emit (fmt &rest args)
   "Stream one progress line to stderr and mirror it to the persistent log.
@@ -103,8 +99,6 @@ before `kill-emacs', which flushes."
 ;; keep resetting the clock) stays quiet.  Default 10s, override with
 ;; ELPACA_UPDATE_HEARTBEAT.
 (defvar elpaca-update--hb-timer nil "Repeating heartbeat timer, cancelled at the end.")
-(defvar elpaca-update--last-emit (float-time)
-  "`float-time' of the most recent emitted line; the silence heartbeat keys on it.")
 (defvar elpaca-update--hb-interval
   (max 1 (string-to-number (or (getenv "ELPACA_UPDATE_HEARTBEAT") "10")))
   "Seconds of silence before a heartbeat line is printed.")
@@ -120,11 +114,13 @@ before `kill-emacs', which flushes."
 ;; Watchdog: fetching+rebuilding every package is slow, but never hang the
 ;; caller forever.  Fires during `elpaca-wait's sit-for.  Default 30 min,
 ;; override with ELPACA_UPDATE_WATCHDOG.
-(run-at-time
- (string-to-number (or (getenv "ELPACA_UPDATE_WATCHDOG") "1800")) nil
- (lambda ()
-   (princ "\nupdate: TIMEOUT - elpaca did not settle within the watchdog window\n")
-   (kill-emacs 124)))
+(defvar elpaca-update--watchdog
+  (run-at-time
+   (string-to-number (or (getenv "ELPACA_UPDATE_WATCHDOG") "1800")) nil
+   (lambda ()
+     (princ "\nupdate: TIMEOUT - elpaca did not settle within the watchdog window\n")
+     (kill-emacs 124)))
+  "One-shot watchdog timer, cancelled once the run reaches a verdict.")
 
 (condition-case err
     (progn
@@ -155,6 +151,7 @@ before `kill-emacs', which flushes."
       (elpaca-unsubscribe 'finished #'elpaca-update--on-finished)
       (elpaca-unsubscribe 'failed #'elpaca-update--on-failed)
       (when (timerp elpaca-update--hb-timer) (cancel-timer elpaca-update--hb-timer))
+      (when (timerp elpaca-update--watchdog) (cancel-timer elpaca-update--watchdog))
       (elpaca-update-report-flush elpaca-update--batcher #'elpaca-update--emit)
       ;; changelog prints the blocks and returns the changed count for the summary
       (kill-emacs (if (elpaca-update--report (elpaca-update--changelog)) 0 1)))
