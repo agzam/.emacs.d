@@ -78,12 +78,12 @@ skipped, never aborting the caller."
               (funcall emit
                        "local-dev: WARNING could not clone %s (%s); leaving it to elpaca"
                        name url)
-              ;; A partial/empty dir would make `local-checkout-recipe' build in
-              ;; place from junk; drop it so elpaca's own clone can still run.
-              (when (and (file-directory-p dir)
-                         (null (directory-files
-                                dir nil directory-files-no-dot-files-regexp t)))
-                (delete-directory dir)))))))))
+              ;; Any dir present now is this attempt's debris (the enclosing
+              ;; check saw none): a partial clone would make
+              ;; `local-checkout-recipe' build in place from junk, so drop it
+              ;; whole - elpaca's own clone can still run.
+              (when (file-directory-p dir)
+                (delete-directory dir t)))))))))
 
 (provide 'local-dev)
 ;;; lisp/local-dev.el ends here

@@ -82,6 +82,19 @@
                    (lambda (fmt &rest args) (push (apply #'format fmt args) emitted)))
                   :to-be nil))
         (expect (cl-some (lambda (l) (string-match-p "WARNING" l)) emitted)
-                :to-be-truthy)))))
+                :to-be-truthy)))
+
+    (it "removes a partially-written checkout when the clone fails"
+      ;; A non-empty leftover would otherwise make `local-checkout-recipe'
+      ;; build in place from junk on the next boot.
+      (let ((dir (expand-file-name "GitHub/agzam/partial.el" base)))
+        (cl-letf (((symbol-function 'call-process)
+                   (lambda (&rest _)
+                     (make-directory dir t)
+                     (write-region "junk" nil (expand-file-name "f.el" dir)
+                                   nil 'silent)
+                     1)))
+          (ensure-local-dev-checkouts (list (cons 'partial dir)) nil #'ignore))
+        (expect (file-directory-p dir) :to-be nil)))))
 
 ;;; tests/lisp/local-dev-tests.el ends here
