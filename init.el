@@ -63,10 +63,15 @@
 ;; Laziness comes from explicit :defer/:hook/:commands keywords instead.
 (setq use-package-always-ensure t)
 
+(add-to-list 'load-path (expand-file-name "lisp/" user-emacs-directory))
+
 ;; Own packages declare plain GitHub recipes (portable across machines);
-;; where a checkout below exists, this hook redirects the recipe to it and
-;; elpaca builds in place - edits picked up on `elpaca-rebuild', nothing
-;; cloned (MIGRATION "Local :repo packages").
+;; where a checkout below exists, `local-checkout-recipe' redirects the recipe
+;; to it and elpaca builds in place - edits picked up on `elpaca-rebuild',
+;; nothing cloned (MIGRATION "Local :repo packages").  A checkout this machine
+;; lacks (a newly added or private own package) is cloned over ssh into its dev
+;; folder by `ensure-local-dev-checkouts' below, before elpaca resolves - so it
+;; too builds in place instead of failing elpaca's anonymous https clone.
 (defvar local-dev-packages
   '((remoto . "~/GitHub/agzam/remoto.el")
     (github-topics . "~/GitHub/agzam/github-topics")
@@ -86,6 +91,13 @@
     (spacehammer . "~/.hammerspoon"))
   "Alist of own packages -> local checkout preferred over the GitHub recipe.")
 
+(defvar local-dev-clone-overrides
+  ;; :repo where the GitHub repo can't be derived from the checkout dir name,
+  ;; :branch where a non-default branch is pinned.
+  '((spacehammer :repo "agzam/spacehammer")   ; checkout is ~/.hammerspoon
+    (reddigg :branch "fetch-via-browser"))    ; fork-only browser/chromium fetch
+  "Per-package (NAME :repo R :branch B) clone overrides for `ensure-local-dev-checkouts'.")
+
 (defun local-checkout-recipe (recipe)
   "Local `:repo' override for RECIPE when its `local-dev-packages' dir exists.
 The trailing slash is load-bearing: elpaca strips \".el$\" from local paths
@@ -99,12 +111,19 @@ build-in-place to clone."
 
 (add-hook 'elpaca-recipe-functions #'local-checkout-recipe)
 
+;; Clone any own package this machine hasn't checked out yet into its dev
+;; folder over ssh, before elpaca resolves recipes, so `local-checkout-recipe'
+;; redirects to it and elpaca builds in place.  Skipped under CI (no ssh key;
+;; it only needs the public repos, which clone anonymously over https).
+(require 'local-dev)
+(unless (getenv "CI")
+  (ensure-local-dev-checkouts))
+
 ;;; Doom compat layer
 
 ;; map! needs general.el at init time.
 (elpaca (general :wait t))
 
-(add-to-list 'load-path (expand-file-name "lisp/" user-emacs-directory))
 (require 'doom-compat)
 
 ;; Mirror of the doom! block in ~/.doom.d/init.el - powers `modulep!' so

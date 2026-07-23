@@ -227,6 +227,19 @@ At most LIMIT entries are shown (default 6); any remainder is counted."
     (concat (mapconcat (lambda (c) (format "%s=%s" (car c) (cdr c))) shown ", ")
             (and (> n limit) (format ", … +%d more" (- n limit))))))
 
+(defun elpaca-update-report-heartbeat-line (pending last-emit interval &optional now)
+  "Return a `still working' line when the run has been silent for INTERVAL secs.
+PENDING is the (ID . STATUS) list from `elpaca-update-report-pending', LAST-EMIT
+the `float-time' of the most recent output, NOW defaults to the current time.
+Returns nil when nothing is pending or the silence is still under INTERVAL - so
+a phase that streams per-package lines (each refreshing LAST-EMIT) stays quiet,
+while the first-run build, which settles steadily but emits nothing, does not."
+  (let ((now (or now (float-time))))
+    (when (and pending (>= (- now last-emit) interval))
+      (format "still working (%ds, %d pending): %s"
+              (round (- now last-emit)) (length pending)
+              (elpaca-update-report-format-pending pending)))))
+
 ;;; Persistent append-log: every session teed to one growing, trimmed file
 
 ;; Beyond the per-run streaming, keep a durable record: every session appended

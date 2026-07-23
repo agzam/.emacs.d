@@ -78,6 +78,7 @@ exits whenever `bb update' runs piped, redirected or from a compilation
 buffer.  The end-of-run changelog and summary stay on stdout - they print just
 before `kill-emacs', which flushes."
   (let ((line (apply #'format fmt args)))
+    (setq elpaca-update--last-emit (float-time))
     (elpaca-update-report-progress line)
     (elpaca-update-report-tee elpaca-update--persist line)))
 
@@ -94,32 +95,27 @@ before `kill-emacs', which flushes."
 
 ;; Heartbeat: `elpaca-wait' pumps the queue by spinning in `sit-for', dead
 ;; silent through a slow compile or a wedged package.  A repeating timer fires
-;; during that spin and says what is still pending - but only once the pending
-;; set has sat unchanged for the interval, so an actively-settling queue (whose
-;; `finished' events already stream) stays quiet.  Default 10s, override with
+;; during that spin and reports what is still pending whenever nothing has been
+;; emitted for the interval - keyed on SILENCE, not on the pending set stalling.
+;; The first-run activation build settles packages steadily yet streams no
+;; per-package line, so a stall-keyed heartbeat sat mute through it; a
+;; silence-keyed one speaks up while a streaming phase (whose per-package lines
+;; keep resetting the clock) stays quiet.  Default 10s, override with
 ;; ELPACA_UPDATE_HEARTBEAT.
 (defvar elpaca-update--hb-timer nil "Repeating heartbeat timer, cancelled at the end.")
-(defvar elpaca-update--hb-sig nil "Pending signature when it last changed.")
-(defvar elpaca-update--hb-change nil "`float-time' when the pending signature last changed.")
+(defvar elpaca-update--last-emit (float-time)
+  "`float-time' of the most recent emitted line; the silence heartbeat keys on it.")
 (defvar elpaca-update--hb-interval
   (max 1 (string-to-number (or (getenv "ELPACA_UPDATE_HEARTBEAT") "10")))
-  "Seconds the pending set may sit unchanged before a heartbeat line is printed.")
+  "Seconds of silence before a heartbeat line is printed.")
 
 (defun elpaca-update--heartbeat ()
-  "Print pending work when nothing has settled for `elpaca-update--hb-interval'."
+  "Report pending work when nothing has been emitted for the interval."
   (when-let* ((pending (elpaca-update-report-pending))
-              (sig (elpaca-update-report-format-pending pending))
-              (now (float-time)))
-    (unless elpaca-update--hb-change (setq elpaca-update--hb-change now))
-    (cond
-     ((not (equal sig elpaca-update--hb-sig))
-      (setq elpaca-update--hb-sig sig elpaca-update--hb-change now))
-     ((>= (- now elpaca-update--hb-change) elpaca-update--hb-interval)
-      (elpaca-update-report-flush elpaca-update--batcher #'elpaca-update--emit)
-      (elpaca-update--emit "still working (%ds, %d pending): %s"
-                           (round (- now elpaca-update--hb-change))
-                           (length pending) sig)
-      (setq elpaca-update--hb-change now)))))
+              (line (elpaca-update-report-heartbeat-line
+                     pending elpaca-update--last-emit elpaca-update--hb-interval)))
+    (elpaca-update-report-flush elpaca-update--batcher #'elpaca-update--emit)
+    (elpaca-update--emit "%s" line)))
 
 ;; Watchdog: fetching+rebuilding every package is slow, but never hang the
 ;; caller forever.  Fires during `elpaca-wait's sit-for.  Default 30 min,
@@ -134,7 +130,8 @@ before `kill-emacs', which flushes."
     (progn
       ;; Start the heartbeat before the first wait so even a slow activation
       ;; reports what it is chewing on.
-      (setq elpaca-update--hb-timer (run-at-time 2 2 #'elpaca-update--heartbeat))
+      (setq elpaca-update--last-emit (float-time)
+            elpaca-update--hb-timer (run-at-time 2 2 #'elpaca-update--heartbeat))
       (elpaca-update--emit "update: activating installed packages (first run can be slow)...")
       (elpaca-wait)                ; settle the boot queue (activate everything)
       (setq elpaca-update--snapshot (elpaca-update-report-snapshot)) ; baseline HEADs

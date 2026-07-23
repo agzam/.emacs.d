@@ -256,6 +256,17 @@ Return a plist (:dir DIR :revs (SHA...)) with revs oldest-first."
     (let ((process-environment (cons "ELPACA_UPDATE_LOG_MAX_BYTES=-1" process-environment)))
       (expect (elpaca-update-report-log-max-bytes) :to-equal 0))))
 
+(describe "elpaca-update-report-heartbeat-line"
+  (it "stays quiet while still within the silence interval"
+    (expect (elpaca-update-report-heartbeat-line '((a . building)) 100.0 10 105.0)
+            :to-be nil))
+  (it "reports pending work once silent past the interval"
+    (expect (elpaca-update-report-heartbeat-line
+             '((a . building) (b . cloning)) 100.0 10 112.0)
+            :to-equal "still working (12s, 2 pending): a=building, b=cloning"))
+  (it "returns nil when nothing is pending, however long the silence"
+    (expect (elpaca-update-report-heartbeat-line nil 100.0 10 9999.0) :to-be nil)))
+
 (describe "elpaca-update-report-progress"
   (it "streams to stderr, bypassing the block-buffered stdout"
     ;; --batch buffers stdout unless it's a TTY, so progress must go to the
