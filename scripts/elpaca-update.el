@@ -71,9 +71,14 @@ UPDATED is the count of packages that actually changed this run."
   "Batcher accumulating settled package names into `pulled:' lines.")
 
 (defun elpaca-update--emit (fmt &rest args)
-  "Print one progress line to stdout and mirror it to the persistent log."
+  "Stream one progress line to stderr and mirror it to the persistent log.
+stderr rather than stdout: under --batch stdout is block-buffered unless it is
+a terminal, so progress `princ'd there would be invisible until the process
+exits whenever `bb update' runs piped, redirected or from a compilation
+buffer.  The end-of-run changelog and summary stay on stdout - they print just
+before `kill-emacs', which flushes."
   (let ((line (apply #'format fmt args)))
-    (princ (concat line "\n"))
+    (elpaca-update-report-progress line)
     (elpaca-update-report-tee elpaca-update--persist line)))
 
 (defun elpaca-update--on-finished (e)

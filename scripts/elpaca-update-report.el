@@ -186,6 +186,20 @@ The 8 covers the width of the `pulled: ' prefix the flush prepends."
     (elpaca-update-report-flush batcher emit))
   (push name (car batcher)))
 
+;;; Live streaming to stderr: keep the headless run followable
+
+;; The headless driver prints progress as the update runs, but a --batch Emacs
+;; block-buffers stdout whenever it is not a terminal (a pipe, a redirect, an
+;; editor's compilation buffer), so anything `princ'd there stays invisible
+;; until the process exits - the "goes silent with no server" complaint.
+;; stderr is unbuffered, so routing progress here streams it live regardless of
+;; how `bb update' was invoked.  The live driver has no such problem: it writes
+;; to a logfile the caller tails and flushes.
+
+(defun elpaca-update-report-progress (line)
+  "Write LINE plus a newline to stderr, which `--batch' leaves unbuffered."
+  (princ (concat line "\n") #'external-debugging-output))
+
 ;;; Pending-work summary: what the update is still waiting on
 
 ;; Both drivers wait for the async queue to settle.  When nothing has settled

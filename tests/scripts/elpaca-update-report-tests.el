@@ -256,6 +256,22 @@ Return a plist (:dir DIR :revs (SHA...)) with revs oldest-first."
     (let ((process-environment (cons "ELPACA_UPDATE_LOG_MAX_BYTES=-1" process-environment)))
       (expect (elpaca-update-report-log-max-bytes) :to-equal 0))))
 
+(describe "elpaca-update-report-progress"
+  (it "streams to stderr, bypassing the block-buffered stdout"
+    ;; --batch buffers stdout unless it's a TTY, so progress must go to the
+    ;; unbuffered stderr stream instead - and never leak onto stdout.
+    (let ((captured "")
+          (stdout (generate-new-buffer " *stdout*")))
+      (unwind-protect
+          (progn
+            (cl-letf (((symbol-function 'external-debugging-output)
+                       (lambda (ch) (setq captured (concat captured (char-to-string ch))))))
+              (let ((standard-output stdout))
+                (elpaca-update-report-progress "still working: foo")))
+            (expect captured :to-equal "still working: foo\n")
+            (expect (with-current-buffer stdout (buffer-string)) :to-equal ""))
+        (kill-buffer stdout)))))
+
 (describe "elpaca-update-report-tee"
   (it "appends a line, stripping ANSI color"
     (let ((f (make-temp-file "eur-tee")))
