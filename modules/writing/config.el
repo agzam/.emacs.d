@@ -45,7 +45,12 @@
      (window . root)
      (window-width . 0.3))))
 
+;; MELPA's recipe clones the stardiviner fork from repo.or.cz, which routinely
+;; times out; emacsmirror tracks the exact same history on a reliable host.
+;; Do NOT "fix" this by pointing at manateelazycat/sdcv - same package name,
+;; drastically different implementation (posframe, sdcv-say-word-p).
 (use-package sdcv
+  :ensure (sdcv :host github :repo "emacsmirror/sdcv")
   :defer t
   :commands (sdcv-search-pointer sdcv-search)
   :hook (sdcv-mode . visual-line-mode)
