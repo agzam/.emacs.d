@@ -257,6 +257,27 @@ Return a plist (:dir DIR :revs (SHA...)) with revs oldest-first."
       (elpaca-update-report-flush b (lambda (&rest _) (cl-incf n)))
       (expect n :to-equal 0))))
 
+(describe "elpaca-update-report-flush-stale"
+  (it "flushes pending names once the silence passes the interval"
+    (let ((b (elpaca-update-report-batcher)) out)
+      (let ((emit (lambda (fmt &rest args) (push (apply #'format fmt args) out))))
+        (elpaca-update-report-note b emit "aa")
+        (elpaca-update-report-flush-stale b emit 100.0 2 103.0)
+        (expect out :to-equal '("pulled: aa")))))
+
+  (it "stays quiet while output is still fresh"
+    (let ((b (elpaca-update-report-batcher)) out)
+      (let ((emit (lambda (fmt &rest args) (push (apply #'format fmt args) out))))
+        (elpaca-update-report-note b emit "aa")
+        (elpaca-update-report-flush-stale b emit 100.0 2 101.0)
+        (expect out :to-be nil)
+        (expect (car b) :to-equal '("aa")))))
+
+  (it "does nothing for an empty batcher however long the silence"
+    (let ((b (elpaca-update-report-batcher)) (n 0))
+      (elpaca-update-report-flush-stale b (lambda (&rest _) (cl-incf n)) 100.0 2 999.0)
+      (expect n :to-equal 0))))
+
 (describe "elpaca-update-report-format-pending"
   (it "renders id=status pairs joined by commas"
     (expect (elpaca-update-report-format-pending '((a . queued) (b . building)))

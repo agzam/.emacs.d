@@ -202,6 +202,17 @@ The 8 covers the width of the `pulled: ' prefix the flush prepends."
     (elpaca-update-report-flush batcher emit))
   (push name (car batcher)))
 
+(defun elpaca-update-report-flush-stale (batcher emit last-emit &optional interval now)
+  "Flush BATCHER via EMIT when nothing has been emitted for INTERVAL seconds.
+LAST-EMIT is the `float-time' of the most recent output; INTERVAL defaults to
+2, NOW to the current time.  Width-based batching keeps bursts of unchanged
+packages on shared `pulled:' lines, but a slow trickle would sit invisible in
+the batcher while the run looks stalled - so the drivers also flush on
+staleness, well before the heartbeat has anything to say."
+  (when (and (car batcher)
+             (<= (or interval 2) (- (or now (float-time)) last-emit)))
+    (elpaca-update-report-flush batcher emit)))
+
 ;;; Live streaming to stderr: keep the headless run followable
 
 ;; The headless driver prints progress as the update runs, but a --batch Emacs

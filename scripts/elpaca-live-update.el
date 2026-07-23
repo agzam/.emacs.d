@@ -39,7 +39,7 @@
   "Non-nil once the post-update local-package rebuild phase has run.")
 (defvar elpaca-live-update--persist nil
   "Persistent append-log path this run tees to, or nil when disabled.")
-(defvar elpaca-live-update--heartbeat-interval 10
+(defvar elpaca-live-update--heartbeat-interval 5
   "Seconds of silence before a heartbeat line is emitted.")
 (defvar elpaca-live-update--last-emit nil
   "`float-time' of the most recent emitted line; the silence heartbeat keys on it.")
@@ -130,12 +130,15 @@ marker once that too has settled."
     ;; Self-heal a reload mid-run: seed the silence clock when unset.
     (unless elpaca-live-update--last-emit
       (setq elpaca-live-update--last-emit (float-time)))
+    ;; A slow trickle of finished packages must not sit invisible in the
+    ;; batcher waiting for the line to fill out - flush it on staleness.
+    (elpaca-update-report-flush-stale elpaca-live-update--batcher
+                                      #'elpaca-live-update--emit
+                                      elpaca-live-update--last-emit)
     (if pending
         (when-let* ((line (elpaca-update-report-heartbeat-line
                            pending elpaca-live-update--last-emit
                            elpaca-live-update--heartbeat-interval)))
-          (elpaca-update-report-flush elpaca-live-update--batcher
-                                      #'elpaca-live-update--emit)
           (elpaca-live-update--emit "%s" line))
       (if elpaca-live-update--locals-rebuilt
           (elpaca-live-update--finish)
@@ -163,7 +166,7 @@ UPDATE-DONE / UPDATE-FAILED line."
               elpaca-live-update--locals-rebuilt nil
               elpaca-live-update--persist (elpaca-update-report-open-session "live")
               elpaca-live-update--heartbeat-interval
-              (max 1 (string-to-number (or (getenv "ELPACA_UPDATE_HEARTBEAT") "10")))
+              (max 1 (string-to-number (or (getenv "ELPACA_UPDATE_HEARTBEAT") "5")))
               elpaca-live-update--last-emit (float-time)
               ;; honor the caller's tty-color? verdict (cleared in --cleanup)
               elpaca-update-report-color color)
@@ -185,6 +188,11 @@ UPDATE-DONE / UPDATE-FAILED line."
                            nil (lambda ()
                                  (elpaca-live-update--emit "UPDATE-TIMEOUT")
                                  (elpaca-live-update--cleanup))))
+        ;; Announce the phase before kicking off: the first `pulled:' line can
+        ;; be seconds away, and the tail must never open on dead air.
+        (elpaca-live-update--emit
+         "update: fetching + merging + rebuilding %d package(s)..."
+         elpaca-live-update--total)
         ;; interactive=t => elpaca processes the queue (async), returns at once.
         (if packages
             (dolist (p packages) (elpaca-update p t))

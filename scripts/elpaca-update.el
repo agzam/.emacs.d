@@ -100,15 +100,19 @@ before `kill-emacs', which flushes."
 ;; ELPACA_UPDATE_HEARTBEAT.
 (defvar elpaca-update--hb-timer nil "Repeating heartbeat timer, cancelled at the end.")
 (defvar elpaca-update--hb-interval
-  (max 1 (string-to-number (or (getenv "ELPACA_UPDATE_HEARTBEAT") "10")))
+  (max 1 (string-to-number (or (getenv "ELPACA_UPDATE_HEARTBEAT") "5")))
   "Seconds of silence before a heartbeat line is printed.")
 
 (defun elpaca-update--heartbeat ()
-  "Report pending work when nothing has been emitted for the interval."
+  "Keep output flowing: flush a stale `pulled:' batch, else report pending work.
+The stale flush wins ties - once it emits, the silence clock resets and the
+heartbeat line stays quiet, so the heartbeat only ever speaks over a batcher
+that is genuinely empty."
+  (elpaca-update-report-flush-stale elpaca-update--batcher #'elpaca-update--emit
+                                    elpaca-update--last-emit)
   (when-let* ((pending (elpaca-update-report-pending))
               (line (elpaca-update-report-heartbeat-line
                      pending elpaca-update--last-emit elpaca-update--hb-interval)))
-    (elpaca-update-report-flush elpaca-update--batcher #'elpaca-update--emit)
     (elpaca-update--emit "%s" line)))
 
 ;; Watchdog: fetching+rebuilding every package is slow, but never hang the
