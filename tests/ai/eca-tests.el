@@ -11,6 +11,11 @@
 ;; the boot-time behavior too (advice takes effect when eca loads).
 (load-module-file "modules/ai/autoload/eca.el")
 
+;; eca is absent here; declare the per-chat selection the seeding advice
+;; overrides, which eca-chat.el would otherwise provide.
+(defvar eca-chat--selected-agent nil)
+(defvar eca-chat--selected-trust nil)
+
 (describe "eca-archive--slugify"
   (it "returns empty string for nil or blank input"
     (expect (eca-archive--slugify nil) :to-equal "")
@@ -102,3 +107,26 @@
       (eca-compact-modeline-icons-h)
       (with-temp-buffer
         (expect (assq 'eca-chat-trust-on-face face-remapping-alist) :to-be nil)))))
+
+(describe "eca-chat-seed-code-and-trust-a"
+  ;; Every new chat copies its selection from the session defaults, and a
+  ;; per-chat switch writes back into them - so one plan chat, or resuming
+  ;; an untrusted one, used to decide how every later chat starts.
+  (it "overrides the selection the new chat just copied"
+    (with-temp-buffer
+      (setq-local eca-chat--selected-agent "plan"
+                  eca-chat--selected-trust nil)
+      (eca-chat-seed-code-and-trust-a nil)
+      (expect eca-chat--selected-agent :to-equal "code")
+      (expect eca-chat--selected-trust :to-be t)))
+
+  (it "stays buffer-local, so a chat switched to plan keeps it"
+    (with-temp-buffer
+      (eca-chat-seed-code-and-trust-a nil)
+      (with-temp-buffer
+        (expect (local-variable-p 'eca-chat--selected-agent) :to-be nil))))
+
+  (it "hooks the seeding call itself, so nothing else has to run first"
+    (expect (advice-member-p 'eca-chat-seed-code-and-trust-a
+                             'eca-chat--initialize-selection-state)
+            :to-be-truthy)))

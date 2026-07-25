@@ -1,18 +1,15 @@
 ;;; modules/ai/autoload/eca.el -*- lexical-binding: t; -*-
 
 ;;;###autoload
-(defadvice! eca-auto-trust-for-plan-a (session new-agent &optional buffer)
-  "Toggle trust mode based on agent: enable for plan, disable for code."
-  :after #'eca-chat--set-agent
-  (when-let* ((buf (or buffer (eca-chat--get-last-buffer session))))
-    (let ((trust (equal new-agent "plan")))
-      (eca-chat--set-trust session trust buf)
-      (when-let* ((chat-id (buffer-local-value 'eca-chat--id buf)))
-        (eca-api-request-sync session
-                              :method "chat/update"
-                              :params (list :chatId chat-id
-                                            :trust (if trust t :json-false))))
-      (eca-info (if trust "Plan mode: trust enabled" "Code mode: trust disabled")))))
+(defadvice! eca-chat-seed-code-and-trust-a (_session)
+  "Start every new chat in the code agent with trust on.
+A new chat copies its selection from the session defaults, which
+upstream keeps sticky: switching one chat to plan, or resuming an
+untrusted one, would decide how every chat opened afterwards starts.
+Overriding that copy keeps the switch a per-chat choice."
+  :after #'eca-chat--initialize-selection-state
+  (setq-local eca-chat--selected-agent "code"
+              eca-chat--selected-trust t))
 
 ;;;###autoload
 (defun eca-chat-flag-and-fork ()

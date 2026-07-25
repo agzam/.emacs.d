@@ -102,8 +102,8 @@
   :defer t
   :config
   (setopt eca-chat-use-side-window nil
-          eca-chat-custom-behavior nil
           eca-chat-parent-mode 'markdown-mode
+          eca-chat-trust-enable t
           eca-api-response-timeout 15)
 
   ;; Upstream reuses (replaces) the first visible eca window for every new
