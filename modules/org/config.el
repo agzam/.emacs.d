@@ -135,7 +135,9 @@
   (add-hook! 'org-capture-mode-hook #'recenter)
 
   (setopt org-export-with-smart-quotes nil
-          org-html-validation-link nil
+          ;; "" not nil: the defcustom type is string (setopt warns on nil);
+          ;; the postamble %v spec renders either as nothing
+          org-html-validation-link ""
           org-latex-prefer-user-labels t
           org-ascii-text-width 900 ; don't wrap text
           org-ascii-links-to-notes nil)
