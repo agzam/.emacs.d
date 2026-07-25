@@ -12,39 +12,70 @@
               []
               (zero? (:exit (p/shell {:continue true :out :string :err :string}
                                      "emacsclient" "--eval" "nil"))))
+            (defn emacs-server-dead?
+              "True only when the server socket refuses outright.
+A busy-but-alive Emacs (blocked in a long computation) leaves the ping
+hanging - that times out and reads as alive, never as dead."
+              []
+              (let [proc (p/process {:out :string :err :string}
+                                    "emacsclient" "--eval" "nil")
+                    res (deref proc 3000 :hung)]
+                (if (= res :hung)
+                  (do (p/destroy proc) false)
+                  (not (zero? (:exit res))))))
             (defn follow-progress
               "Stream LOGFILE to stdout as it grows until an UPDATE- marker.
-Return 0 on UPDATE-DONE, 1 on any other marker or once DEADLINE-MS elapses.
-Tails from a persistent offset instead of re-reading the whole file each
-tick; the trailing partial line is carried over so a marker split across
-two reads still matches its line anchor."
+Return 0 on UPDATE-DONE, 2 when the Emacs server dies mid-run (no marker
+will ever come - the caller decides how to continue), 1 on any other
+marker or once DEADLINE-MS elapses.  Tails from a persistent offset
+instead of re-reading the whole file each tick; the trailing partial
+line is carried over so a marker split across two reads still matches
+its line anchor.  The liveness ping runs every ~2s between ticks."
               [logfile deadline-ms]
               (let [deadline (+ (System/currentTimeMillis) deadline-ms)]
                 (with-open [raf (java.io.RandomAccessFile. (str logfile) "r")]
-                  (loop [carry ""]
+                  (loop [carry "" last-ping (System/currentTimeMillis)]
                     (let [avail (- (.length raf) (.getFilePointer raf))
                           chunk (when (pos? avail)
                                   (let [buf (byte-array avail)]
                                     (.readFully raf buf)
                                     (String. buf java.nio.charset.StandardCharsets/UTF_8)))
-                          seen (str carry chunk)]
+                          seen (str carry chunk)
+                          now (System/currentTimeMillis)
+                          ping? (< 2000 (- now last-ping))]
                       (when chunk (print chunk) (flush))
                       (cond
                         (re-find (re-pattern "(?m)^UPDATE-DONE\\b") seen) 0
                         (re-find (re-pattern "(?m)^UPDATE-(FAILED|TIMEOUT|ERROR)\\b") seen) 1
-                        (< deadline (System/currentTimeMillis))
+                        (and ping? (emacs-server-dead?)) 2
+                        (< deadline now)
                         (do (println "\nupdate: gave up waiting for Emacs to finish") 1)
                         :else (do (Thread/sleep 250)
                                   (recur (if-let [nl (str/last-index-of seen "\n")]
                                            (subs seen (inc nl))
-                                           seen)))))))))
+                                           seen)
+                                         (if ping? now last-ping)))))))))
             (defn tty-color?
               "True when ANSI color should be emitted: our stdout is a real
 terminal (or ELPACA_UPDATE_COLOR=1 forces it) and NO_COLOR is unset."
               []
               (and (str/blank? (or (System/getenv "NO_COLOR") ""))
                    (or (some? (System/console))
-                       (= "1" (System/getenv "ELPACA_UPDATE_COLOR"))))))
+                       (= "1" (System/getenv "ELPACA_UPDATE_COLOR")))))
+            (defn run-batch-driver
+              "Boot the full config in --batch, load scripts/DRIVER on top,
+and return the exit code.  Shared by update/repair/audit - every headless
+task is this one invocation with a different driver.  EXTRA-ENV merges
+over the git-prompt guard (an unreachable remote must fail the order,
+not block on a credential prompt)."
+              [driver & [extra-env]]
+              (:exit (p/shell {:continue true
+                               :extra-env (merge {"GIT_TERMINAL_PROMPT" "0"} extra-env)}
+                              "emacs" "-Q" "--batch"
+                              "--init-directory" root
+                              "-l" (str (fs/path root "early-init.el"))
+                              "-l" (str (fs/path root "init.el"))
+                              "-l" (str (fs/path root "scripts" driver))))))
 
   deps {:doc "Install test deps (buttercup, parseedn) into .local/.cache/test-elpa"
         :task (p/shell "emacs" "-Q" "--batch"
@@ -115,7 +146,14 @@ terminal (or ELPACA_UPDATE_COLOR=1 forces it) and NO_COLOR is unset."
                                          (if (tty-color?) "t" "nil")))]
                     (println "update: driving the running Emacs (live, no restart needed)...")
                     (if (zero? exit)
-                      (System/exit (follow-progress logfile (* 40 60 1000)))
+                      (let [code (follow-progress logfile (* 40 60 1000))]
+                        (when (= 2 code)
+                          ;; No auto-continuation on purpose: a killed Emacs may
+                          ;; mean "stop everything".  A re-run lands on the
+                          ;; headless path, whose heal phase (dirty/stale/
+                          ;; half-built scans) completes the interrupted work.
+                          (println "\nupdate: the live Emacs died mid-update; run `bb update' again to finish headlessly"))
+                        (System/exit (if (zero? code) 0 1)))
                       (do (println "update: could not start in-session update:" (str/trim (str err)))
                           (System/exit 1))))
                   ;; Server down (e.g. CI): plain --batch, no pty, pipeable.
@@ -123,18 +161,15 @@ terminal (or ELPACA_UPDATE_COLOR=1 forces it) and NO_COLOR is unset."
                   ;; are loaded explicitly before the driver.
                   (do
                     (println "update: no Emacs server; updating headlessly in --batch (restart Emacs after to apply)...")
-                    (let [{:keys [exit]}
-                          (p/shell {:continue true
-                                    ;; an unreachable remote must fail the order,
-                                    ;; not block on a git credential prompt
-                                    :extra-env (cond-> {"GIT_TERMINAL_PROMPT" "0"}
-                                                 (tty-color?) (assoc "ELPACA_UPDATE_COLOR" "1"))}
-                                   "emacs" "-Q" "--batch"
-                                   "--init-directory" root
-                                   "-l" (str (fs/path root "early-init.el"))
-                                   "-l" (str (fs/path root "init.el"))
-                                   "-l" (str (fs/path root "scripts" "elpaca-update.el")))]
-                      (System/exit exit))))}
+                    (System/exit (run-batch-driver "elpaca-update.el"
+                                                   (when (tty-color?)
+                                                     {"ELPACA_UPDATE_COLOR" "1"})))))}
+
+  repair {:doc "Heal botched packages, doom-sync style: fresh headless boot (re-clones deleted repos, rebuilds deleted builds), then rebuild anything half-built, stale or dirty. Restart Emacs after."
+          :task (System/exit (run-batch-driver "elpaca-repair.el"))}
+
+  audit {:doc "Void-command audit: boot the full config in --batch, then flag transient suffixes and leader bindings whose commands are neither defined nor autoloaded"
+         :task (System/exit (run-batch-driver "audit-void-commands.el"))}
 
   docsets {:doc "Install/update the Dash docsets the config expects (batch, like doom.d's `make dash-docsets')"
            :task (p/shell "emacs" "-Q" "--batch"

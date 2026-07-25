@@ -15,6 +15,10 @@
 
 (require 'elpaca)
 (require 'cl-lib)
+
+;; Defined in lisp/functions.el, which init loads before this driver can run.
+(declare-function broken-elpaca-builds "functions")
+(declare-function rebuild-broken-elpaca-builds "functions")
 ;; The changelog and local-rebuild helpers sit next to this file.  The live
 ;; driver is `load'ed by `bb update' via emacsclient, so resolve them relative
 ;; to this file, loading each only if the running session lacks it.
@@ -37,6 +41,8 @@
   "Shared `pulled:'-line batcher (see `elpaca-update-report-batcher').")
 (defvar elpaca-live-update--locals-rebuilt nil
   "Non-nil once the post-update local-package rebuild phase has run.")
+(defvar elpaca-live-update--integrity-rebuilt nil
+  "Non-nil once the post-update broken-build heal phase has run.")
 (defvar elpaca-live-update--persist nil
   "Persistent append-log path this run tees to, or nil when disabled.")
 (defvar elpaca-live-update--heartbeat-interval 5
@@ -89,43 +95,64 @@
 
 (defun elpaca-live-update--finish ()
   "Flush the trailing `pulled:' names, emit the summary marker, and clean up.
+A build still broken after the heal phase (deleted repos can only be
+repaired by a fresh process) flips the marker and points at `bb repair'.
 The marker line stays plain - no color prefix - so the caller's `^UPDATE-'
 progress regex still anchors."
   (let ((updated (if (hash-table-p elpaca-live-update--reported)
-                     (hash-table-count elpaca-live-update--reported) 0)))
+                     (hash-table-count elpaca-live-update--reported) 0))
+        (broken (broken-elpaca-builds)))
     (elpaca-update-report-flush elpaca-live-update--batcher #'elpaca-live-update--emit)
     (elpaca-live-update--cleanup)
+    (pcase-dolist (`(,id . ,reason) broken)
+      (elpaca-live-update--emit
+       "STILL BROKEN %s (%s) - run bb repair, then restart Emacs" id reason))
     (elpaca-live-update--emit "%s %d package(s) processed, %d updated, %d failed"
-                              (if (< 0 elpaca-live-update--failed)
+                              (if (or (< 0 elpaca-live-update--failed) broken)
                                   "UPDATE-FAILED" "UPDATE-DONE")
                               elpaca-live-update--total updated
                               elpaca-live-update--failed)))
 
 (defun elpaca-live-update--run-local-rebuilds ()
-  "Rebuild on-disk-changed build-in-place locals; finish now when none need it.
-Announcing what it waits on also refreshes the silence clock, so the wait is
-timed afresh.  Queuing rebuilds makes the queue non-terminal again, so the
-poll keeps ticking until they settle."
-  (if-let* ((rebuilt (elpaca-local-rebuild-changed
-                      (lambda (fmt &rest args)
-                        (elpaca-update-report-flush elpaca-live-update--batcher
-                                                    #'elpaca-live-update--emit)
-                        (apply #'elpaca-live-update--emit fmt args)))))
-      (elpaca-live-update--emit "waiting for %d local rebuild(s): %s"
-                                (length rebuilt)
-                                (mapconcat #'symbol-name rebuilt ", "))
-    (elpaca-live-update--finish)))
+  "Rebuild on-disk-changed build-in-place locals, if any.
+Announcing what it waits on also refreshes the silence clock, so the wait
+is timed afresh.  Queuing rebuilds makes the queue non-terminal again, so
+the poll keeps ticking until they settle; with nothing queued the next
+tick advances to the heal phase."
+  (when-let* ((rebuilt (elpaca-local-rebuild-changed
+                        (lambda (fmt &rest args)
+                          (elpaca-update-report-flush elpaca-live-update--batcher
+                                                      #'elpaca-live-update--emit)
+                          (apply #'elpaca-live-update--emit fmt args)))))
+    (elpaca-live-update--emit "waiting for %d local rebuild(s): %s"
+                              (length rebuilt)
+                              (mapconcat #'symbol-name rebuilt ", "))))
+
+(defun elpaca-live-update--run-integrity-rebuilds ()
+  "Heal half-built/stale builds the git update skipped, if any.
+A merge that moves no HEAD never rebuilds, so damage from an earlier
+interrupted run survives a plain update - rebuild those in place (works
+in-session; disk becomes consistent, RAM catches up on restart)."
+  (when-let* ((broken (rebuild-broken-elpaca-builds
+                       (lambda (fmt &rest args)
+                         (elpaca-update-report-flush elpaca-live-update--batcher
+                                                     #'elpaca-live-update--emit)
+                         (apply #'elpaca-live-update--emit fmt args)))))
+    (elpaca-live-update--emit "waiting for %d integrity rebuild(s): %s"
+                              (length broken)
+                              (mapconcat (lambda (b) (symbol-name (car b)))
+                                         broken ", "))))
 
 (defun elpaca-live-update--advance ()
   "Poll tick: surface silent stretches, run the rebuild phase, then finish.
 Heartbeats keep the run from ever going silent: whenever nothing has been
 emitted for `elpaca-live-update--heartbeat-interval' - a slow compile, or a
 genuinely wedged package - a line says exactly what is still pending, via the
-same silence-keyed helper the headless driver uses.  Once the queue settles it
-rebuilds on-disk-changed locals as a second phase (a git update skips a
-build-in-place checkout whose merge moved no HEAD), which makes the queue
-non-terminal again, so the poll keeps ticking and only writes the terminal
-marker once that too has settled."
+same silence-keyed helper the headless driver uses.  Once the queue settles
+two more phases run before the terminal marker, each re-arming the poll when
+it queues work: on-disk-changed locals (a git update skips a build-in-place
+checkout whose merge moved no HEAD), then broken-build healing (half-built or
+stale builds a plain update also skips)."
   (let ((pending (elpaca-update-report-pending)))
     ;; Self-heal a reload mid-run: seed the silence clock when unset.
     (unless elpaca-live-update--last-emit
@@ -140,10 +167,14 @@ marker once that too has settled."
                            pending elpaca-live-update--last-emit
                            elpaca-live-update--heartbeat-interval)))
           (elpaca-live-update--emit "%s" line))
-      (if elpaca-live-update--locals-rebuilt
-          (elpaca-live-update--finish)
+      (cond
+       ((not elpaca-live-update--locals-rebuilt)
         (setq elpaca-live-update--locals-rebuilt t)
-        (elpaca-live-update--run-local-rebuilds)))))
+        (elpaca-live-update--run-local-rebuilds))
+       ((not elpaca-live-update--integrity-rebuilt)
+        (setq elpaca-live-update--integrity-rebuilt t)
+        (elpaca-live-update--run-integrity-rebuilds))
+       (t (elpaca-live-update--finish))))))
 
 ;;;###autoload
 (defun elpaca-live-update-start (logfile &optional packages color)
@@ -164,6 +195,7 @@ UPDATE-DONE / UPDATE-FAILED line."
               elpaca-live-update--failed 0
               elpaca-live-update--batcher (elpaca-update-report-batcher)
               elpaca-live-update--locals-rebuilt nil
+              elpaca-live-update--integrity-rebuilt nil
               elpaca-live-update--persist (elpaca-update-report-open-session "live")
               elpaca-live-update--heartbeat-interval
               (max 1 (string-to-number (or (getenv "ELPACA_UPDATE_HEARTBEAT") "5")))

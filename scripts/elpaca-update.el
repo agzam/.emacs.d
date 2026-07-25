@@ -14,6 +14,10 @@
 
 (require 'cl-lib)
 (require 'elpaca)
+
+;; Defined in lisp/functions.el, which init loads before this driver can run.
+(declare-function broken-elpaca-builds "functions")
+(declare-function rebuild-broken-elpaca-builds "functions")
 ;; Shared audit-trail helpers sit next to this file.
 (load (expand-file-name "elpaca-update-report"
                         (file-name-directory (or load-file-name buffer-file-name)))
@@ -44,17 +48,24 @@
                        changes))))
     n))
 
-(defun elpaca-update--report (updated)
-  "Print a per-package status summary; return non-nil when none failed.
-UPDATED is the count of packages that actually changed this run."
+(defun elpaca-update--report (updated healed remaining)
+  "Print a per-package status summary; return non-nil when nothing is wrong.
+UPDATED is the count of packages that actually changed this run.  HEALED
+is the (ID . REASON) list of broken builds this run rebuilt; REMAINING is
+the post-heal re-scan - anything still broken fails the run alongside
+failed/blocked statuses."
   (let* ((statuses (mapcar (lambda (e) (cons (car e) (elpaca<-status (cdr e))))
                            (elpaca--queued)))
          (failed (cl-remove-if-not (lambda (s) (memq (cdr s) '(failed blocked)))
                                    statuses)))
-    (princ (format "\nupdate: %d processed, %d updated, %d failed/blocked\n"
-                   (length statuses) updated (length failed)))
+    (princ (format "\nupdate: %d processed, %d updated, %d failed/blocked%s\n"
+                   (length statuses) updated (length failed)
+                   (if healed (format ", %d healed" (length healed)) "")))
     (dolist (f failed) (princ (format "  %s: %s\n" (car f) (cdr f))))
-    (null failed)))
+    (dolist (h healed) (princ (format "  healed %s (%s)\n" (car h) (cdr h))))
+    (dolist (r remaining)
+      (princ (format "  STILL BROKEN %s (%s) - run bb repair\n" (car r) (cdr r))))
+    (and (null failed) (null remaining))))
 
 ;; Live progress: --batch elpaca-wait spins silently, so stream each package to
 ;; stdout as it settles the same way the live driver tees to its logfile -
@@ -152,13 +163,24 @@ that is genuinely empty."
                (elpaca-update-report-flush elpaca-update--batcher #'elpaca-update--emit)
                (apply #'elpaca-update--emit fmt args)))
         (elpaca-wait))
-      (elpaca-unsubscribe 'finished #'elpaca-update--on-finished)
-      (elpaca-unsubscribe 'failed #'elpaca-update--on-failed)
-      (when (timerp elpaca-update--hb-timer) (cancel-timer elpaca-update--hb-timer))
-      (when (timerp elpaca-update--watchdog) (cancel-timer elpaca-update--watchdog))
-      (elpaca-update-report-flush elpaca-update--batcher #'elpaca-update--emit)
-      ;; changelog prints the blocks and returns the changed count for the summary
-      (kill-emacs (if (elpaca-update--report (elpaca-update--changelog)) 0 1)))
+      ;; Heal what the update cannot see: a half-built or stale build whose
+      ;; merge moved no HEAD is skipped by the rebuild step - and an earlier
+      ;; interrupted run leaves exactly that behind.
+      (let ((healed (rebuild-broken-elpaca-builds
+                     (lambda (fmt &rest args)
+                       (elpaca-update-report-flush elpaca-update--batcher
+                                                   #'elpaca-update--emit)
+                       (apply #'elpaca-update--emit fmt args)))))
+        (when healed (elpaca-wait))
+        (elpaca-unsubscribe 'finished #'elpaca-update--on-finished)
+        (elpaca-unsubscribe 'failed #'elpaca-update--on-failed)
+        (when (timerp elpaca-update--hb-timer) (cancel-timer elpaca-update--hb-timer))
+        (when (timerp elpaca-update--watchdog) (cancel-timer elpaca-update--watchdog))
+        (elpaca-update-report-flush elpaca-update--batcher #'elpaca-update--emit)
+        ;; changelog prints the blocks and returns the changed count for the summary
+        (kill-emacs (if (elpaca-update--report (elpaca-update--changelog)
+                                               healed (broken-elpaca-builds))
+                        0 1))))
   (error
    (when (timerp elpaca-update--hb-timer) (cancel-timer elpaca-update--hb-timer))
    (princ (format "\nupdate: ERROR - %s\n" (error-message-string err)))
