@@ -2,8 +2,10 @@
 ;;; Commentary:
 ;; Port of doom.d lisp/sexp-transient.el.  A lazy general-module autoload
 ;; (mirrors expreg.el) instead of an eagerly loaded lisp/ lib: the prefix and
-;; its helpers load on first SPC k.  smartparens is globally on by then; avy
-;; and edit-indirect stay lazy: the avy sexp commands `require' avy at call
+;; its helpers load on first SPC k.  smartparens is soft-required below - the
+;; sp-* suffixes are unguarded, so they must exist whenever the prefix does,
+;; not by load-order luck (noerror keeps the bare -Q batch test env loadable);
+;; avy and edit-indirect stay lazy: the avy sexp commands `require' avy at call
 ;; time (avy-jump carries no autoload cookie upstream, so it is void until avy
 ;; loads), edit-indirect loads when its command first runs - nothing here
 ;; hard-requires them at load, which keeps the file loadable in the bare -Q
@@ -18,6 +20,7 @@
 
 (require 'transient)
 (require 'transient-bypass)
+(require 'smartparens nil t)
 
 ;;;###autoload
 (defun sp-evil-sexp-go-back ()
@@ -180,15 +183,23 @@
     ("e p" "pprint" sp-pp-eval-current-in-mode)
     ("e ;" "eval to comment"
      cider-pprint-eval-last-sexp-to-comment
-     :if (lambda () (derived-mode-p 'clojure-mode)))
+     ;; not autoloaded by cider - fboundp keeps the prefix openable in a
+     ;; clojure buffer before any REPL loaded cider
+     :if (lambda () (and (derived-mode-p 'clojure-mode)
+                         (fboundp 'cider-pprint-eval-last-sexp-to-comment))))
     ("#" "ignore" clojure-toggle-ignore
      :if (lambda () (derived-mode-p 'clojure-mode)))]]
   ["Clojure"
    :if (lambda () (derived-mode-p 'clojure-mode))
    :hide (lambda () (not transient-show-common-commands))
-   [("> SPC" "->" lsp-clojure-thread-first :transient t)
-    (">>" "->>" lsp-clojure-thread-last :transient t)
-    ("<" "un-thread" lsp-clojure-unwind-thread :transient t)
+   ;; lsp-clojure defines the thread commands only once lsp starts on a
+   ;; clojure buffer; mode alone doesn't imply they exist
+   [("> SPC" "->" lsp-clojure-thread-first :transient t
+     :if (lambda () (fboundp 'lsp-clojure-thread-first)))
+    (">>" "->>" lsp-clojure-thread-last :transient t
+     :if (lambda () (fboundp 'lsp-clojure-thread-last)))
+    ("<" "un-thread" lsp-clojure-unwind-thread :transient t
+     :if (lambda () (fboundp 'lsp-clojure-unwind-thread)))
     ("; c" "wrap comment" clojure-wrap-rich-comment)]])
 
 ;;; sexp-transient.el ends here

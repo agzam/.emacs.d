@@ -123,7 +123,10 @@ switch to it."
 (transient-define-prefix org-noter-transient ()
   "Org Noter."
   [[("N" "Noter start" org-noter)
-    ("I" "new note" org-noter-insert-note)]
+    ;; not autoloaded upstream and only meaningful inside a session -
+    ;; fboundp keeps the prefix openable before org-noter loads
+    ("I" "new note" org-noter-insert-note
+     :if (lambda () (fboundp 'org-noter-insert-note)))]
    [("n" "sync" org-noter-sync :transient t)
     ("a" "anchor" org-noter-anchor-to-current-page)]
    [("j" "scroll up" org-noter-pdf-scroll-down :transient t)
