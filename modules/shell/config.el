@@ -74,7 +74,7 @@
   :ensure t
   :defer t
   :init
-  (setq shell-pop-shell-type '("eshell" "*eshell*" (lambda () (interactive) (eshell))))
+  (setq shell-pop-shell-type '("ghostel" "*ghostel*" (lambda () (ghostel))))
   :config
   (setq shell-pop-window-position "bottom"))
 
