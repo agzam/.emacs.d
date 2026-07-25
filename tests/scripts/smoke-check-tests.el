@@ -60,6 +60,22 @@
                  (smoke-report '((evil . finished)) nil "boom happened\n" nil)))
       (expect text :to-match "\\*Warnings\\*:\nboom happened\n")))
 
+  (it "fails on a half-built package even when every status is finished"
+    ;; finished status can hide a link-only build dir (interrupted update);
+    ;; the half-built list must flip the verdict on its own
+    (pcase-let ((`(,ok . ,text)
+                 (smoke-report '((evil . finished) (vulpea . finished))
+                               nil nil nil '((vulpea . "/builds/vulpea")))))
+      (expect ok :to-be nil)
+      (expect text :to-match "\\`SMOKE-FAILED\n")
+      (expect text :to-match "packages: 2 queued, 0 failed/blocked, 1 half-built\n")
+      (expect text :to-match "  vulpea: half-built (no autoloads in /builds/vulpea)\n")))
+
+  (it "stays green with a nil half-built list"
+    (pcase-let ((`(,ok . ,_)
+                 (smoke-report '((evil . finished)) nil nil nil nil)))
+      (expect ok :to-be-truthy)))
+
   (it "ships khalendario in the default tolerance list"
     (expect (memq 'khalendario smoke-tolerated-packages) :to-be-truthy)))
 

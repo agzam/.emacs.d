@@ -80,3 +80,94 @@ re-defines loaded functions); `load-file' those directly."
     (elpaca-process-queues)
     (doom-run-hooks 'doom-after-reload-hook)
     (message "Config reloaded in %.02fs" (float-time (time-since start-time)))))
+
+(defun build-dir-half-built-p (dir autoloads-file)
+  "Non-nil when build DIR exists without AUTOLOADS-FILE and without any .elc.
+An interrupted elpaca update/rebuild stops after the link step: the dir
+holds only linked sources, elpaca still activates it on the next boot
+(its autoloads load is noerror), and the package's commands silently
+come up void.  A dir with either artifact present got past linking."
+  (and (file-directory-p dir)
+       (not (file-exists-p (expand-file-name autoloads-file dir)))
+       (not (directory-files dir nil "\\.elc\\'" t))))
+
+(defun half-built-elpaca-packages ()
+  "Return (ID . BUILD-DIR) for every queued elpaca package left half-built.
+See `build-dir-half-built-p' for what qualifies.  The autoloads file
+name honors the recipe's :autoloads override (org's org-loaddefs.el)."
+  (when (fboundp 'elpaca--queued)
+    (let (broken)
+      (pcase-dolist (`(,id . ,e) (elpaca--queued))
+        (let ((dir (elpaca<-build-dir e))
+              (autoloads (or (plist-get (elpaca<-recipe e) :autoloads)
+                             (format "%s-autoloads.el" (elpaca<-package e)))))
+          (when (and dir (stringp autoloads)
+                     (build-dir-half-built-p dir autoloads))
+            (push (cons id dir) broken))))
+      (nreverse broken))))
+
+(defun stale-elc-files (dir)
+  "Return .elc files in DIR whose sibling .el is newer.
+Aftermath of an interrupted elpaca update: sources merged, the recompile
+never ran, and Emacs silently loads the older bytecode from then on."
+  (when (file-directory-p dir)
+    (seq-filter
+     (lambda (elc)
+       (let ((el (concat (file-name-sans-extension elc) ".el")))
+         (and (file-exists-p el) (file-newer-than-file-p el elc))))
+     (directory-files dir t "\\.elc\\'"))))
+
+(defun stale-elpaca-builds ()
+  "Return (ID . STALE-ELCS) for packages built into elpaca's builds dir.
+Build-in-place local checkouts are skipped: mid-development edits make
+their bytecode stale by definition, and `bb update' rebuilds those."
+  (when (and (fboundp 'elpaca--queued) (boundp 'elpaca-builds-directory))
+    (let (stale)
+      (pcase-dolist (`(,id . ,e) (elpaca--queued))
+        (when-let* ((dir (elpaca<-build-dir e))
+                    ((file-in-directory-p dir elpaca-builds-directory))
+                    (elcs (stale-elc-files dir)))
+          (push (cons id elcs) stale)))
+      (nreverse stale))))
+
+(defun broken-elpaca-builds ()
+  "Return (ID . REASON) for every broken elpaca build.
+REASON is `half-built' (no autoloads) or `stale' (source newer than
+.elc); when the deeper `elpaca-local' checks are loaded - the update and
+repair drivers load them, the boot warn hook stays cheap without - also
+`dirty': the build never saw a source the repo now holds (a merge that
+landed right before the process died, the killed-mid-update case).
+Custom :build/:autoloads recipes are exempt from the dirty scan - their
+build marker lives elsewhere and would read dirty forever (org)."
+  (let* ((base (append (mapcar (lambda (b) (cons (car b) 'half-built))
+                               (half-built-elpaca-packages))
+                       (mapcar (lambda (s) (cons (car s) 'stale))
+                               (stale-elpaca-builds))))
+         (dirty
+          (when (and (fboundp 'elpaca-local-build-dirty-p)
+                     (fboundp 'elpaca--queued))
+            (let (acc)
+              (pcase-dolist (`(,id . ,e) (elpaca--queued))
+                (let ((recipe (elpaca<-recipe e)))
+                  (when (and (not (assq id base))
+                             (not (plist-member recipe :build))
+                             (not (plist-member recipe :autoloads))
+                             (not (elpaca-local-package-p e))
+                             (elpaca-local-build-dirty-p e))
+                    (push (cons id 'dirty) acc))))
+              (nreverse acc)))))
+    (append base dirty)))
+
+(defun rebuild-broken-elpaca-builds (&optional emit)
+  "Queue an `elpaca-rebuild' for every broken build; return the (ID . REASON) list.
+EMIT, when non-nil, is called as (EMIT FMT &rest ARGS) per package.
+Queued non-interactively `elpaca-rebuild' never kicks the queue (the
+go-jira stall, see `elpaca-local-rebuild-changed'), so one
+`elpaca-process-queues' follows; callers wait for elpaca to settle."
+  (let ((broken (broken-elpaca-builds)))
+    (pcase-dolist (`(,id . ,reason) broken)
+      (when emit (funcall emit "rebuild (%s): %s" reason id))
+      (elpaca-rebuild id))
+    (when (and broken (fboundp 'elpaca-process-queues))
+      (elpaca-process-queues))
+    broken))

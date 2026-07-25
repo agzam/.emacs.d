@@ -162,6 +162,19 @@ build-in-place to clone."
 ;; Standalone helpers, loaded before modules (mirrors Doom init.el ordering).
 (load (expand-file-name "lisp/functions" user-emacs-directory) nil 'nomessage)
 
+;; Elpaca activates a package whose build dir merely exists, even when an
+;; interrupted update left it without autoloads (commands silently void,
+;; transients refuse to open) or with stale bytecode (old code keeps
+;; running).  Surface both loudly right after the queue settles instead.
+(add-hook! 'doom-after-init-hook
+  (defun warn-broken-elpaca-builds-h ()
+    (when-let* ((broken (half-built-elpaca-packages)))
+      (warn "Half-built elpaca package(s): %s - autoloads missing; fix with `bb repair' (or M-x elpaca-rebuild)"
+            (mapconcat (lambda (b) (symbol-name (car b))) broken ", ")))
+    (when-let* ((stale (stale-elpaca-builds)))
+      (warn "Stale bytecode in elpaca package(s): %s - source newer than .elc; fix with `bb repair' (or M-x elpaca-rebuild)"
+            (mapconcat (lambda (s) (symbol-name (car s))) stale ", ")))))
+
 ;; GC returns to normal under gcmh once the first buffer is visited.
 (use-package gcmh
   :hook (doom-first-buffer . gcmh-mode)

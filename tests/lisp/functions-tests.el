@@ -122,3 +122,180 @@
       "probe" [("x" "x" ignore)])
     (expect (transient-remap-suffix-key 'probe-menu-no-ret "RET" "s-<return>")
             :not :to-throw)))
+
+(describe "build-dir-half-built-p"
+  ;; A link-only build dir (interrupted between elpaca's link and
+  ;; autoloads/compile steps) is the state that silently voids commands.
+  (let ((dir nil))
+    (before-each (setq dir (make-temp-file "half-built-probe" t)))
+    (after-each (delete-directory dir t))
+
+    (it "flags a dir holding only sources"
+      (with-temp-file (expand-file-name "pkg.el" dir))
+      (expect (build-dir-half-built-p dir "pkg-autoloads.el") :to-be-truthy))
+
+    (it "passes a dir with the autoloads file"
+      (with-temp-file (expand-file-name "pkg-autoloads.el" dir))
+      (expect (build-dir-half-built-p dir "pkg-autoloads.el") :to-be nil))
+
+    (it "passes a dir with compiled files but a custom autoloads name (org)"
+      (with-temp-file (expand-file-name "pkg.elc" dir))
+      (expect (build-dir-half-built-p dir "pkg-autoloads.el") :to-be nil))
+
+    (it "passes a missing dir (package not yet built at all)"
+      (expect (build-dir-half-built-p
+               (expand-file-name "nonexistent" dir) "pkg-autoloads.el")
+              :to-be nil))))
+
+(describe "stale-elc-files"
+  (let ((dir nil))
+    (before-each (setq dir (make-temp-file "stale-elc-probe" t)))
+    (after-each (delete-directory dir t))
+
+    (it "flags an elc older than its source"
+      (let ((el (expand-file-name "pkg.el" dir))
+            (elc (expand-file-name "pkg.elc" dir))
+            (now (current-time)))
+        (with-temp-file elc)
+        (with-temp-file el)
+        (set-file-times elc (time-subtract now 100))
+        (set-file-times el now)
+        (expect (stale-elc-files dir) :to-equal (list elc))))
+
+    (it "passes a fresh elc"
+      (let ((el (expand-file-name "pkg.el" dir))
+            (elc (expand-file-name "pkg.elc" dir))
+            (now (current-time)))
+        (with-temp-file el)
+        (with-temp-file elc)
+        (set-file-times el (time-subtract now 100))
+        (set-file-times elc now)
+        (expect (stale-elc-files dir) :to-be nil)))
+
+    (it "ignores an elc with no sibling source"
+      (with-temp-file (expand-file-name "pkg.elc" dir))
+      (expect (stale-elc-files dir) :to-be nil))))
+
+(describe "stale-elpaca-builds"
+  (it "flags stale builds inside the builds dir, skips build-in-place ones"
+    (let* ((builds-root (make-temp-file "stale-builds-root" t))
+           (pkg-dir (expand-file-name "pkg" builds-root))
+           (local-dir (make-temp-file "stale-local-checkout" t))
+           (now (current-time)))
+      (unwind-protect
+          (progn
+            (make-directory pkg-dir)
+            (dolist (dir (list pkg-dir local-dir))
+              (let ((el (expand-file-name "f.el" dir))
+                    (elc (expand-file-name "f.elc" dir)))
+                (with-temp-file elc)
+                (with-temp-file el)
+                (set-file-times elc (time-subtract now 100))
+                (set-file-times el now)))
+            (cl-letf (((symbol-function 'elpaca--queued)
+                       (lambda () `((pkg . (:build-dir ,pkg-dir))
+                                    (local . (:build-dir ,local-dir)))))
+                      ((symbol-function 'elpaca<-build-dir)
+                       (lambda (e) (plist-get e :build-dir))))
+              (defvar elpaca-builds-directory)
+              (let ((elpaca-builds-directory builds-root))
+                (expect (stale-elpaca-builds)
+                        :to-equal `((pkg . (,(expand-file-name "f.elc" pkg-dir))))))))
+        (delete-directory builds-root t)
+        (delete-directory local-dir t)))))
+
+(describe "broken-elpaca-builds"
+  (it "merges both scans with their reasons"
+    (cl-letf (((symbol-function 'half-built-elpaca-packages)
+               (lambda () '((vulpea . "/b/vulpea"))))
+              ((symbol-function 'stale-elpaca-builds)
+               (lambda () '((magit-section "/b/magit-section/f.elc")))))
+      (expect (broken-elpaca-builds)
+              :to-equal '((vulpea . half-built) (magit-section . stale)))))
+
+  (it "adds the dirty scan when elpaca-local is loaded, with exemptions"
+    ;; entries: vulpea already flagged (dedup), remoto build-in-place local
+    ;; (skipped), org custom :autoloads (skipped), consult custom :build
+    ;; (skipped), forge genuinely dirty (flagged), magit clean
+    (let ((queued '((vulpea . (:recipe nil :dirty t))
+                    (remoto . (:recipe nil :local t :dirty t))
+                    (org . (:recipe (:autoloads "org-loaddefs.el") :dirty t))
+                    (consult . (:recipe (:build (:not x)) :dirty t))
+                    (forge . (:recipe nil :dirty t))
+                    (magit . (:recipe nil)))))
+      (cl-letf (((symbol-function 'half-built-elpaca-packages)
+                 (lambda () '((vulpea . "/b/vulpea"))))
+                ((symbol-function 'stale-elpaca-builds) #'ignore)
+                ((symbol-function 'elpaca--queued) (lambda () queued))
+                ((symbol-function 'elpaca<-recipe)
+                 (lambda (e) (plist-get e :recipe)))
+                ((symbol-function 'elpaca-local-package-p)
+                 (lambda (e) (plist-get e :local)))
+                ((symbol-function 'elpaca-local-build-dirty-p)
+                 (lambda (e) (plist-get e :dirty))))
+        (expect (broken-elpaca-builds)
+                :to-equal '((vulpea . half-built) (forge . dirty)))))))
+
+(describe "rebuild-broken-elpaca-builds"
+  (it "queues a rebuild per broken package, kicks the queue once, reports each"
+    (let (rebuilt kicked emitted)
+      (cl-letf (((symbol-function 'half-built-elpaca-packages)
+                 (lambda () '((vulpea . "/b/vulpea"))))
+                ((symbol-function 'stale-elpaca-builds)
+                 (lambda () '((magit-section "/b/f.elc"))))
+                ((symbol-function 'elpaca-rebuild)
+                 (lambda (id) (push id rebuilt)))
+                ((symbol-function 'elpaca-process-queues)
+                 (lambda () (setq kicked t))))
+        (expect (rebuild-broken-elpaca-builds
+                 (lambda (fmt &rest args)
+                   (push (apply #'format fmt args) emitted)))
+                :to-equal '((vulpea . half-built) (magit-section . stale)))
+        (expect (nreverse rebuilt) :to-equal '(vulpea magit-section))
+        (expect kicked :to-be-truthy)
+        (expect (nreverse emitted)
+                :to-equal '("rebuild (half-built): vulpea"
+                            "rebuild (stale): magit-section")))))
+
+  (it "does nothing on a healthy tree"
+    (let (rebuilt kicked)
+      (cl-letf (((symbol-function 'half-built-elpaca-packages) #'ignore)
+                ((symbol-function 'stale-elpaca-builds) #'ignore)
+                ((symbol-function 'elpaca-rebuild)
+                 (lambda (id) (push id rebuilt)))
+                ((symbol-function 'elpaca-process-queues)
+                 (lambda () (setq kicked t))))
+        (expect (rebuild-broken-elpaca-builds) :to-be nil)
+        (expect rebuilt :to-be nil)
+        (expect kicked :to-be nil)))))
+
+(describe "half-built-elpaca-packages"
+  (it "returns nil when elpaca is absent"
+    (expect (fboundp 'elpaca--queued) :to-be nil)
+    (expect (half-built-elpaca-packages) :to-be nil))
+
+  (it "flags only broken entries, honoring the recipe :autoloads override"
+    (let* ((broken-dir (make-temp-file "half-built-broken" t))
+           (org-dir (make-temp-file "half-built-org" t))
+           (healthy-dir (make-temp-file "half-built-ok" t))
+           ;; fake elpaca structs as plists; accessors stubbed below
+           (queued `((vulpea . (:build-dir ,broken-dir :recipe nil :package "vulpea"))
+                     (org . (:build-dir ,org-dir
+                             :recipe (:autoloads "org-loaddefs.el") :package "org"))
+                     (evil . (:build-dir ,healthy-dir :recipe nil :package "evil")))))
+      (unwind-protect
+          (progn
+            (with-temp-file (expand-file-name "vulpea.el" broken-dir))
+            (with-temp-file (expand-file-name "org-loaddefs.el" org-dir))
+            (with-temp-file (expand-file-name "evil-autoloads.el" healthy-dir))
+            (cl-letf (((symbol-function 'elpaca--queued) (lambda () queued))
+                      ((symbol-function 'elpaca<-build-dir)
+                       (lambda (e) (plist-get e :build-dir)))
+                      ((symbol-function 'elpaca<-recipe)
+                       (lambda (e) (plist-get e :recipe)))
+                      ((symbol-function 'elpaca<-package)
+                       (lambda (e) (plist-get e :package))))
+              (expect (half-built-elpaca-packages)
+                      :to-equal `((vulpea . ,broken-dir)))))
+        (dolist (d (list broken-dir org-dir healthy-dir))
+          (delete-directory d t))))))

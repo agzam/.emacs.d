@@ -26,31 +26,39 @@ inert there.")
 ;; here needs a drawn frame.
 (setq inhibit-redisplay t)
 
-(defun smoke-report (statuses init-error warnings tolerated)
+(defun smoke-report (statuses init-error warnings tolerated &optional half-built)
   "Render the verdict and result-marker text as (OK . TEXT).
 STATUSES is an alist of (PACKAGE . STATUS); INIT-ERROR mirrors
 `init-file-had-error'; WARNINGS is the *Warnings* buffer text or nil.
 A failed/blocked package listed in TOLERATED is reported but does not
-flip the verdict - any other failure, or INIT-ERROR, does."
+flip the verdict - any other failure, INIT-ERROR, or an entry in
+HALF-BUILT (see `half-built-elpaca-packages': finished status hiding a
+build dir with no autoloads) does."
   (let* ((failed (cl-remove-if-not
                   (lambda (s) (memq (cdr s) '(failed blocked)))
                   statuses))
          (fatal (cl-remove-if (lambda (s) (memq (car s) tolerated)) failed))
          (waved (cl-remove-if-not (lambda (s) (memq (car s) tolerated)) failed))
-         (ok (and (null fatal) (not init-error))))
+         (ok (and (null fatal) (null half-built) (not init-error))))
     (cons ok
           (concat
            (if ok "SMOKE-OK\n" "SMOKE-FAILED\n")
-           (format "packages: %d queued, %d failed/blocked%s\n"
+           (format "packages: %d queued, %d failed/blocked%s%s\n"
                    (length statuses) (length fatal)
                    (if waved
                        (format ", %d tolerated (private)" (length waved))
+                     "")
+                   (if half-built
+                       (format ", %d half-built" (length half-built))
                      ""))
            (when init-error "init.el signaled an error during startup\n")
            (mapconcat (lambda (f) (format "  %s: %s\n" (car f) (cdr f)))
                       fatal "")
            (mapconcat (lambda (f) (format "  %s: %s (tolerated)\n" (car f) (cdr f)))
                       waved "")
+           (mapconcat (lambda (b) (format "  %s: half-built (no autoloads in %s)\n"
+                                          (car b) (cdr b)))
+                      half-built "")
            (when warnings (concat "*Warnings*:\n" warnings))))))
 
 (defun smoke-write-result ()
@@ -63,7 +71,9 @@ flip the verdict - any other failure, or INIT-ERROR, does."
                 init-file-had-error
                 (when-let* ((buf (get-buffer "*Warnings*")))
                   (with-current-buffer buf (buffer-string)))
-                smoke-tolerated-packages)))
+                smoke-tolerated-packages
+                (when (fboundp 'half-built-elpaca-packages)
+                  (half-built-elpaca-packages)))))
     (with-temp-file smoke-result-file
       (insert text))
     (kill-emacs (if ok 0 1))))
