@@ -119,6 +119,11 @@ build-in-place to clone."
 (unless (getenv "CI")
   (ensure-local-dev-checkouts))
 
+;; Import the shell PATH; a compositor-launched Emacs inherits a minimal one.
+(elpaca (exec-path-from-shell :wait t))
+(require 'shell-env)
+(import-shell-environment)
+
 ;;; Doom compat layer
 
 ;; map! needs general.el at init time.
