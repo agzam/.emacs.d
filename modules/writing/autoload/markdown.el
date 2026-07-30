@@ -124,6 +124,20 @@ YANK-HANDLER pass through to ORIG-FN untouched.
   (insert "clojure")
   (search-forward "```" nil :noerror))
 
+;; Declared so the `let' below binds dynamically; grip-mode is not loaded when
+;; this file is compiled.
+(defvar grip-preview-in-webkit)
+(declare-function grip-browse-preview "grip-mode")
+
+;;;###autoload
+(defun grip-preview-in-browser ()
+  "Show the grip preview in the external browser instead of the xwidget.
+The embedded webkit cannot print, so saving to PDF needs a real browser."
+  (interactive)
+  (require 'grip-mode)
+  (let ((grip-preview-in-webkit nil))
+    (grip-browse-preview)))
+
 (defvar markdown-stored-links nil
   "Stores markdown links as (label file heading-text)")
 

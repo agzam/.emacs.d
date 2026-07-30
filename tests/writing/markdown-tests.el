@@ -13,6 +13,7 @@
 ;; major-mode (derived-mode-p matches the bare symbol).
 (defvar evil-mode nil)
 (provide 'prisma)
+(provide 'grip-mode)
 
 (load-module-file "modules/writing/autoload/markdown.el")
 
@@ -156,3 +157,14 @@
       (markdown-wrap-code-generic)
       (expect (buffer-string) :to-equal "```\nsome code\n```\n")
       (expect (point) :to-equal 4))))
+
+(describe "grip-preview-in-browser"
+  (it "sends the preview to the external browser, then restores the default"
+    (let (seen)
+      (setf (symbol-function 'grip-browse-preview)
+            (lambda () (setq seen grip-preview-in-webkit)))
+      (let ((grip-preview-in-webkit t))
+        (grip-preview-in-browser)
+        ;; A lexical binding here would leave grip on the xwidget path.
+        (expect seen :to-be nil)
+        (expect grip-preview-in-webkit :to-be t)))))

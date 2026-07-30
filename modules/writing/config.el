@@ -2,8 +2,8 @@
 
 ;; Ported from doom.d modules/custom/writing.  Dropped (git-resurrectable):
 ;; after! writegood-mode (rode Doom's :checkers grammar, not installed here),
-;; after! grip-mode (parks with :lang markdown), lsp-marksman require (parks
-;; with lsp), menu-bar-item-set-clock-or-pomodoro (org-pomodoro long-tail).
+;; lsp-marksman require (parks with lsp),
+;; menu-bar-item-set-clock-or-pomodoro (org-pomodoro long-tail).
 ;; translate-at-point-smart lives here now (below); it un-parked with the pdf
 ;; module (nov's localleader T), its only consumer.
 ;; NOTE Own packages (google-translate, occult, prisma, wiktionary-bro,
@@ -216,6 +216,21 @@
    (":spock:" ?🖖)
    (":thumb:" ?👍)))
 
+(use-package grip-mode
+  :commands (grip-mode grip-browse-preview)
+  :config
+  ;; Teardown guards on the xwidget-internal C feature but calls into
+  ;; xwidget.el, so previewing in the browser first leaves it void.
+  (require 'xwidget nil :noerror)
+  ;; Without real-time refresh grip renders the file on disk rather than the
+  ;; buffer, so the preview lags behind every unsaved edit.  `auto' prefers
+  ;; mdopen/go-grip when installed, and both render locally rather than
+  ;; through GitHub's API - which is the point of grip.
+  (setopt grip-real-time-refresh t
+          grip-command 'grip
+          grip-github-user "agzam"
+          grip-github-password (auth-host->pass "api.github.com")))
+
 (after! markdown-mode
   (setopt markdown-enable-math nil)
   (map! :map (markdown-mode-map)
@@ -224,6 +239,9 @@
                   "<" #'markdown-wrap-collapsible
                   "C" #'markdown-wrap-code-clojure
                   "c" #'markdown-wrap-code-generic)
+         (:prefix ("p" . "preview")
+                  "p" #'grip-mode
+                  "b" #'grip-preview-in-browser)
          (:prefix ("o" . "open/links")
                   "o" #'markdown-open
                   "l" #'markdown-store-link))

@@ -937,8 +937,8 @@ these. Each restores the parked leader rows when its foundation lands.
   eww-open-in-other-window.  insert-comma relocated home from ai
   (autoload + specs; ai loaddefs regen on mtime).  Drops
   (git-resurrectable): after! writegood-mode (only un-did :checkers
-  grammar's hook - package never installed here), after! grip-mode
-  (parks with :lang markdown), lsp-marksman require (parks with lsp),
+  grammar's hook - package never installed here), lsp-marksman require
+  (parks with lsp),
   menu-bar-item-set-clock-or-pomodoro (org-pomodoro long-tail owns its
   consumer hook), translate-at-point-smart (pdf module sole consumer).
   harper-ls after! lsp-mode block ported INERT (registers when lsp
@@ -1908,9 +1908,11 @@ wiktionary-bro (extracted to ~/GitHub/agzam), spacehammer (local-dev via
 (sanctioned exception #2).  SPC x l / SPC x t trees closed; insert-dash +
 insert-bracket-pair un-voided (org "[ SPC" still rides vulpea's config,
 doom.d-parity).  Unblocked: clojure (spacehammer-monroe), chat (jinx).
-Parked with their modules: grip block (:lang markdown), lsp-marksman +
+Parked with their modules: lsp-marksman +
 harper activation (lsp; the after! lsp-mode harper registration ported
-inert), menu-bar clock/pomodoro fn (org long-tail).
+inert), menu-bar clock/pomodoro fn (org long-tail).  grip un-parked
+(2026-07): grip-mode rides the writing module directly, no :lang markdown
+flag needed.
 translate-at-point-smart landed with the pdf module (2026-07) - it lives in
 writing/autoload/google-translate.el, nov's localleader "T" is its consumer.
 ** DONE embark
@@ -2119,7 +2121,7 @@ Each needs a lab decision; bindings tree + registry already assume them.
 - :os macos :: folded into the custom osx module port (2026-07), see the
   osx entry above for the kept/dropped split.
 - :lang emacs-lisp/json/markdown/sh :: port with respective language work;
-  markdown +grip referenced by writing autoloads.
+  markdown's +grip flag landed as a plain grip-mode block in writing.
 
 * Local :repo packages (14)
 gptel-tools, gptel-anthropic-oauth, github-topics, remoto, ag-themes,
