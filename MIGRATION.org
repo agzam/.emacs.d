@@ -1997,12 +1997,31 @@ the recipe tracks vedang's default branch and keeps build/{Makefile,server}
 for the runtime epdfinfo compile (first PDF open, never at elpaca build time).
 Kept: saveplace-pdf-view, org-noter, nov.  Dropped: calibredb (unused, user
 call).  Added: hide-mode-line (annotation-list mode-line), buffer-to-pdf
-(Prot's buffer -> PDF exporter; its x-export-frames needs Cairo, which the
-macOS NS build lacks, so an :around advice on buffer-to-pdf itself keeps
-Prot's command where Emacs can export frames and prints through htmlize + a
-headless Chromium elsewhere - normalizing the 12-digit frame colors htmlize
-leaks - then opens the result; SPC f p rides the same command).
-Cross-module:
+(Prot's buffer -> PDF exporter; its x-export-frames is Cairo-only, so an
+:around advice on the command itself keeps Prot's path where Emacs can export
+frames and prints through htmlize + a headless Chromium elsewhere -
+normalizing the 12-digit frame colors htmlize leaks - then opens the result;
+SPC f p rides the same command.  The sheet carries the frame's font, cell
+height and column count, taking the browser's wrapping from ~5% off Emacs to
+~1%; closing the last 1% needs vertical-motion pre-wrapping, judged not worth
+it.  line-spacing rides along as a unitless line-height ((cell + spacing) /
+font size): a length would compute once on the pre, dropping the gap and
+squashing heading faces, where a factor is inherited and scales with them -
+27px plain and 35px on a level-1 heading, which is what Emacs measures.  The
+sheet bleeds: a page margin lies outside the canvas and leaves a white frame
+on every page, so the inset is the text block's padding with
+box-decoration-break clone, which each fragment keeps.  show-pdf visits with
+save-place-alist bound to nil - page counts change with every export, and
+saveplace-pdf-view restoring a page past the new end aborts the visit.  htmlize reads buffer text, so the buffer is copied first with what
+redisplay draws written into it: static compositions spelled out (org-superstar
+bullets, prettify-symbols - automatic ones are left alone, they are the
+shaper's ligatures), line-prefix indentation inserted (org-indent), and folding
+carried over as cloned overlays plus the invisibility spec, without which every
+folded drawer and subtree lands in the export.  Rejected alternative: photographing the frames through screencapture(1)
+reproduced everything redisplay draws - composed bullets, line prefixes,
+images - but yields raster pages with no text layer, so nothing in the PDF can
+be selected, copied or searched.  What htmlize cannot see (compositions,
+display properties) is the standing cost of this route).  Cross-module:
 translate-at-point-smart un-parked into writing; org-mode-map + pdf-view-mode-
 map localleader "n" and SPC n e wired to org-noter (SPC n e fills the slot
 Doom's (modulep! :lang org +noter) guard prunes in the :custom-org lab).

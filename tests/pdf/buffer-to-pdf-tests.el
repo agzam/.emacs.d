@@ -6,6 +6,9 @@
           (locate-dominating-file (or load-file-name buffer-file-name)
                                   "helper.el")))
 (require 'buttercup)
+;; show-pdf binds save-place-alist; without saveplace loaded it is not special
+;; and a let would bind it lexically, out of the function's sight.
+(require 'saveplace)
 
 (defun buffer-to-pdf-tests--read-form (file marker)
   "Read the form that starts at MARKER in FILE, relative to the config root.
@@ -89,8 +92,10 @@ neither `use-package' nor general (behind `map!') is available."
 ;;; The browser fallback.  htmlize and the buffer-to-pdf package are absent
 ;;; from the batch tier, so the specs stub them.
 
-(defvar buffer-to-pdf-directory (file-name-as-directory
-                                 (make-temp-file "buffer-to-pdf-tests" t)))
+;; A path inside the helper's sandbox, not a directory of its own: the specs
+;; only ever build names from it, and a per-run temp directory leaks one behind
+;; on every `bb test'.
+(defvar buffer-to-pdf-directory (expand-file-name "pdf-exports/" test-sandbox-dir))
 
 (defvar buffer-to-pdf-monochrome nil)
 
@@ -118,26 +123,147 @@ neither `use-package' nor general (behind `map!') is available."
     (expect (normalize-hex-colors "a { color: #655370 } b { color: red }")
             :to-equal "a { color: #655370 } b { color: red }")))
 
-(describe "page-size-css"
+(describe "page-pixels"
   (it "reads the pixel dimensions of an orientation"
-    (expect (page-size-css 'landscape) :to-equal "1024px 768px"))
+    (expect (page-pixels 'landscape) :to-equal '(1024 . 768)))
 
   (it "calls orientations that are functions"
-    (expect (page-size-css 'current-window) :to-equal "640px 480px"))
+    (expect (page-pixels 'current-window) :to-equal '(640 . 480)))
 
   (it "refuses an unknown orientation"
-    (expect (page-size-css 'origami) :to-throw 'user-error)))
+    (expect (page-pixels 'origami) :to-throw 'user-error)))
+
+(describe "line-spacing-pixels"
+  (it "reads a fraction of the character cell"
+    (cl-letf (((symbol-function 'frame-char-height) (lambda (&rest _) 20)))
+      (with-temp-buffer
+        (setq-local line-spacing 0.35)
+        (expect (line-spacing-pixels (current-buffer)) :to-equal 7))))
+
+  (it "takes a pixel count as it stands"
+    (cl-letf (((symbol-function 'frame-char-height) (lambda (&rest _) 20)))
+      (with-temp-buffer
+        (setq-local line-spacing 3)
+        (expect (line-spacing-pixels (current-buffer)) :to-equal 3))))
+
+  (it "adds nothing when neither buffer nor frame asks for it"
+    (cl-letf (((symbol-function 'frame-char-height) (lambda (&rest _) 20))
+              ((symbol-function 'frame-parameter) (lambda (&rest _) nil)))
+      (with-temp-buffer
+        (setq-local line-spacing nil)
+        (expect (line-spacing-pixels (current-buffer)) :to-equal 0)))))
 
 (describe "print-stylesheet"
-  (it "sizes the page and keeps the browser from dropping the theme colors"
-    (let ((css (print-stylesheet "1024px 768px")))
-      (expect css :to-match "@page { size: 1024px 768px")
-      (expect css :to-match "print-color-adjust: exact")))
+  ;; Fira Code at 16, in a 10x20 pixel cell - the metrics the calibration was
+  ;; measured against.
+  (before-each (spy-on 'default-font-metrics
+                       :and-return-value '("Fira Code" 16 10 20)))
+
+  (it "bleeds the page and insets the text itself"
+    ;; The regression: a page margin sits outside the canvas, so the theme
+    ;; background stopped at it and every sheet printed with a white frame.
+    ;; The sheet keeps the border in its size, the text block carries it as
+    ;; padding, and cloning the decoration puts it on every page fragment.
+    (let ((css (print-stylesheet 1024 768 nil 7)))
+      (expect css :to-match "@page { size: 1144px 888px; margin: 0; }")
+      (expect css :to-match "padding: 60px")
+      (expect css :to-match "box-decoration-break: clone")))
+
+  (it "hands the frame's own font to the browser"
+    ;; Left alone the browser renders another typeface at another size and
+    ;; wraps ~5% off; this is what closes the gap to ~1%.
+    (let ((css (print-stylesheet 1024 768 nil 7)))
+      (expect css :to-match "font-family: \"Fira Code\", monospace")
+      (expect css :to-match "font-size: 16px")))
+
+  (it "carries line-spacing, unitless so headings scale with their font"
+    ;; The regression: a length here computes once on the pre, losing the
+    ;; buffer's line-spacing and squashing every heading into a default line.
+    ;; (20 cell + 7 spacing) / 16 = 1.6875, measured at 27px plain and 35px
+    ;; on a 130% heading - Emacs gives 27 and 35.
+    (expect (print-stylesheet 1024 768 nil 7) :to-match "line-height: 1\\.6875")
+    (expect (print-stylesheet 1024 768 nil 0) :to-match "line-height: 1\\.2500"))
+
+  (it "sizes the text box in columns, one short for the continuation glyph"
+    (expect (print-stylesheet 1024 768 nil 7) :to-match "width: 101ch"))
+
+  (it "breaks mid-word unless the buffer wraps on words"
+    (expect (print-stylesheet 1024 768 nil 7) :to-match "word-break: break-all")
+    (expect (print-stylesheet 1024 768 t 7) :to-match "word-break: normal"))
+
+  (it "keeps the browser from dropping the theme colors"
+    (expect (print-stylesheet 1024 768 nil 7) :to-match "print-color-adjust: exact"))
 
   (it "flattens the faces for the monochrome commands"
     (let ((buffer-to-pdf-monochrome (cons "white" "black")))
-      (expect (print-stylesheet "1024px 768px")
+      (expect (print-stylesheet 1024 768 nil 7)
               :to-match "background-color: white !important; color: black"))))
+
+(describe "composed-text"
+  (it "spells out a static composition"
+    ;; (FROM TO COMPONENTS RELATIVE-P MOD-FUNC WIDTH), what compose-region makes.
+    (expect (composed-text '(1 2 [?◉] t nil 1)) :to-equal "◉")
+    (expect (composed-text '(1 2 ?○ t nil 1)) :to-equal "○"))
+
+  (it "leaves automatic compositions alone"
+    ;; Those are (FROM TO GSTRING) - the shaper's ligatures.  Substituting them
+    ;; would rewrite source text into whatever glyphs the font chose.
+    (expect (composed-text '(1 3 [gstring])) :to-be nil)))
+
+(describe "buffer-copy-as-displayed"
+  (it "puts composed glyphs into the text, with the face they were drawn in"
+    (with-temp-buffer
+      (insert "* heading\n")
+      (put-text-property 1 2 'face 'org-level-1)
+      (compose-region 1 2 [?◉])
+      (let ((copy (buffer-copy-as-displayed (current-buffer))))
+        (unwind-protect
+            (with-current-buffer copy
+              (expect (buffer-substring-no-properties (point-min) (point-max))
+                      :to-equal "◉ heading\n")
+              (expect (get-text-property (point-min) 'face) :to-be 'org-level-1))
+          (kill-buffer copy)))))
+
+  (it "writes line prefixes into the text"
+    (with-temp-buffer
+      (insert "one\ntwo\n")
+      (put-text-property 5 8 'line-prefix "  ")
+      (let ((copy (buffer-copy-as-displayed (current-buffer))))
+        (unwind-protect
+            (expect (with-current-buffer copy
+                      (buffer-substring-no-properties (point-min) (point-max)))
+                    :to-equal "one\n  two\n")
+          (kill-buffer copy)))))
+
+  (it "carries folding across, overlays and invisibility spec both"
+    ;; The regression: org folds with overlays here, and a copy without them
+    ;; exports every drawer and subtree the buffer has folded away - one export
+    ;; went from 4 pages to 12.
+    (with-temp-buffer
+      (insert "visible\nhidden\n")
+      (setq-local buffer-invisibility-spec '((org-fold-outline . " ↴")))
+      (overlay-put (make-overlay 9 15) 'invisible 'org-fold-outline)
+      (let ((copy (buffer-copy-as-displayed (current-buffer))))
+        (unwind-protect
+            (progn
+              (expect (buffer-local-value 'buffer-invisibility-spec copy)
+                      :to-equal '((org-fold-outline . " ↴")))
+              (expect (with-current-buffer copy
+                        (seq-find (lambda (overlay)
+                                    (eq 'org-fold-outline (overlay-get overlay 'invisible)))
+                                  (overlays-in (point-min) (point-max))))
+                      :to-be-truthy))
+          (kill-buffer copy)))))
+
+  (it "leaves an ordinary buffer as it is"
+    (with-temp-buffer
+      (insert "(defun foo () 42)\n")
+      (let ((copy (buffer-copy-as-displayed (current-buffer))))
+        (unwind-protect
+            (expect (with-current-buffer copy
+                      (buffer-substring-no-properties (point-min) (point-max)))
+                    :to-equal "(defun foo () 42)\n")
+          (kill-buffer copy))))))
 
 (describe "exported-pdf-path"
   (it "names a file buffer after its file, as the package does"
@@ -182,7 +308,20 @@ neither `use-package' nor general (behind `map!') is available."
                 ((symbol-function 'find-file-other-window)
                  (lambda (path) (setq opened path))))
         (show-pdf "/tmp/fresh.pdf")
-        (expect opened :to-equal "/tmp/fresh.pdf")))))
+        (expect opened :to-equal "/tmp/fresh.pdf"))))
+
+  (it "keeps saved places out of a regenerated file"
+    ;; The regression: an export's page count changes with every run, and
+    ;; saveplace-pdf-view restoring a page past the new end aborts the visit
+    ;; outright - "No such page: 5".
+    (let ((save-place-alist '(("/tmp/fresh.pdf" . 5)))
+          during)
+      (cl-letf (((symbol-function 'get-file-buffer) #'ignore)
+                ((symbol-function 'find-file-other-window)
+                 (lambda (_) (setq during save-place-alist))))
+        (show-pdf "/tmp/fresh.pdf")
+        (expect during :to-be nil)
+        (expect save-place-alist :to-equal '(("/tmp/fresh.pdf" . 5)))))))
 
 (describe "chromium-executable"
   (it "prefers an installed application bundle"
