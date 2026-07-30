@@ -1994,7 +1994,13 @@ Ported (see Decisions log).  Continuous scroll is UPSTREAM now
 the recipe tracks vedang's default branch and keeps build/{Makefile,server}
 for the runtime epdfinfo compile (first PDF open, never at elpaca build time).
 Kept: saveplace-pdf-view, org-noter, nov.  Dropped: calibredb (unused, user
-call).  Added: hide-mode-line (annotation-list mode-line).  Cross-module:
+call).  Added: hide-mode-line (annotation-list mode-line), buffer-to-pdf
+(Prot's buffer -> PDF exporter; its x-export-frames needs Cairo, which the
+macOS NS build lacks, so an :around advice on buffer-to-pdf itself keeps
+Prot's command where Emacs can export frames and prints through htmlize + a
+headless Chromium elsewhere - normalizing the 12-digit frame colors htmlize
+leaks - then opens the result; SPC f p rides the same command).
+Cross-module:
 translate-at-point-smart un-parked into writing; org-mode-map + pdf-view-mode-
 map localleader "n" and SPC n e wired to org-noter (SPC n e fills the slot
 Doom's (modulep! :lang org +noter) guard prunes in the :custom-org lab).

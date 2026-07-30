@@ -22,6 +22,8 @@
 ;; - Doom's `SPC n e' org-noter row is pruned here (its
 ;;   (modulep! :lang org +noter) guard is false - org is a :custom module),
 ;;   so this module fills the slot itself.
+;; - buffer-to-pdf added (Prot's; nothing like it in the Doom original) -
+;;   this module now writes PDFs as well as reads them.
 ;;; Code:
 
 (use-package pdf-tools
@@ -188,5 +190,26 @@
 ;; (modulep! :lang org +noter) guard is structurally false - org registers as
 ;; a :custom module).  The pdf module owns org-noter, so fill the slot here.
 (map! :leader :desc "Org noter" "n e" #'org-noter)
+
+;; Export the current buffer to a PDF that looks like the screen.
+(use-package buffer-to-pdf
+  :ensure (buffer-to-pdf :host github :repo "protesilaos/buffer-to-pdf")
+  :defer t
+  :config
+  (setopt buffer-to-pdf-directory (expand-file-name "~/Downloads/"))
+
+  (defadvice! buffer-to-pdf-fallback-a (fn buffer orientation)
+    "Print through a browser where Emacs cannot export frames, and show it.
+`x-export-frames' is compiled in only for Cairo builds, so on macOS every
+command in this package would otherwise do nothing but error.  Probing the
+function beats the package's own `system-configuration-features' test, which
+reads \"cairo\" against a string that says CAIRO."
+    :around #'buffer-to-pdf
+    (if (fboundp 'x-export-frames)
+        (funcall fn buffer orientation)
+      (print-buffer-with-browser buffer orientation))
+    (show-pdf (exported-pdf-path buffer))))
+
+(map! :leader :desc "Export buffer to PDF" "f p" #'buffer-to-pdf)
 
 ;;; config.el ends here
