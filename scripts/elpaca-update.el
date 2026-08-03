@@ -34,18 +34,26 @@
 (defvar elpaca-update--persist (elpaca-update-report-open-session "headless")
   "Persistent append-log path this run tees to, or nil when disabled.")
 
+(defun elpaca-update--out (text)
+  "Print TEXT to stdout and mirror it into the persistent append-log.
+The changelog and summary print at the very end, right before `kill-emacs'
+flushes stdout - but without this tee the persistent log recorded headless
+sessions with no verdict at all."
+  (princ text)
+  (elpaca-update-report-tee elpaca-update--persist (string-trim-right text "\n+")))
+
 (defun elpaca-update--changelog ()
   "Print the commits pulled in for every changed package; return the count."
   (let ((seen (make-hash-table :test 'equal)) (n 0))
     (dolist (cell (elpaca--queued))
       (when-let* ((changes (elpaca-update-report-block-once
                             (cdr cell) elpaca-update--snapshot seen)))
-        (when (zerop n) (princ "\nupdated packages:\n"))
+        (when (zerop n) (elpaca-update--out "\nupdated packages:\n"))
         (cl-incf n)
-        (princ (format "  %s\n%s\n"
-                       (elpaca-update-report--paint
-                        "1" (symbol-name (elpaca<-id (cdr cell))))
-                       changes))))
+        (elpaca-update--out (format "  %s\n%s\n"
+                                    (elpaca-update-report--paint
+                                     "1" (symbol-name (elpaca<-id (cdr cell))))
+                                    changes))))
     n))
 
 (defun elpaca-update--report (updated healed remaining)
@@ -58,13 +66,15 @@ failed/blocked statuses."
                            (elpaca--queued)))
          (failed (cl-remove-if-not (lambda (s) (memq (cdr s) '(failed blocked)))
                                    statuses)))
-    (princ (format "\nupdate: %d processed, %d updated, %d failed/blocked%s\n"
-                   (length statuses) updated (length failed)
-                   (if healed (format ", %d healed" (length healed)) "")))
-    (dolist (f failed) (princ (format "  %s: %s\n" (car f) (cdr f))))
-    (dolist (h healed) (princ (format "  healed %s (%s)\n" (car h) (cdr h))))
+    (elpaca-update--out
+     (format "\nupdate: %d processed, %d updated, %d failed/blocked%s\n"
+             (length statuses) updated (length failed)
+             (if healed (format ", %d healed" (length healed)) "")))
+    (dolist (f failed) (elpaca-update--out (format "  %s: %s\n" (car f) (cdr f))))
+    (dolist (h healed) (elpaca-update--out (format "  healed %s (%s)\n" (car h) (cdr h))))
     (dolist (r remaining)
-      (princ (format "  STILL BROKEN %s (%s) - run bb repair\n" (car r) (cdr r))))
+      (elpaca-update--out
+       (format "  STILL BROKEN %s (%s) - run bb repair\n" (car r) (cdr r))))
     (and (null failed) (null remaining))))
 
 ;; Live progress: --batch elpaca-wait spins silently, so stream each package to
@@ -133,7 +143,8 @@ that is genuinely empty."
   (run-at-time
    (string-to-number (or (getenv "ELPACA_UPDATE_WATCHDOG") "1800")) nil
    (lambda ()
-     (princ "\nupdate: TIMEOUT - elpaca did not settle within the watchdog window\n")
+     (elpaca-update--out
+      "\nupdate: TIMEOUT - elpaca did not settle within the watchdog window\n")
      (kill-emacs 124)))
   "One-shot watchdog timer, cancelled once the run reaches a verdict.")
 
@@ -183,5 +194,5 @@ that is genuinely empty."
                         0 1))))
   (error
    (when (timerp elpaca-update--hb-timer) (cancel-timer elpaca-update--hb-timer))
-   (princ (format "\nupdate: ERROR - %s\n" (error-message-string err)))
+   (elpaca-update--out (format "\nupdate: ERROR - %s\n" (error-message-string err)))
    (kill-emacs 1)))

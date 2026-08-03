@@ -1,37 +1,64 @@
 {:tasks
  {:requires ([babashka.fs :as fs]
              [babashka.process :as p]
+             [clojure.edn :as edn]
              [clojure.string :as str])
   ;; *file* is cwd-relative under --config; the system property is not
   :init (do (def root (str (fs/parent (fs/canonicalize
                                        (or (System/getProperty "babashka.config")
                                            *file*)))))
             (def test-elpa (str (fs/path root ".local" ".cache" "test-elpa")))
-            (defn emacs-server-up?
-              "True when a running Emacs server answers on the default socket."
+            (defn emacs-socket-owner
+              "Pid of the process holding the default Emacs server socket, or nil.
+Mirrors emacsclient's default socket path: $TMPDIR/emacs<uid>/server.
+Consulted when a client connect is refused, because refusal is ambiguous:
+a dead server refuses, but so does a live one whose listen backlog (5) is
+full while its event loop is behind - only a live server still owns the
+socket file."
               []
+              (try
+                (let [uid (str/trim (:out (p/shell {:out :string :err :string} "id" "-u")))
+                      tmp (or (System/getenv "TMPDIR") "/tmp/")
+                      sock (str tmp (when-not (str/ends-with? tmp "/") "/")
+                                "emacs" uid "/server")
+                      {:keys [exit out]} (p/shell {:continue true :out :string :err :string}
+                                                  "lsof" "-t" (str sock))]
+                  (when (zero? exit)
+                    (first (remove str/blank? (str/split-lines out)))))
+                (catch Exception _ nil)))
+            (defn emacs-server-probe
+              "Probe the Emacs server: :up, :busy (alive but not answering) or :down.
+A ping that hangs is a busy-but-alive Emacs; a refused connect falls back
+to `emacs-socket-owner` before it may conclude :down.  A missing
+emacsclient binary reads as :down (the headless path needs no server)."
+              []
+              (try
+                (let [proc (p/process {:out :string :err :string}
+                                      "emacsclient" "--eval" "nil")
+                      res (deref proc 3000 :hung)]
+                  (cond (= res :hung) (do (p/destroy proc) :busy)
+                        (zero? (:exit res)) :up
+                        (emacs-socket-owner) :busy
+                        :else :down))
+                (catch Exception _ :down)))
+            (defn emacs-alive?
+              "Signal-0 liveness probe of PID, immune to how busy Emacs is.
+Never a fresh client connect: a full socket backlog refuses exactly like
+a dead server, which used to abandon healthy runs as died-mid-update."
+              [pid]
               (zero? (:exit (p/shell {:continue true :out :string :err :string}
-                                     "emacsclient" "--eval" "nil"))))
-            (defn emacs-server-dead?
-              "True only when the server socket refuses outright.
-A busy-but-alive Emacs (blocked in a long computation) leaves the ping
-hanging - that times out and reads as alive, never as dead."
-              []
-              (let [proc (p/process {:out :string :err :string}
-                                    "emacsclient" "--eval" "nil")
-                    res (deref proc 3000 :hung)]
-                (if (= res :hung)
-                  (do (p/destroy proc) false)
-                  (not (zero? (:exit res))))))
+                                     "kill" "-0" (str pid)))))
             (defn follow-progress
               "Stream LOGFILE to stdout as it grows until an UPDATE- marker.
-Return 0 on UPDATE-DONE, 2 when the Emacs server dies mid-run (no marker
-will ever come - the caller decides how to continue), 1 on any other
-marker or once DEADLINE-MS elapses.  Tails from a persistent offset
-instead of re-reading the whole file each tick; the trailing partial
-line is carried over so a marker split across two reads still matches
-its line anchor.  The liveness ping runs every ~2s between ticks."
-              [logfile deadline-ms]
+Return 0 on UPDATE-DONE, 2 when Emacs process PID vanishes mid-run (no
+marker will ever come - the caller decides how to continue), 1 on any
+other marker or once DEADLINE-MS elapses.  Liveness is `kill -0` on the
+pid the kickoff round-trip returned, checked every ~2s; with PID nil the
+death check is skipped and the deadline alone bounds the wait.  Tails
+from a persistent offset instead of re-reading the whole file each tick;
+the trailing partial line is carried over so a marker split across two
+reads still matches its line anchor."
+              [logfile deadline-ms pid]
               (let [deadline (+ (System/currentTimeMillis) deadline-ms)]
                 (with-open [raf (java.io.RandomAccessFile. (str logfile) "r")]
                   (loop [carry "" last-ping (System/currentTimeMillis)]
@@ -47,7 +74,7 @@ its line anchor.  The liveness ping runs every ~2s between ticks."
                       (cond
                         (re-find (re-pattern "(?m)^UPDATE-DONE\\b") seen) 0
                         (re-find (re-pattern "(?m)^UPDATE-(FAILED|TIMEOUT|ERROR)\\b") seen) 1
-                        (and ping? (emacs-server-dead?)) 2
+                        (and ping? pid (not (emacs-alive? pid))) 2
                         (< deadline now)
                         (do (println "\nupdate: gave up waiting for Emacs to finish") 1)
                         :else (do (Thread/sleep 250)
@@ -131,39 +158,52 @@ not block on a credential prompt)."
                    (when-not (str/starts-with? verdict "SMOKE-OK")
                      (System/exit 1))))}
 
-  update {:doc "Update every Elpaca package: drives the running Emacs live (streamed, no restart) if its server is up, else headless --batch (restart after). Like `doom sync -u'."
-          :task (if (emacs-server-up?)
-                  ;; Server up: run the update INSIDE the live Emacs so it picks
-                  ;; up changes without a restart.  emacsclient kicks it off
-                  ;; async (returns at once), then we tail the progress file.
-                  (let [logfile (str (fs/create-temp-file {:prefix "emacs-lab-update"}))
-                        driver (str (fs/path root "scripts" "elpaca-live-update.el"))
-                        {:keys [exit err]}
-                        (p/shell {:continue true :out :string :err :string}
-                                 "emacsclient" "--eval"
-                                 (format "(progn (load %s) (elpaca-live-update-start %s nil %s))"
-                                         (pr-str driver) (pr-str logfile)
-                                         (if (tty-color?) "t" "nil")))]
-                    (println "update: driving the running Emacs (live, no restart needed)...")
-                    (if (zero? exit)
-                      (let [code (follow-progress logfile (* 40 60 1000))]
-                        (when (= 2 code)
-                          ;; No auto-continuation on purpose: a killed Emacs may
-                          ;; mean "stop everything".  A re-run lands on the
-                          ;; headless path, whose heal phase (dirty/stale/
-                          ;; half-built scans) completes the interrupted work.
-                          (println "\nupdate: the live Emacs died mid-update; run `bb update' again to finish headlessly"))
-                        (System/exit (if (zero? code) 0 1)))
-                      (do (println "update: could not start in-session update:" (str/trim (str err)))
-                          (System/exit 1))))
-                  ;; Server down (e.g. CI): plain --batch, no pty, pipeable.
-                  ;; --batch does not auto-load user init, so early-init + init
-                  ;; are loaded explicitly before the driver.
-                  (do
-                    (println "update: no Emacs server; updating headlessly in --batch (restart Emacs after to apply)...")
-                    (System/exit (run-batch-driver "elpaca-update.el"
-                                                   (when (tty-color?)
-                                                     {"ELPACA_UPDATE_COLOR" "1"})))))}
+  update {:doc "Update every Elpaca package: drives the running Emacs live (streamed, no restart) if its server is up, else headless --batch (restart after). Like `doom sync -u'. Re-run while one is in flight re-attaches to its progress."
+          :task (let [probe (emacs-server-probe)]
+                  (if (not= :down probe)
+                    ;; Server up (or busy): run the update INSIDE the live Emacs
+                    ;; so it picks up changes without a restart.  emacsclient
+                    ;; kicks it off async and returns (emacs-pid PROGRESS-FILE)
+                    ;; in one round-trip; we then tail the progress file.  An
+                    ;; update already in flight hands back its own file instead
+                    ;; of starting a second one - tailing that from the top
+                    ;; replays its progress so far.
+                    (let [logfile (str (fs/create-temp-file {:prefix "emacs-lab-update"}))
+                          driver (str (fs/path root "scripts" "elpaca-live-update.el"))
+                          _ (println "update: driving the running Emacs (live, no restart needed)...")
+                          _ (when (= :busy probe)
+                              (println "update: the Emacs server is busy; waiting for it to take the kickoff..."))
+                          {:keys [exit out err]}
+                          (p/shell {:continue true :out :string :err :string}
+                                   "emacsclient" "--eval"
+                                   (format "(progn (load %s) (list (emacs-pid) (elpaca-live-update-start %s nil %s)))"
+                                           (pr-str driver) (pr-str logfile)
+                                           (if (tty-color?) "t" "nil")))]
+                      (if (zero? exit)
+                        (let [[pid in-use] (try (edn/read-string (str/trim (str out)))
+                                                (catch Exception _ nil))
+                              attached? (and (string? in-use) (not= in-use logfile))
+                              logfile (if (string? in-use) in-use logfile)]
+                          (when attached?
+                            (println "update: an update is already in flight; attaching to its progress..."))
+                          (let [code (follow-progress logfile (* 40 60 1000) pid)]
+                            (when (= 2 code)
+                              ;; No auto-continuation on purpose: a killed Emacs
+                              ;; may mean "stop everything".  A re-run picks the
+                              ;; path by probe; the heal phase (dirty/stale/
+                              ;; half-built scans) completes interrupted work.
+                              (println (format "\nupdate: the live Emacs (pid %s) died mid-update; run `bb update' again to finish" pid)))
+                            (System/exit (if (zero? code) 0 1))))
+                        (do (println "update: could not start in-session update:" (str/trim (str err)))
+                            (System/exit 1))))
+                    ;; Server down (e.g. CI): plain --batch, no pty, pipeable.
+                    ;; --batch does not auto-load user init, so early-init + init
+                    ;; are loaded explicitly before the driver.
+                    (do
+                      (println "update: no Emacs server; updating headlessly in --batch (restart Emacs after to apply)...")
+                      (System/exit (run-batch-driver "elpaca-update.el"
+                                                     (when (tty-color?)
+                                                       {"ELPACA_UPDATE_COLOR" "1"}))))))}
 
   repair {:doc "Heal botched packages, doom-sync style: fresh headless boot (re-clones deleted repos, rebuilds deleted builds), then rebuild anything half-built, stale or dirty. Restart Emacs after."
           :task (System/exit (run-batch-driver "elpaca-repair.el"))}
