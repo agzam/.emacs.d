@@ -94,8 +94,7 @@
 (defvar local-dev-clone-overrides
   ;; :repo where the GitHub repo can't be derived from the checkout dir name,
   ;; :branch where a non-default branch is pinned.
-  '((spacehammer :repo "agzam/spacehammer")   ; checkout is ~/.hammerspoon
-    (reddigg :branch "fetch-via-browser"))    ; fork-only browser/chromium fetch
+  '((spacehammer :repo "agzam/spacehammer"))  ; checkout is ~/.hammerspoon
   "Per-package (NAME :repo R :branch B) clone overrides for `ensure-local-dev-checkouts'.")
 
 (defun local-checkout-recipe (recipe)

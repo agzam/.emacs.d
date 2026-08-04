@@ -26,10 +26,10 @@
     (expect (local-dev-clone-spec 'spacehammer "/h/.hammerspoon"
                                   '((spacehammer :repo "agzam/spacehammer")))
             :to-equal '("git@github.com:agzam/spacehammer.git")))
-  (it "honors a pinned :branch override (reddigg)"
+  (it "honors a pinned :branch override"
     (expect (local-dev-clone-spec 'reddigg "/h/GitHub/agzam/emacs-reddigg"
-                                  '((reddigg :branch "fetch-via-browser")))
-            :to-equal '("git@github.com:agzam/emacs-reddigg.git" . "fetch-via-browser"))))
+                                  '((reddigg :branch "next")))
+            :to-equal '("git@github.com:agzam/emacs-reddigg.git" . "next"))))
 
 (describe "ensure-local-dev-checkouts"
   (let ((base nil))
@@ -68,9 +68,9 @@
                      0)))
           (ensure-local-dev-checkouts
            (list (cons 'reddigg dir))
-           '((reddigg :branch "fetch-via-browser")) #'ignore))
+           '((reddigg :branch "next")) #'ignore))
         (expect recorded :to-equal
-                (list "git" "clone" "--branch" "fetch-via-browser"
+                (list "git" "clone" "--branch" "next"
                       "git@github.com:agzam/emacs-reddigg.git" dir))))
 
     (it "warns and does not error when the clone fails"

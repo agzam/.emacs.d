@@ -140,10 +140,10 @@
               :around #'hnreader-frontpage-item-no-rank-a))
 
 ;; reddigg builds in place from ~/GitHub/agzam/emacs-reddigg
-;; (local-dev-packages redirect); the pinned :branch is what non-checkout
-;; machines clone (fork-only fetch-via-browser/chromium features).
+;; (local-dev-packages redirect).  A hard fork tracked on master: upstream
+;; carries none of the fetch layer reddit now demands, and is dormant.
 (use-package reddigg
-  :ensure (reddigg :host github :repo "agzam/emacs-reddigg" :branch "fetch-via-browser")
+  :ensure (reddigg :host github :repo "agzam/emacs-reddigg")
   :defer t
   :hook (reddigg-mode . reddigg-hnreader-show-all-h)
   :config
