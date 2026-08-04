@@ -1591,6 +1591,33 @@ these. Each restores the parked leader rows when its foundation lands.
   row all went live.  Verified: bb lint 227/0, bb test 717 specs 0 failed,
   smoke 233 packages 0 failed/blocked (cloned to major-mode, hnreader-mode
   in the build).
+- [2026-08] telega localleader trees added (chat).  The module carried no
+  <localleader> keys at all, so telega's command surface was reachable only
+  through its own prefix keymaps and evil-collection's terse normal-state
+  rows (ga, gV, gO, J) - the keys that never stuck.  Rootbuf "," acts on the
+  chat at point (chat-with, info, operate, toggle read/pin, delete, create,
+  join, search, saved messages, account, kill) and hangs telega's own keymaps
+  off / \ v f g ? (filter, sort, views, folders, fastnav, describe) rather
+  than restating their keys - which-key renders the real maps.  Chatbuf ","
+  keeps the message at point at the top level (reply, edit, forward, delete,
+  operate, react, translate, mark, favorite, pin, thread, save) with the
+  chat-wide twins uppercased (C operate, S save) and prefixes for attach (a,
+  incl. the module's own telega-extract-and-attach-video on , a u), copy (y),
+  search/filter (s) and fastnav (g).  Enabler: telega-msg-button-map's ","
+  unbound next to the existing SPC row - a message button's keymap is a text
+  property at point and outranks evil's state maps, so both leaders died on
+  every message; "," only duplicated "<" (vvnote rewind), nothing lost.
+  Upstream transients preferred wherever telega ships one (msg-operate,
+  -forward, -delete, -save, -translate, -pin-toggle, chat-operate,
+  chat-delete, chatbuf-input-options): their :if predicates hide what the
+  message or chat can't do.  Verified live: every bound symbol commandp,
+  both aux keymaps resolve in evil normal state, and , a u / , r resolve with
+  point on a message button while < still rewinds and SPC still reaches
+  doom/leader.  Coverage: +9 specs (tests/chat/config-tests.el, source-parsed
+  - neither telega nor general load in the batch tier: the SPC/"," unbindings,
+  per-prefix duplicate keys, a :desc on every row, keymap prefixes bound as
+  variables instead of #'quoted) -> 845 specs 0 failed, bb lint 242/0, smoke
+  237 packages 0 failed/blocked.
 
 * Key clusters
 RETIRED at conclusion (2026-07).  The key audit killed the "binding X
