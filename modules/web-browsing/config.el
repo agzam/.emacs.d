@@ -117,8 +117,10 @@
   (setopt consult-hn-browse-fn #'consult-hn-reader)
   (transient-remap-suffix-key 'consult-hn-transient "RET" "s-<return>"))
 
-;; hnreader clones from GitHub (no local checkout); the pinned :branch is
-;; the fork's major-mode work (dedicated mode + keymap), not upstream master.
+;; hnreader builds in place from ~/GitHub/agzam/emacs-hnreader
+;; (local-dev-packages redirect).  Another hard fork: the pinned branch is
+;; the fork's own major-mode work, and it is also the head of the upstream
+;; PR, so it stays a branch rather than becoming the trunk.
 (use-package hnreader
   :ensure (hnreader :host github :repo "agzam/emacs-hnreader" :branch "major-mode")
   :defer t

@@ -79,6 +79,7 @@
     (browser-hist . "~/GitHub/agzam/browser-hist.el")
     (consult-hn . "~/GitHub/agzam/consult-hn")
     (reddigg . "~/GitHub/agzam/emacs-reddigg")
+    (hnreader . "~/GitHub/agzam/emacs-hnreader")
     (navegosa . "~/GitHub/agzam/navegosa.el")
     (google-translate . "~/GitHub/agzam/google-translate")
     (occult . "~/GitHub/agzam/occult.el")
@@ -94,7 +95,8 @@
 (defvar local-dev-clone-overrides
   ;; :repo where the GitHub repo can't be derived from the checkout dir name,
   ;; :branch where a non-default branch is pinned.
-  '((spacehammer :repo "agzam/spacehammer"))  ; checkout is ~/.hammerspoon
+  '((spacehammer :repo "agzam/spacehammer")   ; checkout is ~/.hammerspoon
+    (hnreader :branch "major-mode"))          ; fork's branch, not its master
   "Per-package (NAME :repo R :branch B) clone overrides for `ensure-local-dev-checkouts'.")
 
 (defun local-checkout-recipe (recipe)
