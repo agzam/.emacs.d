@@ -203,10 +203,10 @@ parallel navegosa-media transient.
    mute/fullscreen); mpv-open now sets up media-transient.
 3. [done] config.el C-x m -> media-transient (also rebound live -
    stale loaddefs still stub mpv-transient until next regen).
-4. [done] navegosa recipe switched to the local checkout
-   (:repo "~/GitHub/agzam/navegosa.el", bare local path) while V3 is
-   unpushed; flip back to :host github once pushed. bb repair rebuilt
-   the stale elpaca build.
+4. [done] navegosa recipe: stays the plain GitHub recipe - init.el's
+   local-dev-packages already redirects it to the ~/GitHub checkout
+   locally (a temporary literal local :repo broke CI smoke and was
+   reverted same day). bb repair rebuilt the stale elpaca build.
 5. [done] tests/web-browsing/media-tests.el - backend resolution
    (auto/pinned, mpv live/dead, darwin/linux), both-group suffix
    rot-net, cross-backend key-mirror guard, bypass engine spec;
@@ -300,8 +300,11 @@ recipe. Live session: media.el/mpv.el loaded, C-x m rebound (stale
 loaddefs would otherwise stub mpv-transient until next boot).
 
 Caveats in flight:
-- navegosa recipe stays on the local checkout while development
-  continues (stages 3-4); flip to :host github when it settles.
+- navegosa declares the plain GitHub recipe like every own package;
+  local-dev-packages + local-checkout-recipe (init.el) already
+  redirect it to the ~/GitHub checkout on machines that have one.
+  Never commit a literal local :repo - CI has no such path, the smoke
+  job dies on it (learned 2026-08-05: one red smoke run on main).
 - navegosa-media-fullscreen-toggle inert until osascript gets
   Accessibility permission (or reroute via Hammerspoon later).
 

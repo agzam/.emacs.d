@@ -180,9 +180,7 @@
       (apply orig-fun args))))
 
 (use-package navegosa
-  ;; local checkout while navegosa is under active development; flip to
-  ;; (:host github :repo "agzam/navegosa.el") when it settles
-  :ensure (navegosa :repo "~/GitHub/agzam/navegosa.el")
+  :ensure (navegosa :host github :repo "agzam/navegosa.el")
   :commands (navegosa-insert-link)
   :config
   (defadvice! navegosa-insert-link-skip-parked-space-a (&rest _)
