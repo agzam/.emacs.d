@@ -1,0 +1,81 @@
+#+title: Handoff - YouTube playback control, Linux lane (stage 3)
+
+Paste the prompt below into a fresh agent session on the Linux box.
+Companion to youtube-playback-control.org (the living spec); refresh
+the SHAs and re-read the spec's stage 3 before pasting if time has
+passed since 2026-08-05.
+
+* Prompt
+
+Continue YouTube playback control from Emacs - Linux lane (stage 3).
+
+Read the spec first: ~/.emacs.d/youtube-playback-control.org
+(status: stages 1-2 and 4 done, mac lane complete; stage 3 is this
+machine's job). It is the authoritative living document - research
+findings, verified constraints, staged plan. Update Progress and
+Changelog as you go. navegosa's own SPEC.md in the checkout tracks
+package-level detail.
+
+Context in one breath: browser-native YT playback is controlled from
+Emacs via navegosa (JXA transport, macOS-only today); mpv keeps local
+files/non-YT; one media-transient on C-x m with backend-conditional
+groups (media-backend: auto/mpv/browser) shares one key set across
+backends. Stage 3 adds the Linux transport: MPRIS via built-in
+dbus.el. Every YT entry point (C-x m o, org yt: links through
+org-follow-yt-link, embark yt-video actions) already routes through
+the media-open dispatcher - a new backend slots in underneath them.
+
+Current state (all pushed, trees clean, CI green as of 2026-08-05):
+- agzam/navegosa.el @ e4a4c71 (V3 media control, 87 specs)
+- agzam/emacs-lab @ cce18dd (media-transient + media-open dispatcher,
+  919 specs; yt entry points unified)
+- agzam/dotfile.org @ e62ca55 (mpv.conf ytdl-format 1080p/avc cap)
+- Mac-only machine config not in any repo: bgutil POT provider for
+  yt-dlp (spec stage 4) - repeat on Linux only if its mpv lane ever
+  matters.
+First move: fetch and ff-only pull all three repos, verify bb lint /
+bb test / bb smoke pass untouched before changing anything.
+
+The work (spec stage 3 has the full detail):
+1. FIRST, open decision - ask before implementing: MPRIS transport
+   placement, inside navegosa-media.el vs a separate emacs-lab
+   module. The spec's Open questions section holds the tradeoffs.
+   The transient side is settled either way: add an MPRIS group
+   (:if) to media-transient and a 'mpris branch to
+   media-backend-active (auto on gnu/linux once the backend exists).
+2. MPRIS backend via built-in dbus.el (in-process, no subprocess per
+   command): discover org.mpris.MediaPlayer2.* names, prefer browser
+   players; PlayPause / Seek / SetPosition / Next / Previous;
+   Metadata + Position feed the echo line ("12:34/56:07") and the
+   timestamped-URL copy (xesam:url + position).
+3. Re-verify the spec's [hypothesized] items live before building on
+   them: Rate writes ignored, volume unreliable, subtitles not
+   exposed, player registers only while media plays. playerctl -l
+   while a video plays is the sanity probe.
+4. Capability degradation: commands the backend cannot do
+   (speed/subs/theater) report "unsupported on this backend"
+   gracefully in the transient - same keys, honest answers.
+5. Unit tests with mocked dbus calls (tests/ mirrors the source
+   tree); live validation on this box is the E2E gate. Buttercup
+   failures dump huge stacktraces - always filter: bb test 2>&1 |
+   rg "FAILED|Ran".
+
+Non-negotiable constraints (hard-won, spec's Verified findings):
+- Live working environments: the user's browser and Emacs session
+  are not test harnesses. Probes non-destructive, own scratch
+  players/tabs only, mute before any playback test, unwind-protect
+  all session state, restore everything, elisp-eval hygiene per
+  AGENTS.
+- CDP against the daily browser profile is dead since Chrome 136
+  (separate --user-data-dir required) - MPRIS is the sanctioned
+  Linux channel. Do not chase extension gap-fillers
+  (browser-mpris2-style) without asking; they are listed under
+  Deferred.
+- Own packages declare plain GitHub recipes; local-dev-packages +
+  local-checkout-recipe (init.el) redirect to ~/GitHub checkouts on
+  machines that have them. NEVER commit a literal local :repo - CI
+  smoke dies on it (2026-08-05 lesson, one red run on main).
+- Verification gates: emacs-lab bb lint, bb test, bb smoke (bb
+  repair heals stale elpaca builds); navegosa make test +
+  check-compile if the package is touched. Commit only on explicit
+  instruction.

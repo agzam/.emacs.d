@@ -19,7 +19,9 @@
   block, then C-u C-c C-v t tangles just that block (org 9.7 tangles
   land read-only by default)
 - symptoms :: "Only SABR formats available", "SABR-only", "PO Token", "mpv youtube laggy", "HTTP Error 403" on fragments
-- related :: agzam/navegosa.el:SPEC.md (V1 tabs, V2 jump-to-link)
+- related :: agzam/navegosa.el:SPEC.md (V1 tabs, V2 jump-to-link);
+  youtube-playback-control-handoff.org (paste into a fresh session on
+  the Linux box to start stage 3)
 
 * Synopsis
 Watching YT through mpv+yt-dlp is laggy and degrading: YouTube enforces
