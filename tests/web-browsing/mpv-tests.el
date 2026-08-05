@@ -12,29 +12,17 @@
 ;; the boot-time behavior too (advice takes effect when mpv loads).
 (load-module-file "modules/web-browsing/autoload/mpv.el")
 
-(describe "mpv-transient layout"
-  :var* ((cmds (transient-layout-commands
-                (get 'mpv-transient 'transient--layout))))
+(describe "mpv.el after the transient moved to media.el"
+  (it "no longer defines mpv-transient"
+    ;; the playback transient is media-transient (media-tests.el); a
+    ;; resurrected local prefix here would shadow it silently
+    (expect (get 'mpv-transient 'transient--layout) :to-be nil)
+    (expect (fboundp 'mpv-transient) :to-be nil))
 
-  (it "carries no elfeed-tube residue after the drop"
-    (expect (seq-filter (lambda (c) (string-match-p "elfeed" (symbol-name c)))
-                        cmds)
-            :to-equal nil))
-
-  (it "pins the slimmed suffix set, mpv-open included"
-    (expect cmds :to-have-same-items-as
-            '(mpv-volume-increase mpv-volume-decrease
-              mpv-playlist-prev mpv-playlist-next
-              mpv-seek-backward mpv-seek-forward
-              mpv-toggle-osc mpv-get-path mpv-toggle-subtitles
-              mpv-speed-decrease mpv-speed-increase mpv-speed-reset
-              mpv-pause mpv-open mpv-kill)))
-
-  (it "pulls the shared bypass engine, not via expreg load order"
-    ;; mpv.el must (require 'transient-bypass) itself; this suite loads only
-    ;; mpv.el, so a dropped require would leave transient-bypass-keys void.
-    (expect (fboundp 'transient-bypass-keys) :to-be-truthy)
-    (expect (transient-bypass-keys 'mpv-transient '(("M-x"))) :to-be-truthy)))
+  (it "keeps the mpv-side helpers the unified transient binds"
+    (expect (fboundp 'mpv-mute-toggle) :to-be-truthy)
+    (expect (fboundp 'mpv-fullscreen-toggle) :to-be-truthy)
+    (expect (fboundp 'mpv-speed-reset) :to-be-truthy)))
 
 (describe "mpv-open"
   :var (calls)
@@ -49,7 +37,7 @@
       (let ((transient-current-command nil))
         (mpv-open "https://vid.example/1")))
     (expect (reverse calls)
-            :to-equal '((setup mpv-transient) (play-url "https://vid.example/1"))))
+            :to-equal '((setup media-transient) (play-url "https://vid.example/1"))))
 
   (it "resolves a url from the kill-ring"
     (cl-letf (((symbol-function 'mpv-play-url)

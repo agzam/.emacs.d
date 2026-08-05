@@ -1,0 +1,430 @@
+#+title: YouTube playback control from Emacs - browser and mpv lanes
+
+* Meta
+- status :: implementing (stages 1-2 done)
+- created :: 2026-08-04
+- projects ::
+  - agzam/navegosa.el @ main (V3 pushed 2026-08-05) - navegosa.el,
+    navegosa-media.el, navegosa-scripts.js, SPEC.md, README.org,
+    changelog.org, Makefile, test/navegosa-tests.el
+  - agzam/emacs-lab @ main (stages 1-2 committed 2026-08-05) -
+    modules/web-browsing/autoload/media.el, autoload/mpv.el,
+    modules/web-browsing/config.el, config.el,
+    tests/web-browsing/{media,mpv}-tests.el, this spec
+- machine config (no repo) :: ~/.config/mpv/mpv.conf, brew yt-dlp/mpv/deno
+- symptoms :: "Only SABR formats available", "SABR-only", "PO Token", "mpv youtube laggy", "HTTP Error 403" on fragments
+- related :: agzam/navegosa.el:SPEC.md (V1 tabs, V2 jump-to-link)
+
+* Synopsis
+Watching YT through mpv+yt-dlp is laggy and degrading: YouTube enforces
+SABR streaming and PO tokens, FFmpeg cannot consume SABR, and mpv's
+pipeline is ytdl_hook extraction + FFmpeg streaming, so client fallbacks
+land on throttled or low-quality formats. Plan: control browser-native
+playback from Emacs instead - navegosa grows a media-control layer (JXA
+transport on macOS, validated E2E; MPRIS/dbus transport on Linux, built
+later on the Linux machine). mpv keeps local files/subed/non-YT, with an
+optional no-cookie patch-up. One transient key-set mirroring the
+existing mpv-transient.
+
+* Verified findings
+macOS/JXA (E2E against live Brave, this machine):
+- [confirmed] osascript JXA round-trip ~145ms including process spawn;
+  pause + seek -5s + rate 1.5x batched in one call, state returned.
+- [confirmed] Background-tab video fully controllable via tab.execute
+  while another tab stays active; no focus needed.
+- [confirmed] Apple-Events JS runs in an isolated world: page JS is
+  invisible (movie_player API methods undefined), DOM fully accessible,
+  cross-call window.* state persists (jump-to-link precedent).
+- [confirmed] DOM control surface suffices: video element
+  (play/pause/currentTime/playbackRate/volume/muted) + YT buttons
+  .ytp-subtitles-button, .ytp-next-button, .ytp-prev-button all present.
+- [confirmed] tab.execute into a discarded (Memory Saver) tab hangs
+  indefinitely - the stale YT tab did exactly that. Playing tabs are
+  never discarded.
+- [confirmed] JXA win.tabs.push(new Tab) activates the new tab; restore
+  activeTabIndex explicitly when opening in background.
+- [confirmed] "Allow JavaScript from Apple Events" already enabled in
+  Brave on this machine.
+
+Stage-1 E2E additions (2026-08-05, live Brave + live Emacs):
+- [confirmed] A never-focused background YT tab defers media load:
+  video element exists with readyState 0, play() accepted but no data
+  loads until the tab is visible once (Page Visibility gating by YT).
+  mediaCommand returns a distinct error for it; navegosa-media-open-tab
+  is the escape hatch. Once a tab has been visible, background control
+  works fully.
+- [confirmed] subsToggle via .ytp-subtitles-button works from the
+  isolated world (aria-pressed false->true->false on a captioned
+  video). The button is inert on videos without captions.
+- [confirmed] next navigates SPA-style; playback continues in the
+  background tab and the new video starts unmuted (muted does not
+  survive navigation). prev is inert outside playlist/watch-history
+  context.
+- [confirmed] Timeout guard proven against a real discarded tab:
+  osascript killed at 3.0s, clean user-error, no leftover processes.
+  Same guard covered a transient mid-session "video not loaded" blip
+  (YT briefly swapped the media element after a rate change).
+- [confirmed] In-page command latency 12-26ms; the ~150ms round trip
+  is osascript spawn. Batched command+state-read confirmed at that
+  cost.
+- [confirmed] Elisp lane: async dispatch + echo, copy-url (&t=743s
+  exact), retry-once flow (invalid index -> relocate -> discarded tab
+  -> guard -> single terminal message, 3.3s) all verified in the live
+  session, then unloaded with autoload stubs restored.
+
+View control (2026-08-05, live Brave):
+- [confirmed] Theater mode: .ytp-size-button click cycles the
+  ytd-watch-flexy theater attribute on a visible tab. On a hidden tab
+  the click registers but layout applies only once the tab is shown
+  (rendering/rAF paused).
+- [confirmed] Player fullscreen is unreachable from the isolated
+  world: synthetic clicks carry no user activation, the Fullscreen API
+  rejects (fullscreenerror fired, fullscreenElement stays null).
+- [confirmed] Fallback: macOS window fullscreen via System Events
+  AXFullScreen (navegosa windowFullscreenToggle). Requires
+  Accessibility permission for osascript - NOT granted on this machine
+  yet; the command surfaces the grant path (System Settings > Privacy
+  & Security > Accessibility). Pair with theater for near-fullscreen.
+  Alternative route if permission stays denied: drive it through
+  Hammerspoon (already has accessibility).
+
+mpv lane (docs/issues):
+- [confirmed] SABR + PO token enforcement is the root cause; no
+  player-side fix while FFmpeg lacks SABR (mpv-player/mpv#16645);
+  fallback chain can end at itag 18 = 360p (yt-dlp PO Token Guide).
+- [confirmed] bgutil-ytdlp-pot-provider is the supported mitigation;
+  works without cookies; deno 2.9.4 present and detected by yt-dlp
+  2026.07.04 as JS runtime.
+- [confirmed] Premium cookies do not reliably unlock formats: SABR
+  forced even with valid premium cookies + POT provider, while a
+  non-premium account worked (yt-dlp/yt-dlp#14390). Account ban risk per
+  yt-dlp FAQ. Decision: never feed main Premium account cookies to
+  yt-dlp.
+
+Linux (docs-verified only, not yet tested):
+- [confirmed] CDP against the default browser profile is blocked since
+  Chrome 136 (requires separate --user-data-dir) - no JXA-equivalent
+  channel for the daily browser.
+- [confirmed] MPRIS is native in Chromium-family and Firefox once media
+  plays: play/pause, seek, SetPosition, next/prev, Metadata (xesam:url),
+  Position. Player registers only while media is active.
+- [hypothesized] Rate writes ignored by browser MPRIS implementations;
+  subtitles not exposed; volume unreliable. Re-verify on the Linux box.
+- [confirmed] dbus.el is built-in - in-process D-Bus, no subprocess
+  spawn per command.
+
+* Design decisions
+- DOM-only control, no page JS API - forced by the isolated world.
+- Tab discovery: URL prefilter (defcustom regex list: youtube, youtu.be,
+  vimeo, twitch, ...) -> probe only candidates, each probe
+  timeout-guarded -> cache (winIdx . tabIdx). Never blind-probe all tabs
+  (discarded-tab hang). On command failure: invalidate cache, re-locate
+  once, retry.
+- Commands async fire-and-forget (make-process); every JS command
+  returns full state {time, duration, rate, paused, volume, muted,
+  title, url} so Emacs can echo "12:34/56:07 1.5x" from a callback.
+- Package ships commands; transient + dispatcher live in emacs-lab
+  config (same split as mpv.el / mpv-transient today).
+- One transient, not parallel ones (user decision): mpv-transient
+  morphed into media-transient
+  (agzam/emacs-lab:modules/web-browsing/autoload/media.el) with
+  per-backend groups gated by :if, the expreg-transient pattern
+  (agzam/emacs-lab:modules/general/autoload/expreg.el). Same keys in
+  every group = one muscle memory; guarded by a key-mirror test.
+- Seek/speed/volume steps mirror mpv-transient semantics, steps as
+  defcustoms.
+- Stage order: mac browser lane -> config integration -> Linux lane (on
+  the Linux machine) -> mpv patch-up.
+
+* Open questions
+- MPRIS backend placement: transport dispatch inside navegosa-media.el
+  vs a separate module in emacs-lab. Leaning navegosa (uniform command
+  set, CI, tests), but it softens the README's "macOS only" identity.
+  The transient side is settled either way (one media-transient in
+  emacs-lab grows an MPRIS group). Decide at stage 3 start.
+- org yt: link handler (agzam/emacs-lab:modules/org/config.el:168-173)
+  forces mpv-open - re-point to browser, or make selectable?
+
+Resolved:
+- C-x m behavior (2026-08-05, user decision): ONE transient
+  (media-transient) for all backends, same keybind, expreg-style
+  conditional groups; backend picked by the media-backend setting
+  ('auto: mpv while a live mpv process exists, else the platform
+  browser lane; pin with 'mpv/'browser).
+
+* Stages
+
+** DONE Stage 1 - browser lane, macOS (navegosa V3)
+Landed 2026-08-05 (uncommitted in the checkout). Deviations from plan:
+- getMediaTabs takes a second urlPattern arg: the prefilter list is an
+  elisp defcustom (navegosa-media-url-patterns, JS regexes joined with
+  "|"), so it must travel to JS.
+- Extracted navegosa--build-script / navegosa--parse-result from
+  navegosa--run so the media runner shares them. Version bumped 0.3.0.
+- mediaCommand distinguishes "No video element in tab" from "Video not
+  loaded - activate the tab once to start it" (background-tab lazy
+  load, see Verified findings).
+
+
+1. [done] agzam/navegosa.el:navegosa-scripts.js - getMediaTabs(browser,
+   urlPattern), mediaStatus(browser, w, t), mediaCommand(browser, w, t,
+   cmd, arg) with cmds: playPause, seekBy, seekTo, rateMul (clamped
+   0.25-5x), rateSet, volumeBy (clamped 0-1, up unmutes), muteToggle,
+   subsToggle, next, prev. Every command returns the full state object.
+2. [done] subsToggle clicks .ytp-subtitles-button when present
+   (E2E-confirmed), falls back to cycling video.textTracks modes
+   (mock-tested; no live non-YT site exercised yet).
+3. [done] agzam/navegosa.el:navegosa-media.el - tab cache,
+   timeout-guarded async runner + sync wrapper (make-process +
+   kill-timer, 3s default), retry-once dispatch, navegosa-media-*
+   commands incl. copy-url (&t=Ns for YT, #t=Ns fragment otherwise),
+   select-tab, open-tab, status echo "12:34/56:07 1.5x vol:80%".
+4. [done] 33 new buttercup specs (82 total, 0 failures), incl. real
+   subprocess timeout-guard tests (osascript swapped for sleep/sh, CI
+   safe). make check-compile clean. Manual E2E against live Brave and
+   live Emacs done (see Verified findings).
+5. [done] SPEC.md V3 section + findings, README.org media section,
+   changelog.org 0.3.0.
+
+** DONE Stage 2 - emacs-lab integration (unified media-transient)
+Landed 2026-08-05. Reshaped per user direction: extend the existing
+mpv-transient into one backend-conditional transient instead of a
+parallel navegosa-media transient.
+
+1. [done] modules/web-browsing/autoload/media.el (new) - media-backend
+   defcustom ('auto/'mpv/'browser) + media-backend-active resolver;
+   media-transient with the bypass section (d/j/k/M-x) and per-backend
+   groups gated by :if (expreg pattern). mpv group = historical
+   mpv-transient plus m mute, f fullscreen; browser group = same keys
+   onto navegosa-media-* plus t theater, s pick tab, o show tab,
+   g status. Requires transient-bypass itself (the load-order lesson).
+2. [done] mpv.el slimmed: transient absorbed into media.el; keeps
+   helpers, gains mpv-mute-toggle + mpv-fullscreen-toggle (cycle
+   mute/fullscreen); mpv-open now sets up media-transient.
+3. [done] config.el C-x m -> media-transient (also rebound live -
+   stale loaddefs still stub mpv-transient until next regen).
+4. [done] navegosa recipe switched to the local checkout
+   (:repo "~/GitHub/agzam/navegosa.el", bare local path) while V3 is
+   unpushed; flip back to :host github once pushed. bb repair rebuilt
+   the stale elpaca build.
+5. [done] tests/web-browsing/media-tests.el - backend resolution
+   (auto/pinned, mpv live/dead, darwin/linux), both-group suffix
+   rot-net, cross-backend key-mirror guard, bypass engine spec;
+   mpv-tests.el updated (tombstone for the moved transient, setup
+   expectation). bb lint clean, bb test 904/0, bb smoke clean.
+6. [done] Follow-up per user feedback (2026-08-05): s pick tab always
+   prompts (single candidate shown as the one minibuffer choice) and
+   brings the pick up in the browser - covers what o "show tab" did.
+   Freed o now mirrors mpv-open on the browser lane: media-open
+   resolves org yt: link at point -> URL at point -> kill-ring
+   (media-url-at-point), opens it via navegosa-media-open-url as the
+   Brave window's front tab WITHOUT focus steal (tab switched
+   in-window, app not activated; playback starts while the window is
+   visible anywhere on screen - E2E-verified live), caches it as the
+   controlled tab. Dired stays on mpv (local-files principle):
+   media-open delegates to mpv-open there and whenever the mpv
+   backend is active. bb test 911/0.
+
+** Stage 3 - browser lane, Linux (build on the Linux machine)
+1. [hypothesized] Resolve placement question; implement MPRIS backend
+   via dbus.el: discover org.mpris.MediaPlayer2.* names, prefer browser
+   instances; PlayPause / Seek / SetPosition / Next / Previous; Metadata
+   + Position for echo and timestamped URL.
+2. [confirmed] Transient side is ready for it: add an MPRIS group to
+   media-transient (:if) and a 'mpris branch to media-backend-active
+   (auto on gnu/linux once the backend exists).
+3. [hypothesized] Capability degradation: speed/subs/volume report
+   "unsupported on this backend" gracefully in the transient.
+4. [hypothesized] Unit tests with mocked dbus calls; live validation on
+   the Linux box is the E2E gate.
+
+** Stage 4 - mpv lane patch-up (optional, machine config)
+1. [confirmed] Install bgutil-ytdlp-pot-provider (pip plugin + deno
+   script transport). No cookies.
+2. [hypothesized] ~/.config/mpv/mpv.conf: cap ytdl-format (e.g.
+   bv*[height<=1080][vcodec^=avc]+ba/b) to avoid heavy VP9/AV1 demux;
+   keep existing cache settings.
+3. [hypothesized] Consider yt-dlp nightly channel over brew stable -
+   SABR/client fallback code moves fast.
+4. [confirmed] Explicitly excluded: cookies-from-browser with the main
+   Premium account.
+
+** Deferred
+- Watch-history instruments (browser lane enables: logged-in YT history
+  page scrape via JXA, browser-hist.el sqlite, resume positions).
+- PiP experiment: synthetic click on .ytp-pip-button likely lacks user
+  activation; controls work identically in or out of PiP either way.
+- Linux speed/subs gap fillers (browser-mpris2-style extension + native
+  host, or minimal own).
+- Disambiguation when multiple tabs play media (completing-read).
+
+* Dead ends
+- Borrowing PO tokens from the browser: video-ID-bound, short TTL,
+  minted on demand by BotGuard - not a copyable artifact.
+- Premium cookies to unlock formats: disproved by yt-dlp/yt-dlp#14390
+  (SABR forced despite premium cookies + POT provider; non-premium
+  account fine). Also: ban risk, macOS keychain prompt per yt-dlp spawn,
+  YT cookie rotation desyncing the live Brave session.
+- CDP for the daily-driver browser: dead since Chrome 136 without a
+  separate --user-data-dir.
+- Driving YT's own player API (movie_player.seekTo etc.): unreachable
+  from the Apple-Events isolated world (verified live).
+- MPRIS Rate for browser speed control: spec-level readwrite, browsers
+  ignore writes.
+
+* Progress
+Workspace:
+- agzam/navegosa.el @ main, V3 committed and pushed 2026-08-05 (the
+  commit also carries pre-existing README title-area edits).
+- agzam/emacs-lab @ main, stages 1-2 committed 2026-08-05 (media.el,
+  mpv.el slim-down, C-x m, recipe, tests, this spec).
+
+Stage 1 complete (2026-08-05): implementation, 82/82 buttercup specs,
+clean strict byte-compile, live E2E on both the JS lane (full command
+matrix, subs on captioned video, next/prev, discarded-tab guard) and
+the elisp lane (locate, echo, copy-url, retry). Browser and Emacs
+session restored after testing.
+
+E2E residue note: during testing a scratch tab briefly flashed twice
+(YT only loads media in a visible tab) and one video segment played
+audibly for ~1min after a next-navigation reset mute - lesson recorded
+in Verified findings.
+
+Stage 2 complete (2026-08-05): unified media-transient live on C-x m
+(user direction: extend mpv-transient, not a parallel one). Backend
+conditional via media-backend ('auto). New view capabilities: theater
+(works), window fullscreen (needs one-time Accessibility grant for
+osascript - not yet granted; command explains). bb lint clean, bb test
+904/0, bb smoke clean after bb repair rebuilt navegosa from the local
+recipe. Live session: media.el/mpv.el loaded, C-x m rebound (stale
+loaddefs would otherwise stub mpv-transient until next boot).
+
+Caveats in flight:
+- navegosa recipe stays on the local checkout while development
+  continues (stages 3-4); flip to :host github when it settles.
+- navegosa-media-fullscreen-toggle inert until osascript gets
+  Accessibility permission (or reroute via Hammerspoon later).
+
+Open questions: 2 remaining (MPRIS transport placement - stage 3; org
+yt: link handler re-pointing).
+
+Workflow (browser lane): point at a yt:/https link (or have it in the
+kill-ring) -> C-x m o opens it as Brave's front tab, playback starts
+(window visible), Emacs keeps focus, transient controls it. s re-points
+control (always prompts, shows the pick). Local files: o in dired lands
+in mpv, after which auto backend = mpv while it runs.
+
+Next action:
+- User tries the transient on a real YT session; then org yt: link
+  handler decision (open question - media-open already handles yt:
+  links at point, the handler re-point may now just be
+  browse-url/media-open), or stage 4 mpv patch-up, or wait for the
+  Linux machine for stage 3.
+
+Useful commands:
+- JXA probe timing: echo a Navegosa call into osascript -l JavaScript
+  and time it; ~145ms is the healthy baseline.
+- yt-dlp -v 2>&1 | rg "JS runtimes|pot|player_client" - check runtime
+  and POT provider wiring.
+- Linux: playerctl -l while a video plays - MPRIS player discovery
+  sanity check.
+
+* Regression signals
+- Subs/next/prev silently stop working: YT renamed .ytp-* classes.
+- All media commands hang: probing a discarded tab (cache stale) or
+  Brave revoked Apple-Events JS permission.
+- Latency jump above ~300ms per command: Apple Events consent re-prompt
+  or Brave throttling change.
+- mpv lane: "Only SABR formats available" warning or 403 on fragments -
+  update yt-dlp, re-check bgutil provider loads.
+
+* Full context
+
+** Capability matrix
+| capability          | mpv (both OS) | Mac browser (JXA)    | Linux browser (MPRIS) |
+|---------------------+---------------+----------------------+-----------------------|
+| play/pause          | yes           | yes (proven)         | yes                   |
+| seek                | yes           | yes (proven)         | yes                   |
+| speed               | yes           | yes (proven)         | no                    |
+| volume/mute         | yes           | yes                  | shaky                 |
+| subtitles toggle    | yes           | yes (button click)   | no                    |
+| theater mode        | n/a           | yes (button click)   | no                    |
+| fullscreen          | yes           | window-level (AX)    | no                    |
+| next/prev           | yes           | yes                  | yes                   |
+| position/title echo | yes           | yes                  | yes                   |
+| timestamped URL     | assemblable   | yes                  | yes (url + position)  |
+| window situation    | own WM unit   | browser tab (or PiP) | browser tab           |
+| Premium/history     | no            | yes                  | yes                   |
+
+** media-transient key map (as implemented)
+| key | mpv group             | browser group                         |
+|-----+-----------------------+---------------------------------------|
+| SPC | mpv-pause             | navegosa-media-play-pause             |
+| h   | mpv-seek-backward     | navegosa-media-seek-backward          |
+| l   | mpv-seek-forward      | navegosa-media-seek-forward           |
+| ,   | mpv-speed-decrease    | navegosa-media-speed-down             |
+| .   | mpv-speed-increase    | navegosa-media-speed-up               |
+| 0   | mpv-speed-reset       | navegosa-media-speed-reset            |
+| K   | mpv-volume-increase   | navegosa-media-volume-up              |
+| J   | mpv-volume-decrease   | navegosa-media-volume-down            |
+| m   | mpv-mute-toggle       | navegosa-media-mute-toggle            |
+| c   | mpv-toggle-subtitles  | navegosa-media-subs-toggle            |
+| t   | -                     | navegosa-media-theater-toggle         |
+| f   | mpv-fullscreen-toggle | navegosa-media-fullscreen-toggle      |
+| p   | mpv-playlist-prev     | navegosa-media-prev (playlists only)  |
+| n   | mpv-playlist-next     | navegosa-media-next                   |
+| y   | mpv-get-path          | navegosa-media-copy-url (&t=Ns)       |
+| o   | mpv-open              | media-open (URL at point/kill-ring)   |
+| s   | -                     | navegosa-media-select-tab (pick+show) |
+| g   | -                     | navegosa-media-status                 |
+| i   | mpv-toggle-osc        | - (browser has own UI)                |
+| Q   | mpv-kill              | -                                     |
+The shared rows are pinned by the key-mirror spec in
+agzam/emacs-lab:tests/web-browsing/media-tests.el.
+
+** Latency numbers (2026-08-04, M-series Mac, Brave)
+- Trivial JXA round-trip (activeTab.url): 134ms.
+- execute JS in background tab, read video state: 144ms.
+- pause + seek + rate in one execute: 146ms.
+- MPRIS via dbus.el: expected well below these (no subprocess).
+
+** mpv lane current state (this machine)
+- mpv 0.41.0, yt-dlp 2026.07.04 (brew), deno 2.9.4 detected as JS
+  runtime, no POT provider installed.
+- mpv.conf already has: cache=yes, demuxer-max-bytes=2000MiB,
+  force-seekable=yes, hwdec=auto-safe. uosc + post-load.lua scripts.
+- Emacs side: mpv.el package, mpv-transient in
+  agzam/emacs-lab:modules/web-browsing/autoload/mpv.el, embark
+  integration (modules/embark/config.el:55-56), org yt: links via
+  mpv-open (modules/org/config.el:168-173).
+
+** References
+- yt-dlp PO Token Guide: https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide
+- mpv SABR tracking: https://github.com/mpv-player/mpv/issues/16645
+- Premium + SABR report: https://github.com/yt-dlp/yt-dlp/issues/14390
+- bgutil POT provider: https://github.com/Brainicism/bgutil-ytdlp-pot-provider
+- Chrome 136 CDP restriction: https://developer.chrome.com/blog/remote-debugging-port
+- MPRIS overview: https://wiki.archlinux.org/title/MPRIS
+- browser-mpris2 (gap-filler prior art): https://github.com/otommod/browser-mpris2
+
+* Changelog
+- 2026-08-05 (later still): transient polish per user feedback - s
+  always prompts and shows the pick (o "show tab" key retired);
+  browser-lane o = media-open (point/kill-ring URL -> front tab, no
+  focus steal, controlled immediately; dired/mpv-backend -> mpv-open).
+  navegosa: locate 'prompt mode, navegosa-media-open-url + openMediaTab.
+- 2026-08-05 (later): stage 2 done, reshaped per user direction - one
+  media-transient extending mpv-transient (expreg-style :if groups per
+  backend, media-backend setting, same C-x m for mpv/browser/MPRIS
+  later). New view commands: theaterToggle (verified),
+  windowFullscreenToggle via AXFullScreen (permission-gated; player
+  fullscreen proven unreachable - no user activation). mpv gains
+  mute/fullscreen toggles. navegosa recipe -> local checkout.
+  C-x m open question resolved.
+- 2026-08-05: stage 1 done - navegosa V3 media control (JS functions,
+  navegosa-media.el, 33 tests, docs). New findings: background-tab
+  media lazy-load + distinct error, subsToggle confirmed, next unmutes,
+  prev inert outside playlists, guard proven on a real discarded tab.
+  getMediaTabs grew a urlPattern arg (defcustom lives in elisp).
+- 2026-08-04: created from research session - mpv lag root cause, live
+  JXA E2E validation against Brave, Linux MPRIS survey, staged plan.

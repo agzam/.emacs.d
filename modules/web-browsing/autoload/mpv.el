@@ -1,13 +1,19 @@
 ;;; modules/web-browsing/autoload/mpv.el -*- lexical-binding: t; -*-
 
-;; mpv-transient's bypass section needs the shared engine; requiring it here
-;; drops the old latent dependency on expreg.el having loaded first.
-(require 'transient-bypass)
-
 ;;;###autoload
 (defun mpv-speed-reset ()
   (interactive)
   (mpv-speed-set 1))
+
+;;;###autoload
+(defun mpv-mute-toggle ()
+  (interactive)
+  (mpv-run-command "cycle" "mute"))
+
+;;;###autoload
+(defun mpv-fullscreen-toggle ()
+  (interactive)
+  (mpv-run-command "cycle" "fullscreen"))
 
 ;;;###autoload
 (defun mpv-open (&optional path)
@@ -32,8 +38,8 @@
                          (thing-at-point 'url))))
 
                       (t (thing-at-point 'url))))))
-      (unless (eq transient-current-command 'mpv-transient)
-        (transient-setup 'mpv-transient))
+      (unless (eq transient-current-command 'media-transient)
+        (transient-setup 'media-transient))
       (mpv-play-url path))))
 
 (defadvice! mpv-play-next-without-stopping-a (orig-fn arg)
@@ -52,6 +58,9 @@
   :around #'mpv-play-url
   (message "Starting mpv to play %s" (car args))
   (apply orig-fn args))
+
+;; The playback transient lives in media.el (media-transient): one
+;; prefix, one keybind, backend-conditional groups (mpv / browser).
 
 (defvar mpv--osc-style "auto")
 (defvar mpv--subtitle-visible "auto")
@@ -78,34 +87,3 @@
    (setq mpv--subtitle-visible
          (if (string-match-p "yes\\|auto" mpv--subtitle-visible)
              "no" "yes"))))
-
-;;;###autoload
-(transient-define-prefix mpv-transient ()
-  "mpv"
-  ["bypass keys"
-   :class transient-column
-   :hide always
-   :setup-children
-   (lambda (_)
-     (transient-bypass-keys
-      'mpv-transient
-      '(("M-x")
-        ("d" t dired-flag-file-deletion)
-        ("j" t evil-next-visual-line)
-        ("k" t evil-previous-visual-line))))]
-  ["mpv"
-   [("K" "vol up" mpv-volume-increase :transient t)
-    ("J" "vol down" mpv-volume-decrease :transient t)]
-   [("p" "prev" mpv-playlist-prev :transient t)
-    ("n" "next" mpv-playlist-next :transient t)]
-   [("h" "<<" mpv-seek-backward :transient t)
-    ("l" ">>" mpv-seek-forward :transient t)]
-   [("i" "osc" mpv-toggle-osc :transient t)
-    ("y" "get path" mpv-get-path :transient t)
-    ("c" "subs" mpv-toggle-subtitles :transient t)]
-   [("," "slower" mpv-speed-decrease :transient t)
-    ("." "faster" mpv-speed-increase :transient t)
-    ("0" "reset" mpv-speed-reset)]
-   [("SPC" "pause" mpv-pause :transient t)
-    ("o" "play" mpv-open :transient t)
-    ("Q" "quit" mpv-kill)]])

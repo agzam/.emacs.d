@@ -1,0 +1,109 @@
+;;; modules/web-browsing/autoload/media.el -*- lexical-binding: t; -*-
+
+;; The transient's bypass section needs the shared engine at layout-build
+;; time; requiring it here keeps the prefix self-contained (the engine
+;; move once surfaced transients that leaned on expreg.el loading first).
+(require 'transient-bypass)
+
+(defcustom media-backend 'auto
+  "Which playback backend `media-transient' controls.
+`auto' picks mpv while an mpv process is live, otherwise the
+platform's browser lane (navegosa on macOS; MPRIS planned for
+Linux).  Set to `mpv' or `browser' to pin one."
+  :type '(choice (const auto) (const mpv) (const browser))
+  :group 'multimedia)
+
+(defun media-backend-active ()
+  "Resolve `media-backend', mapping `auto' to a concrete backend."
+  (cond
+   ((not (eq media-backend 'auto)) media-backend)
+   ((and (featurep 'mpv) (mpv-live-p)) 'mpv)
+   ((eq system-type 'darwin) 'browser)
+   (t 'mpv)))
+
+(defun media-url-at-point ()
+  "Resolve a media URL: org link at point, URL at point, else kill-ring.
+Mirrors `mpv-open's resolution chain (minus dired); org yt: links
+are normalized to https."
+  (let ((url-regex "\\`https?://"))
+    (cond
+     ((derived-mode-p 'org-mode)
+      (replace-regexp-in-string
+       "^yt:" "https:"
+       (or (org-element-property :raw-link (org-element-context))
+           (thing-at-point 'url)
+           "")))
+     ((thing-at-point 'url))
+     ((and (car kill-ring)
+           (string-match url-regex (car kill-ring)))
+      (car kill-ring)))))
+
+;;;###autoload
+(defun media-open ()
+  "Open the media at point (or in the kill-ring) in the active backend.
+Local files (dired) always go to mpv; URLs go to the browser lane
+or mpv per `media-backend'."
+  (interactive)
+  (cond
+   ((or (eq major-mode 'dired-mode)
+        (eq (media-backend-active) 'mpv))
+    (mpv-open))
+   (t
+    (let ((url (media-url-at-point)))
+      (when (or (null url) (string-empty-p url))
+        (user-error "No media URL at point or in the kill-ring"))
+      (navegosa-media-open-url url)))))
+
+;;;###autoload
+(transient-define-prefix media-transient ()
+  "Playback control; backend resolved via `media-backend'."
+  ["bypass keys"
+   :class transient-column
+   :hide always
+   :setup-children
+   (lambda (_)
+     (transient-bypass-keys
+      'media-transient
+      '(("M-x")
+        ("d" t dired-flag-file-deletion)
+        ("j" t evil-next-visual-line)
+        ("k" t evil-previous-visual-line))))]
+  ["mpv"
+   :if (lambda () (eq (media-backend-active) 'mpv))
+   [("K" "vol up" mpv-volume-increase :transient t)
+    ("J" "vol down" mpv-volume-decrease :transient t)
+    ("m" "mute" mpv-mute-toggle :transient t)]
+   [("p" "prev" mpv-playlist-prev :transient t)
+    ("n" "next" mpv-playlist-next :transient t)]
+   [("h" "<<" mpv-seek-backward :transient t)
+    ("l" ">>" mpv-seek-forward :transient t)]
+   [("i" "osc" mpv-toggle-osc :transient t)
+    ("y" "get path" mpv-get-path :transient t)
+    ("c" "subs" mpv-toggle-subtitles :transient t)]
+   [("," "slower" mpv-speed-decrease :transient t)
+    ("." "faster" mpv-speed-increase :transient t)
+    ("0" "reset" mpv-speed-reset)]
+   [("f" "fullscreen" mpv-fullscreen-toggle :transient t)
+    ("SPC" "pause" mpv-pause :transient t)]
+   [("o" "play" mpv-open :transient t)
+    ("Q" "quit" mpv-kill)]]
+  ["browser"
+   :if (lambda () (eq (media-backend-active) 'browser))
+   [("K" "vol up" navegosa-media-volume-up :transient t)
+    ("J" "vol down" navegosa-media-volume-down :transient t)
+    ("m" "mute" navegosa-media-mute-toggle :transient t)]
+   [("p" "prev" navegosa-media-prev :transient t)
+    ("n" "next" navegosa-media-next :transient t)]
+   [("h" "<<" navegosa-media-seek-backward :transient t)
+    ("l" ">>" navegosa-media-seek-forward :transient t)]
+   [("t" "theater" navegosa-media-theater-toggle :transient t)
+    ("y" "copy url" navegosa-media-copy-url :transient t)
+    ("c" "subs" navegosa-media-subs-toggle :transient t)]
+   [("," "slower" navegosa-media-speed-down :transient t)
+    ("." "faster" navegosa-media-speed-up :transient t)
+    ("0" "reset" navegosa-media-speed-reset)]
+   [("f" "fullscreen" navegosa-media-fullscreen-toggle :transient t)
+    ("SPC" "pause" navegosa-media-play-pause :transient t)]
+   [("s" "pick tab" navegosa-media-select-tab :transient t)
+    ("o" "open" media-open :transient t)
+    ("g" "status" navegosa-media-status :transient t)]])

@@ -241,7 +241,7 @@
       :n "gi" #'ibuffer-sidebar-jump
       :i "C-v" #'evil-paste-after
       :i "TAB" #'completion-at-point
-      "C-x m" #'mpv-transient
+      "C-x m" #'media-transient
       "C-;"  #'embark-act
       (:when (featurep :system 'linux)
         :i "C-M-S-s-y" #'nerd-dictation-toggle)
