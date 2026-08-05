@@ -165,12 +165,10 @@
      (sql . t)
      (sqlite . t)))
 
-  ;; youtube videos played in mpv (web-browsing); plain browser when
-  ;; that module is off
+  ;; yt: playback routes per media-backend (web-browsing module);
+  ;; plain browse-url when that module is off
   (org-link-set-parameters
-   "yt" :follow (lambda (path)
-                  (let ((url (concat "https:" path)))
-                    (if (fboundp 'mpv-open) (mpv-open url) (browse-url url))))
+   "yt" :follow #'org-follow-yt-link
    :export (lambda (link _desc _format)
              (format
               (concat

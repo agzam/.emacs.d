@@ -39,17 +39,18 @@ are normalized to https."
       (car kill-ring)))))
 
 ;;;###autoload
-(defun media-open ()
-  "Open the media at point (or in the kill-ring) in the active backend.
-Local files (dired) always go to mpv; URLs go to the browser lane
-or mpv per `media-backend'."
+(defun media-open (&optional url)
+  "Open URL, or the media at point / in the kill-ring, in the active backend.
+An explicit URL (e.g. from a link follow handler) bypasses at-point
+resolution on both lanes.  Local files (dired) always go to mpv;
+URLs go to the browser lane or mpv per `media-backend'."
   (interactive)
   (cond
-   ((or (eq major-mode 'dired-mode)
+   ((or (and (null url) (eq major-mode 'dired-mode))
         (eq (media-backend-active) 'mpv))
-    (mpv-open))
+    (mpv-open url))
    (t
-    (let ((url (media-url-at-point)))
+    (let ((url (or url (media-url-at-point))))
       (when (or (null url) (string-empty-p url))
         (user-error "No media URL at point or in the kill-ring"))
       (navegosa-media-open-url url)))))

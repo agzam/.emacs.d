@@ -119,6 +119,15 @@ Same dual-dialect traversal as `transient-layout-commands'."
       (expect (media-url-at-point)
               :to-equal "https://www.youtube.com/watch?v=q")))
 
+  (it "resolves a plain URL at point outside org-mode"
+    ;; the contract embark's yt-video actions lean on: point lands on
+    ;; the target, thing-at-point must win before the kill-ring
+    (with-temp-buffer
+      (let ((kill-ring '("https://youtu.be/stale")))
+        (insert "see https://youtu.be/xyz here")
+        (search-backward "youtu")
+        (expect (media-url-at-point) :to-equal "https://youtu.be/xyz"))))
+
   (it "falls back to the kill-ring head when it is a URL"
     (with-temp-buffer
       (let ((kill-ring '("https://youtu.be/xyz")))
@@ -158,6 +167,40 @@ Same dual-dialect traversal as `transient-layout-commands'."
         (media-open))
       (expect 'mpv-open :to-have-been-called)
       (expect 'navegosa-media-open-url :not :to-have-been-called)))
+
+  ;; the explicit-URL specs pin the org yt: handler contract: what the
+  ;; follow handler passes in must win over any at-point/kill-ring state
+  (it "prefers an explicit URL over the kill-ring on the browser lane"
+    (let ((media-backend 'browser))
+      (spy-on 'navegosa-media-open-url)
+      (spy-on 'mpv-open)
+      (with-temp-buffer
+        (let ((kill-ring '("https://youtu.be/stale")))
+          (media-open "https://youtu.be/xyz")))
+      (expect 'navegosa-media-open-url :to-have-been-called-with
+              "https://youtu.be/xyz")
+      (expect 'mpv-open :not :to-have-been-called)))
+
+  (it "threads an explicit URL through to mpv"
+    (let ((media-backend 'mpv))
+      (spy-on 'navegosa-media-open-url)
+      (spy-on 'mpv-open)
+      (with-temp-buffer
+        (let ((kill-ring '("https://youtu.be/stale")))
+          (media-open "https://youtu.be/xyz")))
+      (expect 'mpv-open :to-have-been-called-with "https://youtu.be/xyz")
+      (expect 'navegosa-media-open-url :not :to-have-been-called)))
+
+  (it "sends an explicit URL to the browser lane even from dired"
+    (let ((media-backend 'browser))
+      (spy-on 'navegosa-media-open-url)
+      (spy-on 'mpv-open)
+      (with-temp-buffer
+        (setq major-mode 'dired-mode)
+        (media-open "https://youtu.be/xyz"))
+      (expect 'navegosa-media-open-url :to-have-been-called-with
+              "https://youtu.be/xyz")
+      (expect 'mpv-open :not :to-have-been-called)))
 
   (it "errors when no URL can be resolved"
     (let ((media-backend 'browser))

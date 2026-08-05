@@ -273,6 +273,13 @@ Executes `org-table-copy-down' if in table."
   (interactive "p")
   (dotimes (_ count) (org--insert-item 'above)))
 
+;;;###autoload
+(defun org-follow-yt-link (path &optional _arg)
+  "Open a yt: link PATH via `media-open', which routes per `media-backend'.
+Falls back to `browse-url' when the web-browsing module is off."
+  (let ((url (concat "https:" path)))
+    (if (fboundp 'media-open) (media-open url) (browse-url url))))
+
 
 ;;
 ;;; Tables

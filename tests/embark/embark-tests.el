@@ -317,6 +317,50 @@
           (embark-preview)))
       (expect acted :to-be nil))))
 
+;; `embark-url-config's default lives in modules/embark/config.el, which
+;; can't load in batch (real embark keymaps at map! time) - read it as
+;; data instead, the chat-tests pattern.
+(defvar embark-tests--config-forms
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "modules/embark/config.el"
+                                            test-config-root))
+    (goto-char (point-min))
+    (let (forms form)
+      (while (setq form (ignore-errors (read (current-buffer))))
+        (push form forms))
+      (nreverse forms)))
+  "Every top-level form of the embark module config.")
+
+(defun embark-tests--find-subform (pred form)
+  "Depth-first search FORM for a subform satisfying PRED."
+  (cond
+   ((funcall pred form) form)
+   ((proper-list-p form)
+    (cl-some (lambda (f) (embark-tests--find-subform pred f)) form))))
+
+(describe "embark-url-config default value"
+  :var* ((value
+          (cadr  ; strip the quote
+           (nth 2 (embark-tests--find-subform
+                   (lambda (f)
+                     (and (eq (car-safe f) 'defcustom)
+                          (eq (cadr f) 'embark-url-config)))
+                   (cons 'progn embark-tests--config-forms)))))
+         (yt-actions (plist-get (cdr (assq 'yt-video value)) :actions)))
+
+  (it "routes yt-video urls through media-open (backend dispatch)"
+    (expect (cdr (assoc "b b" yt-actions)) :to-be 'media-open)
+    (expect (cdr (assoc "RET" yt-actions)) :to-be 'media-open)
+    (expect (cdr (assoc "b t" yt-actions))
+            :to-be 'youtube-sub-extractor-extract-subs))
+
+  (it "binds mpv-open directly nowhere (media-open owns the dispatch)"
+    (expect (cl-some (lambda (entry)
+                       (cl-some (lambda (a) (eq (cdr a) 'mpv-open))
+                                (plist-get (cdr entry) :actions)))
+                     value)
+            :to-be nil)))
+
 (describe "embark--ephemeral-cleanup"
   (it "unhooks itself and schedules a single minibuffer exit"
     (let ((embark-post-action-hooks

@@ -1,7 +1,8 @@
 #+title: YouTube playback control from Emacs - browser and mpv lanes
 
 * Meta
-- status :: implementing (stages 1-2 done)
+- status :: implementing (stages 1-2 and 4 done, mac lane complete;
+  stage 3 awaits the Linux machine)
 - created :: 2026-08-04
 - projects ::
   - agzam/navegosa.el @ main (V3 pushed 2026-08-05) - navegosa.el,
@@ -11,7 +12,12 @@
     modules/web-browsing/autoload/media.el, autoload/mpv.el,
     modules/web-browsing/config.el, config.el,
     tests/web-browsing/{media,mpv}-tests.el, this spec
-- machine config (no repo) :: ~/.config/mpv/mpv.conf, brew yt-dlp/mpv/deno
+- machine config :: brew yt-dlp/mpv/deno; ~/bgutil-ytdlp-pot-provider
+  + ~/.config/yt-dlp/plugins (stage 4). ~/.config/mpv/mpv.conf is NOT
+  freestanding: it is a read-only (444) tangle artifact of
+  agzam/dotfile.org ("* MPV" heading in dotfile.org) - edit the org
+  block, then C-u C-c C-v t tangles just that block (org 9.7 tangles
+  land read-only by default)
 - symptoms :: "Only SABR formats available", "SABR-only", "PO Token", "mpv youtube laggy", "HTTP Error 403" on fragments
 - related :: agzam/navegosa.el:SPEC.md (V1 tabs, V2 jump-to-link)
 
@@ -142,10 +148,18 @@ Linux (docs-verified only, not yet tested):
   set, CI, tests), but it softens the README's "macOS only" identity.
   The transient side is settled either way (one media-transient in
   emacs-lab grows an MPRIS group). Decide at stage 3 start.
-- org yt: link handler (agzam/emacs-lab:modules/org/config.el:168-173)
-  forces mpv-open - re-point to browser, or make selectable?
 
 Resolved:
+- org yt: link handler (2026-08-05, user decision): hard re-point to
+  media-open, no separate knob - media-backend is the selector
+  ('auto: mpv while live, else browser; browse-url when web-browsing
+  module is off). :follow -> org-follow-yt-link
+  (modules/org/autoload/org.el, named so it is testable; config.el
+  lambda retired). URL threaded explicitly: media-open grew &optional
+  url passed down both lanes, because mpv-open's own resolution chain
+  checks kill-ring BEFORE the org link at point - a no-arg
+  (media-open) on the mpv lane could play a stale kill-ring URL
+  instead of the followed link.
 - C-x m behavior (2026-08-05, user decision): ONE transient
   (media-transient) for all backends, same keybind, expreg-style
   conditional groups; backend picked by the media-backend setting
@@ -224,6 +238,26 @@ parallel navegosa-media transient.
    controlled tab. Dired stays on mpv (local-files principle):
    media-open delegates to mpv-open there and whenever the mpv
    backend is active. bb test 911/0.
+7. [done] org yt: handler re-point (2026-08-05, closes that open
+   question): :follow -> org-follow-yt-link (org/autoload/org.el) ->
+   media-open, backend per media-backend; browse-url fallback when
+   web-browsing is off. media-open gained &optional url (explicit URL
+   wins over dired/kill-ring/at-point on both lanes). +5 specs:
+   3 explicit-url media-open specs (media-tests.el), 2 handler routing
+   specs (org-tests.el, cl-letf incl. nil-function-cell module-off
+   branch). bb test 916/0, lint/smoke green. Live-verified end to end
+   via org-link-open with stubbed lanes.
+8. [done] embark yt-video actions re-point (2026-08-05, closes the
+   last direct-mpv entry point): "b b"/"RET" in embark-url-config ->
+   media-open. Point lands on the target when embark acts, and
+   media-url-at-point checks thing-at-point before the kill-ring -
+   which also fixes the stale-kill-ring hazard mpv-open had there
+   (its chain checks kill-ring first). Live keymaps rebuilt via
+   embark-setup-url-types. +3 specs: config-as-data pin of the
+   yt-video actions + no-mpv-open-anywhere guard (embark-tests.el,
+   chat-tests read-as-data pattern - embark config.el can't load in
+   batch), plain-URL-at-point contract spec (media-tests.el). bb test
+   919/0.
 
 ** Stage 3 - browser lane, Linux (build on the Linux machine)
 1. [hypothesized] Resolve placement question; implement MPRIS backend
@@ -238,16 +272,43 @@ parallel navegosa-media transient.
 4. [hypothesized] Unit tests with mocked dbus calls; live validation on
    the Linux box is the E2E gate.
 
-** Stage 4 - mpv lane patch-up (optional, machine config)
-1. [confirmed] Install bgutil-ytdlp-pot-provider (pip plugin + deno
-   script transport). No cookies.
-2. [hypothesized] ~/.config/mpv/mpv.conf: cap ytdl-format (e.g.
-   bv*[height<=1080][vcodec^=avc]+ba/b) to avoid heavy VP9/AV1 demux;
-   keep existing cache settings.
-3. [hypothesized] Consider yt-dlp nightly channel over brew stable -
-   SABR/client fallback code moves fast.
-4. [confirmed] Explicitly excluded: cookies-from-browser with the main
-   Premium account.
+** DONE Stage 4 - mpv lane patch-up (machine config)
+Landed 2026-08-05 on the Mac (per-machine work; repeat on Linux if its
+mpv lane ever matters).
+1. [done] bgutil-ytdlp-pot-provider 1.3.1, script transport via deno
+   (no server process, no node, no docker): repo cloned at the
+   plugin's default location ~/bgutil-ytdlp-pot-provider (tag 1.3.1),
+   deno install --allow-scripts=npm:canvas --frozen in server/;
+   plugin zip -> ~/.config/yt-dlp/plugins/ (survives brew upgrades,
+   unlike pip into brew's libexec venv). Verified live: "PO Token
+   Providers: ... bgutil:script-deno-1.3.1 (external)", gvs POT
+   minted for web_safari; token cache
+   ~/.cache/bgutil-ytdlp-pot-provider (TOKEN_TTL 6h). The
+   http-provider ping WARNING at startup is benign: script mode is
+   the chosen transport, and mpv's ytdl_hook passes --no-warnings
+   anyway.
+2. [done] ytdl-format cap, with fallback chain for videos lacking avc
+   (or with it SABR-gated):
+   ytdl-format=bv*[height<=1080][vcodec^=avc]+ba/bv*[height<=1080]+ba/b
+   Data point (dQw4w9WgXcQ, 3.5min): default pick was itag 401 = AV1
+   4K 240MiB; capped pick 137+251 = avc1 1080p 77MiB + opus. Note avc
+   runs ~3x vp9/av01 bitrate at 1080p - flip to the codec-agnostic
+   branch if throttle stalls appear (M-series hwdec covers all
+   three). Applied through dotfile.org + single-block tangle, NOT by
+   editing mpv.conf (read-only tangle artifact - see Meta).
+3. [done] yt-dlp channel (2026-08-05, user decision): stay on brew
+   stable (2026.07.04 works with deno EJS + POT provider). Nightly
+   would mean leaving brew for pipx/standalone since brew installs
+   cannot self-update; revisit only on regression signals.
+4. [confirmed] Exclusion honored: no cookies anywhere - no
+   cookies-from-browser, and no ~/.config/yt-dlp/config exists at
+   all (default script location needs zero config, which also keeps
+   mpv's ytdl_hook wiring flag-free).
+E2E gate passed: mpv --vo=null --ao=null --frames=30 on a YT URL ->
+ytdl_hook -> yt-dlp (plugin loaded) -> h264 1080p + opus, videotoolbox
+hwdec, no 403 / SABR errors. (Beware grepping mpv output for
+"error|403": googlevideo URL params contain both as substrings -
+filter long-URL lines first.)
 
 ** Deferred
 - Watch-history instruments (browser lane enables: logged-in YT history
@@ -277,7 +338,11 @@ Workspace:
 - agzam/navegosa.el @ main, V3 committed and pushed 2026-08-05 (the
   commit also carries pre-existing README title-area edits).
 - agzam/emacs-lab @ main, stages 1-2 committed 2026-08-05 (media.el,
-  mpv.el slim-down, C-x m, recipe, tests, this spec).
+  mpv.el slim-down, C-x m, recipe, tests, this spec); the yt
+  entry-point unification (org handler + embark + spec) committed and
+  pushed same day.
+- agzam/dotfile.org @ main: mpv.conf ytdl-format cap committed and
+  pushed 2026-08-05.
 
 Stage 1 complete (2026-08-05): implementation, 82/82 buttercup specs,
 clean strict byte-compile, live E2E on both the JS lane (full command
@@ -308,21 +373,41 @@ Caveats in flight:
 - navegosa-media-fullscreen-toggle inert until osascript gets
   Accessibility permission (or reroute via Hammerspoon later).
 
-Open questions: 2 remaining (MPRIS transport placement - stage 3; org
-yt: link handler re-pointing).
+org yt: handler re-pointed (2026-08-05, uncommitted): following a yt:
+link (RET / C-c C-o) now routes through media-open like C-x m o -
+browser lane by default, mpv when live/pinned, browse-url when the
+web-browsing module is off. Named handler org-follow-yt-link in
+org/autoload/org.el (testable, lazy via loaddefs); media-open grew
+&optional url so the followed link always wins over kill-ring/at-point
+state (mpv-open checks kill-ring first - a no-arg delegate could
+hijack the follow). bb lint clean, bb test 916/0, bb smoke SMOKE-OK.
+Live session: media.el + org.el reloaded, live yt: :follow re-pointed,
+E2E-verified via org-link-open with both lanes stubbed.
+
+Stage 4 complete (2026-08-05): bgutil 1.3.1 deno-script POT provider
+installed and verified (gvs POT minted, no cookies), ytdl-format cap
+live via dotfile.org tangle, brew-stable channel kept (user decision).
+E2E: mpv->ytdl_hook->yt-dlp picks avc1 1080p + opus with videotoolbox
+hwdec, no 403s. Mac lane is fully done.
+
+Embark loose end closed (2026-08-05, later): yt-video "b b"/"RET"
+actions now media-open - every YT entry point (C-x m o, org yt:
+links, embark) goes through the one backend dispatcher. bb test
+919/0, lint/smoke green, live keymaps rebuilt.
+
+Open questions: 1 remaining (MPRIS transport placement - stage 3).
 
 Workflow (browser lane): point at a yt:/https link (or have it in the
 kill-ring) -> C-x m o opens it as Brave's front tab, playback starts
-(window visible), Emacs keeps focus, transient controls it. s re-points
+(window visible), Emacs keeps focus, transient controls it. Following
+an org yt: link (RET / C-c C-o) routes identically. s re-points
 control (always prompts, shows the pick). Local files: o in dired lands
 in mpv, after which auto backend = mpv while it runs.
 
 Next action:
-- User tries the transient on a real YT session; then org yt: link
-  handler decision (open question - media-open already handles yt:
-  links at point, the handler re-point may now just be
-  browse-url/media-open), or stage 4 mpv patch-up, or wait for the
-  Linux machine for stage 3.
+- User tries the transient on a real YT session, follows an org yt:
+  link, exercises an embark YT action, and plays a YT URL in mpv with
+  the new provider. Stage 3 waits for the Linux machine.
 
 Useful commands:
 - JXA probe timing: echo a Navegosa call into osascript -l JavaScript
@@ -393,13 +478,18 @@ agzam/emacs-lab:tests/web-browsing/media-tests.el.
 
 ** mpv lane current state (this machine)
 - mpv 0.41.0, yt-dlp 2026.07.04 (brew), deno 2.9.4 detected as JS
-  runtime, no POT provider installed.
-- mpv.conf already has: cache=yes, demuxer-max-bytes=2000MiB,
-  force-seekable=yes, hwdec=auto-safe. uosc + post-load.lua scripts.
-- Emacs side: mpv.el package, mpv-transient in
-  agzam/emacs-lab:modules/web-browsing/autoload/mpv.el, embark
-  integration (modules/embark/config.el:55-56), org yt: links via
-  mpv-open (modules/org/config.el:168-173).
+  runtime, bgutil-ytdlp-pot-provider 1.3.1 in script-deno mode
+  (~/bgutil-ytdlp-pot-provider + plugin zip in
+  ~/.config/yt-dlp/plugins/).
+- mpv.conf (tangled from dotfile.org): cache=yes,
+  demuxer-max-bytes=2000MiB, force-seekable=yes, hwdec=auto-safe,
+  ytdl-format 1080p/avc cap with codec-agnostic fallback. uosc +
+  post-load.lua scripts.
+- Emacs side: mpv.el package, media-transient in
+  agzam/emacs-lab:modules/web-browsing/autoload/media.el, embark
+  yt-video actions (modules/embark/config.el) and org yt: links
+  (org-follow-yt-link, modules/org/autoload/org.el) both route
+  through media-open - no direct mpv-open entry points remain.
 
 ** References
 - yt-dlp PO Token Guide: https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide
@@ -411,6 +501,22 @@ agzam/emacs-lab:tests/web-browsing/media-tests.el.
 - browser-mpris2 (gap-filler prior art): https://github.com/otommod/browser-mpris2
 
 * Changelog
+- 2026-08-05 (night): embark yt-video actions -> media-open (last
+  direct-mpv entry point gone; also fixes embark's own stale
+  kill-ring hazard). +3 specs (919/0). Committed and pushed with the
+  handler re-point per user instruction.
+- 2026-08-05 (evening, cont.): stage 4 done - bgutil 1.3.1 POT
+  provider (deno script transport, default ~ location, plugin zip in
+  ~/.config/yt-dlp/plugins), ytdl-format 1080p/avc cap with fallback
+  (via dotfile.org tangle - mpv.conf is a 444 tangle artifact, spec
+  Meta corrected), yt-dlp stays brew stable (user decision), no
+  cookies anywhere. E2E through mpv/ytdl_hook green.
+- 2026-08-05 (evening): org yt: handler open question resolved (user
+  decision: hard re-point, no separate knob) - :follow ->
+  org-follow-yt-link -> media-open with the URL threaded explicitly
+  (media-open &optional url; kill-ring-shadowing hazard on the mpv
+  lane documented). +5 specs (916/0), lint/smoke green, live E2E via
+  org-link-open. Embark mpv-open bindings left as-is.
 - 2026-08-05 (later still): transient polish per user feedback - s
   always prompts and shows the pick (o "show tab" key retired);
   browser-lane o = media-open (point/kill-ring URL -> front tab, no

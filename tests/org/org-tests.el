@@ -129,3 +129,21 @@ Point starts at the position of the ^ marker (removed), else point-min."
       (expect (org-clear-babel-results-h) :to-be nil))
     (with-org-buffer "plain ^text\n"
       (expect (org-clear-babel-results-h) :to-be nil))))
+
+;; NOTE cl-letf, not spy-on: media-open may be unloaded in this process
+;; (web-browsing suites own it); a nil function cell exercises the
+;; module-off branch deterministically either way.
+(describe "org-follow-yt-link"
+  (it "routes through media-open, https-normalized"
+    (let (opened)
+      (cl-letf (((symbol-function 'media-open)
+                 (lambda (url) (setq opened url))))
+        (org-follow-yt-link "//www.youtube.com/watch?v=q"))
+      (expect opened :to-equal "https://www.youtube.com/watch?v=q")))
+  (it "falls back to browse-url when the web-browsing module is off"
+    (let (browsed)
+      (cl-letf (((symbol-function 'media-open) nil)
+                ((symbol-function 'browse-url)
+                 (lambda (url &rest _) (setq browsed url))))
+        (org-follow-yt-link "//youtu.be/xyz"))
+      (expect browsed :to-equal "https://youtu.be/xyz"))))

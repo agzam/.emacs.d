@@ -52,8 +52,8 @@
                      ("RET" . eww-open-in-other-window)))
       (yt-video
        :pattern "\\(youtube\\.com/watch\\|youtu\\.be/\\)"
-       :actions (("b b" . mpv-open)
-                 ("RET" . mpv-open)
+       :actions (("b b" . media-open)
+                 ("RET" . media-open)
                  ("b t" . youtube-sub-extractor-extract-subs)))
       (github-repo
        :pattern "github\\.com/[^/]+/[^/]+/?$"
