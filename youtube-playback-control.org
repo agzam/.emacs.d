@@ -1,8 +1,9 @@
 #+title: YouTube playback control from Emacs - browser and mpv lanes
 
 * Meta
-- status :: done (all four stages landed 2026-08-05; mac and Linux
-  lanes complete)
+- status :: implementing (stages 1-4 done and pushed, both lanes
+  complete; stage 5 planned - backend switching inside the
+  transient, see the handoff doc)
 - created :: 2026-08-04
 - projects ::
   - agzam/navegosa.el @ main (V3 pushed 2026-08-05; V4 MPRIS lane
@@ -401,6 +402,38 @@ hwdec, no 403 / SABR errors. (Beware grepping mpv output for
 "error|403": googlevideo URL params contain both as substrings -
 filter long-URL lines first.)
 
+** Stage 5 - backend switching inside the transient (planned)
+Motivation: media-backend-active makes auto sticky to mpv while an
+mpv process lives - controlling browser playback at the same time
+means hand-evaluating a setopt. The switch belongs on a key inside
+media-transient. Pure emacs-lab elisp; navegosa should not need to
+change. Any machine works: Linux exercises mpv+mpris, mac mpv+JXA.
+
+The work:
+1. [hypothesized] A shared suffix on one free key (candidate: b -
+   free in all groups) present in the mpv, browser, and mpris
+   groups alike: re-pin media-backend for the session among auto /
+   mpv / the platform's browser lane (browser on darwin, mpris on
+   gnu/linux - never offer the foreign lane). Plain setq, never
+   customize-save; echo the resolution, e.g. "backend: mpris (was
+   auto)".
+2. [hypothesized] The transient must redraw so the visible group
+   flips: group :if predicates evaluate at setup time, so the
+   suffix likely re-invokes (transient-setup 'media-transient)
+   after setting the variable (or :transient plus
+   transient--redisplay if that re-evaluates groups - verify live,
+   record the working pattern here).
+3. [hypothesized] Cycle vs prompt: cycle is one keypress and
+   self-evident with three states; completing-read scales better.
+   Decide in-session, note the reason here.
+4. [hypothesized] Specs (tests/web-browsing/media-tests.el):
+   switch-function state transitions and platform filtering, no
+   persistence side effects; binding the key in every group lets
+   the existing cross-group key-consistency spec enforce the
+   mirror automatically. Live E2E gate: mpv playing a local file
+   AND a browser video active, hop mpv -> browser lane -> auto
+   from inside C-x m, controlling each in turn.
+
 ** Deferred
 - Watch-history instruments (browser lane enables: logged-in YT history
   page scrape via JXA, browser-hist.el sqlite, resume positions).
@@ -525,6 +558,9 @@ in mpv, after which auto backend = mpv while it runs. Linux caveat:
 muted tabs are invisible to MPRIS - control needs audible playback.
 
 Next action:
+- Stage 5: backend switching inside the transient - the handoff doc
+  (youtube-playback-control-handoff.org) carries the paste-ready
+  prompt for a fresh session on either machine.
 - Optionally exercise the mac lane against the rebuilt package (V4
   changed shared navegosa-media.el paths - JXA specs still pass, but
   a live mac smoke after pulling is cheap).
