@@ -11,6 +11,22 @@
 
 (load-module-file "modules/web-browsing/autoload/media.el")
 
+(defun media-tests--group-plist (node description)
+  "Find the group plist carrying DESCRIPTION anywhere in layout NODE.
+Both transient layout dialects park a group's plist as a keyword-headed
+list among the node's elements - 0.7.x at slot 2 of a [LEVEL CLASS PLIST
+CHILDREN] vector, 0.13.x at slot 1 of [CLASS PLIST CHILDREN] - so a
+uniform descent dodges the slot arithmetic."
+  (cond
+   ((vectorp node)
+    (seq-some (lambda (child) (media-tests--group-plist child description))
+              (append node nil)))
+   ((proper-list-p node)
+    (if (keywordp (car node))
+        (and (equal (plist-get node :description) description) node)
+      (seq-some (lambda (child) (media-tests--group-plist child description))
+                node)))))
+
 (defun media-tests--layout-keys (node)
   "Collect (COMMAND . KEY) suffix pairs from a transient layout NODE.
 Same dual-dialect traversal as `transient-layout-commands'."
@@ -129,14 +145,24 @@ Same dual-dialect traversal as `transient-layout-commands'."
           (expect (cdr pair) :to-equal prev))
         (puthash (car pair) (cdr pair) seen))))
 
+  (it "digs the group plist out of both layout dialects"
+    ;; shapes lifted from transient--parse-group: v0.7.2 is Emacs 30's
+    ;; bundled copy (what CI runs), the other the local elpaca build -
+    ;; the mpris gate below must keep passing on both
+    (let ((v07-layout '([1 transient-columns (:description "mpris" :if ignore)
+                         ((1 transient-suffix (:key "x" :command ignore)))]))
+          (v013-layout [transient-prefix nil
+                        ([transient-columns (:description "mpris" :if ignore)
+                          ([transient-column nil ()])])]))
+      (expect (plist-get (media-tests--group-plist v07-layout "mpris") :if)
+              :to-be 'ignore)
+      (expect (plist-get (media-tests--group-plist v013-layout "mpris") :if)
+              :to-be 'ignore)))
+
   (it "gates the mpris group on the resolved backend"
-    (let* ((layout (get 'media-transient 'transient--layout))
-           (groups (if (vectorp layout) (elt layout 2) layout))
-           (pred (seq-some (lambda (g)
-                             (let ((pl (elt g 1)))
-                               (when (equal (plist-get pl :description) "mpris")
-                                 (plist-get pl :if))))
-                           groups)))
+    (let ((pred (plist-get (media-tests--group-plist
+                            (get 'media-transient 'transient--layout) "mpris")
+                           :if)))
       (expect pred :to-be-truthy)
       (let ((media-backend 'mpris))
         (expect (funcall pred) :to-be-truthy))
