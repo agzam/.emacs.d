@@ -238,7 +238,7 @@
       :i "M-?" #'completion-preview-prev-candidate
       :i "M-l" #'completion-preview-accept-or-slurp
       :i "C-/" #'completion-at-point
-      :n "gi" #'ibuffer-sidebar-jump
+      :n "gI" #'ibuffer-sidebar-jump
       :i "C-v" #'evil-paste-after
       :i "TAB" #'completion-at-point
       "C-x m" #'media-transient
@@ -492,7 +492,8 @@
                (:when (modulep! :custom ai)
                  (:prefix ("g" . "gptel")
                   :desc "gptel-menu" "g" #'gptel-menu
-                  :desc "inline at point" "i" #'gptel-inline
+                  :desc "inline at point" "i" #'gptel-inline-dwim
+                  :desc "visit inline session" "v" #'gptel-inline-visit-last-chat
                   :desc "new gptel" "n" #'open-gptel
                   :desc "check text" "e" #'gptel-improve-text-transient
                   :desc "quick" "q" #'gptel-quick-question-buffer

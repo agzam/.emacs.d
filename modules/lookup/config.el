@@ -120,8 +120,9 @@ window/point.  See `set-lookup-handlers!' about adding to this list.")
 
 ;; Doom binds these in :editor evil's config behind (modulep! :tools lookup);
 ;; the module itself is the guard here.
+;; gI belongs to ibuffer-sidebar-jump (gi is the gptel-inline dwim);
+;; lookup-implementations stays reachable at SPC c i.
 (map! :nv "K"  #'lookup-documentation
       :nv "gd" #'lookup-definition
       :nv "gD" #'lookup-references
-      :nv "gf" #'lookup-file
-      :nv "gI" #'lookup-implementations)
+      :nv "gf" #'lookup-file)

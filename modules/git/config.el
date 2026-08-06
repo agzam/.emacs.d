@@ -116,7 +116,10 @@
          :nv "l" #'evil-forward-char
          :nv "h" #'evil-backward-char
          "M-l" #'magit-log
-         :n "gi" #'ibuffer-sidebar-jump)
+         ;; evil-collection's magit maps swallow global g-sequences;
+         ;; both need restating here
+         :n "gi" #'gptel-inline-dwim
+         :n "gI" #'ibuffer-sidebar-jump)
         (:map magit-status-mode-map
          :nv "gz" #'magit-refresh)
         (:map magit-diff-mode-map

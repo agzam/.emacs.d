@@ -171,6 +171,136 @@
       (open-gptel)
       (expect agent-called :to-be t))))
 
+(describe "gptel-inline-visit-last-chat"
+  :var (chat popped)
+  (before-each
+    (defvar gptel-inline--last nil)
+    (setq popped nil))
+
+  (it "pops to the remembered session"
+    (setq chat (generate-new-buffer "*gptel:proj*"))
+    (unwind-protect
+        (with-temp-buffer
+          (setq-local gptel-inline--last chat)
+          (cl-letf (((symbol-function 'pop-to-buffer)
+                     (lambda (b &rest _) (setq popped b))))
+            (gptel-inline-visit-last-chat))
+          (expect popped :to-be chat))
+      (kill-buffer chat)))
+
+  (it "errors when there is no session for the buffer"
+    (with-temp-buffer
+      (expect (gptel-inline-visit-last-chat) :to-throw 'user-error)))
+
+  (it "errors when the remembered session is dead"
+    (setq chat (generate-new-buffer "doomed"))
+    (kill-buffer chat)
+    (with-temp-buffer
+      (setq-local gptel-inline--last chat)
+      (expect (gptel-inline-visit-last-chat) :to-throw 'user-error))))
+
+(describe "gptel-inline-dismiss-overlay-h"
+  :var (buf ov)
+  (before-each
+    (defvar gptel-inline--response-overlay-mode nil)
+    (setq buf (generate-new-buffer "dismiss-src"))
+    (with-current-buffer buf
+      (insert "some buffer text here")
+      (setq ov (make-overlay 5 10))
+      (overlay-put ov 'gptel-inline '(:marker nil))))
+  (after-each
+    (when (buffer-live-p buf) (kill-buffer buf)))
+
+  (it "stays inert while the overlay mode is off"
+    (with-current-buffer buf
+      (expect (gptel-inline-dismiss-overlay-h) :to-be nil)))
+
+  (it "detaches the overlay into the stash and claims the key"
+    (with-current-buffer buf
+      (setq-local gptel-inline--response-overlay-mode t)
+      (cl-letf (((symbol-function 'gptel-inline--response-overlay-at-point)
+                 (lambda () ov))
+                ((symbol-function 'gptel-inline--response-overlay-mode)
+                 (lambda (&rest _))))
+        (expect (gptel-inline-dismiss-overlay-h) :to-be t))
+      (expect (overlay-buffer ov) :to-be nil)
+      (pcase-let ((`(,sov ,beg ,end) gptel-inline-stashed-overlay))
+        (expect sov :to-be ov)
+        (expect (marker-position beg) :to-equal 5)
+        (expect (marker-position end) :to-equal 10))))
+
+  (it "falls through when no overlay is in view"
+    (with-current-buffer buf
+      (setq-local gptel-inline--response-overlay-mode t)
+      (cl-letf (((symbol-function 'gptel-inline--response-overlay-at-point)
+                 (lambda () nil)))
+        (expect (gptel-inline-dismiss-overlay-h) :to-be nil)))))
+
+(describe "gptel-inline-restore-overlay"
+  :var (buf ov rearmed)
+  (before-each
+    (setq rearmed nil)
+    (setq buf (generate-new-buffer "restore-src"))
+    (with-current-buffer buf (insert "0123456789abcdefghij")))
+  (after-each
+    (when (buffer-live-p buf) (kill-buffer buf)))
+
+  (it "re-attaches the stash at its markers and re-arms the UI"
+    (with-current-buffer buf
+      (setq ov (make-overlay 4 9))
+      (delete-overlay ov)
+      (setq-local gptel-inline-stashed-overlay
+                  (list ov (copy-marker 4) (copy-marker 9)))
+      (cl-letf (((symbol-function 'gptel-inline--setup-response-overlay-keymap)
+                 (lambda (_) (push 'keymap rearmed)))
+                ((symbol-function 'gptel-inline--response-overlay-mode)
+                 (lambda (_) (push 'mode rearmed)))
+                ((symbol-function 'gptel-inline--response-overlay-render)
+                 (lambda (_) (push 'render rearmed)))
+                ((symbol-function 'evil-set-jump) (lambda (&rest _)))
+                ((symbol-function 'recenter) (lambda (&rest _))))
+        (gptel-inline-restore-overlay))
+      (expect (overlay-buffer ov) :to-be buf)
+      (expect (overlay-start ov) :to-equal 4)
+      (expect (overlay-end ov) :to-equal 9)
+      (expect gptel-inline-stashed-overlay :to-be nil)
+      (expect (memq 'render rearmed) :to-be-truthy)
+      (expect (memq 'keymap rearmed) :to-be-truthy)))
+
+  (it "errors when nothing is stashed"
+    (with-temp-buffer
+      (expect (gptel-inline-restore-overlay) :to-throw 'user-error))))
+
+(describe "gptel-inline-dwim"
+  :var (calls)
+  (before-each (setq calls nil))
+
+  (it "restores the stash first"
+    (with-temp-buffer
+      (setq-local gptel-inline-stashed-overlay '(fake-ov nil nil))
+      (cl-letf (((symbol-function 'gptel-inline-restore-overlay)
+                 (lambda () (push 'restore calls))))
+        (gptel-inline-dwim))
+      (expect calls :to-equal '(restore))))
+
+  (it "opens the action menu on a visible overlay"
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'gptel-inline--response-overlay-at-point)
+                 (lambda () 'the-ov))
+                ((symbol-function 'gptel-inline--response-overlay-dispatch)
+                 (lambda (ov) (push (list 'menu ov) calls))))
+        (gptel-inline-dwim))
+      (expect calls :to-equal '((menu the-ov)))))
+
+  (it "opens the prompt strip otherwise"
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'gptel-inline--response-overlay-at-point)
+                 (lambda () nil))
+                ((symbol-function 'gptel-inline)
+                 (lambda (&optional ov) (push (list 'inline ov) calls))))
+        (gptel-inline-dwim))
+      (expect calls :to-equal '((inline nil))))))
+
 (describe "gptel-inline-project-chat-buffer"
   :var (root origin chat clone)
   (before-each

@@ -108,7 +108,22 @@
   (setopt gptel-inline-find-chat-buffer-functions
           (list #'gptel-inline-previous-buffer
                 #'gptel-inline-same-buffer
-                #'gptel-inline-project-chat-buffer)))
+                #'gptel-inline-project-chat-buffer))
+
+  ;; ESC stash-dismisses the visible overlay through the escape-hook
+  ;; chain (like evil-mc and lsp); the SPC x g i dwim re-attaches it.
+  ;; M-RET stays as upstream's action-menu key.
+  (add-hook 'doom-escape-hook #'gptel-inline-dismiss-overlay-h)
+
+  ;; The prompt strip exists to be typed into - start it in insert state
+  ;; on every entry path (fresh, continue, menu reply).
+  (defadvice! gptel-inline-start-in-insert-a (&rest _)
+    :after #'gptel-inline
+    (evil-insert-state)))
+
+;; The whole inline lifecycle on one normal-state key (mode maps shadow
+;; upstream's M-RET in dired and friends; an evil-level g-sequence wins).
+(map! :n "gi" #'gptel-inline-dwim)
 
 ;; extract-tool-defs-from-bb parses the MCP harness .bb files with parseedn;
 ;; doom.d gets it transitively from the clojure module - explicit here until

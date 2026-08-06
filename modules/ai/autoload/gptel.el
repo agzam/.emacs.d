@@ -427,6 +427,79 @@ buffer names (\"*gptel:proj*<2><2>\")."
               root)))))
 
 ;;;###autoload
+(defun gptel-inline-visit-last-chat ()
+  "Pop to the chat session backing gptel-inline in this buffer.
+The response overlay is only a viewport on the latest exchange; the full
+conversation lives in a background chat buffer that gptel-inline
+remembers per origin buffer, surviving overlay dismissal."
+  (interactive)
+  (if-let* ((buf (bound-and-true-p gptel-inline--last))
+            ((buffer-live-p buf)))
+      (pop-to-buffer buf)
+    (user-error "No gptel-inline session for this buffer yet")))
+
+(defvar-local gptel-inline-stashed-overlay nil
+  "Last ESC-dismissed response overlay: (OVERLAY START-MARKER END-MARKER).
+One slot per buffer - dismissing another overlay replaces it, and
+`gptel-inline-dwim' re-attaches it.")
+
+;;;###autoload
+(defun gptel-inline-dismiss-overlay-h ()
+  "Stash-dismiss the visible gptel-inline response overlay.
+For `doom-escape-hook': claims the ESC press only while an overlay is on
+screen, falling through to the other escape handlers otherwise.  The
+overlay is detached, not destroyed, so `gptel-inline-dwim' can bring it
+back.  A response still streaming while detached keeps landing in the
+chat buffer, not the overlay."
+  (when (bound-and-true-p gptel-inline--response-overlay-mode)
+    (when-let* ((ov (gptel-inline--response-overlay-at-point)))
+      (setq gptel-inline-stashed-overlay
+            (list ov
+                  (copy-marker (overlay-start ov))
+                  (copy-marker (overlay-end ov))))
+      (delete-overlay ov)
+      (gptel-inline--response-overlay-mode -1)
+      t)))
+
+;;;###autoload
+(defun gptel-inline-restore-overlay ()
+  "Re-attach this buffer's stashed response overlay and re-arm its UI.
+The visibility tracker and minor mode removed themselves when the
+overlay detached, so both are re-armed here.  Jumps to the overlay when
+it lands outside the window (an evil jump, so \\[evil-jump-backward]
+returns)."
+  (interactive)
+  (pcase gptel-inline-stashed-overlay
+    (`(,ov ,beg ,end)
+     (setq gptel-inline-stashed-overlay nil)
+     (move-overlay ov beg end (current-buffer))
+     (set-marker beg nil)
+     (set-marker end nil)
+     (gptel-inline--setup-response-overlay-keymap ov)
+     (gptel-inline--response-overlay-mode 1)
+     (gptel-inline--response-overlay-render ov)
+     (unless (pos-visible-in-window-p (overlay-start ov))
+       (evil-set-jump)
+       (goto-char (overlay-start ov))
+       (recenter)))
+    (_ (user-error "No dismissed gptel-inline overlay in this buffer"))))
+
+;;;###autoload
+(defun gptel-inline-dwim ()
+  "Single-key gptel-inline lifecycle.
+Re-attach the stashed (ESC-dismissed) overlay if there is one; open the
+action menu on a visible overlay (what upstream puts on M-RET, which
+mode maps like dired's shadow); otherwise open the prompt strip, which
+resumes this buffer's session or starts one."
+  (interactive)
+  (if (car-safe gptel-inline-stashed-overlay)
+      (gptel-inline-restore-overlay)
+    (if-let* (((fboundp 'gptel-inline--response-overlay-at-point))
+              (ov (gptel-inline--response-overlay-at-point)))
+        (gptel-inline--response-overlay-dispatch ov)
+      (gptel-inline))))
+
+;;;###autoload
 (defun gptel-chat-quadrant-buffer-p (buffer-or-name _action)
   "Non-nil for gptel chat buffers that belong in the quadrant window.
 Excludes indirect buffers: gptel-inline's prompt is an indirect clone
