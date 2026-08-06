@@ -89,7 +89,10 @@
     (go-jira . "~/GitHub/agzam/go-jira.el")
     (khalendario . "~/GitHub/agzam/khalendario.el")
     ;; the hammerspoon config IS the spacehammer checkout (doom.d symlinked it)
-    (spacehammer . "~/.hammerspoon"))
+    (spacehammer . "~/.hammerspoon")
+    ;; not an own package: karthink's config is the only upstream of the
+    ;; gptel-inline experiment, tracked as a checkout to pull at will
+    (gptel-inline . "~/GitHub/karthink/.emacs.d"))
   "Alist of own packages -> local checkout preferred over the GitHub recipe.")
 
 (defvar local-dev-clone-overrides

@@ -492,6 +492,7 @@
                (:when (modulep! :custom ai)
                  (:prefix ("g" . "gptel")
                   :desc "gptel-menu" "g" #'gptel-menu
+                  :desc "inline at point" "i" #'gptel-inline
                   :desc "new gptel" "n" #'open-gptel
                   :desc "check text" "e" #'gptel-improve-text-transient
                   :desc "quick" "q" #'gptel-quick-question-buffer

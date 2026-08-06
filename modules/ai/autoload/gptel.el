@@ -402,6 +402,42 @@ Returns nil if the file does not exist."
       (call-interactively #'gptel-agent))))
 
 ;;;###autoload
+(defun gptel-inline-project-chat-buffer (buf)
+  "Return or create a per-project gptel-inline chat buffer for BUF.
+Like `gptel-inline-project-buffer', but never matches indirect buffers:
+abandoned gptel-inline prompts are indirect gptel-mode clones living in
+the project root, and treating one as the chat nests clones and drifts
+buffer names (\"*gptel:proj*<2><2>\")."
+  (with-current-buffer buf
+    (and-let* ((proj (project-current))
+               (root (expand-file-name (project-root proj))))
+      (if-let* ((matching
+                 (match-buffers
+                  (lambda (b-or-n)
+                    (and-let* ((b (get-buffer b-or-n)))
+                      (and (buffer-local-value 'gptel-mode b)
+                           (not (buffer-base-buffer b))
+                           (not (= (aref (buffer-name b) 0) 32))
+                           (string= (expand-file-name
+                                     (buffer-local-value 'default-directory b))
+                                    root)))))))
+          (buffer-name (car matching))
+        (list (format "*gptel:%s*"
+                      (file-name-nondirectory (substring root nil -1)))
+              root)))))
+
+;;;###autoload
+(defun gptel-chat-quadrant-buffer-p (buffer-or-name _action)
+  "Non-nil for gptel chat buffers that belong in the quadrant window.
+Excludes indirect buffers: gptel-inline's prompt is an indirect clone
+carrying the chat buffer's name, and matching it here would override the
+small below-selected window the package asks for."
+  (when-let* ((buf (get-buffer buffer-or-name)))
+    (and (string-match-p (rx bos (or "*Claude" "*ChatGPT" "gptel-"))
+                         (buffer-name buf))
+         (not (buffer-base-buffer buf)))))
+
+;;;###autoload
 (defun gptel-persist-history (_beg _end)
   "Save gptel dedicated buffer to disk.
 Only acts on buffers with `gptel-mode' active, skipping transient
@@ -410,11 +446,16 @@ uses like `gptel-send' from scratch."
              (not (buffer-file-name (current-buffer))))
     (let ((suffix (format-time-string "%Y-%m-%d-%T" (current-time)))
           (chat-dir (concat org-default-folder "/gptel"))
-          (ext (replace-regexp-in-string "-mode$" "" (symbol-name gptel-default-mode))))
+          (ext (replace-regexp-in-string "-mode$" "" (symbol-name gptel-default-mode)))
+          (dir default-directory))
       (unless (file-directory-p chat-dir)
         (make-directory chat-dir :parents))
       (write-file
-       (expand-file-name (concat "gptel-" suffix "." ext) chat-dir)))))
+       (expand-file-name (concat "gptel-" suffix "." ext) chat-dir))
+      ;; write-file re-homes default-directory to chat-dir; keep the chat
+      ;; anchored to where it was born - gptel-inline routes per-project
+      ;; sessions and agent tools resolve paths through this directory.
+      (setq default-directory dir))))
 
 ;;;###autoload
 (defun gptel-quick-question-buffer ()

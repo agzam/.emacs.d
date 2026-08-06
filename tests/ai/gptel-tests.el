@@ -170,3 +170,115 @@
                (lambda () (interactive) (setq agent-called t))))
       (open-gptel)
       (expect agent-called :to-be t))))
+
+(describe "gptel-inline-project-chat-buffer"
+  :var (root origin chat clone)
+  (before-each
+    (defvar gptel-mode nil)
+    (setq root (file-name-as-directory (make-temp-file "gi-proj" t)))
+    (setq origin (generate-new-buffer "origin"))
+    (with-current-buffer origin (setq default-directory root)))
+  (after-each
+    (dolist (b (list clone chat origin))
+      (when (buffer-live-p b) (kill-buffer b)))
+    (setq chat nil clone nil)
+    (delete-directory root t))
+
+  (it "returns the project's live chat buffer"
+    (setq chat (generate-new-buffer "*gptel:proj*"))
+    (with-current-buffer chat
+      (setq-local gptel-mode t)
+      (setq default-directory root))
+    (cl-letf (((symbol-function 'project-current) (lambda (&rest _) 'proj))
+              ((symbol-function 'project-root) (lambda (_) root)))
+      (expect (gptel-inline-project-chat-buffer origin)
+              :to-equal (buffer-name chat))))
+
+  (it "never matches an abandoned indirect prompt clone"
+    (setq chat (generate-new-buffer "*gptel:proj*"))
+    (with-current-buffer chat (setq-local gptel-mode t)) ;base lives elsewhere
+    (setq clone (make-indirect-buffer chat "*gptel:proj*<2>"))
+    (with-current-buffer clone
+      (setq-local gptel-mode t)
+      (setq default-directory root))
+    (cl-letf (((symbol-function 'project-current) (lambda (&rest _) 'proj))
+              ((symbol-function 'project-root) (lambda (_) root)))
+      (expect (gptel-inline-project-chat-buffer origin)
+              :to-equal (list (format "*gptel:%s*"
+                                      (file-name-nondirectory (substring root nil -1)))
+                              root))))
+
+  (it "proposes a fresh name when the project has no chat"
+    (cl-letf (((symbol-function 'project-current) (lambda (&rest _) 'proj))
+              ((symbol-function 'project-root) (lambda (_) root)))
+      (expect (gptel-inline-project-chat-buffer origin)
+              :to-equal (list (format "*gptel:%s*"
+                                      (file-name-nondirectory (substring root nil -1)))
+                              root)))))
+
+(describe "gptel-chat-quadrant-buffer-p"
+  :var (chat clone plain)
+  (before-each
+    (setq chat (generate-new-buffer "*Claude-test*"))
+    (setq clone (make-indirect-buffer
+                 chat (generate-new-buffer-name (buffer-name chat))))
+    (setq plain (generate-new-buffer "irrelevant")))
+  (after-each
+    (dolist (b (list clone chat plain))
+      (when (buffer-live-p b) (kill-buffer b))))
+
+  (it "matches chat buffers by name"
+    (expect (gptel-chat-quadrant-buffer-p chat nil) :to-be-truthy)
+    (expect (gptel-chat-quadrant-buffer-p (buffer-name chat) nil)
+            :to-be-truthy))
+
+  (it "rejects indirect clones sharing the chat's name"
+    (expect (gptel-chat-quadrant-buffer-p clone nil) :to-be nil))
+
+  (it "rejects unrelated buffer names"
+    (expect (gptel-chat-quadrant-buffer-p plain nil) :to-be nil)))
+
+(describe "gptel-persist-history"
+  :var (chat-root start-dir buf)
+  (before-each
+    (defvar gptel-mode nil)
+    (defvar org-default-folder nil)
+    (defvar gptel-default-mode nil)
+    (setq chat-root (make-temp-file "gptel-chats" t))
+    (setq start-dir (file-name-as-directory (make-temp-file "gptel-project" t)))
+    (setq buf (generate-new-buffer "*gptel:project*"))
+    (with-current-buffer buf
+      (setq-local gptel-mode t)
+      (setq default-directory start-dir)
+      (insert "* prompt\nresponse\n")))
+  (after-each
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (setq buffer-file-name nil)
+        (set-buffer-modified-p nil))
+      (kill-buffer buf))
+    (delete-directory chat-root t)
+    (delete-directory start-dir t))
+
+  (it "writes the chat under org-default-folder/gptel"
+    (let ((org-default-folder chat-root)
+          (gptel-default-mode 'org-mode))
+      (with-current-buffer buf (gptel-persist-history 0 0))
+      (expect (length (directory-files (expand-file-name "gptel" chat-root)
+                                       nil "\\`gptel-.*\\.org\\'"))
+              :to-equal 1)))
+
+  (it "preserves default-directory across the save"
+    (let ((org-default-folder chat-root)
+          (gptel-default-mode 'org-mode))
+      (with-current-buffer buf (gptel-persist-history 0 0))
+      (expect (buffer-local-value 'default-directory buf) :to-equal start-dir)))
+
+  (it "skips buffers already visiting a file"
+    (let ((org-default-folder chat-root)
+          (gptel-default-mode 'org-mode))
+      (with-current-buffer buf
+        (setq buffer-file-name "/tmp/existing.org")
+        (gptel-persist-history 0 0))
+      (expect (file-directory-p (expand-file-name "gptel" chat-root))
+              :to-be nil))))

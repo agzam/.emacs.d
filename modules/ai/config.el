@@ -73,7 +73,7 @@
 
   (add-to-list
    'display-buffer-alist
-   `(,(rx bos (or "*Claude" "*ChatGPT" "gptel-"))
+   '(gptel-chat-quadrant-buffer-p
      (display-buffer-in-quadrant)
      (init-width . 0.40)
      (direction . right)
@@ -91,6 +91,24 @@
       display-buffer-in-quadrant)
      (direction . right)
      (window . root))))
+
+;; Karthik's experimental overlay UI for gptel: prompt in a small window,
+;; response in an overlay at point, chat session routed per project in the
+;; background.  No standalone repo - the single file lives in his config;
+;; local-dev-packages redirects the recipe to the ~/GitHub/karthink checkout.
+(use-package gptel-inline
+  :ensure (gptel-inline :host github :repo "karthink/.emacs.d"
+                        :main "plugins/gptel-inline.el"
+                        :files ("plugins/gptel-inline.el"))
+  :defer t
+  :config
+  ;; Abandoned prompt strips leak gptel-mode indirect clones into the
+  ;; project root; upstream's matcher would pick one as the chat and nest
+  ;; clones.  Same hook list, clone-proof project matcher.
+  (setopt gptel-inline-find-chat-buffer-functions
+          (list #'gptel-inline-previous-buffer
+                #'gptel-inline-same-buffer
+                #'gptel-inline-project-chat-buffer)))
 
 ;; extract-tool-defs-from-bb parses the MCP harness .bb files with parseedn;
 ;; doom.d gets it transitively from the clojure module - explicit here until
