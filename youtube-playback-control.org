@@ -1,19 +1,18 @@
 #+title: YouTube playback control from Emacs - browser and mpv lanes
 
 * Meta
-- status :: complete (stages 1-6 done; stage 5 - backend switching -
-  and stage 6 - Linux gap lanes (audio-server volume/mute +
-  compositor page keys) - landed 2026-08-05 on the Linux box,
-  uncommitted in both repos)
+- status :: complete (stages 1-6 done and pushed; stages 5-6 landed
+  2026-08-05 on the Linux box, pushed 2026-08-06 - emacs-lab
+  0af5168, navegosa 17a9b75 - both CI runs green)
 - created :: 2026-08-04
 - projects ::
-  - agzam/navegosa.el @ main (V3-V4 pushed 2026-08-05 @ 40b5060; V5 -
-    stage 6's keysend + pactl lanes, 0.5.0 - built same day,
-    uncommitted) - navegosa.el, navegosa-media.el, navegosa-mpris.el,
+  - agzam/navegosa.el @ main (V5 pushed 2026-08-06 @ 17a9b75, CI
+    green) - navegosa.el, navegosa-media.el, navegosa-mpris.el,
     navegosa-keysend.el, navegosa-scripts.js, SPEC.md, README.org,
     changelog.org, Makefile, test/navegosa-tests.el
-  - agzam/emacs-lab @ main (stages 1-3 pushed 2026-08-05; stages 5-6
-    uncommitted) - modules/web-browsing/autoload/media.el,
+  - agzam/emacs-lab @ main (stage 5 + CI dialect fix pushed
+    2026-08-06 @ 0af5168, CI green - the first green run since
+    e267a12) - modules/web-browsing/autoload/media.el,
     autoload/mpv.el, modules/web-browsing/config.el, config.el,
     tests/web-browsing/{media,mpv}-tests.el, this spec
 - machine config :: brew yt-dlp/mpv/deno; ~/bgutil-ytdlp-pot-provider
@@ -732,10 +731,12 @@ cookies-from-browser use on the Linux box's reddit-extraction path -
 the stage-4 "no cookies for yt-dlp" decision concerned the mac
 Premium account and mpv's YouTube lane, which stay cookie-free.
 
+All pushed (2026-08-06): emacs-lab 51fc67c (CI dialect fix, its own
+commit so the main repair stays revertable) + 0af5168 (stage 5 +
+docs); navegosa 17a9b75 (V5). Both CI runs green - emacs-lab's
+first since e267a12 broke it.
+
 Next action:
-- Commit the CI dialect fix (media-tests.el hunks) - main stays red
-  on Emacs 30.1 until it lands; then stages 5-6 (emacs-lab:
-  transient switch + this spec; navegosa: V5) on instruction.
 - Optionally exercise the mac lane against the rebuilt package (V4
   changed shared navegosa-media.el paths - JXA specs still pass, but
   a live mac smoke after pulling is cheap). Stages 5-6 add nothing
