@@ -3,6 +3,21 @@
   "The list of extracted videos,
 where each item is a k/v pair of the url and filepath.")
 
+(defun yt-dlp-command (url)
+  "Build the yt-dlp download command for URL.
+Two Linux-only twists, both verified against a live Reddit post:
+yt-dlp picks the cookie-decryption keyring by desktop environment, and
+outside GNOME/KDE (Hyprland here) it falls back to plaintext decrypting
+nothing, so the keyring is named explicitly; and some CDNs (Reddit's)
+reject the system python's TLS fingerprint outright, so curl_cffi browser
+impersonation carries the requests.  macOS needs neither: the key comes
+from the Keychain, and its yt-dlp lacks the impersonation extra."
+  (format "yt-dlp --verbose --restrict-filenames %s '%s'"
+          (if (eq system-type 'gnu/linux)
+              "--cookies-from-browser brave+gnomekeyring --impersonate chrome"
+            "--cookies-from-browser brave")
+          url))
+
 ;;;###autoload
 (defun yt-extract-video-y-entonces (url &optional callback)
   "Extracts video from URL with yt-dlp and runs CALLBACK fn.
@@ -11,8 +26,7 @@ Passes the filepath as the param to CALLBACK."
   (interactive "sVideo URL: ")
   (let* ((default-directory "~/Downloads/")
          (pbuf "*yt-dlp*")
-         (process (async-shell-command
-                   (format "yt-dlp --verbose --restrict-filenames --cookies-from-browser brave '%s'" url) pbuf)))
+         (process (async-shell-command (yt-dlp-command url) pbuf)))
     (set-process-sentinel
      (get-buffer-process pbuf)
      (lambda (_process event)
