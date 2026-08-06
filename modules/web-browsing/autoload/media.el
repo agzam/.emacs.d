@@ -22,6 +22,35 @@ Linux).  Set to `mpv', `browser', or `mpris' to pin one."
    ((and (eq system-type 'gnu/linux) (featurep 'dbusbind)) 'mpris)
    (t 'mpv)))
 
+(defun media-backend-choices ()
+  "Backends offerable here: auto, mpv, and this platform's browser lane."
+  (append '(auto mpv)
+          (cond
+           ((eq system-type 'darwin) '(browser))
+           ((and (eq system-type 'gnu/linux) (featurep 'dbusbind)) '(mpris)))))
+
+(defun media-backend-description ()
+  "Menu label for the backend switch: the pin, plus its resolution when auto."
+  (if (eq media-backend 'auto)
+      (format "backend: auto(%s)" (media-backend-active))
+    (format "backend: %s" media-backend)))
+
+;;;###autoload
+(defun media-backend-switch ()
+  "Cycle `media-backend' among auto, mpv, and this platform's browser lane.
+Session-only re-pin (plain `setq', nothing persisted).  Inside
+`media-transient' the prefix's `:refresh-suffixes' re-evaluates the
+group `:if' predicates, so the visible group follows the new backend."
+  (interactive)
+  (let* ((choices (media-backend-choices))
+         (old media-backend)
+         (new (or (cadr (memq old choices)) (car choices))))
+    (setq media-backend new)
+    (message "backend: %s%s (was %s)"
+             new
+             (if (eq new 'auto) (format " = %s" (media-backend-active)) "")
+             old)))
+
 (defun media-url-at-point ()
   "Resolve a media URL: org link at point, URL at point, else kill-ring.
 Mirrors `mpv-open's resolution chain (minus dired); org yt: links
@@ -60,6 +89,9 @@ URLs go to the browser lane (JXA or MPRIS) or mpv per
 ;;;###autoload
 (transient-define-prefix media-transient ()
   "Playback control; backend resolved via `media-backend'."
+  ;; re-create suffix objects after every press: group :if predicates
+  ;; re-evaluate, so a backend hop (b) flips the visible group in place
+  :refresh-suffixes t
   ["bypass keys"
    :class transient-column
    :hide always
@@ -89,7 +121,9 @@ URLs go to the browser lane (JXA or MPRIS) or mpv per
    [("f" "fullscreen" mpv-fullscreen-toggle :transient t)
     ("SPC" "pause" mpv-pause :transient t)]
    [("o" "play" mpv-open :transient t)
-    ("Q" "quit" mpv-kill)]]
+    ("Q" "quit" mpv-kill)
+    ("b" media-backend-switch :description media-backend-description
+     :transient t)]]
   ["browser"
    :if (lambda () (eq (media-backend-active) 'browser))
    [("K" "vol up" navegosa-media-volume-up :transient t)
@@ -109,7 +143,9 @@ URLs go to the browser lane (JXA or MPRIS) or mpv per
     ("SPC" "pause" navegosa-media-play-pause :transient t)]
    [("s" "pick tab" navegosa-media-select-tab :transient t)
     ("o" "open" media-open :transient t)
-    ("g" "status" navegosa-media-status :transient t)]]
+    ("g" "status" navegosa-media-status :transient t)
+    ("b" media-backend-switch :description media-backend-description
+     :transient t)]]
   ;; same keys as the browser group: what MPRIS cannot do (speed, volume,
   ;; mute, subs, theater, fullscreen) answers with an honest user-error
   ["mpris"
@@ -131,4 +167,6 @@ URLs go to the browser lane (JXA or MPRIS) or mpv per
     ("SPC" "pause" navegosa-media-play-pause :transient t)]
    [("s" "pick player" navegosa-media-select-tab :transient t)
     ("o" "open" media-open :transient t)
-    ("g" "status" navegosa-media-status :transient t)]])
+    ("g" "status" navegosa-media-status :transient t)
+    ("b" media-backend-switch :description media-backend-description
+     :transient t)]])

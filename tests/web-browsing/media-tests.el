@@ -81,6 +81,66 @@ Same dual-dialect traversal as `transient-layout-commands'."
       (spy-on 'featurep :and-return-value nil)
       (expect (media-backend-active) :to-be 'mpv))))
 
+(describe "media-backend-switch"
+  (it "offers only the platform's own browser lane"
+    (let ((system-type 'darwin))
+      (expect (media-backend-choices) :to-equal '(auto mpv browser)))
+    (let ((system-type 'gnu/linux))
+      (spy-on 'featurep :and-call-fake (lambda (f &rest _) (eq f 'dbusbind)))
+      (expect (media-backend-choices) :to-equal '(auto mpv mpris))))
+
+  (it "cycles auto -> mpv -> mpris -> auto on Linux"
+    (let ((media-backend 'auto)
+          (system-type 'gnu/linux))
+      (spy-on 'featurep :and-call-fake (lambda (f &rest _) (eq f 'dbusbind)))
+      (media-backend-switch)
+      (expect media-backend :to-be 'mpv)
+      (media-backend-switch)
+      (expect media-backend :to-be 'mpris)
+      (media-backend-switch)
+      (expect media-backend :to-be 'auto)))
+
+  (it "cycles into browser, never mpris, on macOS"
+    (let ((media-backend 'mpv)
+          (system-type 'darwin))
+      (media-backend-switch)
+      (expect media-backend :to-be 'browser)))
+
+  (it "skips the browser lane on a Linux build without D-Bus"
+    (let ((media-backend 'mpv)
+          (system-type 'gnu/linux))
+      (spy-on 'featurep :and-return-value nil)
+      (media-backend-switch)
+      (expect media-backend :to-be 'auto)))
+
+  (it "recovers to auto when pinned to the foreign lane"
+    ;; a hand-setopt 'browser on Linux is outside the cycle: next press
+    ;; must land on a lane that exists here, not error or stick
+    (let ((media-backend 'browser)
+          (system-type 'gnu/linux))
+      (spy-on 'featurep :and-call-fake (lambda (f &rest _) (eq f 'dbusbind)))
+      (media-backend-switch)
+      (expect media-backend :to-be 'auto)))
+
+  (it "re-pins with plain setq, never the customize machinery"
+    (let ((media-backend 'auto)
+          (system-type 'darwin))
+      (spy-on 'featurep :and-return-value nil)
+      (spy-on 'customize-save-variable)
+      (spy-on 'customize-set-variable)
+      (media-backend-switch)
+      (expect 'customize-save-variable :not :to-have-been-called)
+      (expect 'customize-set-variable :not :to-have-been-called)
+      (expect (get 'media-backend 'saved-value) :to-be nil)))
+
+  (it "labels the switch with the pin, plus its resolution when auto"
+    (spy-on 'featurep :and-return-value nil)
+    (let ((media-backend 'auto)
+          (system-type 'darwin))
+      (expect (media-backend-description) :to-equal "backend: auto(browser)"))
+    (let ((media-backend 'mpris))
+      (expect (media-backend-description) :to-equal "backend: mpris"))))
+
 (describe "media-transient layout"
   :var* ((cmds (transient-layout-commands
                 (get 'media-transient 'transient--layout))))
@@ -108,7 +168,8 @@ Same dual-dialect traversal as `transient-layout-commands'."
               navegosa-media-status
               ;; the mpris group re-binds the same navegosa-media-*
               ;; commands - same set, no additions
-              )))
+              ;; the backend switch is shared by all three groups
+              media-backend-switch)))
 
   (it "keeps one muscle-memory key set across backends"
     (let ((pairs (media-tests--layout-keys
@@ -144,6 +205,22 @@ Same dual-dialect traversal as `transient-layout-commands'."
         (when-let* ((prev (gethash (car pair) seen)))
           (expect (cdr pair) :to-equal prev))
         (puthash (car pair) (cdr pair) seen))))
+
+  (it "puts the backend switch on b in every group"
+    ;; one per group: a backend hop must keep b under the finger
+    (let* ((pairs (media-tests--layout-keys
+                   (get 'media-transient 'transient--layout)))
+           (keys (mapcar #'cdr (seq-filter
+                                (lambda (pair)
+                                  (eq (car pair) 'media-backend-switch))
+                                pairs))))
+      (expect keys :to-equal '("b" "b" "b"))))
+
+  (it "re-inits suffixes after every press so a backend hop redraws"
+    ;; group :if predicates evaluate at (re)init time: without
+    ;; refresh-suffixes the visible group could not flip in place
+    (expect (oref (get 'media-transient 'transient--prefix) refresh-suffixes)
+            :to-be-truthy))
 
   (it "digs the group plist out of both layout dialects"
     ;; shapes lifted from transient--parse-group: v0.7.2 is Emacs 30's

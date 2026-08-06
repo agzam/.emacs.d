@@ -1,5 +1,9 @@
 #+title: Handoff - media-transient backend switching (stage 5)
 
+COMPLETED 2026-08-05 on the Linux box - do not re-run. Stage 5
+landed: see the spec's stage-5 section and Progress. Kept for the
+record only.
+
 Paste the prompt below into a fresh agent session on either machine
 (pure emacs-lab elisp; Linux exercises mpv+mpris, mac mpv+JXA).
 Companion to youtube-playback-control.org (the living spec); refresh

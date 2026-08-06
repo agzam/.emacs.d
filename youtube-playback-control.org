@@ -1,19 +1,20 @@
 #+title: YouTube playback control from Emacs - browser and mpv lanes
 
 * Meta
-- status :: implementing (stages 1-4 done and pushed, both lanes
-  complete; stage 5 planned - backend switching inside the
-  transient, see the handoff doc)
+- status :: complete (stages 1-6 done; stage 5 - backend switching -
+  and stage 6 - Linux gap lanes (audio-server volume/mute +
+  compositor page keys) - landed 2026-08-05 on the Linux box,
+  uncommitted in both repos)
 - created :: 2026-08-04
 - projects ::
-  - agzam/navegosa.el @ main (V3 pushed 2026-08-05; V4 MPRIS lane
-    built on the Linux box same day, uncommitted) - navegosa.el,
-    navegosa-media.el, navegosa-mpris.el, navegosa-scripts.js,
-    SPEC.md, README.org, changelog.org, Makefile,
-    test/navegosa-tests.el
-  - agzam/emacs-lab @ main (stages 1-2 committed 2026-08-05) -
-    modules/web-browsing/autoload/media.el, autoload/mpv.el,
-    modules/web-browsing/config.el, config.el,
+  - agzam/navegosa.el @ main (V3-V4 pushed 2026-08-05 @ 40b5060; V5 -
+    stage 6's keysend + pactl lanes, 0.5.0 - built same day,
+    uncommitted) - navegosa.el, navegosa-media.el, navegosa-mpris.el,
+    navegosa-keysend.el, navegosa-scripts.js, SPEC.md, README.org,
+    changelog.org, Makefile, test/navegosa-tests.el
+  - agzam/emacs-lab @ main (stages 1-3 pushed 2026-08-05; stages 5-6
+    uncommitted) - modules/web-browsing/autoload/media.el,
+    autoload/mpv.el, modules/web-browsing/config.el, config.el,
     tests/web-browsing/{media,mpv}-tests.el, this spec
 - machine config :: brew yt-dlp/mpv/deno; ~/bgutil-ytdlp-pot-provider
   + ~/.config/yt-dlp/plugins (stage 4). ~/.config/mpv/mpv.conf is NOT
@@ -23,8 +24,8 @@
   land read-only by default)
 - symptoms :: "Only SABR formats available", "SABR-only", "PO Token", "mpv youtube laggy", "HTTP Error 403" on fragments
 - related :: agzam/navegosa.el:SPEC.md (V1 tabs, V2 jump-to-link);
-  youtube-playback-control-handoff.org (paste into a fresh session on
-  the Linux box to start stage 3)
+  youtube-playback-control-handoff.org (served stages 3 and 5, both
+  completed - kept for the record)
 
 * Synopsis
 Watching YT through mpv+yt-dlp is laggy and degrading: YouTube enforces
@@ -181,6 +182,71 @@ Stage-3 E2E additions (2026-08-05, after the backend landed):
   at the keys): pause/seek/status work, speed/volume/mute/subs/
   theater/fullscreen answer with the honest unsupported message in
   the echo area.
+
+Stage-5 probes (2026-08-05, live Emacs, Linux box):
+- [confirmed] Group :if predicates re-evaluate on suffix re-init, and
+  transient 0.5+ has the exact knob: `:refresh-suffixes t' on the
+  prefix makes transient--post-command call
+  transient--refresh-transient (re-init + redisplay) after every
+  suffix while the menu stays up.  A `:transient t' suffix that setqs
+  media-backend therefore flips the visible group in place - no
+  transient-setup re-invocation needed (the hypothesized mechanism;
+  never tried because refresh-suffixes is the supported path).
+- [confirmed] The refresh re-runs the bypass section's
+  :setup-children and every dynamic :description on each press;
+  transient-bypass-keys is pure (static-layout walk + parse), so the
+  per-keypress cost is negligible.
+- [confirmed] A bare function symbol as :description value renders
+  fine (functionp symbol -> funcall at draw time), so the b entry
+  self-documents as "backend: auto(mpris)" / "backend: mpv" and
+  stays current across hops.
+- [confirmed] message from inside a suffix survives the refresh -
+  the echo area shows "backend: mpris (was mpv)" under the redrawn
+  menu.
+
+Stage-6 probes (2026-08-05, live Brave + Hyprland 0.56 + PipeWire,
+Linux box):
+- [confirmed] Key injection by focus-bouncing at the shell level
+  (activate browser, type, return) is a dead end regardless of speed:
+  kernel autorepeat routes the user's held key into whichever window
+  holds focus mid-bounce (k pausing YT, Vimium eating letters), and
+  Chromium ignores X11 XSendEvent-style unfocused synthetic input
+  anyway. Wayland has no unfocused-targeting either (ydotool is
+  focused-window-only).
+- [confirmed] Hyprland sendshortcut delivers a key to a window by
+  address, but Chromium (spec-correct Wayland client) discards keys
+  without wl_keyboard focus: bare sendshortcut silently no-ops. The
+  working pattern is one batched IPC - focuswindow target ;
+  sendshortcut ; focuswindow back - milliseconds, user-confirmed
+  imperceptible. hyprctl answers "ok" either way; delivery cannot be
+  verified from the exit status.
+- [confirmed] Hyprland resolves bare keysyms only at the unshifted
+  keymap level: "greater" fails ("key not found"), SHIFT,period
+  delivers >. Shifted chars need explicit MOD,KEY specs.
+- [confirmed] Window targeting: MPRIS xesam:title is a verbatim
+  substring of the Hyprland window title ("<title> - YouTube -
+  Brave") while the video tab is frontmost in its window; a
+  backgrounded tab breaks the match, which is the correct honest
+  refusal (keys would land in the wrong tab).
+- [confirmed] PA-level mute is invisible to the browser: MPRIS
+  session stays registered, PlaybackStatus Playing, Position ticking
+  through the mute. Tab mute deregisters (stage-3 finding); the
+  asymmetry is what makes m possible on Linux.
+- [confirmed] Brave's sink-input (application.name "Brave", binary
+  "brave", media.name a generic "Playback" - no per-tab identity)
+  exists only while audio flows: appears on play, survives a short
+  pause, gone after longer idle. pactl -f json works; relative
+  set-sink-input-volume steps are percentage points; PA volume is
+  independent of YT's player slider (gains multiply).
+- [confirmed] pactl per-pulse cost is a few ms with no focus
+  movement: held K/J through the transient glides smoothly
+  (user-confirmed), where any key-injection scheme would strobe
+  focus at autorepeat rate.
+- [confirmed] Injected page keys hit the active tab exactly like
+  typing: Vimium-C (installed here) must exclude the site or its
+  default t = new-tab shadows theater. User excluded youtube.com;
+  c/t/</> then land on the player. c is inert on caption-less
+  videos (stage-1 finding, still true via keys).
 
 * Design decisions
 - DOM-only control, no page JS API - forced by the isolated world.
@@ -402,45 +468,98 @@ hwdec, no 403 / SABR errors. (Beware grepping mpv output for
 "error|403": googlevideo URL params contain both as substrings -
 filter long-URL lines first.)
 
-** Stage 5 - backend switching inside the transient (planned)
-Motivation: media-backend-active makes auto sticky to mpv while an
-mpv process lives - controlling browser playback at the same time
-means hand-evaluating a setopt. The switch belongs on a key inside
-media-transient. Pure emacs-lab elisp; navegosa should not need to
-change. Any machine works: Linux exercises mpv+mpris, mac mpv+JXA.
+** DONE Stage 5 - backend switching inside the transient
+Landed 2026-08-05 on the Linux box (pure emacs-lab elisp; navegosa
+untouched, as planned). Motivation: media-backend-active makes auto
+sticky to mpv while an mpv process lives - controlling browser
+playback at the same time meant hand-evaluating a setopt.
 
-The work:
-1. [hypothesized] A shared suffix on one free key (candidate: b -
-   free in all groups) present in the mpv, browser, and mpris
-   groups alike: re-pin media-backend for the session among auto /
-   mpv / the platform's browser lane (browser on darwin, mpris on
-   gnu/linux - never offer the foreign lane). Plain setq, never
-   customize-save; echo the resolution, e.g. "backend: mpris (was
-   auto)".
-2. [hypothesized] The transient must redraw so the visible group
-   flips: group :if predicates evaluate at setup time, so the
-   suffix likely re-invokes (transient-setup 'media-transient)
-   after setting the variable (or :transient plus
-   transient--redisplay if that re-evaluates groups - verify live,
-   record the working pattern here).
-3. [hypothesized] Cycle vs prompt: cycle is one keypress and
-   self-evident with three states; completing-read scales better.
-   Decide in-session, note the reason here.
-4. [hypothesized] Specs (tests/web-browsing/media-tests.el):
-   switch-function state transitions and platform filtering, no
-   persistence side effects; binding the key in every group lets
-   the existing cross-group key-consistency spec enforce the
-   mirror automatically. Live E2E gate: mpv playing a local file
-   AND a browser video active, hop mpv -> browser lane -> auto
-   from inside C-x m, controlling each in turn.
+1. [done] media-backend-switch on b in all three media-transient
+   groups (media.el): cycles media-backend with plain setq among
+   (media-backend-choices) = auto / mpv / the platform lane only
+   (browser on darwin, mpris on gnu/linux gated on dbusbind - the
+   foreign lane is never offered). A value outside the local cycle
+   (hand-setopt foreign lane) recovers to auto on the next press.
+   Echo: "backend: mpris (was mpv)", with the resolution appended
+   when landing on auto ("backend: auto = mpv (was mpris)").
+2. [done] Redraw via `:refresh-suffixes t' on the prefix + b bound
+   `:transient t' - transient's supported mechanism re-inits suffix
+   objects after every press, re-evaluating group :if predicates, so
+   the visible group flips in place. The hypothesized
+   (transient-setup 'media-transient) re-invocation was not needed.
+   The switch command stays pure (setq + message, zero transient
+   plumbing); b's label is a :description function
+   (media-backend-description) showing the pin and, under auto, its
+   resolution.
+3. [done] Cycle over completing-read: at most three states per
+   platform, overshoot costs one repeat press, and the redrawn group
+   plus the b label are the feedback - a minibuffer prompt would be
+   the menu's only key breaking the single-press rhythm.
+4. [done] +9 specs (932/0): choices platform filtering, cycle
+   transitions on Linux/darwin/dbus-less builds, foreign-lane
+   recovery, setq-only (customize machinery spied, saved-value
+   checked), label format, b present in all three groups, prefix
+   refresh-suffixes pinned; media-backend-switch added to the
+   suffix-set pin, and the existing cross-group key-consistency spec
+   enforces the shared key automatically. bb lint / test / smoke
+   green. Live E2E gate on this box: mpv playing a scratch local
+   file AND a Brave YT tab audible at low volume simultaneously;
+   from inside C-x m: SPC controlled mpv, b b hopped to mpris (group
+   flipped with mpv still live), SPC paused/resumed the tab over
+   MPRIS (dbus-verified), b returned to auto which resolved back to
+   the live mpv, SPC controlled mpv again; user tactile pass
+   confirmed. All scratch state cleaned up (mpv killed, file
+   removed, backend restored).
+
+** DONE Stage 6 - Linux gap lanes (audio server + compositor keys)
+Landed 2026-08-05 on the Linux box, all in navegosa (0.5.0);
+emacs-lab needed zero code - the transient's dead mpris-group keys
+simply came alive. Origin: user asked whether Vimium-aware key
+simulation could fill the subs/theater gap; probes killed the
+focus-bounce shell approach (autorepeat leakage) and found the two
+real lanes instead.
+
+1. [done] Volume/mute (K/J/m) ride the audio server:
+   navegosa-mpris.el shells pactl on the browser's sink-inputs,
+   matched from the MPRIS bus name's app token. Clamped 0-100%,
+   browser-wide (Chromium streams carry no per-tab identity), honest
+   "no audio stream" when nothing plays. PA-mute keeps the MPRIS
+   session alive - the probe finding that unlocked m at all. Held
+   K/J glides smoothly: a few ms per pulse, no focus movement.
+2. [done] Subs/theater/speed (c/t/,/.) send the page's own keys
+   (c, t, <, >) at the browser window: new navegosa-keysend.el.
+   Generic seam per user direction: navegosa-keysend-function
+   defcustom (contract: KEY TITLE &optional CLASS, user-error with
+   reason when impossible, nil disables - both "set your own
+   command" and "defaults with more backends later" in one knob),
+   navegosa-keysend-keys action->key alist. Shipped backend
+   navegosa-keysend-hyprland: window by xesam:title substring +
+   class filter over hyprctl clients -j, delivery via the batched
+   focus-bounce (Chromium discards unfocused keys), SHIFT specs for
+   shifted keysyms. rateMul routes by direction (YT 0.25 steps);
+   rateSet stays honest (no page reset key). Prerequisite: Vimium-C
+   excluded on youtube.com (user config, done).
+3. [done] 20 new navegosa specs (128/0; hyprctl/pactl mocked, pure
+   window/stream matchers), strict compile with the new file wired
+   into the Makefile targets. Docs: SPEC.md V5 + findings, README
+   Linux section rewrite, changelog 0.5.0.
+4. [done] Live E2E through C-x m on the real bindings: c subs, t
+   theater (eyes-on), m mute with dbus-verified session survival,
+   held K/J volume glide, , and . speed with YT's bezel, 0 the
+   honest reset error; plus the honest no-stream and
+   tab-not-frontmost refusals exercised naturally mid-session. User
+   tactile pass: "all works, feels right".
 
 ** Deferred
 - Watch-history instruments (browser lane enables: logged-in YT history
   page scrape via JXA, browser-hist.el sqlite, resume positions).
 - PiP experiment: synthetic click on .ytp-pip-button likely lacks user
   activation; controls work identically in or out of PiP either way.
-- Linux speed/subs gap fillers (browser-mpris2-style extension + native
-  host, or minimal own) - would also restore copy-url on Chromium.
+- Extension + native host gap filler: after stage 6 its remaining
+  value is copy-url on Chromium (no xesam:url), per-tab volume, and
+  verified key effects - much thinner case than before.
+- More navegosa-keysend backends (sway/KDE/X11) and a fullscreen key
+  entry ((fullscreen . "f") once its Vimium collision is checked).
 - Firefox MPRIS check (xesam:url present? volume real?) - no Firefox
   on this box; the backend already uses url when the player offers it.
 - Dim/annotate the dead keys in the mpris transient group (today they
@@ -553,17 +672,75 @@ kill-ring) -> C-x m o opens it as Brave's front tab (mac: JXA
 front-tab, no focus steal; linux: browse-url + control attaches once
 it plays audibly), transient controls it. Following an org yt: link
 (RET / C-c C-o) routes identically. s re-points control (mac: pick
-tab and show it; linux: pick player). Local files: o in dired lands
-in mpv, after which auto backend = mpv while it runs. Linux caveat:
-muted tabs are invisible to MPRIS - control needs audible playback.
+tab and show it; linux: pick player). b hops the backend without
+leaving the transient (auto -> mpv -> platform lane -> auto; the
+visible group follows). Local files: o in dired lands in mpv, after
+which auto backend = mpv while it runs - b escapes that stickiness
+when browser control is wanted meanwhile. Linux caveat: muted tabs
+are invisible to MPRIS - control needs audible playback.
+
+Stage 5 complete (2026-08-05, Linux box): media-backend-switch cycles
+auto/mpv/platform-lane on b in every media-transient group; redraw
+via the prefix's :refresh-suffixes (group :if re-evaluated per press,
+visible group flips in place - the hypothesized transient-setup
+re-invocation was unnecessary). +9 specs (932/0), lint/smoke green.
+Live E2E with mpv and a Brave tab playing at once: hopped
+mpv -> mpris -> auto from inside C-x m controlling each in turn
+(dbus-verified), user tactile pass good. Uncommitted.
+
+Stage 6 complete (2026-08-05, Linux box, same session): the mpris
+group's dead keys came alive without touching emacs-lab code -
+navegosa 0.5.0 grew the two gap lanes. Volume/mute via pactl on the
+browser's streams (PA-mute keeps the MPRIS session registered - the
+enabling probe finding; held K/J glides, a few ms per pulse, no
+focus movement). Subs/theater/speed via the page's own keys through
+the compositor: navegosa-keysend.el, generic
+navegosa-keysend-function seam with the Hyprland backend shipped
+(batched focus-bounce - Chromium discards unfocused synthetic keys;
+bare sendshortcut silently no-ops; SHIFT specs for < >). Vimium-C
+excluded on youtube.com by the user (prerequisite - injected keys
+land exactly like typed ones). navegosa 128/0 + strict compile;
+emacs-lab suite untouched and green; live E2E through C-x m incl.
+user tactile pass. Remaining honest errors on Linux: 0 speed reset,
+f fullscreen, y copy-url.
+
+Caveat in flight: one file-corruption incident during stage 6 dev
+(navegosa-mpris.el partially reverted + a mangled defun; no visiting
+buffer found afterwards). Caught immediately by check-parens + make
+test, repaired surgically, full diff reviewed. Cause found later: a
+SECOND ECA session was working this same live Emacs concurrently
+(the yt-dlp cookie fix + CI debugging) - parallel sessions racing
+one server is the hazard; the lesson stands: after any edit anomaly,
+diff the whole file before trusting it.
+
+CI reality check (2026-08-06, via the parallel session): emacs-lab
+CI had been red since e267a12 (stage 3) - one spec, "gates the mpris
+group on the resolved backend", hardcoded (elt g 1) for the group
+plist; transient 0.7.2 (CI's Emacs 30.1 bundled copy) parses groups
+as [LEVEL CLASS PLIST CHILDREN] (plist at slot 2), local 0.13.6 as
+[CLASS PLIST CHILDREN] (slot 1). The handoff's "CI green as of
+2026-08-05" only held for the pre-stage-3 runs. Fix (parallel
+session, uncommitted, folded into this working tree and covered by
+the 936/0 + lint + smoke runs here): media-tests--group-plist
+descent helper replacing the slot indexing, plus a fixture spec
+pinning both dialect literals so the 0.7 branch runs locally too.
+Definitive proof needs a push to run Emacs 30.1. Unrelated but same
+session: 6c7509c (yt-dlp Brave cookie extraction on Linux -
+brave+gnomekeyring + --impersonate chrome, Linux branch only, mac
+byte-identical) landed on main; note it introduces the first
+cookies-from-browser use on the Linux box's reddit-extraction path -
+the stage-4 "no cookies for yt-dlp" decision concerned the mac
+Premium account and mpv's YouTube lane, which stay cookie-free.
 
 Next action:
-- Stage 5: backend switching inside the transient - the handoff doc
-  (youtube-playback-control-handoff.org) carries the paste-ready
-  prompt for a fresh session on either machine.
+- Commit the CI dialect fix (media-tests.el hunks) - main stays red
+  on Emacs 30.1 until it lands; then stages 5-6 (emacs-lab:
+  transient switch + this spec; navegosa: V5) on instruction.
 - Optionally exercise the mac lane against the rebuilt package (V4
   changed shared navegosa-media.el paths - JXA specs still pass, but
-  a live mac smoke after pulling is cheap).
+  a live mac smoke after pulling is cheap). Stages 5-6 add nothing
+  mac-side: the switch offers browser instead of mpris there, and
+  the JXA lane already had volume/speed/subs/theater natively.
 
 Useful commands:
 - JXA probe timing: echo a Navegosa call into osascript -l JavaScript
@@ -589,10 +766,10 @@ Useful commands:
 |---------------------+---------------+----------------------+-------------------------|
 | play/pause          | yes           | yes (proven)         | yes (proven)            |
 | seek                | yes           | yes (proven)         | yes (SetPosition exact) |
-| speed               | yes           | yes (proven)         | no (writes ignored)     |
-| volume/mute         | yes           | yes                  | no (Volume inert)       |
-| subtitles toggle    | yes           | yes (button click)   | no                      |
-| theater mode        | n/a           | yes (button click)   | no                      |
+| speed               | yes           | yes (proven)         | 0.25 steps (page keys)  |
+| volume/mute         | yes           | yes                  | yes (audio server)      |
+| subtitles toggle    | yes           | yes (button click)   | yes (page key)          |
+| theater mode        | n/a           | yes (button click)   | yes (page key)          |
 | fullscreen          | yes           | window-level (AX)    | no                      |
 | next/prev           | yes           | yes                  | playlists only (Can*)   |
 | position/title echo | yes           | yes                  | yes (proven)            |
@@ -623,11 +800,13 @@ Useful commands:
 | g   | -                     | navegosa-media-status                 |
 | i   | mpv-toggle-osc        | - (browser has own UI)                |
 | Q   | mpv-kill              | -                                     |
+| b   | media-backend-switch  | media-backend-switch                  |
 The shared rows are pinned by the key-mirror spec in
 agzam/emacs-lab:tests/web-browsing/media-tests.el. The mpris group
 re-binds the browser column's commands on the same keys (s reads
-"pick player"); unsupported ones answer with an honest user-error -
-a cross-group key-consistency spec pins that too.
+"pick player"); since stage 6 only 0 (speed reset), f (fullscreen)
+and y (copy-url, Chromium) still answer with the honest user-error -
+a cross-group key-consistency spec pins the mirror too.
 
 ** Latency numbers (2026-08-04, M-series Mac, Brave)
 - Trivial JXA round-trip (activeTab.url): 134ms.
@@ -661,6 +840,29 @@ a cross-group key-consistency spec pins that too.
 - browser-mpris2 (gap-filler prior art): https://github.com/otommod/browser-mpris2
 
 * Changelog
+- 2026-08-05 (Linux box, later that night): stage 6 done - Linux gap
+  lanes, all in navegosa 0.5.0 (emacs-lab code untouched). Probes
+  first: shell-level focus-bounce key injection rejected (autorepeat
+  leakage; Chromium ignores unfocused synthetic input on X11 and
+  Wayland alike), Hyprland sendshortcut needs a batched focus-bounce
+  for Chromium, PA-mute leaves MPRIS registered (unlike tab mute),
+  sink-inputs live only while audio flows, shifted keysyms need
+  SHIFT specs. Then: pactl volume/mute lane (browser-wide, clamped,
+  honest no-stream error), navegosa-keysend.el (generic function
+  seam + Hyprland backend, action->key alist), speed via < > by
+  direction. 20 specs (128/0), docs, live E2E incl. held-key glide
+  and user tactile pass. Vimium-C excluded on YT by user. Capability
+  matrix: Linux gains speed/volume/mute/subs/theater; 0/f/y remain
+  honest.
+- 2026-08-05 (Linux box, night): stage 5 done - media-backend-switch
+  cycles auto/mpv/platform-lane on b in all three transient groups
+  (cycle over prompt: three states, in-menu feedback); redraw via
+  :refresh-suffixes t + :transient t (transient's supported re-init
+  path - the hypothesized transient-setup re-invocation unnecessary);
+  choices helper never offers the foreign lane, foreign pin recovers
+  to auto; +9 specs (932/0), all gates green; live E2E hopping
+  mpv -> mpris -> auto with both players active, dbus-verified, user
+  tactile pass. Spec status flipped to complete.
 - 2026-08-05 (Linux box): stage 3 done - MPRIS lane live-probed
   first (mute suppresses the session; names linger Stopped; Rate and
   Volume writes ignored; no xesam:url on Chromium; relative Seek
