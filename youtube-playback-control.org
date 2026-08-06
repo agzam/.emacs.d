@@ -1,13 +1,15 @@
 #+title: YouTube playback control from Emacs - browser and mpv lanes
 
 * Meta
-- status :: implementing (stages 1-2 and 4 done, mac lane complete;
-  stage 3 awaits the Linux machine)
+- status :: done (all four stages landed 2026-08-05; mac and Linux
+  lanes complete)
 - created :: 2026-08-04
 - projects ::
-  - agzam/navegosa.el @ main (V3 pushed 2026-08-05) - navegosa.el,
-    navegosa-media.el, navegosa-scripts.js, SPEC.md, README.org,
-    changelog.org, Makefile, test/navegosa-tests.el
+  - agzam/navegosa.el @ main (V3 pushed 2026-08-05; V4 MPRIS lane
+    built on the Linux box same day, uncommitted) - navegosa.el,
+    navegosa-media.el, navegosa-mpris.el, navegosa-scripts.js,
+    SPEC.md, README.org, changelog.org, Makefile,
+    test/navegosa-tests.el
   - agzam/emacs-lab @ main (stages 1-2 committed 2026-08-05) -
     modules/web-browsing/autoload/media.el, autoload/mpv.el,
     modules/web-browsing/config.el, config.el,
@@ -29,10 +31,9 @@ SABR streaming and PO tokens, FFmpeg cannot consume SABR, and mpv's
 pipeline is ytdl_hook extraction + FFmpeg streaming, so client fallbacks
 land on throttled or low-quality formats. Plan: control browser-native
 playback from Emacs instead - navegosa grows a media-control layer (JXA
-transport on macOS, validated E2E; MPRIS/dbus transport on Linux, built
-later on the Linux machine). mpv keeps local files/subed/non-YT, with an
-optional no-cookie patch-up. One transient key-set mirroring the
-existing mpv-transient.
+transport on macOS and MPRIS/dbus transport on Linux, both validated
+E2E). mpv keeps local files/subed/non-YT, with an optional no-cookie
+patch-up. One transient key-set mirroring the existing mpv-transient.
 
 * Verified findings
 macOS/JXA (E2E against live Brave, this machine):
@@ -109,17 +110,76 @@ mpv lane (docs/issues):
   yt-dlp FAQ. Decision: never feed main Premium account cookies to
   yt-dlp.
 
-Linux (docs-verified only, not yet tested):
+Linux (docs-verified 2026-08-04; superseded where noted by the live
+probes below):
 - [confirmed] CDP against the default browser profile is blocked since
   Chrome 136 (requires separate --user-data-dir) - no JXA-equivalent
   channel for the daily browser.
 - [confirmed] MPRIS is native in Chromium-family and Firefox once media
-  plays: play/pause, seek, SetPosition, next/prev, Metadata (xesam:url),
-  Position. Player registers only while media is active.
-- [hypothesized] Rate writes ignored by browser MPRIS implementations;
-  subtitles not exposed; volume unreliable. Re-verify on the Linux box.
+  plays: play/pause, seek, SetPosition, next/prev, Metadata, Position.
+  (The docs' claims about xesam:url and registration lifetime did not
+  survive the live probes - see below.)
 - [confirmed] dbus.el is built-in - in-process D-Bus, no subprocess
   spawn per command.
+
+Stage-3 MPRIS probes (2026-08-05, live Brave + live Emacs, Linux box;
+scratch tab, near-silent volume, all state restored via unwind-protect):
+- [confirmed] dbus.el in-process channel works from the live session:
+  property read ~1.2ms, Metadata read ~1.1ms - two orders of magnitude
+  under the JXA ~150ms spawn.
+- [confirmed] Tab-level mute (Mute site) suppresses the media session
+  entirely: with the muted tab playing, the player object stays
+  Stopped/empty (CanPlay false, no metadata, Position 0). Unmuting
+  registers it within a second. Chromium exposes MPRIS only for
+  audible playback - muted media is invisible and uncontrollable, so
+  the probe protocol is near-silent player volume, never tab mute,
+  and a mute command cannot exist on this lane.
+- [confirmed] The bus name (org.mpris.MediaPlayer2.brave.instancePID)
+  lingers in Stopped state after media ends - it pre-existed the
+  scratch tab. Discovery must filter by PlaybackStatus Playing/Paused,
+  never by name presence.
+- [confirmed] Rate writes ignored: set 1.5 -> readback 1.0, position
+  advanced 1.006s per wall-clock second; MinimumRate = MaximumRate =
+  1.0 advertises the constraint.
+- [confirmed] Volume property inert on Brave: reads 1.0 with the
+  player slider at 5%, write 0.5 bounces back to 1.0. No volume
+  control, no mute detection.
+- [confirmed] No xesam:url: metadata keys are exactly artUrl, length,
+  trackid, album, artist, title. Timestamped-URL copy is impossible
+  over MPRIS on Chromium-family; y degrades to an honest error.
+  (Firefox reportedly exposes xesam:url - unverified, no Firefox
+  here.)
+- [confirmed] Relative Seek is hijacked by the page's MediaSession
+  seek handlers: +10s request lands +5.15s, +4s lands +5.25s, -10s
+  lands -4.81s (YT's ~5s handler step wins). SetPosition(trackid,
+  pos) is exact to the microsecond - the backend implements all
+  seeking as SetPosition math (Position ± delta clamped to
+  [0, mpris:length]).
+- [confirmed] PlayPause round-trips cleanly (PlaybackStatus flips
+  within 0.4s); Position ticks continuously while playing, freezes
+  while paused.
+- [confirmed] CanGoNext/CanGoPrevious false on a plain watch page -
+  YT registers next/prev MediaSession handlers only in
+  playlist/queue context. Next/Previous must be guarded by the Can*
+  props with honest errors.
+- [confirmed] Metadata carries xesam:title + xesam:artist (channel) +
+  mpris:length + mpris:artUrl - echo line feasible sans volume.
+- [confirmed] Subtitles and theater have no MPRIS surface at all
+  (spec defines no such members; nothing site-specific leaks
+  through) - degrade honestly.
+
+Stage-3 E2E additions (2026-08-05, after the backend landed):
+- [confirmed] The bus name survives even closing the media tab - it
+  lingers in Stopped state until the browser exits. Discovery by
+  status handles it; a command against the gone player relocates
+  once and answers "no active MPRIS players".
+- [confirmed] Chromium reports Rate 0 while paused; the state builder
+  coerces zero (never a real playback rate) to 1.0 so the echo does
+  not show a bogus "0x".
+- [confirmed] Full command matrix through the live transient (user
+  at the keys): pause/seek/status work, speed/volume/mute/subs/
+  theater/fullscreen answer with the honest unsupported message in
+  the echo area.
 
 * Design decisions
 - DOM-only control, no page JS API - forced by the isolated world.
@@ -145,13 +205,14 @@ Linux (docs-verified only, not yet tested):
   the Linux machine) -> mpv patch-up.
 
 * Open questions
-- MPRIS backend placement: transport dispatch inside navegosa-media.el
-  vs a separate module in emacs-lab. Leaning navegosa (uniform command
-  set, CI, tests), but it softens the README's "macOS only" identity.
-  The transient side is settled either way (one media-transient in
-  emacs-lab grows an MPRIS group). Decide at stage 3 start.
+None.
 
 Resolved:
+- MPRIS backend placement (2026-08-05, user decision): inside
+  navegosa - new navegosa-mpris.el, uniform navegosa-media-* command
+  set (commands dispatch JXA on darwin, MPRIS on gnu/linux), package
+  CI and buttercup suite cover it. README's "macOS only" phrasing
+  softens to "macOS (JXA) + Linux (MPRIS)".
 - org yt: link handler (2026-08-05, user decision): hard re-point to
   media-open, no separate knob - media-backend is the selector
   ('auto: mpv while live, else browser; browse-url when web-browsing
@@ -261,18 +322,46 @@ parallel navegosa-media transient.
    batch), plain-URL-at-point contract spec (media-tests.el). bb test
    919/0.
 
-** Stage 3 - browser lane, Linux (build on the Linux machine)
-1. [hypothesized] Resolve placement question; implement MPRIS backend
-   via dbus.el: discover org.mpris.MediaPlayer2.* names, prefer browser
-   instances; PlayPause / Seek / SetPosition / Next / Previous; Metadata
-   + Position for echo and timestamped URL.
-2. [confirmed] Transient side is ready for it: add an MPRIS group to
-   media-transient (:if) and a 'mpris branch to media-backend-active
-   (auto on gnu/linux once the backend exists).
-3. [hypothesized] Capability degradation: speed/subs/volume report
-   "unsupported on this backend" gracefully in the transient.
-4. [hypothesized] Unit tests with mocked dbus calls; live validation on
-   the Linux box is the E2E gate.
+** DONE Stage 3 - browser lane, Linux (MPRIS)
+Landed 2026-08-05 on the Linux box. Placement resolved per user
+decision: inside navegosa (navegosa-mpris.el), uniform
+navegosa-media-* command set - navegosa-media--dispatch routes to
+navegosa-mpris-dispatch on gnu/linux builds with D-Bus, JXA lane
+untouched on darwin. Deviations from plan, all probe-driven:
+- All seeking via SetPosition math (Position ± delta clamped to the
+  track): relative Seek is hijacked by the page's MediaSession seek
+  handlers (YT quantizes to ~5s whatever offset is asked).
+- Timestamped-URL copy is Chromium-impossible (no xesam:url in
+  metadata) - y answers honestly; Firefox reportedly exposes it
+  (unverified).
+- Echo predicts the outcome (seek target, flipped pause) because the
+  browser applies commands asynchronously; no volume/muted fields -
+  the bus reports a static 1.0 lie.
+- navegosa-media-open-url on Linux: browse-url + player-cache reset
+  (MPRIS cannot open tabs); select-tab picks among active players.
+
+The work:
+1. [done] navegosa-mpris.el: status-filtered discovery
+   (Playing/Paused only - names linger in Stopped), ranked by
+   navegosa-mpris-player-priority (browsers first, Playing beats
+   Paused within a rank), cache + revalidate + retry-once on
+   dbus-error; PlayPause / SetPosition / Next / Previous (Can*
+   guarded); state plist shaped like the JXA lane's.
+2. [done] MPRIS group in media-transient (:if, same keys, s = "pick
+   player") and the 'mpris branch in media-backend-active (auto on
+   gnu/linux + dbusbind; defcustom grew the 'mpris pin).
+3. [done] Capability degradation as honest user-errors with reasons:
+   speed (Rate writes ignored), volume/mute (Volume inert; muting
+   deregisters the player), subs/theater/fullscreen (no MPRIS
+   surface), next/prev outside playlists (CanGoNext/Prev false).
+4. [done] Tests: 22 new navegosa specs (D-Bus fully mocked; JXA
+   dispatch specs pin the transport off - CI runs on ubuntu), 4 new
+   emacs-lab specs (resolver incl. featurep quirk, mpris group
+   gating, cross-group key consistency, media-open lane). navegosa
+   109/0 + check-compile clean; emacs-lab lint/923-0/smoke green.
+   Live E2E on this box: full matrix via the real commands and the
+   user at C-x m; lifecycle teardown verified (tab close -> honest
+   "no active MPRIS players").
 
 ** DONE Stage 4 - mpv lane patch-up (machine config)
 Landed 2026-08-05 on the Mac (per-machine work; repeat on Linux if its
@@ -318,7 +407,11 @@ filter long-URL lines first.)
 - PiP experiment: synthetic click on .ytp-pip-button likely lacks user
   activation; controls work identically in or out of PiP either way.
 - Linux speed/subs gap fillers (browser-mpris2-style extension + native
-  host, or minimal own).
+  host, or minimal own) - would also restore copy-url on Chromium.
+- Firefox MPRIS check (xesam:url present? volume real?) - no Firefox
+  on this box; the backend already uses url when the player offers it.
+- Dim/annotate the dead keys in the mpris transient group (today they
+  answer on press; a visual cue would spare the keystroke).
 - Disambiguation when multiple tabs play media (completing-read).
 
 * Dead ends
@@ -397,19 +490,44 @@ actions now media-open - every YT entry point (C-x m o, org yt:
 links, embark) goes through the one backend dispatcher. bb test
 919/0, lint/smoke green, live keymaps rebuilt.
 
-Open questions: 1 remaining (MPRIS transport placement - stage 3).
+Stage 3 complete (2026-08-05, Linux box): all [hypothesized] items
+live-probed first (one session with a scratch tab at near-silent
+volume - tab MUTE suppresses MPRIS entirely, a surprise finding),
+then navegosa-mpris.el built against the probe results, wired into
+media-transient ('mpris group + resolver branch), tested (navegosa
+109/0 with D-Bus mocked; emacs-lab 923/0; lint + smoke + strict
+compile green after bb repair rebuilt the stale navegosa build), and
+E2E-validated live: programmatic command matrix, the user at C-x m,
+teardown lifecycle (tab close -> name lingers Stopped -> honest "no
+active MPRIS players"). Session state restored throughout; scratch
+tab closed.
+
+Caveats in flight:
+- Stage-3 changes committed and pushed 2026-08-05 in both repos
+  (navegosa V4; emacs-lab media wiring + specs + this spec) per
+  user instruction.
+- Chromium-family cannot do timestamped-URL copy over MPRIS (no
+  xesam:url); y answers honestly. Deferred: Firefox check,
+  extension gap-filler.
+- The user's first tactile pass read the dead keys as "not working" -
+  the honest errors show in the echo area but are easy to miss; a
+  visual cue on dead keys is Deferred polish.
+
+Open questions: none.
 
 Workflow (browser lane): point at a yt:/https link (or have it in the
-kill-ring) -> C-x m o opens it as Brave's front tab, playback starts
-(window visible), Emacs keeps focus, transient controls it. Following
-an org yt: link (RET / C-c C-o) routes identically. s re-points
-control (always prompts, shows the pick). Local files: o in dired lands
-in mpv, after which auto backend = mpv while it runs.
+kill-ring) -> C-x m o opens it as Brave's front tab (mac: JXA
+front-tab, no focus steal; linux: browse-url + control attaches once
+it plays audibly), transient controls it. Following an org yt: link
+(RET / C-c C-o) routes identically. s re-points control (mac: pick
+tab and show it; linux: pick player). Local files: o in dired lands
+in mpv, after which auto backend = mpv while it runs. Linux caveat:
+muted tabs are invisible to MPRIS - control needs audible playback.
 
 Next action:
-- User tries the transient on a real YT session, follows an org yt:
-  link, exercises an embark YT action, and plays a YT URL in mpv with
-  the new provider. Stage 3 waits for the Linux machine.
+- Optionally exercise the mac lane against the rebuilt package (V4
+  changed shared navegosa-media.el paths - JXA specs still pass, but
+  a live mac smoke after pulling is cheap).
 
 Useful commands:
 - JXA probe timing: echo a Navegosa call into osascript -l JavaScript
@@ -431,20 +549,20 @@ Useful commands:
 * Full context
 
 ** Capability matrix
-| capability          | mpv (both OS) | Mac browser (JXA)    | Linux browser (MPRIS) |
-|---------------------+---------------+----------------------+-----------------------|
-| play/pause          | yes           | yes (proven)         | yes                   |
-| seek                | yes           | yes (proven)         | yes                   |
-| speed               | yes           | yes (proven)         | no                    |
-| volume/mute         | yes           | yes                  | shaky                 |
-| subtitles toggle    | yes           | yes (button click)   | no                    |
-| theater mode        | n/a           | yes (button click)   | no                    |
-| fullscreen          | yes           | window-level (AX)    | no                    |
-| next/prev           | yes           | yes                  | yes                   |
-| position/title echo | yes           | yes                  | yes                   |
-| timestamped URL     | assemblable   | yes                  | yes (url + position)  |
-| window situation    | own WM unit   | browser tab (or PiP) | browser tab           |
-| Premium/history     | no            | yes                  | yes                   |
+| capability          | mpv (both OS) | Mac browser (JXA)    | Linux browser (MPRIS)   |
+|---------------------+---------------+----------------------+-------------------------|
+| play/pause          | yes           | yes (proven)         | yes (proven)            |
+| seek                | yes           | yes (proven)         | yes (SetPosition exact) |
+| speed               | yes           | yes (proven)         | no (writes ignored)     |
+| volume/mute         | yes           | yes                  | no (Volume inert)       |
+| subtitles toggle    | yes           | yes (button click)   | no                      |
+| theater mode        | n/a           | yes (button click)   | no                      |
+| fullscreen          | yes           | window-level (AX)    | no                      |
+| next/prev           | yes           | yes                  | playlists only (Can*)   |
+| position/title echo | yes           | yes                  | yes (proven)            |
+| timestamped URL     | assemblable   | yes                  | Firefox only (no url)   |
+| window situation    | own WM unit   | browser tab (or PiP) | browser tab             |
+| Premium/history     | no            | yes                  | yes                     |
 
 ** media-transient key map (as implemented)
 | key | mpv group             | browser group                         |
@@ -470,13 +588,17 @@ Useful commands:
 | i   | mpv-toggle-osc        | - (browser has own UI)                |
 | Q   | mpv-kill              | -                                     |
 The shared rows are pinned by the key-mirror spec in
-agzam/emacs-lab:tests/web-browsing/media-tests.el.
+agzam/emacs-lab:tests/web-browsing/media-tests.el. The mpris group
+re-binds the browser column's commands on the same keys (s reads
+"pick player"); unsupported ones answer with an honest user-error -
+a cross-group key-consistency spec pins that too.
 
 ** Latency numbers (2026-08-04, M-series Mac, Brave)
 - Trivial JXA round-trip (activeTab.url): 134ms.
 - execute JS in background tab, read video state: 144ms.
 - pause + seek + rate in one execute: 146ms.
-- MPRIS via dbus.el: expected well below these (no subprocess).
+- MPRIS via dbus.el (measured 2026-08-05, Linux box): ~1.2ms per
+  property read, ~1.1ms per Metadata read - two orders under JXA.
 
 ** mpv lane current state (this machine)
 - mpv 0.41.0, yt-dlp 2026.07.04 (brew), deno 2.9.4 detected as JS
@@ -503,6 +625,16 @@ agzam/emacs-lab:tests/web-browsing/media-tests.el.
 - browser-mpris2 (gap-filler prior art): https://github.com/otommod/browser-mpris2
 
 * Changelog
+- 2026-08-05 (Linux box): stage 3 done - MPRIS lane live-probed
+  first (mute suppresses the session; names linger Stopped; Rate and
+  Volume writes ignored; no xesam:url on Chromium; relative Seek
+  quantized by page handlers; SetPosition exact; dbus.el ~1.2ms),
+  then built as navegosa-mpris.el (placement per user decision:
+  in navegosa, uniform command set, honest degradation), media
+  transient grew the mpris group + resolver branch, 22+4 new specs,
+  all gates green, live E2E incl. user at C-x m and teardown
+  lifecycle. Spec matrix corrected (volume/next-prev/timestamped-URL
+  downgraded to reality). Version 0.4.0.
 - 2026-08-05 (night): embark yt-video actions -> media-open (last
   direct-mpv entry point gone; also fixes embark's own stale
   kill-ring hazard). +3 specs (919/0). Committed and pushed with the

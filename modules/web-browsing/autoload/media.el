@@ -8,9 +8,9 @@
 (defcustom media-backend 'auto
   "Which playback backend `media-transient' controls.
 `auto' picks mpv while an mpv process is live, otherwise the
-platform's browser lane (navegosa on macOS; MPRIS planned for
-Linux).  Set to `mpv' or `browser' to pin one."
-  :type '(choice (const auto) (const mpv) (const browser))
+platform's browser lane (navegosa JXA on macOS, navegosa MPRIS on
+Linux).  Set to `mpv', `browser', or `mpris' to pin one."
+  :type '(choice (const auto) (const mpv) (const browser) (const mpris))
   :group 'multimedia)
 
 (defun media-backend-active ()
@@ -19,6 +19,7 @@ Linux).  Set to `mpv' or `browser' to pin one."
    ((not (eq media-backend 'auto)) media-backend)
    ((and (featurep 'mpv) (mpv-live-p)) 'mpv)
    ((eq system-type 'darwin) 'browser)
+   ((and (eq system-type 'gnu/linux) (featurep 'dbusbind)) 'mpris)
    (t 'mpv)))
 
 (defun media-url-at-point ()
@@ -43,7 +44,8 @@ are normalized to https."
   "Open URL, or the media at point / in the kill-ring, in the active backend.
 An explicit URL (e.g. from a link follow handler) bypasses at-point
 resolution on both lanes.  Local files (dired) always go to mpv;
-URLs go to the browser lane or mpv per `media-backend'."
+URLs go to the browser lane (JXA or MPRIS) or mpv per
+`media-backend'."
   (interactive)
   (cond
    ((or (and (null url) (eq major-mode 'dired-mode))
@@ -106,5 +108,27 @@ URLs go to the browser lane or mpv per `media-backend'."
    [("f" "fullscreen" navegosa-media-fullscreen-toggle :transient t)
     ("SPC" "pause" navegosa-media-play-pause :transient t)]
    [("s" "pick tab" navegosa-media-select-tab :transient t)
+    ("o" "open" media-open :transient t)
+    ("g" "status" navegosa-media-status :transient t)]]
+  ;; same keys as the browser group: what MPRIS cannot do (speed, volume,
+  ;; mute, subs, theater, fullscreen) answers with an honest user-error
+  ["mpris"
+   :if (lambda () (eq (media-backend-active) 'mpris))
+   [("K" "vol up" navegosa-media-volume-up :transient t)
+    ("J" "vol down" navegosa-media-volume-down :transient t)
+    ("m" "mute" navegosa-media-mute-toggle :transient t)]
+   [("p" "prev" navegosa-media-prev :transient t)
+    ("n" "next" navegosa-media-next :transient t)]
+   [("h" "<<" navegosa-media-seek-backward :transient t)
+    ("l" ">>" navegosa-media-seek-forward :transient t)]
+   [("t" "theater" navegosa-media-theater-toggle :transient t)
+    ("y" "copy url" navegosa-media-copy-url :transient t)
+    ("c" "subs" navegosa-media-subs-toggle :transient t)]
+   [("," "slower" navegosa-media-speed-down :transient t)
+    ("." "faster" navegosa-media-speed-up :transient t)
+    ("0" "reset" navegosa-media-speed-reset)]
+   [("f" "fullscreen" navegosa-media-fullscreen-toggle :transient t)
+    ("SPC" "pause" navegosa-media-play-pause :transient t)]
+   [("s" "pick player" navegosa-media-select-tab :transient t)
     ("o" "open" media-open :transient t)
     ("g" "status" navegosa-media-status :transient t)]])

@@ -1,5 +1,8 @@
 #+title: Handoff - YouTube playback control, Linux lane (stage 3)
 
+DONE: stage 3 landed 2026-08-05 on the Linux box (see the spec's
+Progress/Changelog). Kept for reference only - do not re-run.
+
 Paste the prompt below into a fresh agent session on the Linux box.
 Companion to youtube-playback-control.org (the living spec); refresh
 the SHAs and re-read the spec's stage 3 before pasting if time has

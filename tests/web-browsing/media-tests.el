@@ -29,7 +29,9 @@ Same dual-dialect traversal as `transient-layout-commands'."
     (let ((media-backend 'browser))
       (expect (media-backend-active) :to-be 'browser))
     (let ((media-backend 'mpv))
-      (expect (media-backend-active) :to-be 'mpv)))
+      (expect (media-backend-active) :to-be 'mpv))
+    (let ((media-backend 'mpris))
+      (expect (media-backend-active) :to-be 'mpris)))
 
   (it "auto picks mpv while an mpv process is live"
     (let ((media-backend 'auto))
@@ -49,9 +51,18 @@ Same dual-dialect traversal as `transient-layout-commands'."
           (system-type 'darwin))
       (expect (media-backend-active) :to-be 'browser)))
 
-  (it "auto stays on mpv on Linux until the MPRIS lane lands"
+  ;; featurep is spied, not features let-rebound: featurep reads the C-side
+  ;; feature list and ignores a let-binding of the Lisp variable
+  (it "auto picks MPRIS on Linux when Emacs has D-Bus"
     (let ((media-backend 'auto)
           (system-type 'gnu/linux))
+      (spy-on 'featurep :and-call-fake (lambda (f &rest _) (eq f 'dbusbind)))
+      (expect (media-backend-active) :to-be 'mpris)))
+
+  (it "auto stays on mpv on a Linux build without D-Bus"
+    (let ((media-backend 'auto)
+          (system-type 'gnu/linux))
+      (spy-on 'featurep :and-return-value nil)
       (expect (media-backend-active) :to-be 'mpv))))
 
 (describe "media-transient layout"
@@ -78,7 +89,10 @@ Same dual-dialect traversal as `transient-layout-commands'."
               navegosa-media-speed-reset
               navegosa-media-fullscreen-toggle navegosa-media-play-pause
               navegosa-media-select-tab media-open
-              navegosa-media-status)))
+              navegosa-media-status
+              ;; the mpris group re-binds the same navegosa-media-*
+              ;; commands - same set, no additions
+              )))
 
   (it "keeps one muscle-memory key set across backends"
     (let ((pairs (media-tests--layout-keys
@@ -103,6 +117,31 @@ Same dual-dialect traversal as `transient-layout-commands'."
               (browser-key (cdr (assq (cdr pair) pairs))))
           (expect mpv-key :to-be-truthy)
           (expect browser-key :to-equal mpv-key)))))
+
+  (it "re-binds every shared command to the same key in every group"
+    ;; the browser and mpris groups bind the same navegosa-media-*
+    ;; commands: a command appearing in several groups must keep one key
+    (let ((pairs (media-tests--layout-keys
+                  (get 'media-transient 'transient--layout)))
+          (seen (make-hash-table :test #'eq)))
+      (dolist (pair pairs)
+        (when-let* ((prev (gethash (car pair) seen)))
+          (expect (cdr pair) :to-equal prev))
+        (puthash (car pair) (cdr pair) seen))))
+
+  (it "gates the mpris group on the resolved backend"
+    (let* ((layout (get 'media-transient 'transient--layout))
+           (groups (if (vectorp layout) (elt layout 2) layout))
+           (pred (seq-some (lambda (g)
+                             (let ((pl (elt g 1)))
+                               (when (equal (plist-get pl :description) "mpris")
+                                 (plist-get pl :if))))
+                           groups)))
+      (expect pred :to-be-truthy)
+      (let ((media-backend 'mpris))
+        (expect (funcall pred) :to-be-truthy))
+      (let ((media-backend 'browser))
+        (expect (funcall pred) :to-be nil))))
 
   (it "pulls the shared bypass engine itself"
     ;; media.el must (require 'transient-bypass): this suite loads only
@@ -141,6 +180,18 @@ Same dual-dialect traversal as `transient-layout-commands'."
 (describe "media-open"
   (it "sends URLs to the browser lane when it is the active backend"
     (let ((media-backend 'browser))
+      (spy-on 'navegosa-media-open-url)
+      (spy-on 'mpv-open)
+      (with-temp-buffer
+        (let ((kill-ring '("https://youtu.be/xyz")))
+          (media-open)))
+      (expect 'navegosa-media-open-url :to-have-been-called-with
+              "https://youtu.be/xyz")
+      (expect 'mpv-open :not :to-have-been-called)))
+
+  (it "sends URLs to the same lane on the mpris backend"
+    ;; navegosa-media-open-url does the browse-url fallback itself there
+    (let ((media-backend 'mpris))
       (spy-on 'navegosa-media-open-url)
       (spy-on 'mpv-open)
       (with-temp-buffer
