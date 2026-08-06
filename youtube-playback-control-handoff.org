@@ -1,86 +1,108 @@
-#+title: Handoff - media-transient backend switching (stage 5)
+#+title: Handoff - media app profiles + transient relocation (stage 7)
 
-COMPLETED 2026-08-05 on the Linux box - do not re-run. Stage 5
-landed: see the spec's stage-5 section and Progress. Kept for the
-record only.
-
-Paste the prompt below into a fresh agent session on either machine
-(pure emacs-lab elisp; Linux exercises mpv+mpris, mac mpv+JXA).
-Companion to youtube-playback-control.org (the living spec); refresh
-the SHAs and re-read the spec's stage 5 before pasting if time has
-passed since 2026-08-05.
+Served stages 3 and 5 before (both completed and pushed); this
+revision carries stage 7. Paste the prompt below into a fresh agent
+session. Machine split: part A's browser-tab probes run on the Linux
+box (mpris/keysend/pactl lanes); the JXA like/dislike selectors and
+any YT Music app / Spotify verification need the mac or wherever
+those apps exist - the Linux box has none of them (checked
+2026-08-06). Refresh the SHAs and re-read the spec's stage 7 before
+pasting if time has passed since 2026-08-06.
 
 * Prompt
 
-Continue YouTube playback control from Emacs - stage 5, backend
-switching inside the transient.
+Continue media playback control from Emacs - stage 7: app profiles
+and moving the transient into navegosa.
 
 Read the spec first: ~/.emacs.d/youtube-playback-control.org
-(status: stages 1-4 done and pushed, mac and Linux lanes complete;
-stage 5 is this task). It is the authoritative living document -
-verified findings, design decisions, staged plan. Update Progress
-and Changelog as you go. navegosa's own SPEC.md tracks package-level
-detail, but stage 5 should not need to touch the package.
+(status: stages 1-6 done and pushed, both CI green; stage 7 is this
+task, planned in full there). It is the authoritative living
+document - verified findings, design decisions, staged plan. Update
+Progress and Changelog as you go. navegosa's own SPEC.md tracks
+package-level detail and gets a V6 section; stage 7 is mostly
+navegosa work.
 
-Context in one breath: browser-native YT playback is controlled from
-Emacs via navegosa (one navegosa-media-* command set; JXA transport
-on macOS, MPRIS/dbus on Linux); mpv keeps local files/non-YT; one
-media-transient on C-x m with backend-conditional groups
-(media-backend: auto/mpv/browser/mpris) shares one key set across
-backends; every YT entry point (C-x m o, org yt: links, embark)
-routes through media-open. Problem: auto is sticky to mpv while an
-mpv process lives - controlling the browser meanwhile means
-hand-evaluating a setopt. Stage 5 puts the switch on a key inside
-the transient.
+Context in one breath: browser-native media playback is controlled
+from Emacs via navegosa (one navegosa-media-* command set; JXA
+transport on macOS, MPRIS + pactl + compositor-keysend lanes on
+Linux); mpv keeps local files; one media-transient on C-x m with
+backend-conditional groups and in-menu backend switching (b). The
+control surface is YouTube-shaped while the transports are already
+app-agnostic - stage 7 grows an app-profile layer (YT Music tab/app,
+Spotify, generic MPRIS fallback, like/dislike actions) and relocates
+the transient into navegosa so package users get the full experience
+without this config.
 
-Current state (all pushed, trees clean, CI green as of 2026-08-05):
-- agzam/navegosa.el @ 40b5060 (V4 MPRIS lane, 109 specs)
-- agzam/emacs-lab @ e267a12 plus the stage-5 plan commit carrying
-  this file (mpris group + resolver, 923 specs)
+Current state (all pushed, trees clean, CI green as of 2026-08-06):
+- agzam/navegosa.el @ 17a9b75 (V5 gap lanes, 128 specs, 0.5.0)
+- agzam/emacs-lab @ b9bdb27 (stage 5 switch + CI dialect fix, 936
+  specs)
 First move: fetch and ff-only pull both repos, verify bb lint /
-bb test / bb smoke pass untouched before changing anything
-(navegosa make test + check-compile too if you end up touching the
-package after all).
+bb test / bb smoke and navegosa make test / make check-compile pass
+untouched before changing anything.
 
-The work (spec stage 5 has the full detail):
-1. A shared suffix on one free key (candidate: b - free in every
-   group) in the mpv, browser, AND mpris groups of media-transient
-   (modules/web-browsing/autoload/media.el): re-pin media-backend
-   for the session among auto / mpv / the platform's browser lane
-   (browser on darwin, mpris on gnu/linux - never offer the foreign
-   lane). Plain setq, never customize-save.
-2. Echo the resolution ("backend: mpris (was auto)") and make the
-   transient redraw so the visible group flips. Group :if
-   predicates evaluate at setup time - re-invoking
-   (transient-setup 'media-transient) from the suffix is the likely
-   mechanism; verify live and record the working pattern in the
-   spec.
-3. Cycle vs prompt is an open micro-decision - pick one, record the
-   reason in the spec (cycle: one keypress, three states;
-   completing-read: scales, self-documenting).
-4. Specs in tests/web-browsing/media-tests.el: switch-function
-   state transitions, platform filtering, no persistence side
-   effects; binding the key in every group makes the existing
-   cross-group key-consistency spec enforce the mirror
-   automatically - extend the suffix-set pin with the new command.
-5. Live E2E gate: mpv playing a local file AND a browser video
-   active at once; hop mpv -> browser lane -> auto from inside
-   C-x m, controlling each in turn. On Linux remember: muted tabs
-   are invisible to MPRIS - near-silent player volume, never tab
-   mute.
+The work (spec stage 7 has the full detail; probe first, build
+against probe results):
+1. App-profile registry in navegosa: matcher -> capabilities.
+   Detection: Linux via MPRIS root props Identity + DesktopEntry
+   plus title suffix; mac via tab URL. Ship youtube (default,
+   current behavior), youtube-music, spotify (transport-only), and
+   a generic transport-only fallback with keysend off. Keysend key
+   maps become per-profile - probe YT Music's real shortcuts, they
+   are not YouTube's.
+2. like/dislike actions: mac = DOM clicks (scripts.js grows
+   per-site selectors - the reliable lane); Linux tab = keysend
+   only where the site has a native shortcut (youtube.com has
+   none - honest error); YT Music app = its MPRIS/REST surfaces
+   where the app exists; Spotify = honest error. Free transient
+   keys: candidates + / - or L/D; extend the key-mirror spec.
+3. Spotify: transport control should already work via the existing
+   status-filtered discovery - verify if a client is ever
+   available, else ship designed-for-unverified and say so in
+   README. Micro-decision: add it to
+   navegosa-mpris-player-priority.
+4. Transient relocation: media-transient + backend resolver +
+   switch (+ the generic core of media-open) move into navegosa.
+   This reverses the stage-1 "transient lives in config" decision -
+   record the reversal. mpv.el stays a SOFT dependency (fboundp/
+   featurep-gated group, no Package-Requires entry).
+   Package-Requires gains (transient "0.5.0") - refresh-suffixes
+   needs it, Emacs 29.1 bundles 0.4.x - and navegosa CI deps must
+   install it explicitly or the 29.4 job tests the bundled 0.4.
+   The evil bypass section stays in emacs-lab; give the prefix a
+   layering seam (transient-append-suffix or an extra-groups
+   defcustom) and decide whether the transient-bypass engine
+   upstreams. Migrate the layout specs (key-mirror, suffix set,
+   gating, dialect fixtures - they must pass BOTH bundled
+   transients in CI); emacs-lab keeps thin layering pins.
+5. Live E2E gates per lane: profile detection picking the right
+   keysend map with a YT Music tab playing; like/dislike on the
+   mac against YouTube and YT Music; the relocated transient
+   driven through C-x m on both machines with the emacs-lab layer
+   (bypass keys, entry points) intact.
 
 Non-negotiable constraints (hard-won, spec's Verified findings):
-- Live working environments: the user's browser and Emacs session
-  are not test harnesses. Probes non-destructive, own scratch
-  players/tabs only, unwind-protect all session state, restore
-  everything, elisp-eval hygiene per AGENTS.
+- Live working environments: browser and Emacs session are not test
+  harnesses. Probes non-destructive, own scratch players/tabs only,
+  near-silent player volume - never tab mute (MPRIS invisibility),
+  unwind-protect all session state, elisp-eval hygiene per AGENTS.
+- One ECA session at a time on this Emacs: a parallel session once
+  raced the edit tool into file corruption (spec Progress caveat).
+  After any edit anomaly, diff the whole file before trusting it.
+- Keysend facts: Chromium discards unfocused synthetic keys - the
+  batched hyprctl focus-bounce is the delivery; injected keys land
+  in the active tab like typing, so Vimium-C must exclude the site
+  and the video tab must be frontmost; shifted keysyms need SHIFT
+  specs; hyprctl says "ok" regardless - verify by eyes/effect.
 - Naming: plain descriptive names - no +prefixes, no invented
   namespaces (AGENTS.md).
 - Own packages declare plain GitHub recipes; local-dev-packages +
   local-checkout-recipe (init.el) redirect to ~/GitHub checkouts.
-  NEVER commit a literal local :repo - CI smoke dies on it
-  (2026-08-05 lesson, one red run on main).
+  NEVER commit a literal local :repo - CI smoke dies on it.
 - Verification gates: bb lint, bb test (buttercup output is huge -
-  always filter: bb test 2>&1 | rg "FAILED|Ran"), bb smoke; bb
-  repair heals stale elpaca builds. Commit only on explicit
+  always filter: bb test 2>&1 | rg "FAILED|Ran"), bb smoke, bb
+  repair for stale elpaca builds; navegosa make test +
+  check-compile. Transient layout specs must pass both dialect
+  shapes (0.7.x slot layout vs 0.13 - see media-tests--group-plist
+  and the CI-red lesson in Progress). Commit only on explicit
   instruction.

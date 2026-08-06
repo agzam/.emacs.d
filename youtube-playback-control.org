@@ -1,9 +1,10 @@
 #+title: YouTube playback control from Emacs - browser and mpv lanes
 
 * Meta
-- status :: complete (stages 1-6 done and pushed; stages 5-6 landed
-  2026-08-05 on the Linux box, pushed 2026-08-06 - emacs-lab
-  0af5168, navegosa 17a9b75 - both CI runs green)
+- status :: stages 1-6 complete and pushed (emacs-lab 0af5168,
+  navegosa 17a9b75, both CI green); stage 7 planned - multi-app
+  profiles (YT Music, Spotify, generic) + transient relocation into
+  navegosa, see the handoff doc
 - created :: 2026-08-04
 - projects ::
   - agzam/navegosa.el @ main (V5 pushed 2026-08-06 @ 17a9b75, CI
@@ -23,8 +24,8 @@
   land read-only by default)
 - symptoms :: "Only SABR formats available", "SABR-only", "PO Token", "mpv youtube laggy", "HTTP Error 403" on fragments
 - related :: agzam/navegosa.el:SPEC.md (V1 tabs, V2 jump-to-link);
-  youtube-playback-control-handoff.org (served stages 3 and 5, both
-  completed - kept for the record)
+  youtube-playback-control-handoff.org (served stages 3 and 5;
+  now carries the stage-7 prompt)
 
 * Synopsis
 Watching YT through mpv+yt-dlp is laggy and degrading: YouTube enforces
@@ -549,6 +550,82 @@ real lanes instead.
    tab-not-frontmost refusals exercised naturally mid-session. User
    tactile pass: "all works, feels right".
 
+** Stage 7 - app profiles + transient relocation (planned)
+Two directions, both navegosa-side. A: the control surface is
+YouTube-shaped (keysend keys, JXA button selectors, "theater") while
+the transports underneath are already app-agnostic - MPRIS controls
+any player, pactl any stream. Grow an app-profile layer so YT Music
+(tab or app), Spotify, and anything MPRIS-shaped get a coherent
+experience, plus like/dislike as new actions. B: move the transient
+into navegosa so a package user gets the full experience without the
+emacs-lab config.
+
+The work, part A (profiles):
+1. [hypothesized] Profile registry: a defcustom mapping matchers to
+   capabilities. Detection keys per lane: Linux - MPRIS root props
+   Identity + DesktopEntry (dbus-read, cheap, available for apps and
+   browsers alike) plus window-title suffix for browser tabs; mac -
+   tab URL (JXA has it). Ship profiles: youtube (current behavior,
+   the default), youtube-music (browser tab now; app when present),
+   spotify (transport-only), and a generic fallback = transport-only
+   with keysend disabled. Per-profile keysend key maps - YT Music's
+   shortcuts differ from YouTube's and need live probing (no
+   captions/theater there; do NOT assume c/t).
+2. [hypothesized] like/dislike actions: mac lane via DOM button
+   clicks (navegosa-scripts.js grows per-site selectors for YouTube
+   and YT Music - the reliable lane); Linux browser tab via keysend
+   only where the site has a native shortcut (probe YT Music;
+   youtube.com has none - honest error); YT Music desktop app via
+   its own surfaces (th-ch app exposes MPRIS + an optional REST
+   plugin - probe on a machine that has it); Spotify - honest error
+   (no MPRIS surface, no shortcut). Transient keys: pick free ones
+   (candidates: + / -, or L/D; free set excludes
+   K J m p n h l t y c , . 0 f SPC s o g b and bypass M-x d j k),
+   extend the mirror spec.
+3. [hypothesized] Spotify transport-level control should already
+   work (discovery accepts any org.mpris.MediaPlayer2.* name;
+   unranked names sort last, s picks them; pactl token matching is
+   name-based and case-insensitive). Verify against a real client
+   where one exists; the user has no Spotify account - ship as
+   designed-for, unverified, and say so in the docs. Micro-decision:
+   add spotify to navegosa-mpris-player-priority defaults.
+4. [hypothesized] Machine reality check (2026-08-06): the Linux box
+   has no YT Music app, no Spotify, no PWA - only Brave. Tab-profile
+   probes happen here; app/Spotify verification needs a machine that
+   has them (check the mac for the YT Music app).
+
+The work, part B (transient into navegosa):
+1. [hypothesized] Move media-transient + media-backend resolver +
+   media-backend-switch (and the generic core of media-open) into
+   navegosa; emacs-lab keeps C-x m, the org yt:/embark/dired entry
+   points, and its personal layers. This REVERSES the stage-1
+   design decision "package ships commands; transient + dispatcher
+   live in config" - record the reversal: the transient became the
+   product, and a package user should get it off the bat.
+2. [hypothesized] mpv.el: soft dependency only - no Package-Requires
+   entry; the mpv group gates on (featurep 'mpv)/fboundp and the
+   auto resolver already treats dead/absent mpv as "use the browser
+   lane". Weighed: a hard dep would drag mpv.el (and its own deps)
+   onto browser-only users for one optional group; soft costs only
+   declare-functions and a docs line "install mpv.el for the
+   local-files lane". Decision expected: soft.
+3. [hypothesized] transient: becomes a real dependency pin -
+   :refresh-suffixes needs transient >= 0.5, Emacs 29.1 bundles
+   0.4.x, so Package-Requires gains (transient "0.5.0") (GNU ELPA
+   serves it) AND navegosa's Makefile/CI deps must install it
+   explicitly - the 29.4 CI job otherwise tests against the bundled
+   0.4 where the prefix errors.
+4. [hypothesized] The bypass section (M-x d j k pass-throughs) is
+   personal, evil-flavored config - it stays in emacs-lab. Navegosa's
+   prefix needs a layering seam: config appends its groups/suffixes
+   post-definition (transient-append-suffix / a defcustom of extra
+   groups - decide in-session; also decide whether the generic
+   transient-bypass engine upstreams or stays an emacs-lab lisp/).
+5. [hypothesized] Test migration: key-mirror, suffix-set, group
+   gating, dialect fixtures move to navegosa's suite (both bundled
+   transients in CI!); emacs-lab keeps thin specs pinning its
+   layering (C-x m target, bypass injection, entry-point routing).
+
 ** Deferred
 - Watch-history instruments (browser lane enables: logged-in YT history
   page scrape via JXA, browser-hist.el sqlite, resume positions).
@@ -737,6 +814,11 @@ docs); navegosa 17a9b75 (V5). Both CI runs green - emacs-lab's
 first since e267a12 broke it.
 
 Next action:
+- Stage 7: app profiles (YT Music/Spotify/generic + like/dislike)
+  and the transient relocation into navegosa - the handoff doc
+  carries the paste-ready prompt. Part A's tab-profile probes run on
+  the Linux box; the app/Spotify/JXA-selector parts need the mac (or
+  wherever the apps exist).
 - Optionally exercise the mac lane against the rebuilt package (V4
   changed shared navegosa-media.el paths - JXA specs still pass, but
   a live mac smoke after pulling is cheap). Stages 5-6 add nothing
@@ -841,6 +923,14 @@ a cross-group key-consistency spec pins the mirror too.
 - browser-mpris2 (gap-filler prior art): https://github.com/otommod/browser-mpris2
 
 * Changelog
+- 2026-08-06 (Linux box): stage 7 planned per user direction -
+  app profiles (YT Music tab/app, Spotify unverified-by-design,
+  generic fallback, like/dislike actions with per-lane reality:
+  mac DOM clicks reliable, Linux keysend only where a site
+  shortcut exists) + transient relocation into navegosa (soft mpv
+  dependency, transient >= 0.5 pin, bypass stays config-side,
+  test migration). Handoff doc repurposed with the stage-7 prompt.
+  Machine fact recorded: this box has no YT Music app/Spotify/PWA.
 - 2026-08-05 (Linux box, later that night): stage 6 done - Linux gap
   lanes, all in navegosa 0.5.0 (emacs-lab code untouched). Probes
   first: shell-level focus-bounce key injection rejected (autorepeat
