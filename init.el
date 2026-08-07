@@ -7,9 +7,10 @@
 
 ;;; Elpaca bootstrap (installer 0.12, verbatim from upstream README)
 
-;; Disable treeless clones on Linux - they're broken with newer Git versions
-(when (eq system-type 'gnu/linux)
-  (setq elpaca-order-defaults (list :type 'git :protocol 'https :inherit t :depth 1)))
+;; Disable treeless clones everywhere - with newer Git versions (seen on
+;; git 2.55) the clone succeeds but materializes an empty worktree, so
+;; elpaca finds no elisp files
+(setq elpaca-order-defaults (list :type 'git :protocol 'https :inherit t :depth 1))
 
 (defvar elpaca-installer-version 0.12)
 ;; Deviation from the stock installer: repos/builds live outside the config
