@@ -28,6 +28,7 @@
 ;; To use:
 ;; (setq gptel-model 'claude-sonnet-4-5-20250929
 ;;       gptel-backend (gptel-make-anthropic-oauth "Claude-OAuth" :stream t))
+;;    Use `gptel-anthropic-oauth-refresh-models' to refresh an existing backend.
 
 ;;; Code:
 
@@ -35,6 +36,7 @@
 (require 'gptel-anthropic)
 (require 'json)
 (require 'url)
+(require 'url-http)
 (require 'browse-url)
 
 (defgroup gptel-anthropic-oauth nil
@@ -64,6 +66,9 @@
 
 (defconst gptel-anthropic-oauth--redirect-uri "https://console.anthropic.com/oauth/code/callback"
   "OAuth redirect URI.")
+
+(defconst gptel-anthropic-oauth--models-url "https://api.anthropic.com/v1/models"
+  "Anthropic model discovery endpoint.")
 
 (defconst gptel-anthropic-oauth--required-system-prompt
   "You are Claude Code, Anthropic's official CLI for Claude."
@@ -268,45 +273,115 @@
       (gptel-anthropic-oauth-login)))
   (car gptel-anthropic-oauth--token-cache))
 
-;; '((claude-opus-4-1-20250805
-;;    :description "Claude Opus 4.1 - Most capable"
-;;    :capabilities (tool json reasoning)
-;;    :context-window 200000
-;;    :max-tokens 64000)
-;;   (claude-opus-4-20250514
-;;    :description "Claude Opus 4"
-;;    :capabilities (tool json reasoning)
-;;    :context-window 200000
-;;    :max-tokens 64000)
-;;   (claude-sonnet-4-20250514
-;;    :description "Claude Sonnet 4"
-;;    :capabilities (tool json)
-;;    :context-window 200000
-;;    :max-tokens 32000)
-;;   (claude-3-5-sonnet-20241022
-;;    :description "Claude Sonnet 3.5 v2"
-;;    :capabilities (tool json)
-;;    :context-window 200000
-;;    :max-tokens 8192)
-;;   (claude-3-5-haiku-20241022
-;;    :description "Claude Haiku 3.5 - Fast"
-;;    :capabilities (tool json)
-;;    :context-window 200000
-;;    :max-tokens 8192))
+;;; Model discovery
+
+(defun gptel-anthropic-oauth--json-value (key object)
+  "Return KEY from OBJECT, accepting symbol or string JSON keys."
+  (or (alist-get key object)
+      (alist-get (symbol-name key) object nil nil #'equal)))
+
+(defun gptel-anthropic-oauth--model-specs (response)
+  "Convert a model-list RESPONSE into gptel model specifications."
+  (let ((known (mapcar (lambda (model)
+                         (cons (symbol-name (car model)) (cdr model)))
+                       gptel--anthropic-models))
+        models)
+    (dolist (model (append (gptel-anthropic-oauth--json-value 'data response)
+                           nil))
+      (when-let* ((id (gptel-anthropic-oauth--json-value 'id model))
+                  (name (intern id)))
+        (push
+         (if-let* ((metadata (cdr (assoc id known))))
+             (cons name metadata)
+           (list name
+                 :description
+                 (or (gptel-anthropic-oauth--json-value
+                      'display_name model)
+                     id)
+                 :capabilities '(media tool-use cache)
+                 :mime-types
+                 '("image/jpeg" "image/png" "image/gif" "image/webp"
+                   "application/pdf")
+                 :context-window 200))
+         models)))
+    (sort (nreverse models)
+          (lambda (left right)
+            (string< (symbol-name (car right))
+                     (symbol-name (car left)))))))
+
+(defun gptel-anthropic-oauth--cached-token ()
+  "Return a cached OAuth token without starting an interactive login."
+  (unless gptel-anthropic-oauth--token-cache
+    (gptel-anthropic-oauth--load-tokens))
+  (unless (gptel-anthropic-oauth--token-valid-p)
+    (gptel-anthropic-oauth--refresh-token))
+  (when (gptel-anthropic-oauth--token-valid-p)
+    (car gptel-anthropic-oauth--token-cache)))
+
+(defun gptel-anthropic-oauth--fetch-models ()
+  "Fetch model specifications available to the current OAuth account."
+  (when-let* ((token (gptel-anthropic-oauth--cached-token)))
+    (condition-case err
+        (let ((url-request-method "GET")
+              (url-request-extra-headers
+               `(("Authorization" . ,(concat "Bearer " token))
+                 ("anthropic-version" . "2023-06-01")
+                 ("anthropic-beta" . "oauth-2025-04-20"))))
+          (with-current-buffer
+              (url-retrieve-synchronously
+               gptel-anthropic-oauth--models-url nil nil 10)
+            (unwind-protect
+                (progn
+                  (unless (and (boundp 'url-http-response-status)
+                               (< url-http-response-status 300))
+                    (error "HTTP %s" url-http-response-status))
+                  (goto-char (point-min))
+                  (unless (re-search-forward "^$" nil t)
+                    (error "Malformed response headers"))
+                  (gptel-anthropic-oauth--model-specs (json-read)))
+              (kill-buffer (current-buffer)))))
+      (error
+       (display-warning
+        'gptel-anthropic-oauth
+        (format "Could not refresh Claude models: %s"
+                (error-message-string err))
+        :warning)
+       nil))))
+
+(defun gptel-anthropic-oauth--refresh-backends (models)
+  "Set OAuth backend model lists to MODELS."
+  (dolist (entry gptel--known-backends)
+    (when (gptel-anthropic-oauth-p (cdr entry))
+      (setf (gptel-backend-models (cdr entry))
+            (gptel--process-models models)))))
+
+(defun gptel-anthropic-oauth-refresh-models ()
+  "Refresh Claude OAuth models from Anthropic."
+  (interactive)
+  (if-let* ((models (gptel-anthropic-oauth--fetch-models)))
+      (progn
+        (gptel-anthropic-oauth--refresh-backends models)
+        (message "Claude OAuth: loaded %d models" (length models)))
+    (user-error "Claude OAuth model discovery failed")))
 
 ;;; Backend Creation
 
 ;;;###autoload
 (cl-defun gptel-make-anthropic-oauth
     (name &key stream key
-          (models gptel--anthropic-models))
+          models)
   "Create Claude backend with OAuth authentication.
 
 NAME is the backend name.
 STREAM enables streaming responses.
 MODELS is the list of available models."
   (declare (indent 1))
-  (let ((backend
+  (let* ((models (or models
+                     (gptel-anthropic-oauth--fetch-models)
+                     (progn
+                       (message "Claude OAuth: using bundled model metadata")
+                       gptel--anthropic-models)))
+         (backend
          (gptel--make-anthropic-oauth
           :name name
           :host "api.anthropic.com"
