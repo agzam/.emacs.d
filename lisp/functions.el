@@ -82,14 +82,20 @@ re-defines loaded functions); `load-file' those directly."
     (message "Config reloaded in %.02fs" (float-time (time-since start-time)))))
 
 (defun build-dir-half-built-p (dir autoloads-file)
-  "Non-nil when build DIR exists without AUTOLOADS-FILE and without any .elc.
+  "Non-nil when build DIR exists without a working AUTOLOADS-FILE.
 An interrupted elpaca update/rebuild stops after the link step: the dir
 holds only linked sources, elpaca still activates it on the next boot
 (its autoloads load is noerror), and the package's commands silently
-come up void.  A dir with either artifact present got past linking."
+come up void.  A dir with either artifact present got past linking.
+A dangling autoloads symlink is broken regardless of leftover .elc
+files: builds link sources by absolute path, so a relocated sources
+tree (renamed config dir, moved CI workspace) severs every link while
+the compiled files - real files - stay behind and mask the damage."
   (and (file-directory-p dir)
-       (not (file-exists-p (expand-file-name autoloads-file dir)))
-       (not (directory-files dir nil "\\.elc\\'" t))))
+       (let ((autoloads (expand-file-name autoloads-file dir)))
+         (and (not (file-exists-p autoloads))
+              (or (file-symlink-p autoloads)
+                  (not (directory-files dir nil "\\.elc\\'" t)))))))
 
 (defun half-built-elpaca-packages ()
   "Return (ID . BUILD-DIR) for every queued elpaca package left half-built.

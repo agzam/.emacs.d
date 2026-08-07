@@ -79,4 +79,44 @@
   (it "ships khalendario in the default tolerance list"
     (expect (memq 'khalendario smoke-tolerated-packages) :to-be-truthy)))
 
+(describe "smoke-should-report-now-p"
+  (it "reports immediately once elpaca has settled"
+    (expect (smoke-should-report-now-p t nil t) :to-be-truthy))
+
+  (it "reports immediately when init died before the queue was armed"
+    ;; the poisoned-cache class: bootstrap error aborts init.el before
+    ;; elpaca-process-queues reaches after-init-hook, so nothing ever
+    ;; fires elpaca-after-init-hook and only the watchdog would end it
+    (expect (smoke-should-report-now-p nil t nil) :to-be-truthy))
+
+  (it "waits when init errored but queues are armed and settling"
+    ;; killing mid-processing would leave half-built dirs; the settle
+    ;; hook still reports the init error as fatal
+    (expect (smoke-should-report-now-p nil t t) :to-be nil))
+
+  (it "waits during a normal cold boot"
+    (expect (smoke-should-report-now-p nil nil t) :to-be nil)))
+
+(describe "smoke-write-result"
+  (it "writes a failed marker without elpaca when init errored before queuing"
+    ;; elpaca is absent in this sandbox - exactly the state after a
+    ;; bootstrap abort; the marker must still appear, verdict failed
+    (let* ((marker (make-temp-file "smoke-marker"))
+           (smoke-result-file marker)
+           (init-file-had-error t)
+           (exit-code nil))
+      (unwind-protect
+          (progn
+            (cl-letf (((symbol-function 'kill-emacs)
+                       (lambda (&optional code) (setq exit-code code))))
+              (smoke-write-result))
+            (let ((text (with-temp-buffer
+                          (insert-file-contents marker)
+                          (buffer-string))))
+              (expect text :to-match "\\`SMOKE-FAILED\n")
+              (expect text :to-match "packages: 0 queued, 0 failed/blocked\n")
+              (expect text :to-match "init\\.el signaled an error during startup\n"))
+            (expect exit-code :to-be 1))
+        (delete-file marker)))))
+
 ;;; tests/scripts/smoke-check-tests.el ends here

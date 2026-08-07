@@ -62,12 +62,15 @@ build dir with no autoloads) does."
            (when warnings (concat "*Warnings*:\n" warnings))))))
 
 (defun smoke-write-result ()
-  "Dump elpaca statuses + warnings to `smoke-result-file' and exit."
+  "Dump elpaca statuses + warnings to `smoke-result-file' and exit.
+Elpaca may be absent entirely (init died in the bootstrap); the report
+then carries the init error and *Warnings* alone."
   (pcase-let ((`(,ok . ,text)
                (smoke-report
-                (mapcar (lambda (entry)
-                          (cons (car entry) (elpaca<-status (cdr entry))))
-                        (elpaca--queued))
+                (when (fboundp 'elpaca--queued)
+                  (mapcar (lambda (entry)
+                            (cons (car entry) (elpaca<-status (cdr entry))))
+                          (elpaca--queued)))
                 init-file-had-error
                 (when-let* ((buf (get-buffer "*Warnings*")))
                   (with-current-buffer buf (buffer-string)))
@@ -78,9 +81,23 @@ build dir with no autoloads) does."
       (insert text))
     (kill-emacs (if ok 0 1))))
 
+(defun smoke-should-report-now-p (settled init-error queue-armed)
+  "Non-nil when the verdict is already decided at probe load time.
+SETTLED: elpaca finished before this file loaded (warm cache).
+INIT-ERROR mirrors `init-file-had-error'; QUEUE-ARMED whether init.el
+got far enough to put `elpaca-process-queues' on `after-init-hook'.
+An init error with the queue never armed means `elpaca-after-init-hook'
+cannot fire - waiting only runs out the watchdog."
+  (or settled (and init-error (not queue-armed))))
+
 ;; -l files load after `after-init-hook', so on a warm cache elpaca may
 ;; already be done by the time this file runs - check, don't just hook.
-(if (bound-and-true-p elpaca-after-init-time)
+;; An init.el error can also abort before elpaca queue processing is
+;; armed; report right away instead of idling into the watchdog.
+(if (smoke-should-report-now-p
+     (bound-and-true-p elpaca-after-init-time)
+     init-file-had-error
+     (memq 'elpaca-process-queues after-init-hook))
     (smoke-write-result)
   (add-hook 'elpaca-after-init-hook #'smoke-write-result 99))
 

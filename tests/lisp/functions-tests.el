@@ -142,6 +142,20 @@
       (with-temp-file (expand-file-name "pkg.elc" dir))
       (expect (build-dir-half-built-p dir "pkg-autoloads.el") :to-be nil))
 
+    (it "flags a dangling autoloads symlink despite real compiled files"
+      ;; relocated sources tree (renamed repo/config dir, moved CI
+      ;; workspace): absolute symlink targets all sever, .elc stay real
+      (with-temp-file (expand-file-name "pkg.elc" dir))
+      (make-symbolic-link (expand-file-name "gone/pkg-autoloads.el" dir)
+                          (expand-file-name "pkg-autoloads.el" dir))
+      (expect (build-dir-half-built-p dir "pkg-autoloads.el") :to-be-truthy))
+
+    (it "passes a live autoloads symlink (the normal linked build)"
+      (with-temp-file (expand-file-name "target.el" dir))
+      (make-symbolic-link (expand-file-name "target.el" dir)
+                          (expand-file-name "pkg-autoloads.el" dir))
+      (expect (build-dir-half-built-p dir "pkg-autoloads.el") :to-be nil))
+
     (it "passes a missing dir (package not yet built at all)"
       (expect (build-dir-half-built-p
                (expand-file-name "nonexistent" dir) "pkg-autoloads.el")
