@@ -10,12 +10,11 @@
 (defvar smoke-result-file
   (or (getenv "SMOKE_RESULT_FILE") "/tmp/emacs-lab-smoke-result"))
 
-(defvar smoke-tolerated-packages '(khalendario)
-  "Own packages whose repos are private.
-Without ssh keys (CI) their anonymous https clone can only fail, so their
-failed/blocked status is reported but does not flip the verdict.  On a dev
-machine the local checkout makes them build normally, keeping this list
-inert there.")
+(defvar smoke-tolerated-packages '()
+  "Packages whose failure is reported but does not flip the verdict.
+Empty by default: CI authenticates private repos through the workflow's
+fine-grained PAT (see ci.yml), so even own private packages must build.
+The escape hatch stays for anything genuinely unreachable from CI.")
 
 ;; Emacs 30.1's tty redisplay can segfault while padding frame glyph rows
 ;; (fill_up_frame_row_with_spaces <- build_frame_matrix_from_window_tree,

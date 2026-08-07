@@ -47,7 +47,18 @@ jobs:
             .local/elpaca
             .local/.cache/eln
           # yamllint disable-line rule:line-length
-          key: elpaca-${{ runner.os }}-${{ hashFiles('init.el', 'modules/**/config.el') }}
+          key: elpaca-${{ runner.os }}-${{ hashFiles('init.el', 'modules/**/config.el', '.github/workflows/ci.yml') }}
           restore-keys: |
             elpaca-${{ runner.os }}-
+      # Private package repos (khalendario.el) need credentials; the
+      # fine-grained PAT has Contents:read on them.  The blanket rewrite
+      # authenticates every github https clone - public ones included,
+      # which also lifts anonymous rate limits.
+      - name: Authenticate git for private package repos
+        env:
+          TOKEN: ${{ secrets.PRIVATE_REPOS_TOKEN }}
+        run: |
+          git config --global \
+            url."https://x-access-token:${TOKEN}@github.com/".insteadOf \
+            "https://github.com/"
       - run: bb smoke

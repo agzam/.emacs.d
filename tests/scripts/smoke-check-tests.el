@@ -94,8 +94,8 @@
                                '((khalendario . ("fatal: could not read Username"))))))
       (expect text :not :to-match "could not read Username")))
 
-  (it "ships khalendario in the default tolerance list"
-    (expect (memq 'khalendario smoke-tolerated-packages) :to-be-truthy)))
+  (it "ships an empty default tolerance list - private repos authenticate in CI"
+    (expect smoke-tolerated-packages :to-be nil)))
 
 (describe "smoke-package-events"
   (it "returns nil when elpaca never loaded"
