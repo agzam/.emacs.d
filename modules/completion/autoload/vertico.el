@@ -21,7 +21,7 @@
            (effective-lh (+ char-h (cond ((floatp ls) (ceiling (* char-h ls)))
                                          ((integerp ls) ls)
                                          (t 0))))
-           (max-height (/ (frame-text-height parent) effective-lh))
+           (max-height (+ (/ (frame-text-height parent) effective-lh) 2))
            (vertico-height (min 75 (- max-height 2)))
            (count (max 0 (- vertico-height 2))))
       (setq vertico-posframe-height vertico-height
@@ -113,3 +113,31 @@ Supports exporting consult-grep to wgrep, file to wdeired, and consult-location 
             ((buffer-local-value 'vertico-suspend--ov buf)))
       (vertico-suspend)
     (vertico-repeat)))
+
+;;;###autoload
+(defun vertico-detour ()
+  "Toggle focus between an active vertico session and its calling window.
+
+From inside the minibuffer, jump to the window the session was started
+from for a quick exploration, keeping the session alive.  From outside,
+jump back into the pending session.  A posframe-displayed session is
+switched to the plain minibuffer display first, because a posframe hides
+itself whenever focus leaves the minibuffer; the multiform toggle stack
+restores the posframe display once the session ends."
+  (interactive)
+  (if-let* ((win (active-minibuffer-window))
+            ((buffer-local-value 'vertico--input (window-buffer win))))
+      (if (minibufferp)
+          (progn
+            (when (and (bound-and-true-p vertico-posframe-mode)
+                       (posframe-workable-p))
+              (when vertico-posframe-tall-mode
+                (vertico-posframe-height-restore-h))
+              (vertico-multiform-posframe)
+              ;; Redraw while the minibuffer is still selected: its local
+              ;; post-command-hook won't run after the window switch, and
+              ;; without it the minibuffer window stays one line tall.
+              (vertico--exhibit))
+            (select-window (or (minibuffer-selected-window) (get-mru-window))))
+        (select-window win))
+    (user-error "No active vertico session")))

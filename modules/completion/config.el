@@ -211,6 +211,7 @@
          "g" #'vertico-multiform-grid
          "i" #'vertico-quick-insert
          "j" #'vertico-quick-jump
+         "o" #'vertico-detour
          "p" #'vertico-multiform-posframe
          "r" #'vertico-multiform-reverse
          "s" #'vertico-suspend
@@ -232,7 +233,10 @@
         "C-/" #'vertico-jump-root
         "C-?" #'vertico-jump-sudo
         "M-m" #'embark-select
-        "C-SPC" #'embark-preview))
+        "C-SPC" #'embark-preview)
+
+  ;; Global so the same key round-trips: out of the minibuffer and back in.
+  (map! "M-o" #'vertico-detour))
 
 (use-package vertico-posframe
   :ensure (vertico-posframe :host github :repo "tumashu/vertico-posframe")
