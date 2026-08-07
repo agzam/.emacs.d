@@ -76,8 +76,32 @@
                  (smoke-report '((evil . finished)) nil nil nil nil)))
       (expect ok :to-be-truthy)))
 
+  (it "prints event log lines indented under the matching fatal package"
+    ;; a bare "consult-gh: failed" forced log archaeology to learn the
+    ;; clone died mid-transfer; the reason must ride along in the marker
+    (pcase-let ((`(,ok . ,text)
+                 (smoke-report '((consult-gh . failed)) nil nil nil nil
+                               '((consult-gh . ("$git clone --depth 1 ..."
+                                                "fatal: early EOF"))))))
+      (expect ok :to-be nil)
+      (expect text :to-match "  consult-gh: failed\n")
+      (expect text :to-match "      \\$git clone --depth 1 \\.\\.\\.\n")
+      (expect text :to-match "      fatal: early EOF\n")))
+
+  (it "omits log lines for tolerated packages"
+    (pcase-let ((`(,_ . ,text)
+                 (smoke-report '((khalendario . failed)) nil nil '(khalendario) nil
+                               '((khalendario . ("fatal: could not read Username"))))))
+      (expect text :not :to-match "could not read Username")))
+
   (it "ships khalendario in the default tolerance list"
     (expect (memq 'khalendario smoke-tolerated-packages) :to-be-truthy)))
+
+(describe "smoke-package-events"
+  (it "returns nil when elpaca never loaded"
+    ;; the sandbox has no elpaca - the bootstrap-abort path must not
+    ;; blow up collecting logs for a report that has no packages anyway
+    (expect (smoke-package-events 'anything) :to-be nil)))
 
 (describe "smoke-should-report-now-p"
   (it "reports immediately once elpaca has settled"

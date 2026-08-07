@@ -26,14 +26,17 @@ inert there.")
 ;; here needs a drawn frame.
 (setq inhibit-redisplay t)
 
-(defun smoke-report (statuses init-error warnings tolerated &optional half-built)
+(defun smoke-report (statuses init-error warnings tolerated &optional half-built logs)
   "Render the verdict and result-marker text as (OK . TEXT).
 STATUSES is an alist of (PACKAGE . STATUS); INIT-ERROR mirrors
 `init-file-had-error'; WARNINGS is the *Warnings* buffer text or nil.
 A failed/blocked package listed in TOLERATED is reported but does not
 flip the verdict - any other failure, INIT-ERROR, or an entry in
 HALF-BUILT (see `half-built-elpaca-packages': finished status hiding a
-build dir with no autoloads) does."
+build dir with no autoloads) does.  LOGS is an alist of (PACKAGE .
+LINES); LINES print indented under the matching fatal entry, so the CI
+log answers why a package failed (git stderr, build error) without a
+second run."
   (let* ((failed (cl-remove-if-not
                   (lambda (s) (memq (cdr s) '(failed blocked)))
                   statuses))
@@ -52,7 +55,11 @@ build dir with no autoloads) does."
                        (format ", %d half-built" (length half-built))
                      ""))
            (when init-error "init.el signaled an error during startup\n")
-           (mapconcat (lambda (f) (format "  %s: %s\n" (car f) (cdr f)))
+           (mapconcat (lambda (f)
+                        (concat
+                         (format "  %s: %s\n" (car f) (cdr f))
+                         (mapconcat (lambda (line) (format "      %s\n" line))
+                                    (alist-get (car f) logs) "")))
                       fatal "")
            (mapconcat (lambda (f) (format "  %s: %s (tolerated)\n" (car f) (cdr f)))
                       waved "")
@@ -61,25 +68,43 @@ build dir with no autoloads) does."
                       half-built "")
            (when warnings (concat "*Warnings*:\n" warnings))))))
 
+(defun smoke-package-events (id &optional n)
+  "Readable `:info' lines from package ID's last N elpaca events, oldest first.
+Multi-line infos (git stderr) are split so the report can indent each
+line.  Nil when elpaca (or its event log) never loaded."
+  (when (and (boundp 'elpaca--event-log) (fboundp 'elpaca-event<-id))
+    (let (infos)
+      (cl-loop for ev in elpaca--event-log
+               while (< (length infos) (or n 4))
+               when (eq (elpaca-event<-id ev) id)
+               do (when-let* ((info (plist-get (elpaca-event<-payload ev) :info)))
+                    (push info infos)))
+      (mapcan (lambda (info) (split-string info "\n" t)) infos))))
+
 (defun smoke-write-result ()
   "Dump elpaca statuses + warnings to `smoke-result-file' and exit.
 Elpaca may be absent entirely (init died in the bootstrap); the report
 then carries the init error and *Warnings* alone."
-  (pcase-let ((`(,ok . ,text)
-               (smoke-report
-                (when (fboundp 'elpaca--queued)
-                  (mapcar (lambda (entry)
-                            (cons (car entry) (elpaca<-status (cdr entry))))
-                          (elpaca--queued)))
-                init-file-had-error
-                (when-let* ((buf (get-buffer "*Warnings*")))
-                  (with-current-buffer buf (buffer-string)))
-                smoke-tolerated-packages
-                (when (fboundp 'half-built-elpaca-packages)
-                  (half-built-elpaca-packages)))))
-    (with-temp-file smoke-result-file
-      (insert text))
-    (kill-emacs (if ok 0 1))))
+  (let* ((statuses (when (fboundp 'elpaca--queued)
+                     (mapcar (lambda (entry)
+                               (cons (car entry) (elpaca<-status (cdr entry))))
+                             (elpaca--queued))))
+         (logs (cl-loop for (id . status) in statuses
+                        when (memq status '(failed blocked))
+                        collect (cons id (smoke-package-events id)))))
+    (pcase-let ((`(,ok . ,text)
+                 (smoke-report
+                  statuses
+                  init-file-had-error
+                  (when-let* ((buf (get-buffer "*Warnings*")))
+                    (with-current-buffer buf (buffer-string)))
+                  smoke-tolerated-packages
+                  (when (fboundp 'half-built-elpaca-packages)
+                    (half-built-elpaca-packages))
+                  logs)))
+      (with-temp-file smoke-result-file
+        (insert text))
+      (kill-emacs (if ok 0 1)))))
 
 (defun smoke-should-report-now-p (settled init-error queue-armed)
   "Non-nil when the verdict is already decided at probe load time.
