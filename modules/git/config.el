@@ -347,6 +347,11 @@ GraphQL `errors' alist, which otherwise dies with `listp, http'."
 (after! diff-mode
   (setq diff-add-log-use-relative-names t))
 
+;; ox-gfm ships no Version header and its v1.0 tag sits on a commit a
+;; depth-1 clone never fetches, so consult-gh's (ox-gfm "1.0") requirement
+;; reads "version 0" on every cold build; declare the version explicitly.
+(elpaca (ox-gfm :version (lambda (_) "1.0")))
+
 ;; doom.d's consult-gh config block is `:disabled' - only the package ports
 ;; (autoloaded commands for SPC g c); its embark-glue autoloads skipped too
 (use-package consult-gh
