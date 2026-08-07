@@ -36,7 +36,11 @@
             :to-be-truthy)
     (expect (car treesit-extra-load-path) :to-be-truthy)
     (expect (file-in-directory-p (car treesit-extra-load-path) doom-cache-dir)
-            :to-be-truthy)))
+            :to-be-truthy)
+    ;; raw treesit-install-language-grammar ignores treesit-extra-load-path;
+    ;; its non-interactive default out-dir is the car of this history list.
+    (expect (car treesit--install-language-grammar-out-dir-history)
+            :to-equal (car treesit-extra-load-path))))
 
 (describe "switch-frame hook machinery"
   (it "defines the debounced trigger and its hook"

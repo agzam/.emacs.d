@@ -87,11 +87,17 @@
       ;; git module: the request package derives its curl cookie jar from
       ;; request-storage-directory, which defaults inside user-emacs-directory
       request-storage-directory (concat doom-cache-dir "request/")
-      ;; tree-sitter module: Emacs 31 `treesit-ensure-installed' installs
-      ;; compiled grammars into the first writable `treesit-extra-load-path'
-      ;; entry, else user-emacs-directory/tree-sitter - keep the .dylib blobs
-      ;; (un-greppable build artifacts) in the cache
+      ;; tree-sitter module: keep the .dylib grammar blobs (un-greppable
+      ;; build artifacts) in the cache.  Two knobs, both load-bearing:
+      ;; `treesit-ensure-installed' (Emacs 31) installs into the first
+      ;; writable `treesit-extra-load-path' entry, but raw
+      ;; `treesit-install-language-grammar' calls (markdown-ts-mode's
+      ;; grammar setup, M-x with RET) ignore that variable - their default
+      ;; out-dir is the car of the history list, else
+      ;; user-emacs-directory/tree-sitter.
       treesit-extra-load-path (list (expand-file-name "tree-sitter" doom-cache-dir))
+      treesit--install-language-grammar-out-dir-history
+      (list (expand-file-name "tree-sitter" doom-cache-dir))
       ;; chat module: emojify downloads its emoji-image sets under
       ;; user-emacs-directory/emojis/ by default (Doom's :ui emoji relocates
       ;; the same way)

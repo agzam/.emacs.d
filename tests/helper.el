@@ -7,6 +7,13 @@
 
 (setq user-emacs-directory test-sandbox-dir)
 
+;; Batch runs skip early-init.el, so its eln redirect never fires - and specs
+;; that cl-letf primitives make Emacs synthesize trampoline .eln files, which
+;; would land in the real ~/.emacs.d/eln-cache.  Point them at the sandbox.
+(when (and (featurep 'native-compile)
+           (fboundp 'startup-redirect-eln-cache))
+  (startup-redirect-eln-cache (expand-file-name "eln-cache/" test-sandbox-dir)))
+
 (defvar test-config-root
   (expand-file-name "../" (file-name-directory (or load-file-name buffer-file-name)))
   "Root of the config being tested, derived from this file's location.")

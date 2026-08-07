@@ -34,16 +34,22 @@ into code or prose.
   (bindings tree, `consult-customize` lists, hooks, advice). Files vendored
   from Doom itself (see below) are exempt until their planned rename sweep.
 
-## Nothing writes inside this directory
+## Nothing writes into the tracked tree
 
-- All caches/state/downloads live outside: `doom-cache-dir`
-  (~/.cache/emacs-lab/), `doom-data-dir`, `doom-state-dir`,
-  `doom-local-dir` (~/.local/share/emacs-lab/ - elpaca repos/builds, eln via
-  early-init redirect).
+- All caches/state/downloads live under `.local/` (git-ignored, relative to
+  the config dir): `doom-local-dir` (.local/ - elpaca repos/builds),
+  `doom-cache-dir` (.local/.cache/ - eln via early-init redirect,
+  tree-sitter grammars, generated loaddefs), `doom-data-dir` (.local/etc/),
+  `doom-state-dir` (.local/state/).
 - New package writing into `user-emacs-directory`? Redirect its path variable
   in the quarantine section of `lisp/doom-compat.el`.
-- `.gitignore` is a whitelist: new top-level tracked entries need a `!/name`
-  line; state files can never sneak in.
+- Batch runs (`emacs -Q --batch`) skip early-init.el and with it the eln
+  redirect; a spec that cl-letf-mocks a C primitive makes Emacs write a
+  trampoline .eln to ~/.emacs.d/eln-cache. tests/helper.el redirects that
+  into the test sandbox - any new batch entry point needs the same.
+- `.gitignore` is a conventional blacklist (.local/, custom.el, per-tool
+  droppings, *.elc/*.eln litter); anything unexpected dumped into the tree
+  shows up in `git status` instead of being silently ignored.
 - Sanctioned exceptions: `custom.el` stays in the config dir (edited in
   place by choice, explicitly git-ignored); `modules/writing/abbrev_defs`
   is tracked AND written in place by abbrev (`C-x a i g` curates it).
