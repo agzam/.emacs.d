@@ -31,14 +31,17 @@
 
 ;;;###autoload
 (defun vertico-jump-to-home-dir-on~  ()
-  "Puts you in home dir initial location in find-file"
+  "In file completion, jump to the home dir; otherwise self-insert ~.
+Outside file category ~ must reach `orderless-flex' as an affix dispatcher."
   (interactive)
-  (when (eq 'file (vertico--metadata-get 'category))
-    (vertico-directory-up 1000)
-    (unless (string-match-p "^~.*" (minibuffer-contents))
-      (beginning-of-line)
-      (insert "~")
-      (end-of-line))))
+  (if (eq 'file (vertico--metadata-get 'category))
+      (progn
+        (vertico-directory-up 1000)
+        (unless (string-match-p "^~.*" (minibuffer-contents))
+          (beginning-of-line)
+          (insert "~")
+          (end-of-line)))
+    (insert "~")))
 
 ;;;###autoload
 (defun vertico-jump-root  ()

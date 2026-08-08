@@ -86,7 +86,7 @@
   :after-call doom-first-input-hook
   :config
   (setopt orderless-affix-dispatch-alist
-          '((?! . orderless-without-literal)
+          '((?! . orderless-not)
             (?& . orderless-annotation)
             (?% . char-fold-to-regexp)
             (?` . orderless-initialism)
