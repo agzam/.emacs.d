@@ -18,7 +18,8 @@
           shr-max-width nil
           shr-fill-text nil
           eww-browse-url-new-window-is-tab nil
-          shr-put-image-function #'shr-put-sliced-image)
+          shr-put-image-function #'shr-put-sliced-image
+          eww-readable-urls '("."))
 
   (add-hook! 'eww-after-render-hook #'eww--rename-buffer)
   (defadvice! eww-rename-buffer-a ()

@@ -65,3 +65,32 @@
       (setq-local eww-data (list :title "" :url "https://y.example/"))
       (eww--rename-buffer)
       (expect (buffer-name) :to-match "\\*https://y\\.example/ # eww\\*"))))
+
+(defun eww-tests--eww-config-forms ()
+  "Read the (use-package eww ...) :config forms out of web-browsing/config.el."
+  (with-temp-buffer
+    (insert-file-contents
+     (expand-file-name "modules/web-browsing/config.el" test-config-root))
+    (let (form)
+      (while (and (setq form (ignore-errors (read (current-buffer))))
+                  (not (and (eq (car-safe form) 'use-package)
+                            (eq (cadr form) 'eww)))))
+      (expect form :to-be-truthy)
+      (use-package-body-forms (cddr form) :config))))
+
+(describe "eww readable-by-default"
+  ;; run the real :config against the real built-in eww, so a future
+  ;; eww-readable-urls format change breaks here and not at browse time
+  (before-all
+    (eval `(progn ,@(eww-tests--eww-config-forms)) t))
+
+  (it "makes eww render any url readable"
+    (expect (eww-default-readable-p "https://anything.example/some/page")
+            :to-be-truthy))
+
+  (it "keeps the (REGEXP . nil) opt-out lane working"
+    (let ((eww-readable-urls (cons '("\\`https://opt\\.out/" . nil)
+                                   eww-readable-urls)))
+      (expect (eww-default-readable-p "https://opt.out/page") :to-be nil)
+      (expect (eww-default-readable-p "https://still.example/page")
+              :to-be-truthy))))
