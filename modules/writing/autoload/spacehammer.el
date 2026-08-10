@@ -37,19 +37,3 @@ Computes direction from frame position on screen—no AppleScript needed."
   (let ((alist (append `((direction . ,(frame-facing-direction)))
                        alist)))
     (display-buffer-in-quadrant buffer alist)))
-
-;;;###autoload
-(defun hammerspoon-eval-fennel (fennel-form)
-  "Evaluates given Fennel form in Hammerspoon IPC.
-See https://www.hammerspoon.org/docs/hs.ipc.html for more."
-  (unless (eq system-type 'darwin)
-    (user-error "This function works only in OSX!"))
-  (unless (executable-find "hs")
-    (user-error "Hammerspoon IPC executable - 'hs' cmd util not found."))
-  (let ((fennel-form* (replace-regexp-in-string "\"" "\\\\\"" fennel-form)))
-    (process-lines
-     (executable-find "hs")
-     "-c"
-     (format
-      "local fennel = require(\"fennel\"); print(fennel.eval(\" %s \"));"
-      fennel-form*))))

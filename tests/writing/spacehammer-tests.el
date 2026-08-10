@@ -35,22 +35,3 @@
           (spacehammer-display-edit-buffer (current-buffer) '((window . root))))
         (expect (alist-get 'direction seen) :to-be 'left)
         (expect (alist-get 'window seen) :to-be 'root)))))
-
-(describe "hammerspoon-eval-fennel"
-  (it "refuses to run off macOS"
-    (let ((system-type 'gnu/linux))
-      (expect (hammerspoon-eval-fennel "(+ 1 2)") :to-throw 'user-error)))
-
-  (it "requires the hs CLI"
-    (let ((system-type 'darwin))
-      (cl-letf (((symbol-function 'executable-find) (lambda (_) nil)))
-        (expect (hammerspoon-eval-fennel "(+ 1 2)") :to-throw 'user-error))))
-
-  (it "escapes double quotes before shipping the form to hs"
-    (let ((system-type 'darwin) seen)
-      (cl-letf (((symbol-function 'executable-find) (lambda (_) "/usr/local/bin/hs"))
-                ((symbol-function 'process-lines)
-                 (lambda (&rest args) (setq seen args) '("ok"))))
-        (expect (hammerspoon-eval-fennel "(print \"hi\")") :to-equal '("ok"))
-        (expect (nth 0 seen) :to-equal "/usr/local/bin/hs")
-        (expect (nth 2 seen) :to-match "\\\\\"hi\\\\\"")))))
