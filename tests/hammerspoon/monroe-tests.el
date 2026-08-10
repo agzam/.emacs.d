@@ -10,6 +10,7 @@
 (load-module-file "modules/hammerspoon/autoload/monroe.el")
 
 (defvar monroe-default-port 7888)
+(defvar monroe-default-host "localhost")
 
 (describe "hammerspoon-monroe--cleanup"
   (it "kills only monroe buffers"
@@ -58,3 +59,45 @@
         (hammerspoon-monroe-connect)
         (expect cleaned :to-be t)
         (expect connected :to-equal "localhost:7888")))))
+
+(describe "hammerspoon-monroe-eval-sync"
+  (it "user-errors when no connection is live"
+    (cl-letf (((symbol-function 'hammerspoon-monroe--repl-buffer) #'ignore))
+      (expect (hammerspoon-monroe-eval-sync "(+ 1 2)") :to-throw 'user-error)))
+
+  (it "accumulates value, out and err across response chunks until done"
+    (cl-letf (((symbol-function 'hammerspoon-monroe--repl-buffer)
+               (lambda () (current-buffer)))
+              ((symbol-function 'monroe-send-eval-string)
+               (lambda (_form callback)
+                 (funcall callback '(("out" . "hel")))
+                 (funcall callback '(("out" . "lo") ("err" . "warn")))
+                 (funcall callback '(("value" . "3") ("status" . ("done")))))))
+      (expect (hammerspoon-monroe-eval-sync "(+ 1 2)")
+              :to-equal '(:value "3" :out "hello" :err "warn"))))
+
+  (it "errors when done never arrives within the timeout"
+    (cl-letf (((symbol-function 'hammerspoon-monroe--repl-buffer)
+               (lambda () (current-buffer)))
+              ((symbol-function 'monroe-send-eval-string)
+               (lambda (_form _callback))))
+      (expect (hammerspoon-monroe-eval-sync "(+ 1 2)" 0.1) :to-throw 'error))))
+
+(describe "hammerspoon-monroe-eval-async"
+  (it "sends the form with a discard callback on a live connection"
+    (let (sent)
+      (cl-letf (((symbol-function 'hammerspoon-monroe--repl-buffer)
+                 (lambda () (current-buffer)))
+                ((symbol-function 'monroe-send-eval-string)
+                 (lambda (form callback) (setq sent (list form callback)))))
+        (hammerspoon-monroe-eval-async "(print :hi)")
+        (expect (car sent) :to-equal "(print :hi)")
+        (expect (cadr sent) :to-be #'ignore))))
+
+  (it "silently does nothing when disconnected"
+    (let (sent)
+      (cl-letf (((symbol-function 'hammerspoon-monroe--repl-buffer) #'ignore)
+                ((symbol-function 'monroe-send-eval-string)
+                 (lambda (&rest args) (setq sent args))))
+        (hammerspoon-monroe-eval-async "(print :hi)")
+        (expect sent :to-be nil)))))

@@ -58,3 +58,53 @@
     (message "Hammerspoon nREPL: connection lost, reconnecting...")
     (setq hammerspoon-monroe--reconnect-timer
           (run-with-timer 1.5 nil #'hammerspoon-monroe--try-reconnect))))
+
+(defun hammerspoon-monroe--repl-buffer ()
+  "REPL buffer of a live Hammerspoon monroe connection, or nil.
+Liveness is judged by the connection process, which monroe keeps on a
+separate *monroe-connection* buffer."
+  (let* ((host (format "%s:%d" monroe-default-host monroe-default-port))
+         (repl (get-buffer (format "*monroe: %s*" host)))
+         (proc (get-buffer-process (format "*monroe-connection: %s*" host))))
+    (when (and repl (process-live-p proc))
+      repl)))
+
+;;;###autoload
+(defun hammerspoon-monroe-eval-sync (fennel-form &optional timeout)
+  "Eval FENNEL-FORM in Hammerspoon, block until the result arrives.
+Returns a plist (:value V :out O :err E), each a string or nil.
+Values come serialized through hs.inspect, so payloads meant for
+parsing are better printed to :out by the form itself.  Signals
+`user-error' when disconnected, `error' after TIMEOUT (default 10s)."
+  (let ((repl (hammerspoon-monroe--repl-buffer)))
+    (unless repl
+      (user-error "Hammerspoon nREPL is not connected (M-x hammerspoon-monroe-connect)"))
+    (let (val-acc out-acc err-acc done)
+      (with-current-buffer repl
+        (monroe-send-eval-string
+         fennel-form
+         (lambda (response)
+           ;; monroe's bencode layer yields alists with string keys
+           (let ((value (cdr (assoc "value" response)))
+                 (out (cdr (assoc "out" response)))
+                 (err (cdr (assoc "err" response)))
+                 (status (cdr (assoc "status" response))))
+             (when value (setq val-acc (concat val-acc value)))
+             (when out (setq out-acc (concat out-acc out)))
+             (when err (setq err-acc (concat err-acc err)))
+             (when (member "done" status) (setq done t))))))
+      (let ((deadline (+ (float-time) (or timeout 10))))
+        (while (and (not done) (< (float-time) deadline))
+          (accept-process-output nil 0.05)))
+      (unless done
+        (error "Hammerspoon eval timed out: %s" fennel-form))
+      (list :value val-acc :out out-acc :err err-acc))))
+
+;;;###autoload
+(defun hammerspoon-monroe-eval-async (fennel-form)
+  "Fire-and-forget eval of FENNEL-FORM in Hammerspoon.
+Silently does nothing when disconnected - meant for cosmetic calls
+(e.g. preview overlays) that must never interrupt the caller."
+  (when-let* ((repl (hammerspoon-monroe--repl-buffer)))
+    (with-current-buffer repl
+      (monroe-send-eval-string fennel-form #'ignore))))
