@@ -125,13 +125,20 @@ targets."
   ;; reachable from vertico's C-SPC before embark ever loads
   (require 'embark)
   (when-let* ((target (car (embark--targets)))
-              (type (plist-get target :type)))
+              (type (plist-get target :type))
+              (str (or (plist-get target :target) ""))
+              ;; async searches have no candidate yet: acting on the empty
+              ;; string crashes actions like consult-gh--pr-view-action
+              ((not (string-empty-p str))))
     (cond
+     ;; github-topics previews via `consult-preview-key' already;
+     ;; dwim-ing it would additionally open the browser
+     ((eq type 'github-topics-pr) nil)
      ((and (member type '(url consult-omni))
            (string-match-p
             ;; only match PRs/Issues or individual files
             "https://github\\.com/\\([^/]+/[^/]+/\\)\\(pull\\|issues\\|blob\\)[^#\n]+"
-            (plist-get target :target)))
+            str))
       (cl-labels ((forge-visit-topic-url*
                     (url &rest _)
                     (forge-visit-topic-via-url url)))
