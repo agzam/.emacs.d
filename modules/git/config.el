@@ -353,10 +353,15 @@ GraphQL `errors' alist, which otherwise dies with `listp, http'."
 (elpaca (ox-gfm :version (lambda (_) "1.0")))
 
 ;; doom.d's consult-gh config block is `:disabled' - only the package ports
-;; (autoloaded commands for SPC g c); its embark-glue autoloads skipped too
+;; (autoloaded commands for SPC g c)
 (use-package consult-gh
   :ensure (consult-gh :host github :repo "armindarvish/consult-gh" :files ("*.el"))
-  :defer t)
+  :defer t
+  :config
+  ;; consult-gh 2.0+ ships embark glue as a separate mode; without it
+  ;; embark has no default action for consult-gh candidates
+  (require 'consult-gh-embark)
+  (consult-gh-embark-mode 1))
 
 (use-package git-auto-commit-mode
   :ensure t
