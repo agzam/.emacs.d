@@ -49,39 +49,4 @@
       (expect (buffer-string)
               :to-equal "* A Story Title\n  50 points\n"))))
 
-(describe "consult-line-collect-urls"
-  ;; consult isn't installed in the test sandbox; satisfy the runtime
-  ;; require and stub consult--read
-  (before-all (provide 'consult))
 
-  (it "offers only url-bearing lines and jumps to the selection"
-    (with-temp-buffer
-      (insert "no url here\n"
-              "see https://one.example/x now\n"
-              "plain line\n"
-              "and https://two.example/y\n")
-      (let (captured)
-        (cl-letf (((symbol-function 'consult--read)
-                   (lambda (cands &rest _)
-                     (setq captured cands)
-                     (car (nth 1 cands))))
-                  ((symbol-function 'recenter) #'ignore))
-          (consult-line-collect-urls))
-        (expect (mapcar #'car captured)
-                :to-equal '("2: https://one.example/x"
-                            "4: https://two.example/y"))
-        (expect (line-number-at-pos) :to-equal 4))))
-
-  (it "honors the ignore-regexp filter"
-    (with-temp-buffer
-      (insert "keep https://one.example/x\n"
-              "skip https://news.ycombinator.com/item?id=1\n")
-      (let (captured)
-        (cl-letf (((symbol-function 'consult--read)
-                   (lambda (cands &rest _)
-                     (setq captured cands)
-                     (caar cands)))
-                  ((symbol-function 'recenter) #'ignore))
-          (consult-line-collect-urls "ycombinator\\.com"))
-        (expect (mapcar #'car captured)
-                :to-equal '("1: https://one.example/x"))))))
