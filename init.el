@@ -202,15 +202,17 @@ build-in-place to clone."
 (defvar active-modules
   `(evil bindings lookup git general multiple-cursors completion embark colors modeline tab-bar elisp search dired ai web-browsing tree-sitter lsp clojure python lua java rust org shell writing chat yaml pdf
     ;; darwin-only tail - Doom's (:if (featurep :system 'macos) ...)
+    ;; hammerspoon: monroe glue for the spacehammer fennel nREPL.
     ;; jira after osx: its browse autoload rides the web-browsing + git
     ;; module fns (loaded above), and it defers on org (loaded above).
-    ,@(when (eq system-type 'darwin) '(osx jira)))
+    ,@(when (eq system-type 'darwin) '(osx hammerspoon jira)))
   "Modules under modules/, loaded in this exact order.
 bindings (Doom's :config default) precedes the :custom ports, like in doom!;
 lookup (Doom's :tools lookup core) rides right behind it; lsp < clojure <
 python/lua/java/rust < org keeps the doom! :custom order (python/lua/java/rust
-ride behind lsp and clojure - they call lsp!, the lsp lookup handlers, and
-clojure's fennel monroe glue; java/rust need no extra deps beyond lsp).
+ride behind lsp and clojure - they call lsp! and the lsp lookup handlers;
+java/rust need no extra deps beyond lsp; fennel's monroe glue now lives in
+the darwin-tail hammerspoon module, autoloaded so order-independent).
 pdf trails org and writing: org-noter defers on org, and the
 nov (epub) config rides writing's translate + jinx autoloads.")
 

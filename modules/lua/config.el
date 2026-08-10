@@ -6,8 +6,8 @@
 ;;   `lua-search-documentation' - so :ensure nil, no MELPA package.
 ;; - friar dropped: it drove an AwesomeWM (Linux/X11) fennel REPL off a
 ;;   /home/ag/.luarocks path.  This machine is macOS, where the Lua/Fennel
-;;   work is Hammerspoon - handled by spacehammer (writing) and the clojure
-;;   module's monroe glue.  Nothing bound awesomewm-repl or friar.
+;;   work is Hammerspoon - handled by spacehammer (writing) and the
+;;   hammerspoon module's monroe glue.  Nothing bound awesomewm-repl or friar.
 ;; - fennel starts lsp via `lsp!' (deferred, guarded) instead of doom.d's
 ;;   bare `lsp', matching the lsp module's blessed entry point.
 

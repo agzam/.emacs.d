@@ -1,4 +1,4 @@
-;;; tests/clojure/monroe-tests.el --- clojure/autoload/monroe.el specs -*- lexical-binding: t; -*-
+;;; tests/hammerspoon/monroe-tests.el --- hammerspoon/autoload/monroe.el specs -*- lexical-binding: t; -*-
 
 (require 'test-helper
          (expand-file-name
@@ -7,7 +7,7 @@
                                   "helper.el")))
 (require 'buttercup)
 
-(load-module-file "modules/clojure/autoload/monroe.el")
+(load-module-file "modules/hammerspoon/autoload/monroe.el")
 
 (defvar monroe-default-port 7888)
 

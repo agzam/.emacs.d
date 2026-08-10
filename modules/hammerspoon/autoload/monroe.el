@@ -1,4 +1,4 @@
-;;; modules/clojure/autoload/monroe.el -*- lexical-binding: t; -*-
+;;; modules/hammerspoon/autoload/monroe.el -*- lexical-binding: t; -*-
 
 ;; Monroe glue for the Hammerspoon (spacehammer) fennel nREPL.  Renamed off
 ;; the spacehammer- package namespace (writing-port precedent:
