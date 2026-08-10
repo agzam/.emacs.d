@@ -30,6 +30,8 @@
               consult-omni-youtube
               gptel-log-find
               search-github-with-lang
+              slack-visible-capture
+              slack-visible-yank
               slacko-search)))
 
   (it "carries none of the dropped rows"

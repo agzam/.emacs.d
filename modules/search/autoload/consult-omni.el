@@ -31,5 +31,7 @@ ARGS &rest OPTIONS)."
     ("gf" "gptel log find" gptel-log-find :if (lambda () (featurep 'gptel)))]
    [("gh" "code search" search-github-with-lang)
     ("gH" "github" consult-omni-github :if (lambda () (featurep 'consult-gh)))
-    ("ss" "slack search" slacko-search)
-    ("hn" "HN" consult-hn-transient :if (lambda () (featurep 'consult-hn)))]])
+    ("hn" "HN" consult-hn-transient :if (lambda () (featurep 'consult-hn)))]
+   [("ss" "slack visible msg" slack-visible-capture)
+    ("sy" "slack yank link" slack-visible-yank)
+    ("sS" "slack search" slacko-search)]])
