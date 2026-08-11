@@ -37,6 +37,26 @@ the /issues/ form to /pull/ so it resolves pull requests too."
           project ticket))
 
 ;;;###autoload
+(defun bug-reference-github-resolve-url (url)
+  "Ask the GitHub API for the accurate html_url behind issue URL.
+Issues and pull requests share one number sequence, so a constructed
+/issues/N url is only a guess; the issues API accepts both kinds and
+its html_url says /pull/N for pull requests.  On any failure (no ghub,
+no token, offline, 404) returns URL as-is - github.com still redirects."
+  (or (and (or (fboundp 'ghub-get) (require 'ghub nil t))
+           (string-match
+            "github\\.com/\\([^/]+\\)/\\([^/]+\\)/issues/\\([0-9]+\\)\\'" url)
+           (condition-case nil
+               (alist-get 'html_url
+                          (ghub-get (format "/repos/%s/%s/issues/%s"
+                                            (match-string 1 url)
+                                            (match-string 2 url)
+                                            (match-string 3 url))
+                                    nil :auth 'forge))
+             (error nil)))
+      url))
+
+;;;###autoload
 (defun bug-reference-url-format-fn ()
   "GitHub issue URL for the last `bug-reference-bug-regexp' match."
   (bug-reference-github-issue-url (match-string-no-properties 2)
@@ -45,10 +65,14 @@ the /issues/ form to /pull/ so it resolves pull requests too."
 
 ;;;###autoload
 (defun bug-reference->github-url (ref)
-  "GitHub issue URL for a bug REF string like \"org/repo#123\".
+  "GitHub URL for a bug REF string like \"org/repo#123\".
 Returns nil when REF is not a bug reference.  Re-matches against REF
-rather than the buffer, so it is safe to call away from point."
+rather than the buffer, so it is safe to call away from point.  Unlike
+the in-buffer button path this url gets pasted as text, so it consults
+the API to tell pull requests from issues instead of leaning on the
+github.com redirect; offline it falls back to the /issues/ form."
   (when (string-match bug-reference-bug-regexp ref)
-    (bug-reference-github-issue-url (match-string-no-properties 2 ref)
-                                    (match-string-no-properties 3 ref)
-                                    (match-string-no-properties 4 ref))))
+    (bug-reference-github-resolve-url
+     (bug-reference-github-issue-url (match-string-no-properties 2 ref)
+                                     (match-string-no-properties 3 ref)
+                                     (match-string-no-properties 4 ref)))))

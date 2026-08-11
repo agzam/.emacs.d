@@ -40,14 +40,61 @@
         (expect (bug-reference-url-format-fn)
                 :to-equal "https://github.com/agzam/spacehammer/issues/101")))))
 
+;; NOTE ghub-get is stubbed per-test with cl-letf, never a top-level defun:
+;; buttercup-run-discover shares one Emacs and tests/org/custom-tests.el
+;; already defines a global ghub-get stub - two defuns would collide.
+
+(describe "bug-reference-github-resolve-url"
+  (it "swaps /issues/ for the API html_url when the number is a pull request"
+    (let (calls)
+      (cl-letf (((symbol-function 'ghub-get)
+                 (lambda (resource &rest _)
+                   (push resource calls)
+                   '((html_url . "https://github.com/agzam/github-topics/pull/4")))))
+        (expect (bug-reference-github-resolve-url
+                 "https://github.com/agzam/github-topics/issues/4")
+                :to-equal "https://github.com/agzam/github-topics/pull/4")
+        (expect calls :to-equal '("/repos/agzam/github-topics/issues/4")))))
+  (it "keeps the url when the number is a real issue"
+    (cl-letf (((symbol-function 'ghub-get)
+               (lambda (&rest _)
+                 '((html_url . "https://github.com/agzam/spacehammer/issues/101")))))
+      (expect (bug-reference-github-resolve-url
+               "https://github.com/agzam/spacehammer/issues/101")
+              :to-equal "https://github.com/agzam/spacehammer/issues/101")))
+  (it "returns the url unchanged when the API call fails"
+    (cl-letf (((symbol-function 'ghub-get)
+               (lambda (&rest _) (error "offline"))))
+      (expect (bug-reference-github-resolve-url
+               "https://github.com/agzam/github-topics/issues/4")
+              :to-equal "https://github.com/agzam/github-topics/issues/4")))
+  (it "does not consult the API for non-issue urls"
+    (let (calls)
+      (cl-letf (((symbol-function 'ghub-get)
+                 (lambda (&rest args) (push args calls) nil)))
+        (expect (bug-reference-github-resolve-url "https://example.com/foo")
+                :to-equal "https://example.com/foo")
+        (expect calls :to-be nil)))))
+
 (describe "bug-reference->github-url"
-  (it "expands an org/repo#N ref string to its GitHub issue url"
+  (it "resolves an org/repo#N ref through the API to the accurate url"
     (let ((bug-reference-bug-regexp bug-reference-bug-regexp)
           (bug-reference-url-format bug-reference-url-format))
       (init-bug-reference-mode-settings)
-      (expect (bug-reference->github-url "qlik-trial/stitch-menagerie-service#576")
-              :to-equal
-              "https://github.com/qlik-trial/stitch-menagerie-service/issues/576")))
+      (cl-letf (((symbol-function 'ghub-get)
+                 (lambda (&rest _)
+                   '((html_url . "https://github.com/agzam/github-topics/pull/4")))))
+        (expect (bug-reference->github-url "agzam/github-topics#4")
+                :to-equal "https://github.com/agzam/github-topics/pull/4"))))
+  (it "falls back to the /issues/ form when the API is unreachable"
+    (let ((bug-reference-bug-regexp bug-reference-bug-regexp)
+          (bug-reference-url-format bug-reference-url-format))
+      (init-bug-reference-mode-settings)
+      (cl-letf (((symbol-function 'ghub-get)
+                 (lambda (&rest _) (error "offline"))))
+        (expect (bug-reference->github-url "qlik-trial/stitch-menagerie-service#576")
+                :to-equal
+                "https://github.com/qlik-trial/stitch-menagerie-service/issues/576"))))
   (it "returns nil for a non-reference string"
     (let ((bug-reference-bug-regexp bug-reference-bug-regexp)
           (bug-reference-url-format bug-reference-url-format))
