@@ -344,8 +344,8 @@
     :keymaps (append default-minibuffer-maps)
     "C-/" #'consult-history)
 
-  (map! :after consult
-        :map isearch-mode-map "M-s l" #'consult-line)
+  (map! :after consult :map isearch-mode-map "M-s l" #'consult-line)
+  (map! :after consult :map minibuffer-local-map "C-r" #'consult-history)
 
   (remove-hook! 'consult-after-jump-hook 'consult--maybe-recenter)
   (add-hook! 'consult-after-jump-hook 'recenter))
