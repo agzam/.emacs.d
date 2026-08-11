@@ -18,8 +18,11 @@
 
 ;;;###autoload
 (defun get-gh-item-title (uri)
-  "Based on given GitHub URI for pull-request or issue,
-  return the title of that pull-request or issue."
+  "Title of the GitHub pull-request, issue or repo behind URI.
+Nil for anything that is not a github.com link."
+  ;; own the ghub dep here instead of leaning on some earlier-loaded file
+  ;; having required it (url.el used to; its converters call this lazily)
+  (unless (fboundp 'ghub-get) (require 'ghub))
   (cond
    (;; either PR or issue
     (string-match "\\(github.com\\).*\\(issues\\|pull\\)" uri)

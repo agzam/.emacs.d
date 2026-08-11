@@ -44,7 +44,7 @@ Signals an error if there is no current project."
   ;; a file:     https://github.com/fniessen/refcard-org-mode/blob/master/images/org-mode-unicorn.png
   ;; a diff:     https://github.com/advthreat/iroh/pull/7317/files#diff-3edf9...
   ;; comparison: https://github.com/advthreat/iroh/compare/master...1.78-proposal
-  (let* ((seg "\\([A-z,0-9,._~!$&'()*+,;=:@%-]+\\)")
+  (let* ((seg "\\([A-Za-z0-9._~!$&'()*+,;=:@%-]+\\)")
          (bare-rx (concat "\\(https\\:\\/\\/github.com\\)\\/" seg "\\/" seg))
          (file-rx (concat bare-rx "\\/blob\\/" seg "\\/\\(.*\\)"))
          (issue-rx (concat "\\(https\\:\\/\\/github.com\\)\\/" seg
@@ -78,6 +78,16 @@ Signals an error if there is no current project."
                (when (string-match re fname)
                  (replace-regexp-in-string
                   re "\\1" fname)))))))
+
+;;;###autoload
+(defun github-url->bug-reference (url)
+  "Bug reference \"org/repo#N\" for a GitHub issue or pull URL.
+Nil when URL carries no issue/pull number; errors (via
+`bisect-github-url') when URL is not a GitHub url at all, so
+converter commands surface why nothing happened."
+  (let ((parts (bisect-github-url url)))
+    (when-let* ((num (or (plist-get parts :pull) (plist-get parts :issue))))
+      (format "%s/%s#%s" (plist-get parts :org) (plist-get parts :repo) num))))
 
 (defun github-get-readme-url (repo-url)
   "Get the README blob URL for a GitHub repo at REPO-URL."

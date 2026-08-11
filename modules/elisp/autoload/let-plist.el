@@ -3,7 +3,7 @@
 ;; Borrowed from https://emacs.stackexchange.com/questions/45581.  doom.d
 ;; carried it as an in-module :local-repo package (straight load-order
 ;; workaround); here the cookied macro rides the module loaddefs, which also
-;; heals general's bare let-plist uses (url.el, misc.el) at call time.
+;; heals general's bare let-plist uses (misc.el) at call time.
 ;;; Code:
 
 (require 'let-alist)

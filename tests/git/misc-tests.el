@@ -55,6 +55,24 @@
       (expect (plist-get parts :ext) :to-equal "src/code.py#L42")))
   (it "errors on non-github urls"
     (expect (bisect-github-url "https://example.com/not/github")
+            :to-throw 'error))
+  (it "handles dots, dashes and underscores in org and repo"
+    (let ((parts (bisect-github-url "https://github.com/foo-bar.baz/qu_ux-1.2")))
+      (expect (plist-get parts :org) :to-equal "foo-bar.baz")
+      (expect (plist-get parts :repo) :to-equal "qu_ux-1.2"))))
+
+(describe "github-url->bug-reference"
+  (it "formats a pull url as org/repo#N"
+    (expect (github-url->bug-reference "https://github.com/agzam/foo/pull/4")
+            :to-equal "agzam/foo#4"))
+  (it "formats an issue url as org/repo#N"
+    (expect (github-url->bug-reference "https://github.com/agzam/foo/issues/12")
+            :to-equal "agzam/foo#12"))
+  (it "returns nil for a bare repo url"
+    (expect (github-url->bug-reference "https://github.com/agzam/foo")
+            :to-be nil))
+  (it "errors on non-github urls"
+    (expect (github-url->bug-reference "https://example.com/x/y")
             :to-throw 'error)))
 
 (describe "make-path"
