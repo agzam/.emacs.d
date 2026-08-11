@@ -11,7 +11,7 @@
              (fboundp 'treesit-available-p)
              (treesit-available-p))
   :config
-  (setopt treesit-auto-install-grammar 'ask
+  (setopt treesit-auto-install-grammar 'always
           treesit-enabled-modes '(python-ts-mode css-ts-mode
                                   typescript-ts-mode js-ts-mode json-ts-mode
                                   bash-ts-mode dockerfile-ts-mode
