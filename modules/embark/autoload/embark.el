@@ -131,9 +131,9 @@ targets."
               ;; string crashes actions like consult-gh--pr-view-action
               ((not (string-empty-p str))))
     (cond
-     ;; github-topics previews via `consult-preview-key' already;
-     ;; dwim-ing it would additionally open the browser
-     ((eq type 'github-topics-pr) nil)
+     ;; these preview via `consult-preview-key' already; dwim-ing them
+     ;; would additionally run the default action (browser / thread capture)
+     ((memq type '(github-topics-pr slacko-message)) nil)
      ((and (member type '(url consult-omni))
            (string-match-p
             ;; only match PRs/Issues or individual files
