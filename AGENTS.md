@@ -43,10 +43,19 @@ into code or prose.
   `doom-state-dir` (.local/state/).
 - New package writing into `user-emacs-directory`? Redirect its path variable
   in the quarantine section of `lisp/doom-compat.el`.
-- Batch runs (`emacs -Q --batch`) skip early-init.el and with it the eln
-  redirect; a spec that cl-letf-mocks a C primitive makes Emacs write a
-  trampoline .eln to ~/.emacs.d/eln-cache. tests/helper.el redirects that
-  into the test sandbox - any new batch entry point needs the same.
+- Neither `-Q` nor `--batch` relocates `user-emacs-directory` - they only skip
+  loading init files, and they skip early-init.el with it, so the eln
+  redirect never fires. Every unset default (eln cache, `auto-save-list`,
+  transient history, `package-user-dir`) then resolves against the real
+  config dir. Every `emacs` invocation anywhere - probes, harnesses, other
+  repos' Makefiles - takes `--init-directory` pointing at a sandbox; ad-hoc
+  probes use `emacs -Q --init-directory=$(mktemp -d)`.
+- The config's own batch entry points do this via the `emacs-batch` vector in
+  bb.edn (`--init-directory` plus an explicit `startup-redirect-eln-cache`,
+  since `--init-directory` alone would put the eln cache at the root);
+  tests/helper.el redirects again into the test sandbox.
+- `bb check-root` is the tripwire: anything at the root that is neither
+  git-tracked nor a sanctioned exception fails it.
 - `.gitignore` is a conventional blacklist (.local/, custom.el, per-tool
   droppings, *.elc/*.eln litter); anything unexpected dumped into the tree
   shows up in `git status` instead of being silently ignored.
@@ -94,8 +103,9 @@ into code or prose.
 
 - Canonical entry points (same locally and in CI, see
   `.github/workflows/ci.yml`): `bb lint` (check-parens over tracked elisp),
-  `bb test` (buttercup suites in `tests/`), `bb smoke` (full elpaca boot in
-  a pty; verdict comes from the marker written by `scripts/smoke-check.el`).
+  `bb test` (buttercup suites in `tests/`), `bb check-root` (nothing leaked
+  into the config root), `bb smoke` (full elpaca boot in a pty; verdict comes
+  from the marker written by `scripts/smoke-check.el`).
 - Every module port adds or extends a suite in `tests/`, which mirrors the
   source tree: `tests/MODULE/FILE-tests.el` per module source file (the
   `autoload/` level is flattened), `lisp/` sources under `tests/lisp/`.

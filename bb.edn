@@ -8,6 +8,15 @@
                                        (or (System/getProperty "babashka.config")
                                            *file*)))))
             (def test-elpa (str (fs/path root ".local" ".cache" "test-elpa")))
+            ;; Neither -Q nor --batch relocates `user-emacs-directory', and both
+            ;; skip early-init.el and with it the eln redirect - so an
+            ;; unadorned batch Emacs drops trampolines and package droppings
+            ;; into whatever ~/.emacs.d the developer actually runs.
+            (def emacs-batch
+              ["emacs" "-Q" "--batch" "--init-directory" root
+               "--eval" (format "(startup-redirect-eln-cache %s)"
+                                (pr-str (str (fs/path root ".local" ".cache" "eln"))))])
+
             (defn emacs-socket-owner
               "Pid of the process holding the default Emacs server socket, or nil.
 Mirrors emacsclient's default socket path: $TMPDIR/emacs<uid>/server.
@@ -105,12 +114,13 @@ not block on a credential prompt)."
                               "-l" (str (fs/path root "scripts" driver))))))
 
   deps {:doc "Install test deps (buttercup, parseedn) into .local/.cache/test-elpa"
-        :task (p/shell "emacs" "-Q" "--batch"
-                       "--eval" (format "(setq package-user-dir %s)" (pr-str test-elpa))
-                       "--eval" "(require 'package)"
-                       "--eval" "(add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\"))"
-                       "-f" "package-initialize"
-                       "--eval" "(dolist (p '(buttercup parseedn)) (unless (package-installed-p p) (unless package-archive-contents (package-refresh-contents)) (package-install p)))")}
+        :task (apply p/shell
+                     (concat emacs-batch
+                             ["--eval" (format "(setq package-user-dir %s)" (pr-str test-elpa))
+                              "--eval" "(require 'package)"
+                              "--eval" "(add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\"))"
+                              "-f" "package-initialize"
+                              "--eval" "(dolist (p '(buttercup parseedn)) (unless (package-installed-p p) (unless package-archive-contents (package-refresh-contents)) (package-install p)))"]))}
 
   lint {:doc "check-parens over every tracked .el file"
         :task (let [files (->> (p/shell {:out :string :dir root}
@@ -121,17 +131,17 @@ not block on a credential prompt)."
                                ;; -c lists deleted-but-unstaged files too
                                (filter (fn [f] (fs/exists? (fs/path root f)))))]
                 (apply p/shell {:dir root}
-                       "emacs" "-Q" "--batch" "-l" "scripts/lint.el" files))}
+                       (concat emacs-batch ["-l" "scripts/lint.el"] files)))}
 
   test {:doc "Run the buttercup suites in tests/"
         :depends [deps]
         ;; :dir matters: buttercup-run-discover finds nothing from foreign cwds
-        :task (p/shell {:dir root}
-                       "emacs" "-Q" "--batch"
-                       "--eval" (format "(setq package-user-dir %s)" (pr-str test-elpa))
-                       "-f" "package-initialize"
-                       "--eval" "(setq buttercup-stack-frame-style 'omit)"
-                       "-f" "buttercup-run-discover" (str (fs/path root "tests")))}
+        :task (apply p/shell {:dir root}
+                     (concat emacs-batch
+                             ["--eval" (format "(setq package-user-dir %s)" (pr-str test-elpa))
+                              "-f" "package-initialize"
+                              "--eval" "(setq buttercup-stack-frame-style 'omit)"
+                              "-f" "buttercup-run-discover" (str (fs/path root "tests"))]))}
 
   smoke {:doc "Full Elpaca boot in a pty; verdict comes from the result marker"
          :task (let [result (str (fs/create-temp-file {:prefix "emacs-lab-smoke"}))
@@ -212,8 +222,16 @@ not block on a credential prompt)."
          :task (System/exit (run-batch-driver "audit-void-commands.el"))}
 
   docsets {:doc "Install/update the Dash docsets the config expects (batch, like doom.d's `make dash-docsets')"
-           :task (p/shell "emacs" "-Q" "--batch"
-                          "-l" (str (fs/path root "scripts" "install-docsets.el")))}
+           :task (apply p/shell
+                        (concat emacs-batch
+                                ["-l" (str (fs/path root "scripts" "install-docsets.el"))]))}
 
-  ci {:doc "deps + lint + test (the fast tier; smoke is a separate job)"
-      :depends [deps lint test]}}}
+  check-root {:doc "Fail on anything at the config root that is neither tracked nor a sanctioned exception - a stray means some run wrote outside .local/"
+              :task (System/exit
+                     (:exit (apply p/shell {:continue true}
+                                   (concat emacs-batch
+                                           ["-l" (str (fs/path root "scripts" "check-root.el"))
+                                            "--eval" (format "(check-root-main %s)" (pr-str root))]))))}
+
+  ci {:doc "deps + lint + test + check-root (the fast tier; smoke is a separate job)"
+      :depends [deps lint test check-root]}}}
