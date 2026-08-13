@@ -7,7 +7,9 @@
 ;; a terminal key embeds the label in the keymap as a (DESC . DEF) menu item
 ;; (built-in which-key reads it directly, so embark's prefix-stripped
 ;; sub-keymaps keep their labels); prefix labels stay global replacements so
-;; layered leader prefixes across modules still merge instead of clobbering.
+;; layered leader prefixes across modules still merge instead of clobbering,
+;; but outside the leader tree they go through `which-key-label-prefix', which
+;; only matches prefix bindings.
 ;;; Code:
 
 (require 'doom-compat)
@@ -172,6 +174,22 @@ localleader prefix."
   (which-key-add-key-based-replacements doom-leader-key "<leader>")
   (which-key-add-key-based-replacements doom-localleader-key "<localleader>"))
 
+(defun which-key-label-prefix (key desc)
+  "Label the prefix keymap bound at KEY as DESC.
+Narrower than `which-key-add-key-based-replacements', which matches the
+key alone: embark resolves a pressed prefix to its bare sub-keymap and
+hands that to which-key with no prefix context, so a top-level \"b\"
+label would rename whatever command sits on \"b\" one level down."
+  (cl-pushnew (cons (cons (format "\\`%s\\'" (regexp-quote (key-description (kbd key))))
+                          ;; which-key renders a bare prefix keymap as
+                          ;; "prefix", one carrying a (DESC . KEYMAP) label as
+                          ;; "group:DESC"; anchored both ends so the label
+                          ;; replaces the description whole
+                          "\\`\\(?:group:.*\\|prefix\\)\\'")
+                    (cons nil desc))
+              which-key-replacement-alist
+              :test #'equal))
+
 
 ;;; ** `map!' macro
 
@@ -256,7 +274,16 @@ For example, :nvi will map to (list \\='normal \\='visual \\='insert). See
                     (doom--map-set (if doom--map-fn :infix :prefix)
                                    prefix)
                     (when (stringp desc)
-                      (setq rest (append (list :desc desc "" nil) rest)))))
+                      (if doom--map-fn
+                          ;; leader/localleader labels ride on the whole
+                          ;; <leader>-anchored sequence, which nothing else can
+                          ;; match; `doom--define-leader-key' reads them off
+                          ;; the :which-key def
+                          (setq rest (append (list :desc desc "" nil) rest))
+                        (push `(after! which-key
+                                 (which-key-label-prefix
+                                  ,(doom--map-append-keys :prefix) ,desc))
+                              doom--map-forms)))))
                  (:textobj
                   (let* ((key (pop rest))
                          (inner (pop rest))
