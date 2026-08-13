@@ -240,10 +240,18 @@
              :to-equal
              "fix [PR title](https://github.com/agzam/foo/issues/12) soon"))))
 
-;;; mode-aware dispatcher
+;;; dispatcher
+;;
+;; Dispatch follows the link under point, so a markdown-derived buffer is
+;; stood up here to prove the major mode does not steer it.  markdown-mode
+;; itself is absent from the batch harness.
+
+(unless (fboundp 'markdown-mode)
+  (define-derived-mode markdown-mode text-mode "Markdown"))
+(define-derived-mode chat-like-mode markdown-mode "ChatLike")
 
 (describe "link->link-bug-reference"
-  (it "routes through the org converter in org buffers"
+  (it "routes through the org converter for an org link"
     (with-temp-buffer
       (org-mode)
       (insert "pre [[https://github.com/agzam/foo/issues/7][x]] post")
@@ -251,9 +259,27 @@
       (link->link-bug-reference)
       (expect (buffer-string) :to-equal "pre agzam/foo#7 post")))
 
-  (it "routes through the plain converter elsewhere"
+  (it "routes through the plain converter for a bare url"
     (with-temp-buffer
       (insert "pre https://github.com/agzam/foo/issues/7 post")
       (search-backward "issues")
       (link->link-bug-reference)
-      (expect (buffer-string) :to-equal "pre agzam/foo#7 post"))))
+      (expect (buffer-string) :to-equal "pre agzam/foo#7 post")))
+
+  (it "converts a bare url in a markdown-derived buffer"
+    (with-temp-buffer
+      (chat-like-mode)
+      (insert "pre https://github.com/agzam/foo/pull/4 post")
+      (search-backward "pull")
+      (link->link-bug-reference)
+      (expect (buffer-string) :to-equal "pre agzam/foo#4 post")))
+
+  (it "still routes a real markdown link through the markdown converter"
+    (cl-letf (((symbol-function 'markdown-link-at-pos)
+               (lambda (_) '(5 44 "x" "https://github.com/agzam/foo/pull/4" nil nil))))
+      (with-temp-buffer
+        (chat-like-mode)
+        (insert "pre [x](https://github.com/agzam/foo/pull/4) post")
+        (search-backward "x")
+        (link->link-bug-reference)
+        (expect (buffer-string) :to-equal "pre agzam/foo#4 post")))))

@@ -236,11 +236,15 @@ from it."
 
 ;;;###autoload
 (defun link->link-bug-reference ()
-  "Convert link at point to an org/repo#N reference, per major mode."
+  "Convert link at point to an org/repo#N reference.
+Dispatches on the link under point, not the major mode: a bare url in a
+markdown-derived buffer (gfm, eca-chat) is a plain link, and the
+markdown parser would silently decline it."
   (interactive)
-  (cond ((derived-mode-p 'org-mode) (link-org->link-bug-reference))
-        ((derived-mode-p 'markdown-mode) (link-markdown->link-bug-reference))
-        (t (link-plain->link-bug-reference))))
+  (pcase (car (url-get-link-type))
+    ('org-mode (link-org->link-bug-reference))
+    ('markdown (link-markdown->link-bug-reference))
+    (_ (link-plain->link-bug-reference))))
 
 ;;; the odd ones out
 
