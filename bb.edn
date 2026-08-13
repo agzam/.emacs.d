@@ -14,7 +14,9 @@
             ;; into whatever ~/.emacs.d the developer actually runs.
             (def emacs-batch
               ["emacs" "-Q" "--batch" "--init-directory" root
-               "--eval" (format "(startup-redirect-eln-cache %s)"
+               ;; Guarded like early-init.el's copy: CI's Emacs has no native
+               ;; comp, where the redirect dies on a void native-comp-eln-load-path.
+               "--eval" (format "(when (and (featurep 'native-compile) (fboundp 'startup-redirect-eln-cache)) (startup-redirect-eln-cache %s))"
                                 (pr-str (str (fs/path root ".local" ".cache" "eln"))))])
 
             (defn emacs-socket-owner
