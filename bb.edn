@@ -100,6 +100,36 @@ terminal (or ELPACA_UPDATE_COLOR=1 forces it) and NO_COLOR is unset."
               (and (str/blank? (or (System/getenv "NO_COLOR") ""))
                    (or (some? (System/console))
                        (= "1" (System/getenv "ELPACA_UPDATE_COLOR")))))
+            (defn run-pty-probe
+              "Boot the full config in a pty with SCRIPT loaded on top.
+The probe writes its verdict to the file named by RESULT-ENV; anything
+that does not start with OK-PREFIX (a missing marker included) fails the
+task.  A pty because the boot is `emacs -nw': elpaca's install UI and
+embark's key prompter both want a terminal.  BSD and util-linux
+script(1) disagree on syntax, hence the split."
+              [script result-env ok-prefix intro]
+              (let [result (str (fs/create-temp-file {:prefix "emacs-lab-probe"}))
+                    macos? (str/includes? (str/lower-case (System/getProperty "os.name")) "mac")
+                    emacs-args ["emacs" "-nw" "--init-directory" root
+                                "-l" (str (fs/path root "scripts" script))]
+                    cmd (if macos?
+                          (into ["script" "-q" "/dev/null"] emacs-args)
+                          ["script" "-qec" (str/join " " emacs-args) "/dev/null"])]
+                (println intro)
+                (apply p/shell {:continue true
+                                :extra-env {result-env result
+                                            ;; CI runners have no usable TERM
+                                            "TERM" "xterm-256color"
+                                            ;; a private/unreachable remote must fail the
+                                            ;; elpaca order, not sit at a git prompt the
+                                            ;; pty swallows until the watchdog
+                                            "GIT_TERMINAL_PROMPT" "0"}}
+                       cmd)
+                (let [verdict (if (fs/exists? result) (slurp result) "NO RESULT MARKER\n")]
+                  (print verdict)
+                  (flush)
+                  (when-not (str/starts-with? verdict ok-prefix)
+                    (System/exit 1)))))
             (defn run-batch-driver
               "Boot the full config in --batch, load scripts/DRIVER on top,
 and return the exit code.  Shared by update/repair/audit - every headless
@@ -146,29 +176,14 @@ not block on a credential prompt)."
                               "-f" "buttercup-run-discover" (str (fs/path root "tests"))]))}
 
   smoke {:doc "Full Elpaca boot in a pty; verdict comes from the result marker"
-         :task (let [result (str (fs/create-temp-file {:prefix "emacs-lab-smoke"}))
-                     macos? (str/includes? (str/lower-case (System/getProperty "os.name")) "mac")
-                     emacs-args ["emacs" "-nw" "--init-directory" root
-                                 "-l" (str (fs/path root "scripts" "smoke-check.el"))]
-                     ;; pty wrapper syntax differs: BSD vs util-linux script(1)
-                     cmd (if macos?
-                           (into ["script" "-q" "/dev/null"] emacs-args)
-                           ["script" "-qec" (str/join " " emacs-args) "/dev/null"])]
-                 (println "smoke: booting the config (first elpaca run can take minutes)...")
-                 (apply p/shell {:continue true
-                                 :extra-env {"SMOKE_RESULT_FILE" result
-                                             ;; CI runners have no usable TERM
-                                             "TERM" "xterm-256color"
-                                             ;; a private/unreachable remote must fail the
-                                             ;; elpaca order, not sit at a git prompt the
-                                             ;; pty swallows until the watchdog
-                                             "GIT_TERMINAL_PROMPT" "0"}}
-                        cmd)
-                 (let [verdict (if (fs/exists? result) (slurp result) "NO RESULT MARKER\n")]
-                   (print verdict)
-                   (flush)
-                   (when-not (str/starts-with? verdict "SMOKE-OK")
-                     (System/exit 1))))}
+         :task (run-pty-probe
+                "smoke-check.el" "SMOKE_RESULT_FILE" "SMOKE-OK"
+                "smoke: booting the config (first elpaca run can take minutes)...")}
+
+  e2e {:doc "Drive real keypresses over real buffers in a booted config (tests/e2e/); verdict from the result marker"
+       :task (run-pty-probe
+              "e2e-check.el" "E2E_RESULT_FILE" "E2E-OK"
+              "e2e: booting the config to drive real flows...")}
 
   update {:doc "Update every Elpaca package: drives the running Emacs live (streamed, no restart) if its server is up, else headless --batch (restart after). Like `doom sync -u'. Re-run while one is in flight re-attaches to its progress."
           :task (let [probe (emacs-server-probe)]
@@ -235,5 +250,5 @@ not block on a credential prompt)."
                                            ["-l" (str (fs/path root "scripts" "check-root.el"))
                                             "--eval" (format "(check-root-main %s)" (pr-str root))]))))}
 
-  ci {:doc "deps + lint + test + check-root (the fast tier; smoke is a separate job)"
+  ci {:doc "deps + lint + test + check-root (the fast tier; smoke and e2e share the boot job)"
       :depends [deps lint test check-root]}}}

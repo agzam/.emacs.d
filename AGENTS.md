@@ -105,13 +105,27 @@ into code or prose.
   `.github/workflows/ci.yml`): `bb lint` (check-parens over tracked elisp),
   `bb test` (buttercup suites in `tests/`), `bb check-root` (nothing leaked
   into the config root), `bb smoke` (full elpaca boot in a pty; verdict comes
-  from the marker written by `scripts/smoke-check.el`).
+  from the marker written by `scripts/smoke-check.el`), `bb e2e` (the same
+  boot, then real keypresses over real buffers; marker from
+  `scripts/e2e-check.el`). Both pty probes share one CI job - smoke first,
+  since e2e means nothing if the config does not boot.
 - Every module port adds or extends a suite in `tests/`, which mirrors the
   source tree: `tests/MODULE/FILE-tests.el` per module source file (the
   `autoload/` level is flattened), `lisp/` sources under `tests/lisp/`.
   Suites load `tests/helper.el` (located via `locate-dominating-file`),
   which sandboxes the XDG dirs before doom-compat derives its paths - tests
   never touch the real cache/state.
+- A `with-temp-buffer` spec runs in a replica of a buffer, not in one: no
+  major mode was turned on, nothing is fontified, and no keymap was
+  consulted. Behaviour that depends on any of those - thingatpt providers,
+  overlays, text properties, or which target/keymap reaches a command -
+  cannot fail there, so a suite covering it proves nothing. Enable the modes
+  and fontify in the fixture, and add the flow to `tests/e2e/`: a scenario
+  file registering a function on `e2e-scenarios`, whose cases run through
+  `e2e-act-case` (real file in its own mode, fontified, displayed, driven by
+  real keypresses). Scenario files must not be named `*-tests.el` - that is
+  buttercup's discovery pattern. Link conversion shipped broken twice
+  because both fixes were verified only against the replica.
 - Ad-hoc smoke checks: the /tmp elisp file + kitty tab pattern still applies
   (`TERM=xterm-256color emacs -nw --init-directory ~/.emacs.d -l
   /tmp/check.el`, marker on `elpaca-after-init-hook`, `kill-emacs`). Always

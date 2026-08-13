@@ -26,9 +26,12 @@ jobs:
           key: test-elpa-${{ runner.os }}-${{ hashFiles('bb.edn') }}
       - run: bb ci
 
-  # Full tier: boot the whole config with elpaca in a pty. Doubles as the
-  # Linux-parity trial gate from MIGRATION.org. Elpaca is unpinned, so the
-  # restore-keys fallback keeps package checkouts warm between key changes.
+  # Full tier: boot the whole config with elpaca in a pty, then drive real
+  # flows through it. Doubles as the Linux-parity trial gate from
+  # MIGRATION.org. Elpaca is unpinned, so the restore-keys fallback keeps
+  # package checkouts warm between key changes. E2E rides this job rather
+  # than its own: it needs the same boot, and the packages this job just
+  # built make its second one cheap.
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -62,3 +65,4 @@ jobs:
             url."https://x-access-token:${TOKEN}@github.com/".insteadOf \
             "https://github.com/"
       - run: bb smoke
+      - run: bb e2e
