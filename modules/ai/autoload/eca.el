@@ -344,20 +344,48 @@ Keys: :file :id :workspace :model :project :title :time."
   (let ((id (plist-get entry :id)))
     (substring id 0 (min 8 (length id)))))
 
-(defun eca-archive--label (entry)
-  "A one-line description of ENTRY for completion."
+(defun eca-archive--column (text width)
+  "TEXT padded with spaces or truncated to exactly WIDTH columns.
+Both halves matter: without padding the titles start at a different
+column on every row, without truncation one long title pushes the dates
+of the rows below it out of line."
+  (truncate-string-to-width (or text "") width nil ?\s t))
+
+(defun eca-archive--project (entry)
+  "ENTRY's project as displayed."
+  (or (plist-get entry :project) "?"))
+
+(defun eca-archive--title (entry)
+  "ENTRY's title as displayed."
+  (or (plist-get entry :title) "untitled"))
+
+(defun eca-archive--width (entries accessor cap)
+  "Width of ACCESSOR's column across ENTRIES, at most CAP.
+Measures what gets rendered, fallbacks included: sizing a column by the
+raw field collapses it to nothing when every entry falls back."
+  (min cap (apply #'max 0 (mapcar (lambda (entry)
+                                    (string-width (funcall accessor entry)))
+                                  entries))))
+
+(defun eca-archive--label (entry project-width title-width)
+  "A row describing ENTRY, its columns sized by PROJECT-WIDTH and TITLE-WIDTH."
   (format "%s  %s"
-          (or (plist-get entry :project) "?")
-          (or (plist-get entry :title) "untitled")))
+          (eca-archive--column (eca-archive--project entry) project-width)
+          (eca-archive--column (eca-archive--title entry) title-width)))
 
 (defun eca-archive--table (entries)
   "Alist of label to entry over ENTRIES, keeping their order.
+Columns are sized to the entries in hand rather than fixed, so a set of
+short project names does not leave a gutter across every row.
+
 Two chats in one project can carry the same title, so a repeated label
 gains the chat id - unique by construction - rather than shadowing the
 entry it collides with."
-  (let (table)
+  (let ((project-width (eca-archive--width entries #'eca-archive--project 20))
+        (title-width (eca-archive--width entries #'eca-archive--title 60))
+        table)
     (dolist (entry entries (nreverse table))
-      (let ((label (eca-archive--label entry)))
+      (let ((label (eca-archive--label entry project-width title-width)))
         (when (assoc label table)
           (setq label (format "%s  [%s]" label (eca-archive--id-short entry))))
         (push (cons label entry) table)))))
@@ -373,22 +401,108 @@ would otherwise sort it alphabetically."
                    (cycle-sort-function . identity))
       (complete-with-action action labels string pred))))
 
+(defun eca-archive--annotation-function (table)
+  "An annotation function dating each row of TABLE in one column.
+The uniquifying id suffix makes some rows longer than the rest, so the
+dates are padded out to the widest row instead of trailing each one."
+  (let ((width (apply #'max 0 (mapcar (lambda (row) (string-width (car row))) table))))
+    (lambda (label)
+      (when-let* ((entry (cdr (assoc label table))))
+        (concat (make-string (max 1 (- (+ width 2) (string-width label))) ?\s)
+                (propertize (format-time-string "%Y-%m-%d %H:%M"
+                                                (plist-get entry :time))
+                            'face 'completions-annotations))))))
+
 (defun eca-archive-read-entry (&optional prompt)
   "Prompt with PROMPT for an archived chat and return its entry."
   (let* ((table (eca-archive--table (eca-archive-entries)))
          (completion-extra-properties
-          (list :annotation-function
-                (lambda (label)
-                  (when-let* ((entry (cdr (assoc label table))))
-                    (format "  %s"
-                            (format-time-string "%Y-%m-%d %H:%M"
-                                                (plist-get entry :time))))))))
+          (list :annotation-function (eca-archive--annotation-function table))))
     (unless table
       (user-error "No archived chats under %s" eca-archive-dir))
     (cdr (assoc (completing-read (or prompt "Continue chat: ")
                                  (eca-archive--completion-table (mapcar #'car table))
                                  nil t)
                 table))))
+
+;;;; Columns for the resume picker
+
+;; `eca-chat-resume' concatenates model, message count and age onto the end
+;; of the title, so every field begins wherever the title above it happened
+;; to stop.  Only the layout is rewritten here; which chats are offered and
+;; what happens to the chosen one stay upstream's.
+
+(defun eca-resume--fields (annotation)
+  "Return (MODEL COUNT AGE) pulled out of upstream's ANNOTATION.
+The age is found by its own face.  Model and message count share one,
+so they arrive as a single run and the count is split off its tail;
+neither can be found by splitting on whitespace, which both contain."
+  (let* ((end (length annotation))
+         (age-at (text-property-any 0 end 'face 'eca-chat-elapsed-time-face annotation))
+         (age (when age-at
+                (string-trim (substring-no-properties annotation age-at))))
+         (rest (string-trim (substring-no-properties annotation 0 (or age-at end))))
+         (count (when (string-match "\\([0-9]+ msgs\\)\\'" rest)
+                  (match-string 1 rest)))
+         (model (string-trim (if count (substring rest 0 (match-beginning 1)) rest))))
+    (list (unless (string-empty-p model) model) count age)))
+
+(defun eca-resume--rows (labels annotate)
+  "Alist of aligned display string to its LABEL, annotated by ANNOTATE.
+The label is kept as the value so the caller can hand upstream back the
+exact string it indexed its chats by."
+  (let* ((rows (mapcar (lambda (label)
+                         (cons label (eca-resume--fields (or (funcall annotate label) ""))))
+                       labels))
+         (width (lambda (get) (apply #'max 0 (mapcar (lambda (row)
+                                                       (string-width (or (funcall get row) "")))
+                                                     rows))))
+         (label-width (min 60 (funcall width #'car)))
+         (model-width (funcall width #'cadr))
+         (count-width (funcall width #'caddr)))
+    (mapcar
+     (pcase-lambda (`(,label ,model ,count ,age))
+       (cons (concat (eca-archive--column label label-width)
+                     "  " (propertize (eca-archive--column (or model "") model-width)
+                                      'face 'shadow)
+                     ;; right-aligned, so the digits line up rather than the
+                     ;; word after them
+                     "  " (propertize (string-pad (or count "") count-width nil t)
+                                      'face 'shadow)
+                     "  " (propertize (or age "") 'face 'eca-chat-elapsed-time-face))
+             label))
+     rows)))
+
+(defun eca-resume--completing-read (read prompt collection &rest args)
+  "Read from COLLECTION with PROMPT via READ, in columns, passing ARGS along.
+READ is the real `completing-read', handed in because the symbol is
+shadowed while this runs and calling it by name would recurse.  Falls
+back to READ untouched for a collection that annotates nothing, so this
+only ever reshapes the picker it was written for."
+  (let* ((metadata (ignore-errors (funcall collection "" nil 'metadata)))
+         (annotate (alist-get 'annotation-function (cdr-safe metadata))))
+    (if (not (functionp annotate))
+        (apply read prompt collection args)
+      (let* ((rows (eca-resume--rows (all-completions "" collection) annotate))
+             (chosen (apply read prompt
+                            (lambda (string pred action)
+                              (if (eq action 'metadata)
+                                  '(metadata (display-sort-function . identity)
+                                             (cycle-sort-function . identity))
+                                (complete-with-action action (mapcar #'car rows)
+                                                      string pred)))
+                            args)))
+        (cdr (assoc chosen rows))))))
+
+;;;###autoload
+(defadvice! eca-chat-resume-in-columns-a (fn &rest args)
+  "Lay the chats `eca-chat-resume' offers out in columns."
+  :around #'eca-chat-resume
+  (let ((read (symbol-function 'completing-read)))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest args) (apply #'eca-resume--completing-read read args))))
+      (apply fn args))))
+
 
 (defun eca-archive--session-for-root (root)
   "Return a running session whose workspace folders include ROOT."

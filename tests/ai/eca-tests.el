@@ -202,19 +202,71 @@ the order given, oldest first, so recency is deterministic."
     (let ((table (eca-archive--table
                   '((:id "aaaaaaaa1" :project "p" :title "second")
                     (:id "bbbbbbbb1" :project "p" :title "first")))))
-      (expect (mapcar #'car table) :to-equal '("p  second" "p  first"))))
+      (expect (mapcar (lambda (row) (string-trim (car row))) table)
+              :to-equal '("p  second" "p  first"))))
+
+  ;; the point of the columns: every title starts in the same place, whatever
+  ;; the project name beside it
+  (it "pads the project column so the titles line up"
+    (let ((table (eca-archive--table
+                  '((:id "a" :project "short" :title "one")
+                    (:id "b" :project "a-much-longer-project" :title "two")))))
+      (expect (mapcar (lambda (row) (string-match-p "one\\|two" (car row))) table)
+              :to-equal '(22 22))))
+
+  (it "gives every row the same width, so annotations cannot go ragged"
+    (let* ((table (eca-archive--table
+                   '((:id "a" :project "p" :title "a short one")
+                     (:id "b" :project "longer-project" :title "a considerably longer title"))))
+           (widths (mapcar (lambda (row) (string-width (car row))) table)))
+      (expect (car widths) :to-equal (cadr widths))))
+
+  ;; one enormous title would otherwise push every date below it out of line
+  (it "truncates a title past the column cap"
+    (let* ((long (make-string 100 ?x))
+           (label (caar (eca-archive--table (list (list :id "a" :project "p" :title long))))))
+      (expect (string-width label) :to-equal 63)
+      (expect label :not :to-match long)))
 
   ;; a repeated label would otherwise make `assoc' hand back the wrong chat
   (it "disambiguates a repeated project and title with the chat id"
     (let ((table (eca-archive--table
                   '((:id "aaaaaaaa-1111" :project "p" :title "same")
                     (:id "bbbbbbbb-2222" :project "p" :title "same")))))
-      (expect (mapcar #'car table) :to-equal '("p  same" "p  same  [bbbbbbbb]"))
+      (expect (mapcar (lambda (row) (string-trim (car row))) table)
+              :to-equal '("p  same" "p  same  [bbbbbbbb]"))
       (expect (plist-get (cdr (nth 1 table)) :id) :to-equal "bbbbbbbb-2222")))
 
   (it "names an untitled chat rather than showing a blank"
-    (expect (caar (eca-archive--table '((:id "a" :project "p" :title nil))))
+    (expect (string-trim (caar (eca-archive--table '((:id "a" :project "p" :title nil)))))
             :to-equal "p  untitled")))
+
+(describe "eca-archive--annotation-function"
+  (it "starts every date in the same column, including a uniquified row"
+    (let* ((table (eca-archive--table
+                   '((:id "aaaaaaaa-1" :project "p" :title "same")
+                     (:id "bbbbbbbb-2" :project "p" :title "same")
+                     (:id "cccccccc-3" :project "p" :title "other"))))
+           (annotate (eca-archive--annotation-function table))
+           (columns (mapcar (lambda (row)
+                              (+ (string-width (car row))
+                                 (- (string-width (funcall annotate (car row)))
+                                    (string-width (string-trim (funcall annotate (car row)))))))
+                            table)))
+      (expect (seq-uniq columns) :to-have-same-items-as (list (car columns)))))
+
+  (it "dates each row from its own archive" ; not from whatever row was first
+    (let* ((table (eca-archive--table
+                   (list (list :id "a" :project "p" :title "one"
+                               :time (encode-time '(0 0 12 1 1 2020 nil -1 nil)))
+                         (list :id "b" :project "p" :title "two"
+                               :time (encode-time '(0 0 12 2 2 2021 nil -1 nil))))))
+           (annotate (eca-archive--annotation-function table)))
+      (expect (funcall annotate (car (nth 0 table))) :to-match "2020-01-01")
+      (expect (funcall annotate (car (nth 1 table))) :to-match "2021-02-02")))
+
+  (it "ignores a label it does not know"
+    (expect (funcall (eca-archive--annotation-function nil) "nope") :to-be nil)))
 
 (describe "eca-archive--completion-table"
   (it "tells completion not to reorder the candidates"
@@ -253,6 +305,93 @@ the order given, oldest first, so recency is deterministic."
 (defun eca--initialize (&rest _))
 (defun eca--handle-message (&rest _))
 
+
+(defun eca-tests--resume-annotation (model count age)
+  "Upstream's resume annotation for MODEL, COUNT and AGE, faces and all."
+  (concat (when model (propertize (concat "  " model) 'face 'shadow))
+          (when count (propertize (format "  %d msgs" count) 'face 'shadow))
+          (when age (propertize (concat "  " age) 'face 'eca-chat-elapsed-time-face))))
+
+(describe "eca-resume--fields"
+  ;; model and count share the shadow face, so they arrive as one run
+  (it "separates the model from the message count beside it"
+    (expect (eca-resume--fields
+             (eca-tests--resume-annotation "anthropic/claude-opus-5" 686 "1m ago"))
+            :to-equal '("anthropic/claude-opus-5" "686 msgs" "1m ago")))
+
+  (it "reads a model name containing digits"
+    (expect (car (eca-resume--fields
+                  (eca-tests--resume-annotation "anthropic/claude-opus-4-8" 46 "56d ago")))
+            :to-equal "anthropic/claude-opus-4-8"))
+
+  ;; ages read like "3 days ago", so whitespace cannot be the separator
+  (it "keeps a multi-word age whole"
+    (expect (nth 2 (eca-resume--fields
+                    (eca-tests--resume-annotation "m" 1 "3 days ago")))
+            :to-equal "3 days ago"))
+
+  (it "tolerates any field being absent"
+    (expect (eca-resume--fields (eca-tests--resume-annotation nil 5 nil))
+            :to-equal '(nil "5 msgs" nil))
+    (expect (eca-resume--fields (eca-tests--resume-annotation "m" nil "1m ago"))
+            :to-equal '("m" nil "1m ago"))
+    (expect (eca-resume--fields "") :to-equal '(nil nil nil))))
+
+(describe "eca-resume--rows"
+  (defun eca-tests--annotate (alist)
+    (lambda (label) (cdr (assoc label alist))))
+
+  (it "starts the model column at the same place on every row"
+    (let* ((rows (eca-resume--rows
+                  '("short" "a considerably longer chat title")
+                  (eca-tests--annotate
+                   (list (cons "short" (eca-tests--resume-annotation "m1" 1 "1m ago"))
+                         (cons "a considerably longer chat title"
+                               (eca-tests--resume-annotation "m2" 2 "2m ago"))))))
+           (columns (mapcar (lambda (row) (string-match-p "m[12]" (car row))) rows)))
+      (expect (car columns) :to-equal (cadr columns))))
+
+  (it "right-aligns the message counts so the digits line up"
+    (let* ((rows (eca-resume--rows
+                  '("a" "b")
+                  (eca-tests--annotate
+                   (list (cons "a" (eca-tests--resume-annotation "m" 7 "1m ago"))
+                         (cons "b" (eca-tests--resume-annotation "m" 694 "2m ago"))))))
+           (ends (mapcar (lambda (row)
+                           (+ (string-match-p "msgs" (car row)) 4))
+                         rows)))
+      (expect (car ends) :to-equal (cadr ends))))
+
+  ;; upstream indexes its chats by the label it built, so that exact string
+  ;; has to come back out - a padded one looks up nothing
+  (it "keeps the original label as the value behind the padded row"
+    (let ((rows (eca-resume--rows
+                 '("a chat")
+                 (eca-tests--annotate
+                  (list (cons "a chat" (eca-tests--resume-annotation "m" 1 "1m ago")))))))
+      (expect (cdar rows) :to-equal "a chat")
+      (expect (caar rows) :to-match "\\`a chat +m +1 msgs  1m ago\\'"))))
+
+(describe "eca-resume--completing-read"
+  (it "returns the label upstream knows, not the row it displayed"
+    (let* ((labels '("first chat" "second chat"))
+           (collection (lambda (string pred action)
+                         (if (eq action 'metadata)
+                             `(metadata (annotation-function
+                                         . ,(lambda (_) (eca-tests--resume-annotation "m" 3 "1m ago"))))
+                           (complete-with-action action labels string pred))))
+           ;; the real completing-read, standing in for the user picking row 2
+           (read (lambda (_prompt table &rest _)
+                   (nth 1 (all-completions "" table)))))
+      (expect (eca-resume--completing-read read "Resume: " collection nil t)
+              :to-equal "second chat")))
+
+  (it "leaves a collection that annotates nothing alone"
+    (let* ((collection '("plain" "candidates"))
+           (seen nil)
+           (read (lambda (_prompt table &rest _) (setq seen table) "plain")))
+      (expect (eca-resume--completing-read read "P: " collection nil t) :to-equal "plain")
+      (expect seen :to-be collection))))
 
 (describe "eca-archive--session-for-root"
   (it "matches a session whose root is recorded unexpanded"

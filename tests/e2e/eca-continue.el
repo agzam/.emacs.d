@@ -50,6 +50,10 @@
    (eca-continue-e2e--result
     "eca-chat-delete asks first"
     (advice-member-p 'eca-chat-delete-confirm-a 'eca-chat-delete)
+    'installed 'installed)
+   (eca-continue-e2e--result
+    "eca-chat-resume is laid out in columns"
+    (advice-member-p 'eca-chat-resume-in-columns-a 'eca-chat-resume)
     'installed 'installed)))
 
 ;; Each of these is faked in tests/ai/eca-tests.el.  Asserting they exist,
