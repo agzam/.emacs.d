@@ -12,6 +12,20 @@
 
 ;;; link detection (embark target finders)
 
+(defun plain-url-at-point ()
+  "Url written at point as (URL BEG . END), nil when there is none.
+`bug-reference-mode' and `org-mode' own thingatpt's url provider
+wherever they are on, and then `thing-at-point' answers for a reference
+with its GitHub url over the reference's own bounds, truncates a real
+url to a ref-shaped fragment inside it, and stretches an org one over
+the whitespace after it.  Conversions rewrite buffer text, so only the
+url literally written here counts."
+  (let (thing-at-point-provider-alist
+        bounds-of-thing-at-point-provider-alist)
+    (when-let* ((bounds (bounds-of-thing-at-point 'url))
+                (url (thing-at-point 'url)))
+      (cons url bounds))))
+
 ;;;###autoload
 (defun url-get-link-type ()
   "Type and bounds of the link at point, nil when there is none.
@@ -28,8 +42,8 @@ reference."
    ((when-let* ((pos (org-in-regexp "<\\(https?://[^>]+\\)>\\|\\[\\([^]]+\\)\\]\\((https?://[^)]+)\\)" 1)))
       (cons 'markdown pos)))
 
-   ((when-let* ((bounds (bounds-of-thing-at-point 'url)))
-      (cons 'plain bounds)))
+   ((when-let* ((url+bounds (plain-url-at-point)))
+      (cons 'plain (cdr url+bounds))))
 
    ((when-let* ((pos (org-in-regexp bug-reference-bug-regexp 1)))
       (cons 'bug-reference pos)))))
@@ -100,9 +114,9 @@ which does not understand them."
 
 (defun parse-plain-link-at-point ()
   "Plain url at point as a (:url :label :beg :end) plist, nil when absent."
-  (when-let* ((url (thing-at-point-url-at-point))
-              (bounds (bounds-of-thing-at-point 'url)))
-    (list :url url :label nil :beg (car bounds) :end (cdr bounds))))
+  (when-let* ((url+bounds (plain-url-at-point)))
+    (list :url (car url+bounds) :label nil
+          :beg (cadr url+bounds) :end (cddr url+bounds))))
 
 (defun parse-bug-reference-at-point ()
   "Bug reference at point as a (:url :label :beg :end) plist, nil when absent.
@@ -244,6 +258,7 @@ markdown parser would silently decline it."
   (pcase (car (url-get-link-type))
     ('org-mode (link-org->link-bug-reference))
     ('markdown (link-markdown->link-bug-reference))
+    ('bug-reference (user-error "Already a bug reference"))
     (_ (link-plain->link-bug-reference))))
 
 ;;; the odd ones out
