@@ -15,6 +15,52 @@
 ;; overrides, which eca-chat.el would otherwise provide.
 (defvar eca-chat--selected-agent nil)
 (defvar eca-chat--selected-trust nil)
+(defvar eca-chat--kill-delete-server-side nil)
+
+;; config.el's defcustom; the module file only declares it, and a bodiless
+;; `defvar' marks a variable special just inside its own file, so binding it
+;; from here needs the global declaration.
+(defvar eca-archive-dir nil)
+
+(describe "closing a chat"
+  ;; `eca-chat--delete-chat' runs from `kill-buffer-hook', where the kill can
+  ;; no longer be aborted, and consults exactly one thing: the flag the query
+  ;; left behind.  Leaving it nil is what keeps the chat on the server.
+  (it "lets the kill proceed"
+    (with-temp-buffer
+      (expect (eca-chat-kill-keeps-server-copy-a) :to-be t)))
+
+  (it "never arms the server-side delete, even if something armed it first"
+    (with-temp-buffer
+      (setq-local eca-chat--kill-delete-server-side t)
+      (eca-chat-kill-keeps-server-copy-a)
+      (expect eca-chat--kill-delete-server-side :to-be nil)))
+
+  (it "keeps the flag buffer-local, so one kill cannot arm another chat"
+    (with-temp-buffer
+      (eca-chat-kill-keeps-server-copy-a)
+      (with-temp-buffer
+        (expect (local-variable-p 'eca-chat--kill-delete-server-side) :to-be nil))))
+
+  ;; an :override, so upstream's yes-or-no-p never gets to run at all
+  (it "overrides the query rather than answering it"
+    (expect (advice-member-p 'eca-chat-kill-keeps-server-copy-a
+                             'eca-chat--kill-buffer-query)
+            :to-be-truthy)))
+
+(describe "eca-chat-delete-confirm-a"
+  (it "lets the delete through once confirmed"
+    (spy-on 'yes-or-no-p :and-return-value t)
+    (expect (eca-chat-delete-confirm-a) :to-be-truthy))
+
+  ;; :before-while, so a nil here means `eca-chat-delete' never runs
+  (it "stops the delete when declined"
+    (spy-on 'yes-or-no-p :and-return-value nil)
+    (expect (eca-chat-delete-confirm-a) :to-be nil))
+
+  (it "guards the command itself"
+    (expect (advice-member-p 'eca-chat-delete-confirm-a 'eca-chat-delete)
+            :to-be-truthy)))
 
 (describe "eca-archive--slugify"
   (it "returns empty string for nil or blank input"
@@ -71,6 +117,275 @@
             (with-temp-file f (insert "just a markdown file\n"))
             (expect (eca-archive--read-meta f) :to-be nil))
         (delete-file f)))))
+
+(defun eca-tests--archive-dir (&rest files)
+  "A throwaway archive dir holding FILES, each (NAME META-PLIST . BODY).
+A nil META writes no metadata line.  Files are stamped a minute apart in
+the order given, oldest first, so recency is deterministic."
+  (let ((dir (file-name-as-directory (make-temp-file "eca-archive" t)))
+        (stamp (encode-time '(0 0 12 1 1 2020 nil -1 nil))))
+    (pcase-dolist (`(,name ,meta . ,body) files)
+      (let ((file (expand-file-name name dir)))
+        (with-temp-file file
+          (when meta (insert (format "<!-- eca: %S -->\n\n" meta)))
+          (insert (or body "body\n")))
+        (set-file-times file (time-add stamp (* 60 (cl-position name (mapcar #'car files)
+                                                               :test #'equal))))))
+    dir))
+
+(describe "eca-archive--parse-name"
+  (it "splits project, title and id"
+    (expect (eca-archive--parse-name "/a/emacs.d__Fixing-the-thing_1b22794a.md")
+            :to-equal '("emacs.d" . "Fixing-the-thing")))
+
+  (it "reads a name whose title slugified away"
+    (expect (eca-archive--parse-name "/a/emacs.d_1b22794a.md")
+            :to-equal '("emacs.d" . nil)))
+
+  ;; project names carry underscores, so the first `__' has to win
+  (it "keeps an underscore inside the project name out of the title"
+    (expect (eca-archive--parse-name "/a/my_proj__Some-title_1b22794a.md")
+            :to-equal '("my_proj" . "Some-title")))
+
+  (it "falls back to the whole name when nothing matches"
+    (expect (eca-archive--parse-name "/a/notes.md") :to-equal '("notes" . nil))))
+
+(describe "eca-archive--entry"
+  (it "prefers the title and project the metadata records"
+    (let* ((dir (eca-tests--archive-dir
+                 '("proj__Slugged-title_abc12345.md"
+                   (:id "abc12345-full" :workspace "/w/" :model "m"
+                    :project "real-proj" :title "Real Title: with punctuation"))))
+           (entry (eca-archive--entry
+                   (expand-file-name "proj__Slugged-title_abc12345.md" dir))))
+      (expect (plist-get entry :id) :to-equal "abc12345-full")
+      (expect (plist-get entry :project) :to-equal "real-proj")
+      (expect (plist-get entry :title) :to-equal "Real Title: with punctuation")
+      (expect (plist-get entry :workspace) :to-equal "/w/")))
+
+  ;; the 300-odd archives written before the metadata carried them
+  (it "falls back to the file name when the metadata predates them"
+    (let* ((dir (eca-tests--archive-dir
+                 '("proj__Slugged-title_abc12345.md"
+                   (:id "abc12345-full" :workspace "/w/" :model "m"))))
+           (entry (eca-archive--entry
+                   (expand-file-name "proj__Slugged-title_abc12345.md" dir))))
+      (expect (plist-get entry :project) :to-equal "proj")
+      (expect (plist-get entry :title) :to-equal "Slugged-title")))
+
+  (it "ignores a markdown file that records no chat"
+    (let ((dir (eca-tests--archive-dir '("stray.md" nil))))
+      (expect (eca-archive--entry (expand-file-name "stray.md" dir)) :to-be nil))))
+
+(describe "eca-archive-entries"
+  (it "lists the most recently written chat first"
+    (let ((eca-archive-dir
+           (eca-tests--archive-dir
+            '("proj_aaaaaaaa.md" (:id "aaaaaaaa" :title "oldest"))
+            '("proj_bbbbbbbb.md" (:id "bbbbbbbb" :title "middle"))
+            '("proj_cccccccc.md" (:id "cccccccc" :title "newest")))))
+      (expect (mapcar (lambda (e) (plist-get e :title)) (eca-archive-entries))
+              :to-equal '("newest" "middle" "oldest"))))
+
+  (it "skips files that are not archived chats"
+    (let ((eca-archive-dir
+           (eca-tests--archive-dir '("proj_aaaaaaaa.md" (:id "aaaaaaaa" :title "kept"))
+                                   '("README.md" nil))))
+      (expect (length (eca-archive-entries)) :to-equal 1)))
+
+  (it "returns nothing when the archive dir does not exist"
+    (let ((eca-archive-dir "/definitely/not/here/"))
+      (expect (eca-archive-entries) :to-be nil))))
+
+(describe "eca-archive--table"
+  (it "keeps the entries in the order given"
+    (let ((table (eca-archive--table
+                  '((:id "aaaaaaaa1" :project "p" :title "second")
+                    (:id "bbbbbbbb1" :project "p" :title "first")))))
+      (expect (mapcar #'car table) :to-equal '("p  second" "p  first"))))
+
+  ;; a repeated label would otherwise make `assoc' hand back the wrong chat
+  (it "disambiguates a repeated project and title with the chat id"
+    (let ((table (eca-archive--table
+                  '((:id "aaaaaaaa-1111" :project "p" :title "same")
+                    (:id "bbbbbbbb-2222" :project "p" :title "same")))))
+      (expect (mapcar #'car table) :to-equal '("p  same" "p  same  [bbbbbbbb]"))
+      (expect (plist-get (cdr (nth 1 table)) :id) :to-equal "bbbbbbbb-2222")))
+
+  (it "names an untitled chat rather than showing a blank"
+    (expect (caar (eca-archive--table '((:id "a" :project "p" :title nil))))
+            :to-equal "p  untitled")))
+
+(describe "eca-archive--completion-table"
+  (it "tells completion not to reorder the candidates"
+    (let ((metadata (funcall (eca-archive--completion-table '("b" "a"))
+                             "" nil 'metadata)))
+      (expect (alist-get 'display-sort-function (cdr metadata)) :to-be #'identity)
+      (expect (alist-get 'cycle-sort-function (cdr metadata)) :to-be #'identity)))
+
+  (it "still completes over the labels"
+    (expect (funcall (eca-archive--completion-table '("proj  one" "proj  two"))
+                     "proj" nil t)
+            :to-have-same-items-as '("proj  one" "proj  two"))))
+
+;; eca is absent from the batch harness, so the session plumbing the
+;; continue path drives is stood in for here.  The e2e scenario asserts the
+;; real symbols exist and still take these shapes, so a rename upstream
+;; cannot leave these specs passing against a fiction.
+(cl-defstruct (eca--session (:constructor eca-tests--session))
+  id status workspace-folders chats last-chat-buffer)
+
+(defvar eca--sessions nil)
+(defvar eca-chat-history-page-size 50)
+
+(defun eca-vals (plist)
+  (cl-loop for (_k v) on plist by #'cddr collect v))
+(defun eca-get (plist key) (plist-get plist key #'equal))
+(defun eca-info (&rest _))
+(defun eca-warn (&rest _))
+;; upstream's eca-error only messages - it does not signal, so nothing may
+;; use it to abort
+(defun eca-error (fmt &rest args) (apply #'message fmt args))
+(defun eca-assert-session-running (_session))
+(defun eca-api-request-async (&rest _))
+(defun eca-create-session (&rest _))
+(defun eca-process-start (&rest _))
+(defun eca--initialize (&rest _))
+(defun eca--handle-message (&rest _))
+
+
+(describe "eca-archive--session-for-root"
+  (it "matches a session whose root is recorded unexpanded"
+    (let ((eca--sessions (list :s (eca-tests--session
+                                   :workspace-folders '("~/.emacs.d/")))))
+      (expect (eca-archive--session-for-root (expand-file-name "~/.emacs.d"))
+              :not :to-be nil)))
+
+  (it "matches whichever of several roots the chat was archived under"
+    (let ((eca--sessions (list :s (eca-tests--session
+                                   :workspace-folders '("/a/" "/b/")))))
+      (expect (eca-archive--session-for-root "/b") :not :to-be nil)))
+
+  (it "returns nothing for an unknown root, or none at all"
+    (let ((eca--sessions (list :s (eca-tests--session :workspace-folders '("/a/")))))
+      (expect (eca-archive--session-for-root "/elsewhere/") :to-be nil)
+      (expect (eca-archive--session-for-root nil) :to-be nil)
+      (expect (eca-archive--session-for-root "") :to-be nil))))
+
+(describe "eca-archive--when-started"
+  (it "runs the callback at once for a started session"
+    (let ((got nil)
+          (session (eca-tests--session :status 'started)))
+      (eca-archive--when-started session (lambda (s) (setq got s)))
+      (expect got :to-be session)))
+
+  ;; a dead process would otherwise be polled until the deadline
+  (it "gives up immediately when the session stopped"
+    (expect (eca-archive--when-started (eca-tests--session :status 'stopped)
+                                       #'ignore)
+            :to-throw 'error))
+
+  (it "gives up once the deadline passes rather than rescheduling forever"
+    (expect (eca-archive--when-started (eca-tests--session :status 'starting)
+                                       #'ignore
+                                       (time-add nil -1))
+            :to-throw 'error))
+
+  (it "keeps waiting while the session is still starting"
+    (spy-on 'run-at-time)
+    (eca-archive--when-started (eca-tests--session :status 'starting) #'ignore)
+    (expect 'run-at-time :to-have-been-called)))
+
+(describe "eca-archive--ensure-session"
+  (it "reuses a running session for the recorded workspace"
+    (let* ((session (eca-tests--session :status 'started
+                                        :workspace-folders '("/w/")))
+           (eca--sessions (list :s session))
+           (got nil))
+      (spy-on 'eca-create-session)
+      (eca-archive--ensure-session "/w/" (lambda (s) (setq got s)))
+      (expect got :to-be session)
+      (expect 'eca-create-session :not :to-have-been-called)))
+
+  ;; resuming normally happens after a restart, with nothing running yet
+  (it "starts a session for the workspace when none is running"
+    (let* ((dir (file-name-as-directory (make-temp-file "eca-ws" t)))
+           (eca--sessions nil)
+           (started (eca-tests--session :status 'started)))
+      (unwind-protect
+          (progn
+            (spy-on 'eca-create-session :and-return-value started)
+            (spy-on 'eca-process-start)
+            (eca-archive--ensure-session dir #'ignore)
+            (expect 'eca-create-session :to-have-been-called-with (list dir))
+            (expect 'eca-process-start :to-have-been-called))
+        (delete-directory dir t))))
+
+  (it "refuses a workspace that is no longer a directory"
+    (let ((eca--sessions nil))
+      (spy-on 'eca-create-session)
+      (expect (eca-archive--ensure-session "/gone/" #'ignore) :to-throw 'error)
+      (expect (eca-archive--ensure-session nil #'ignore) :to-throw 'error)
+      (expect 'eca-create-session :not :to-have-been-called))))
+
+(describe "eca-archive--continue-in"
+  (before-each
+    (spy-on 'eca-archive--attach-chat)
+    (spy-on 'eca-archive--gone))
+
+  (defun eca-tests--continue (open-res &optional buffer error?)
+    "Drive the chat/open callback with OPEN-RES, BUFFER registered for the chat."
+    (let* ((session (eca-tests--session
+                     :status 'started
+                     :chats (when buffer (list "chat-1" buffer))))
+           (entry '(:id "chat-1" :file "/a.md" :title "t")))
+      ;; session comes first, the keywords after it
+      (spy-on 'eca-api-request-async
+              :and-call-fake
+              (lambda (_session &rest args)
+                (funcall (plist-get args (if error? :error-callback :success-callback))
+                         open-res)))
+      (eca-archive--continue-in session entry)))
+
+  (it "reopens the chat itself when the server still has it"
+    (with-temp-buffer
+      (eca-tests--continue '(:found? t) (current-buffer))
+      (expect 'eca-archive--attach-chat :to-have-been-called)
+      (expect 'eca-archive--gone :not :to-have-been-called)))
+
+  ;; a new chat fed the transcript is a different conversation, so a chat
+  ;; the server no longer holds has to fail rather than be approximated
+  (it "reports a chat the server no longer has, opening nothing"
+    (eca-tests--continue '(:found? nil))
+    (expect 'eca-archive--gone :to-have-been-called)
+    (expect 'eca-archive--attach-chat :not :to-have-been-called))
+
+  ;; found, but nothing was registered - attaching would surface a dead buffer
+  (it "reports when the server claims the chat but no buffer appeared"
+    (eca-tests--continue '(:found? t))
+    (expect 'eca-archive--gone :to-have-been-called)
+    (expect 'eca-archive--attach-chat :not :to-have-been-called))
+
+  (it "reports when the request itself fails"
+    (eca-tests--continue '(:code -1) nil t)
+    (expect 'eca-archive--gone :to-have-been-called)
+    (expect 'eca-archive--attach-chat :not :to-have-been-called)))
+
+(describe "eca-archive--gone"
+  (it "names the chat and the archive that outlived it"
+    (let (said)
+      (spy-on 'eca-error :and-call-fake (lambda (fmt &rest args)
+                                          (setq said (apply #'format fmt args))))
+      (eca-archive--gone '(:id "abcdef1234" :file "/a/chat.md"))
+      (expect said :to-match "abcdef12")
+      (expect said :to-match "chat.md")))
+
+  ;; it runs inside the process filter, where a signal only wraps the message
+  ;; in `error in process filter' - and nothing downstream may depend on it
+  (it "reports without signalling"
+    (spy-on 'eca-error)
+    (expect (eca-archive--gone '(:id "abcdef1234" :file "/a/chat.md"))
+            :not :to-throw)))
 
 (describe "eca-compact-modeline-icons-h"
   ;; Regression: ECA's trust/elapsed mode-line segments use color emoji

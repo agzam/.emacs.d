@@ -194,6 +194,29 @@ a fresh token pair without losing the active chat."
     (eca-providers--do-login session "anthropic" "max")))
 
 
+;;;; Keeping a closed chat alive
+
+;; Killing the buffer is how a chat gets put away, and upstream turns that into a
+;; `chat/delete' prompt - a hard delete, no trash, no undo - on the same keystroke
+;; used to tidy up. Answer it wrong once and the conversation is gone from the
+;; server; the archived markdown that survives is a transcript, not the message
+;; history the model reads, so nothing can bring the chat back. Closing now only closes.
+
+;;;###autoload
+(defadvice! eca-chat-kill-keeps-server-copy-a ()
+  "Let the kill proceed without deleting the chat server-side."
+  :override #'eca-chat--kill-buffer-query
+  (setq-local eca-chat--kill-delete-server-side nil)
+  t)
+
+;;;###autoload
+(defadvice! eca-chat-delete-confirm-a (&rest _)
+  "Confirm before `eca-chat-delete' destroys the chat server-side.
+It sits one key from `eca-chat-reset', which merely closes."
+  :before-while #'eca-chat-delete
+  (yes-or-no-p "Delete this chat from the server (cannot be undone)? "))
+
+
 ;;;; Session archiving + resume-from-archive
 
 (defvar eca-archive-dir)                ; real defcustom lives in config.el
@@ -256,7 +279,8 @@ nil if BUFFER is not an archivable chat."
           (make-directory dir t)
           (with-temp-file file
             (insert (format "<!-- eca: %S -->\n\n"
-                            (list :id id :workspace workspace :model model)))
+                            (list :id id :workspace workspace :model model
+                                  :project project :title title)))
             (insert content))
           ;; Keep one file per chat: now that FILE exists, drop any stale
           ;; name for this id (e.g. an earlier untitled save).
@@ -279,6 +303,93 @@ nil if BUFFER is not an archivable chat."
         (read (string-remove-suffix
                " -->" (string-remove-prefix "<!-- eca: " line)))))))
 
+(defun eca-archive--parse-name (file)
+  "Return (PROJECT . TITLE) read off FILE's name.
+`eca-archive--chat-file-name' builds PROJECT__TITLE_ID.md, or
+PROJECT_ID.md when the title slugified away.  Only archives written
+before the metadata line carried both need this; their title keeps the
+slug's hyphens rather than being guessed back into words."
+  (let ((base (file-name-base file)))
+    (cond
+     ((string-match "\\`\\(.+?\\)__\\(.+\\)_[0-9a-f]+\\'" base)
+      (cons (match-string 1 base) (match-string 2 base)))
+     ((string-match "\\`\\(.+\\)_[0-9a-f]+\\'" base)
+      (cons (match-string 1 base) nil))
+     (t (cons base nil)))))
+
+(defun eca-archive--entry (file)
+  "Describe archive FILE as a plist, or nil when it records no chat.
+Keys: :file :id :workspace :model :project :title :time."
+  (when-let* ((meta (eca-archive--read-meta file))
+              (id (plist-get meta :id)))
+    (pcase-let ((`(,project . ,title) (eca-archive--parse-name file)))
+      (list :file file
+            :id id
+            :workspace (plist-get meta :workspace)
+            :model (plist-get meta :model)
+            :project (or (plist-get meta :project) project)
+            :title (or (plist-get meta :title) title)
+            :time (file-attribute-modification-time (file-attributes file))))))
+
+(defun eca-archive-entries ()
+  "Every archived chat, most recently written first."
+  (let ((dir (expand-file-name eca-archive-dir)))
+    (sort (delq nil (mapcar #'eca-archive--entry
+                            (and (file-directory-p dir)
+                                 (directory-files dir t "\\.md\\'"))))
+          (lambda (a b) (time-less-p (plist-get b :time) (plist-get a :time))))))
+
+(defun eca-archive--id-short (entry)
+  "The leading 8 characters of ENTRY's chat id."
+  (let ((id (plist-get entry :id)))
+    (substring id 0 (min 8 (length id)))))
+
+(defun eca-archive--label (entry)
+  "A one-line description of ENTRY for completion."
+  (format "%s  %s"
+          (or (plist-get entry :project) "?")
+          (or (plist-get entry :title) "untitled")))
+
+(defun eca-archive--table (entries)
+  "Alist of label to entry over ENTRIES, keeping their order.
+Two chats in one project can carry the same title, so a repeated label
+gains the chat id - unique by construction - rather than shadowing the
+entry it collides with."
+  (let (table)
+    (dolist (entry entries (nreverse table))
+      (let ((label (eca-archive--label entry)))
+        (when (assoc label table)
+          (setq label (format "%s  [%s]" label (eca-archive--id-short entry))))
+        (push (cons label entry) table)))))
+
+(defun eca-archive--completion-table (labels)
+  "Completion table over LABELS that keeps them in the given order.
+The list arrives newest first and that is the useful order; completion
+would otherwise sort it alphabetically."
+  (lambda (string pred action)
+    (if (eq action 'metadata)
+        '(metadata (category . eca-archive-chat)
+                   (display-sort-function . identity)
+                   (cycle-sort-function . identity))
+      (complete-with-action action labels string pred))))
+
+(defun eca-archive-read-entry (&optional prompt)
+  "Prompt with PROMPT for an archived chat and return its entry."
+  (let* ((table (eca-archive--table (eca-archive-entries)))
+         (completion-extra-properties
+          (list :annotation-function
+                (lambda (label)
+                  (when-let* ((entry (cdr (assoc label table))))
+                    (format "  %s"
+                            (format-time-string "%Y-%m-%d %H:%M"
+                                                (plist-get entry :time))))))))
+    (unless table
+      (user-error "No archived chats under %s" eca-archive-dir))
+    (cdr (assoc (completing-read (or prompt "Continue chat: ")
+                                 (eca-archive--completion-table (mapcar #'car table))
+                                 nil t)
+                table))))
+
 (defun eca-archive--session-for-root (root)
   "Return a running session whose workspace folders include ROOT."
   (when (and (stringp root) (not (string-empty-p root)))
@@ -294,11 +405,72 @@ nil if BUFFER is not an archivable chat."
                        (string= (file-name-as-directory (expand-file-name f))
                                 root))))))))))
 
-(defun eca-archive--open-chat (session chat-id)
-  "Open CHAT-ID in SESSION via chat/open and surface its buffer.
-Mirrors the open path of `eca-chat-resume'."
+(defvar eca-archive-session-timeout 60
+  "Seconds to wait for a session to finish starting before giving up.")
+
+(defun eca-archive--when-started (session callback &optional deadline)
+  "Call CALLBACK with SESSION once it reports started.
+Starting spans several round trips, so this polls on a timer instead of
+blocking Emacs, and stops at DEADLINE rather than rescheduling forever."
+  (let ((deadline (or deadline (time-add nil eca-archive-session-timeout))))
+    (pcase (eca--session-status session)
+      ('started (funcall callback session))
+      ('stopped (user-error "ECA session stopped before it finished starting"))
+      (_ (if (time-less-p deadline nil)
+             (user-error "Timed out waiting for the ECA session to start")
+           (run-at-time 0.3 nil #'eca-archive--when-started
+                        session callback deadline))))))
+
+(defun eca-archive--ensure-session (root callback)
+  "Call CALLBACK with a started session for ROOT, starting one if needed.
+Resuming usually happens after a restart, when nothing is running for
+the chat's workspace yet; requiring the session to exist first would
+push that chore back onto whoever wants to read an old chat."
+  (if-let* ((session (eca-archive--session-for-root root)))
+      (eca-archive--when-started session callback)
+    ;; `eca-error' only messages, so aborting here has to signal
+    (unless (and (stringp root) (file-directory-p root))
+      (user-error "Archive records no usable workspace to start (%s)" root))
+    (let ((session (eca-create-session
+                    (list (file-name-as-directory (expand-file-name root))))))
+      (eca-info "Starting ECA in %s to continue the chat..." root)
+      (eca-process-start session
+                         (lambda () (eca--initialize session))
+                         (apply-partially #'eca--handle-message session))
+      (eca-archive--when-started session callback))))
+
+(defun eca-archive--attach-chat (session chat-id open-res from-buf)
+  "Surface CHAT-ID's restored buffer in SESSION after OPEN-RES.
+FROM-BUF is where the command ran, so an empty welcome buffer it left
+behind can be reclaimed.  Mirrors the open path of `eca-chat-resume'."
+  (let ((chat-buf (eca-get (eca--session-chats session) chat-id)))
+    (setf (eca--session-last-chat-buffer session) chat-buf)
+    (eca-chat--with-current-buffer chat-buf
+      (eca-chat--apply-history-meta (plist-get open-res :meta))
+      (eca-chat--refresh-load-older-control)
+      (eca-chat--protect-non-prompt))
+    (eca-chat-open session)
+    (eca-chat--kill-empty-welcome-buffer session from-buf chat-buf)))
+
+(defun eca-archive--gone (entry &optional detail)
+  "Report that ENTRY's chat cannot be resumed, DETAIL saying why.
+Resuming means the server replaying the messages the model actually
+read.  When it no longer holds the chat there is nothing to resume, and
+a new chat fed the transcript would be a different conversation wearing
+its clothes - so this stops instead of pretending."
+  ;; only ever called from a chat/open callback, i.e. inside the process
+  ;; filter, where signalling buys nothing but an `error in process filter'
+  ;; wrapper around the sentence worth reading.  Nothing may branch on this.
+  (eca-error "Chat %s is no longer on the server%s; the archive %s is all that is left"
+             (eca-archive--id-short entry)
+             (if detail (format " (%s)" detail) "")
+             (abbreviate-file-name (plist-get entry :file))))
+
+(defun eca-archive--continue-in (session entry)
+  "Reopen ENTRY's chat inside SESSION, in its own buffer."
   (eca-assert-session-running session)
-  (let ((from-buf (current-buffer)))
+  (let ((chat-id (plist-get entry :id))
+        (from-buf (current-buffer)))
     (eca-api-request-async
      session
      :method "chat/open"
@@ -309,51 +481,33 @@ Mirrors the open path of `eca-chat-resume'."
      (lambda (open-res)
        (cond
         ((not (plist-get open-res :found?))
-         (user-error "Server could not open chat %s" chat-id))
+         (eca-archive--gone entry))
         ((not (buffer-live-p (eca-get (eca--session-chats session) chat-id)))
-         (user-error "No buffer registered for chat %s" chat-id))
-        (t
-         (let ((chat-buf (eca-get (eca--session-chats session) chat-id)))
-           (setf (eca--session-last-chat-buffer session) chat-buf)
-           (eca-chat--with-current-buffer chat-buf
-             (eca-chat--apply-history-meta (plist-get open-res :meta))
-             (eca-chat--refresh-load-older-control)
-             (eca-chat--protect-non-prompt))
-           (eca-chat-open session)
-           (eca-chat--kill-empty-welcome-buffer session from-buf chat-buf)))))
+         (eca-archive--gone entry "the server found it but registered no buffer"))
+        (t (eca-archive--attach-chat session chat-id open-res from-buf))))
      :error-callback
-     (lambda (err) (user-error "Failed to continue chat: %s" err)))))
+     (lambda (err) (eca-archive--gone entry (format "%s" err))))))
 
 ;;;###autoload
 (defun eca-continue-from-file (&optional file)
-  "Open and continue the ECA chat recorded in archive FILE.
-Without FILE, use the current archive buffer or prompt in
-`eca-archive-dir'.  Like `eca-chat-resume', the chat's workspace
-session must already be running and still hold the chat."
+  "Reopen an archived ECA chat, prompting for one unless FILE is given.
+A file visited from `eca-archive-dir' is taken as the chat to reopen.
+Starts the chat's workspace session when none is running, then restores
+the chat itself - same chat, same history.  Says so and opens nothing
+when the server no longer holds it."
   (interactive)
-  (let* ((file (or file
-                   (and buffer-file-name
-                        (file-in-directory-p buffer-file-name
-                                             (expand-file-name eca-archive-dir))
-                        buffer-file-name)
-                   (read-file-name "Continue ECA chat from: "
-                                   (file-name-as-directory
-                                    (expand-file-name eca-archive-dir))
-                                   nil t)))
-         (meta      (eca-archive--read-meta file))
-         (chat-id   (plist-get meta :id))
-         (workspace (plist-get meta :workspace))
-         (session   (eca-archive--session-for-root workspace)))
-    (cond
-     ((null chat-id)
-      (user-error "No chat metadata found in %s" file))
-     ((null session)
-      (user-error "No running ECA session for %s; start it with `eca' first"
-                  (or workspace "that workspace")))
-     ((not (eq (eca--session-status session) 'started))
-      (user-error "ECA session for %s is not ready yet" workspace))
-     (t
-      (eca-archive--open-chat session chat-id)))))
+  (let* ((entry (cond
+                 (file (eca-archive--entry file))
+                 ((and buffer-file-name
+                       (file-in-directory-p buffer-file-name
+                                            (expand-file-name eca-archive-dir)))
+                  (eca-archive--entry buffer-file-name))
+                 (t (eca-archive-read-entry)))))
+    (unless entry
+      (user-error "No chat metadata found in %s" (or file buffer-file-name)))
+    (eca-archive--ensure-session
+     (plist-get entry :workspace)
+     (lambda (session) (eca-archive--continue-in session entry)))))
 
 ;;;###autoload
 (defun eca-mcp-restart-server (name &optional session)

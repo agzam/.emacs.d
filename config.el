@@ -253,7 +253,9 @@
          :desc "quick" "q" #'gptel-quick-question-buffer
          "m" #'gptel-mode
          "s" #'gptel-send
-         "c" #'eca)))
+         "c" #'eca
+         :desc "resume eca chat" "r" #'eca-chat-resume
+         :desc "continue archived eca chat" "a" #'eca-continue-from-file)))
 
 (map! (:map (prog-mode-map text-mode-map markdown-mode-map)
        :desc "external browser" "C-c C-o"
@@ -500,7 +502,9 @@
                   :desc "search" "/" #'gptel-log-find
                   "m" #'gptel-mode
                   "s" #'gptel-send
-                  "c" #'eca)))
+                  "c" #'eca
+                  :desc "resume eca chat" "r" #'eca-chat-resume
+                  :desc "continue archived eca chat" "a" #'eca-continue-from-file)))
 
       (:prefix ("z" . "zoom")
        :desc "frame" "f" #'frame-zoom-transient))
