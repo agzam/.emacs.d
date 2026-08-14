@@ -13,23 +13,21 @@
   "Drive smerge conflict resolution with single keys."
   :transient-suffix 'transient--do-stay
   :transient-non-suffix 'transient--do-stay
+  ;; title-less two-row columns keep the panel three lines tall
   [:description
    (lambda ()
      (with-current-buffer (or transient--original-buffer (current-buffer))
-       (format "smerge: %d conflict(s) left\n"
+       (format "smerge: %d conflict(s) left"
                (save-excursion
                  (goto-char (point-min))
                  (count-matches "^<<<<<<< " (point-min) (point-max))))))
-   ["Navigate"
-    ("n" "next" smerge-next)
+   [("n" "next" smerge-next)
     ("p" "prev" smerge-prev)]
-   ["Keep"
-    ("u" "original (upper)" smerge-keep-upper)
-    ("l" "rewrite (lower)" smerge-keep-lower)
-    ("RET" "side at point" smerge-keep-current)
+   [("u" "original (upper)" smerge-keep-upper)
+    ("l" "rewrite (lower)" smerge-keep-lower)]
+   [("RET" "side at point" smerge-keep-current)
     ("a" "all sides" smerge-keep-all)]
-   ["Other"
-    ("r" "auto-resolve" smerge-resolve)
-    ("R" "refine words" smerge-refine)
-    ("E" "ediff" smerge-ediff :transient nil)
+   [("r" "auto-resolve" smerge-resolve)
+    ("R" "refine words" smerge-refine)]
+   [("E" "ediff" smerge-ediff :transient nil)
     ("q" "quit" transient-quit-one)]])
