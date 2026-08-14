@@ -362,18 +362,7 @@
   (setq consult-dir-project-list-function #'consult-dir-project-dirs
         consult-dir-shadow-filenames nil
         ;; Jump straight into the picked dir instead of re-prompting via find-file.
-        consult-dir-default-command #'consult-dir-dired)
-
-  (defvar consult-dir--source-zoxide
-    `(:name "Zoxide"
-      :narrow ?z
-      :category file
-      :face consult-file
-      :enabled ,(lambda () (executable-find "zoxide"))
-      :items consult-zoxide-directories)
-    "Zoxide directory source for `consult-dir'.")
-
-  (add-to-list 'consult-dir-sources 'consult-dir--source-zoxide t))
+        consult-dir-default-command #'consult-dir-dired))
 
 (use-package marginalia
   :hook (doom-first-input . marginalia-mode)
