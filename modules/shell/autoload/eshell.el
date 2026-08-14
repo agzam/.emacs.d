@@ -64,8 +64,7 @@
 ;;;###autoload
 (defun eshell/z (&optional regexp)
   "Navigate to a previously visited directory in eshell."
-  ;; zoxide-find lives in the search module (returns a path in eshell)
-  (eshell/cd (zoxide-find regexp)))
+  (eshell/cd (consult-zoxide-read regexp)))
 
 ;; From https://protesilaos.com/dotemacs
 ;;;###autoload

@@ -370,10 +370,7 @@
       :category file
       :face consult-file
       :enabled ,(lambda () (executable-find "zoxide"))
-      :items ,(lambda ()
-                (split-string
-                 (string-trim (shell-command-to-string "zoxide query --list"))
-                 "\n" t)))
+      :items consult-zoxide-directories)
     "Zoxide directory source for `consult-dir'.")
 
   (add-to-list 'consult-dir-sources 'consult-dir--source-zoxide t))

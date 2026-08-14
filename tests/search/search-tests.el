@@ -8,7 +8,8 @@
 (require 'buttercup)
 (require 'dired)
 
-;; zoxide-find requires consult at call time; batch tier has no packages
+;; consult-line-collect-urls requires consult at call time; batch tier has
+;; no packages
 (provide 'consult)
 
 (load-module-file "modules/search/autoload/search.el")
@@ -46,89 +47,8 @@
             (format "https://github.com/search?q=%s&type=code"
                     (url-hexify-string "needle")))))
 
-(describe "zoxide-find"
-  (it "errors without a zoxide executable"
-    (cl-letf (((symbol-function 'executable-find) (lambda (_) nil)))
-      (expect (zoxide-find) :to-throw 'error)))
-
-  (it "opens the single match without prompting"
-    (let (visited prompted)
-      (cl-letf (((symbol-function 'executable-find) (lambda (_) t))
-                ((symbol-function 'shell-command-to-string)
-                 (lambda (_) "/home/u/proj\n"))
-                ((symbol-function 'consult--read)
-                 (lambda (&rest _) (setq prompted t)))
-                ((symbol-function 'find-file)
-                 (lambda (path) (setq visited path))))
-        (zoxide-find))
-      (expect visited :to-equal "/home/u/proj")
-      (expect prompted :to-be nil)))
-
-  (it "prompts among multiple matches"
-    (let (visited)
-      (cl-letf (((symbol-function 'executable-find) (lambda (_) t))
-                ((symbol-function 'shell-command-to-string)
-                 (lambda (_) "/home/u/a\n/home/u/b\n"))
-                ((symbol-function 'consult--read)
-                 (lambda (items &rest _) (cadr items)))
-                ((symbol-function 'find-file)
-                 (lambda (path) (setq visited path))))
-        (zoxide-find))
-      (expect visited :to-equal "/home/u/b")))
-
-  (it "returns the path instead of visiting from eshell"
-    (let (visited)
-      (cl-letf (((symbol-function 'executable-find) (lambda (_) t))
-                ((symbol-function 'shell-command-to-string)
-                 (lambda (_) "/home/u/proj\n"))
-                ((symbol-function 'find-file)
-                 (lambda (path) (setq visited path))))
-        (with-temp-buffer
-          (setq major-mode 'eshell-mode)
-          (expect (zoxide-find) :to-equal "/home/u/proj")))
-      (expect visited :to-be nil))))
-
-(describe "add-to-zoxide-cache"
-  :var (added)
-
-  (before-each (setq added nil))
-
-  (it "registers the directory of a file buffer"
-    (cl-letf (((symbol-function 'call-process-shell-command)
-               (lambda (cmd) (setq added cmd)))
-              ((symbol-function 'file-readable-p) (lambda (_) t)))
-      (with-temp-buffer
-        (setq buffer-file-name "/home/u/proj/file.el")
-        (add-to-zoxide-cache)
-        (setq buffer-file-name nil)))
-    (expect added :to-equal "zoxide add \"/home/u/proj/\""))
-
-  (it "registers dired-directory in dired buffers"
-    (cl-letf (((symbol-function 'call-process-shell-command)
-               (lambda (cmd) (setq added cmd)))
-              ((symbol-function 'file-readable-p) (lambda (_) t)))
-      (with-temp-buffer
-        (setq major-mode 'dired-mode)
-        (setq-local dired-directory "/home/u/downloads/")
-        (add-to-zoxide-cache)))
-    (expect added :to-equal "zoxide add \"/home/u/downloads/\""))
-
-  (it "skips buffers visiting nothing"
-    (cl-letf (((symbol-function 'call-process-shell-command)
-               (lambda (cmd) (setq added cmd))))
-      (with-temp-buffer
-        (add-to-zoxide-cache)))
-    (expect added :to-be nil))
-
-  (it "skips unreadable directories"
-    (cl-letf (((symbol-function 'call-process-shell-command)
-               (lambda (cmd) (setq added cmd)))
-              ((symbol-function 'file-readable-p) (lambda (_) nil)))
-      (with-temp-buffer
-        (setq buffer-file-name "/gone/file.el")
-        (add-to-zoxide-cache)
-        (setq buffer-file-name nil)))
-    (expect added :to-be nil)))
+;; zoxide-find and add-to-zoxide-cache left for the consult-zoxide package;
+;; their specs live in that repo's test/ now
 
 (describe "search-in-project"
   :var (got)

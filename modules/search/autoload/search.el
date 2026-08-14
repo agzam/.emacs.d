@@ -30,41 +30,6 @@
                         (url-hexify-string search-term))))
     (browse-url query)))
 
-;;;###autoload
-(defun zoxide-find (&optional query)
-  "Use zoxide to open a directory with dired."
-  (interactive "P")
-  (if (not (executable-find "zoxide"))
-      (error "zoxide executable cannot be found")
-    (require 'consult)
-    (let* ((items (thread-last
-                    (or query "")
-                    (format "zoxide query --list '%s'")
-                    shell-command-to-string
-                    ((lambda (s) (split-string s "\n")))
-                    (seq-remove #'string-blank-p)))
-           (path (or (and (length= items 1) (car-safe items))
-                     (consult--read
-                      items
-                      :prompt "Choose: "
-                      :sort nil
-                      :initial query))))
-      (if (eq major-mode 'eshell-mode)
-          path
-        (find-file path)))))
-
-;;;###autoload
-(defun add-to-zoxide-cache ()
-  "Teach zoxide the current buffer's directory."
-  (when-let* ((dir (if (eq major-mode 'dired-mode)
-                       dired-directory
-                     (and buffer-file-name
-                          (file-name-directory buffer-file-name))))
-              ((stringp dir))
-              ((file-readable-p dir)))
-    (call-process-shell-command
-     (format "zoxide add \"%s\"" dir))))
-
 (defun consult-line-collect-urls--candidates (&optional ignore-regexp)
   "Collect \"LINE: URL\" candidates, skipping lines matching IGNORE-REGEXP.
 Only the first URL of a line is taken.  Each candidate carries the bare

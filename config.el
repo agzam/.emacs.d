@@ -324,7 +324,7 @@
 
       (:prefix ("f" . "files")
                (:when (modulep! :custom search)
-                 :desc "zoxide dir" "d" #'zoxide-find)
+                 :desc "zoxide dir" "d" #'consult-zoxide)
                :desc "dired" "j" #'dired-jump
                (:when (featurep :system 'macos)
                  :desc "open in app" "O" #'macos-open-in-default-program)

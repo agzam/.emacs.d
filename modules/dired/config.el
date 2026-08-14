@@ -81,7 +81,7 @@
   (add-to-list 'dired-guess-shell-alist-user '("\\.pdf\\'" "open -a Preview"))
 
   (when (modulep! :custom search)
-    (add-hook 'dired-after-readin-hook #'add-to-zoxide-cache))
+    (consult-zoxide-track-mode 1))
 
   (defadvice! dired-do-shell-command-full-paths-a (orig-fn command &optional arg _)
     "Hand `dired-do-shell-command' full paths instead of local file names."

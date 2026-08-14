@@ -217,9 +217,9 @@ resurrecting their buffers before the modes exist."
    [("p" "projects" (lambda ()
                       (interactive)
                       (dired (project-prompt-project-dir))))
-    ("SPC" "zoxide history" zoxide-find)
+    ("SPC" "zoxide history" consult-zoxide)
     ("b" "buffers" consult-buffer)
-    ("fd" "zoxide" zoxide-find)
+    ("fd" "zoxide" consult-zoxide)
     ("fr" "recent" consult-recent-file)]
    [("d" "kill tab" tab-bar-kill-tab)]])
 

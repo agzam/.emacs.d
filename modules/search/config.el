@@ -95,6 +95,13 @@
   :config
   (setopt slacko-default-host "qlikdev.slack.com"))
 
+;; extracted from this module's autoload/search.el (was zoxide-find +
+;; add-to-zoxide-cache); the dired module turns tracking on, eshell/z reads
+;; through consult-zoxide-read
+(use-package consult-zoxide
+  :ensure (consult-zoxide :host github :repo "agzam/consult-zoxide.el")
+  :defer t)
+
 ;; relocated home from the root layer (was pulled ahead for SPC h h)
 (use-package consult-symbol
   :ensure (consult-symbol :host github :repo "danielfleischer/consult-symbol")

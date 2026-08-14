@@ -79,6 +79,7 @@
     (ag-themes . "~/GitHub/agzam/ag-themes.el")
     (browser-hist . "~/GitHub/agzam/browser-hist.el")
     (consult-hn . "~/GitHub/agzam/consult-hn")
+    (consult-zoxide . "~/GitHub/agzam/consult-zoxide.el")
     (reddigg . "~/GitHub/agzam/emacs-reddigg")
     (hnreader . "~/GitHub/agzam/emacs-hnreader")
     (navegosa . "~/GitHub/agzam/navegosa.el")
