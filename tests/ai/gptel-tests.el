@@ -367,6 +367,40 @@
         (gptel-rewrite-merge-sentences (list ov ov)))
       (expect (count-matches "^<<<<<<<" (point-min) (point-max)) :to-equal 1)))
 
+  (it "leaves point inside the first conflict, ready for u/l"
+    (with-current-buffer buf
+      (insert "Aa bad. Bb fine.")
+      (setq ov (make-overlay (point-min) (point-max)))
+      (overlay-put ov 'gptel-rewrite "Aa good. Bb fine.")
+      (cl-letf (((symbol-function 'gptel--rewrite-reject) #'ignore))
+        (gptel-rewrite-merge-sentences (list ov)))
+      (expect (looking-at-p "Aa bad") :to-be-truthy)
+      (expect (save-excursion (smerge-match-conflict) t) :to-be t)))
+
+  (it "opens the smerge transient after inserting conflicts"
+    (with-current-buffer buf
+      (insert "Aa bad. Bb fine.")
+      (setq ov (make-overlay (point-min) (point-max)))
+      (overlay-put ov 'gptel-rewrite "Aa good. Bb fine.")
+      (let (opened)
+        (cl-letf (((symbol-function 'gptel--rewrite-reject) #'ignore)
+                  ((symbol-function 'smerge-transient)
+                   (lambda () (setq opened t))))
+          (gptel-rewrite-merge-sentences (list ov)))
+        (expect opened :to-be t))))
+
+  (it "keeps the transient closed on whitespace-only rewrites"
+    (with-current-buffer buf
+      (insert "Aa fine.  Bb fine.")
+      (setq ov (make-overlay (point-min) (point-max)))
+      (overlay-put ov 'gptel-rewrite "Aa fine. Bb fine.")
+      (let (opened)
+        (cl-letf (((symbol-function 'gptel--rewrite-reject) #'ignore)
+                  ((symbol-function 'smerge-transient)
+                   (lambda () (setq opened t))))
+          (gptel-rewrite-merge-sentences (list ov)))
+        (expect opened :to-be nil))))
+
   (it "keeps the original on whitespace-only rewrites"
     (with-current-buffer buf
       (insert "Aa fine.  Bb fine.")

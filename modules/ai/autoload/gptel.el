@@ -502,7 +502,8 @@ review is done."
     (with-current-buffer ov-buf
       (let ((label (if (and (boundp 'gptel-backend) (fboundp 'gptel-backend-name))
                        (gptel-backend-name gptel-backend)
-                     "rewrite")))
+                     "rewrite"))
+            (conflicted nil))
         ;; iterating re-pushes the same overlay onto the pending list, and
         ;; replacing its region evaporates it - visit each live one once
         (dolist (ov (seq-uniq (ensure-list ovs)))
@@ -526,8 +527,18 @@ review is done."
                     (insert merged)
                     (require 'smerge-mode)
                     (smerge-mode 1)
-                    (gptel-rewrite-arm-review-cleanup mbeg (point))))))))
-        (gptel--rewrite-reject ovs)))))
+                    (gptel-rewrite-arm-review-cleanup mbeg (point))
+                    (setq conflicted (or conflicted mbeg))))))))
+        (gptel--rewrite-reject ovs)
+        (when conflicted
+          ;; land inside the first conflict: smerge-next skips a conflict
+          ;; at point, and u/l need point within one to act
+          (goto-char conflicted)
+          (unless (looking-at-p "<<<<<<<")
+            (re-search-forward "^<<<<<<< " nil t))
+          (forward-line 1)
+          (when (fboundp 'smerge-transient)
+            (smerge-transient)))))))
 
 ;;;###autoload
 (transient-define-prefix gptel-improve-text-transient ()

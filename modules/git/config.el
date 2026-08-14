@@ -347,6 +347,9 @@ GraphQL `errors' alist, which otherwise dies with `listp, http'."
 (after! diff-mode
   (setq diff-add-log-use-relative-names t))
 
+(after! smerge-mode
+  (map! :map smerge-mode-map :n "gm" #'smerge-transient))
+
 ;; ox-gfm ships no Version header and its v1.0 tag sits on a commit a
 ;; depth-1 clone never fetches, so consult-gh's (ox-gfm "1.0") requirement
 ;; reads "version 0" on every cold build; declare the version explicitly.
