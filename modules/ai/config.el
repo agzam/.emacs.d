@@ -28,7 +28,9 @@
    gptel-default-mode 'org-mode
    gptel-expert-commands t
    gptel-track-media t
-   gptel-highlight-methods '(face))
+   gptel-highlight-methods '(face)
+   ;; rewrite overlays advertise their keys instead of a bare "Ready"
+   gptel-rewrite-default-action #'gptel-rewrite-ready-banner)
 
   (after! gptel-transient
     ;; RET stays a newline in the chat buffer; send/confirm move to

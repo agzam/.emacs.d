@@ -224,16 +224,6 @@ Returns nil if the file does not exist."
            "Do not include any headers, titles or explanations outside of the snippet, "
            "keep the three ticks with the language designator (markdown code markup).")))
 
-(defun replace-region-with-string (replacement buffer beg end)
-  "Replace BEG..END in BUFFER with REPLACEMENT.
-Inserts at BEG explicitly - point may be anywhere by the time an async
-response lands, and bare `insert' would splice the text there."
-  (with-current-buffer buffer
-    (save-excursion
-      (delete-region beg end)
-      (goto-char beg)
-      (insert replacement "\n"))))
-
 ;; Unlike Doom, the lab loads transient lazily - make sure the definers
 ;; below expand no matter which autoload fires first.
 (require 'transient)
@@ -276,6 +266,45 @@ response lands, and bare `insert' would splice the text there."
 ;; at runtime the package is always there.
 (require 'gptel-transient nil t)
 
+;; The in-place flow rides on gptel-rewrite, loaded on demand.  The
+;; defvar keeps the let below dynamic even before that load.
+(defvar gptel--rewrite-directive)
+(defvar gptel-rewrite-actions-map)
+(declare-function gptel--suffix-rewrite "gptel-rewrite")
+(declare-function gptel--rewrite-update-status "gptel-rewrite")
+
+;;;###autoload
+(defun gptel-rewrite-ready-banner (ov)
+  "Replace OV's \" Ready\" status with a legend of the pending actions.
+For `gptel-rewrite-default-action': the rewrite overlay's keys are
+otherwise invisible - RET's dispatch menu is the only discoverable
+entry.  Rendered spacehammer-edit style: key, label, │ separators."
+  (let* ((key-for
+          (lambda (cmd)
+            ;; prefer a keyboard key over <mouse-1>
+            (if-let* ((keys (seq-remove
+                             (lambda (k) (string-match-p "mouse" (key-description k)))
+                             (where-is-internal cmd gptel-rewrite-actions-map))))
+                (key-description (car keys))
+              "?")))
+         (seg (lambda (cmd label face)
+                (concat
+                 (propertize (funcall key-for cmd)
+                             'face `(:weight bold :inherit ,face))
+                 (propertize (concat " " label) 'face 'shadow))))
+         (sep (propertize " │ " 'face 'shadow)))
+    (gptel--rewrite-update-status
+     ov (concat
+         " "
+         (string-join
+          (list (funcall seg 'gptel--rewrite-dispatch "menu" 'font-lock-function-name-face)
+                (funcall seg 'gptel--rewrite-accept "accept" 'success)
+                (funcall seg 'gptel--rewrite-merge "merge" 'font-lock-constant-face)
+                (funcall seg 'gptel--rewrite-diff "diff" 'font-lock-keyword-face)
+                (funcall seg 'gptel--rewrite-iterate "iterate" 'warning)
+                (funcall seg 'gptel--rewrite-reject "reject" 'error))
+          sep)))))
+
 ;;;###autoload
 (transient-define-prefix gptel-improve-text-transient ()
   "Improve region with gptel."
@@ -309,54 +338,21 @@ response lands, and bare `insert' would splice the text there."
                       prompt))
               :transient t)))))))])
 
-(defun gptel-improve-text-show-diff (original improved model)
-  "Display a cleaned-up diff between ORIGINAL and IMPROVED strings.
-MODEL only names the scratch buffers.  Returns the diff buffer."
-  (require 'diff)
-  (let ((fst-buf (generate-new-buffer (format "* %s 1 *" model)))
-        (snd-buf (generate-new-buffer (format "* %s 2 *" model))))
-    (with-current-buffer fst-buf (insert original))
-    (with-current-buffer snd-buf (insert improved))
-    (unwind-protect
-        (let ((diff-buf (diff-no-select
-                         fst-buf snd-buf "--text" 'no-async
-                         (get-buffer-create "*improve-text diff*"))))
-          (with-current-buffer diff-buf
-            (read-only-mode -1)
-            (goto-char (point-min))
-            (dolist (r '("^diff.*\n"
-                         "^. No newline at end of file\n"
-                         "^. No newline at end of file\n"
-                         "^Diff finished.*$"))
-              (when (re-search-forward r nil :noerror)
-                (replace-match "")))
-            (visual-line-mode))
-          (display-buffer diff-buf)
-          diff-buf)
-      (kill-buffer fst-buf)
-      (kill-buffer snd-buf))))
-
-(defun gptel-improve-text-handle-response (resp info buffer beg end text in-place)
-  "Apply improve-text RESP to BUFFER between BEG and END.
-Written against the current `gptel-request' callback contract: RESP is
-the response only when it is a string; cons cells carry reasoning/tool
-chunks (ignored here), and nil means the request failed - its cause
-lives in INFO.  TEXT, the original region, is diffed against RESP when
-IN-PLACE."
+(defun gptel-improve-text-handle-response (resp info)
+  "Show improve-text RESP in a side buffer.
+Only the aside prompts (variants, code explanations) land here; the
+in-place prompts ride on `gptel-rewrite'.  Per the `gptel-request'
+callback contract, cons cells carry reasoning/tool chunks (ignored),
+and nil means the request failed - its cause lives in INFO."
   (cond
    ((stringp resp)
-    (let ((model (or (let-plist info .data.model)
-                     (and (boundp 'gptel-model) gptel-model))))
-      (if in-place
-          (progn
-            (replace-region-with-string resp buffer beg end)
-            (message "¡Ahí está!")
-            (gptel-improve-text-show-diff text resp model))
-        (let ((buf (generate-new-buffer (format "* %s *" model))))
-          (with-current-buffer buf
-            (markdown-mode)
-            (insert resp))
-          (switch-to-buffer-other-window buf)))))
+    (let* ((model (or (let-plist info .data.model)
+                      (and (boundp 'gptel-model) gptel-model)))
+           (buf (generate-new-buffer (format "* %s *" model))))
+      (with-current-buffer buf
+        (markdown-mode)
+        (insert resp))
+      (switch-to-buffer-other-window buf)))
    ;; reasoning / tool-call / tool-result chunks: not the response
    ((consp resp) nil)
    ((eq resp 'abort) (message "gptel-improve-text: request aborted"))
@@ -369,23 +365,23 @@ IN-PLACE."
     (user-error "no selection"))
   (setq gptel-improve-text-prompt (or gptel-improve-text-prompt
                                       (car gptel-improve-text-prompts-history)))
-  (let* ((buffer (current-buffer))
-         ;; markers: keep aiming at the region even if the buffer is
-         ;; edited while the request is in flight
-         (beg (copy-marker (region-beginning)))
-         (end (copy-marker (region-end)))
-         (text (buffer-substring-no-properties beg end))
-         (in-place? (string-match-p
-                     "fix mistakes\\|correct mistakes\\|simplify"
-                     gptel-improve-text-prompt)))
+  (let ((in-place? (string-match-p
+                    "fix mistakes\\|correct mistakes\\|simplify"
+                    gptel-improve-text-prompt)))
     (message "beep-bop... checking your crap with %s" gptel-model)
-    (gptel-request text
-      :system gptel-improve-text-prompt
-      :buffer buffer
-      :callback
-      (lambda (resp info)
-        (gptel-improve-text-handle-response
-         resp info buffer beg end text in-place?)))))
+    (if in-place?
+        (progn
+          (require 'gptel-rewrite nil t)
+          ;; Let-bound: `gptel-request' captures :system synchronously.
+          ;; Iterating later from the rewrite dispatch falls back to the
+          ;; stock rewrite directive.
+          (let ((gptel--rewrite-directive gptel-improve-text-prompt))
+            (gptel--suffix-rewrite
+             "Apply the directive. Output only the final replacement text.")))
+      (gptel-request (buffer-substring-no-properties
+                      (region-beginning) (region-end))
+        :system gptel-improve-text-prompt
+        :callback #'gptel-improve-text-handle-response))))
 
 ;;; Chat buffer helpers
 

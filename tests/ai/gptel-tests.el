@@ -121,87 +121,117 @@
     (expect (extract-tool-defs-from-bb nil) :to-be nil)))
 
 (describe "gptel-improve-text-handle-response"
-  :var (buf)
-  (before-each
-    (setq buf (generate-new-buffer "improve-src"))
-    (with-current-buffer buf (insert "teh text stays")))
-  (after-each
-    (when (buffer-live-p buf) (kill-buffer buf)))
-
-  (it "ignores reasoning and tool chunks without touching the buffer"
+  (it "ignores reasoning and tool chunks"
     ;; current gptel forwards (reasoning . TEXT) & friends to custom callbacks
-    (gptel-improve-text-handle-response
-     '(reasoning . "") '(:data (:model "m")) buf 1 9 "teh text" t)
-    (gptel-improve-text-handle-response
-     '(tool-call . nil) '(:data (:model "m")) buf 1 9 "teh text" t)
-    (expect (with-current-buffer buf (buffer-string))
-            :to-equal "teh text stays"))
+    (spy-on 'switch-to-buffer-other-window)
+    (expect (gptel-improve-text-handle-response '(reasoning . "") nil) :to-be nil)
+    (expect (gptel-improve-text-handle-response '(tool-call . nil) nil) :to-be nil)
+    (expect 'switch-to-buffer-other-window :not :to-have-been-called))
 
   (it "surfaces request failures from the info plist"
     (spy-on 'message)
-    (gptel-improve-text-handle-response
-     nil '(:status "429 Too Many Requests") buf 1 9 "teh text" t)
+    (gptel-improve-text-handle-response nil '(:status "429 Too Many Requests"))
     (expect 'message :to-have-been-called-with
-            "gptel-improve-text failed: %s" "429 Too Many Requests")
-    (expect (with-current-buffer buf (buffer-string))
-            :to-equal "teh text stays"))
+            "gptel-improve-text failed: %s" "429 Too Many Requests"))
 
   (it "reports aborted requests"
     (spy-on 'message)
-    (gptel-improve-text-handle-response 'abort '(:status "abort") buf 1 9 "teh text" t)
+    (gptel-improve-text-handle-response 'abort '(:status "abort"))
     (expect 'message :to-have-been-called-with
             "gptel-improve-text: request aborted"))
 
-  (it "replaces the region and diffs in-place responses"
-    (spy-on 'gptel-improve-text-show-diff)
-    (gptel-improve-text-handle-response
-     "the text" '(:data (:model "claude-x")) buf 1 9 "teh text" t)
-    (expect (with-current-buffer buf (buffer-string))
-            :to-equal "the text\n stays")
-    (expect 'gptel-improve-text-show-diff :to-have-been-called-with
-            "teh text" "the text" "claude-x"))
-
-  (it "shows non-in-place responses in a side buffer"
+  (it "shows string responses in a markdown side buffer"
     (spy-on 'markdown-mode)
     (spy-on 'switch-to-buffer-other-window)
     (gptel-improve-text-handle-response
-     "variant 1\n\n---\n\nvariant 2" '(:data (:model "claude-x")) buf 1 9 "teh text" nil)
-    (expect (with-current-buffer buf (buffer-string))
-            :to-equal "teh text stays")
+     "variant 1\n\n---\n\nvariant 2" '(:data (:model "claude-x")))
     (let ((shown (car (spy-calls-args-for 'switch-to-buffer-other-window 0))))
       (expect (buffer-live-p shown) :to-be t)
       (expect (with-current-buffer shown (buffer-string))
               :to-equal "variant 1\n\n---\n\nvariant 2")
       (kill-buffer shown))))
 
+(describe "gptel-rewrite-ready-banner"
+  :var (captured)
+  (before-each
+    (setq captured nil)
+    (defvar gptel-rewrite-actions-map nil)
+    (setq gptel-rewrite-actions-map
+          (define-keymap
+            "RET" 'gptel--rewrite-dispatch
+            "<mouse-1>" 'gptel--rewrite-dispatch
+            "C-c C-a" 'gptel--rewrite-accept
+            "C-c C-m" 'gptel--rewrite-merge
+            "C-c C-d" 'gptel--rewrite-diff
+            "C-c C-r" 'gptel--rewrite-iterate
+            "C-c C-k" 'gptel--rewrite-reject)))
+
+  (it "renders every action with its key, skipping mouse bindings"
+    (cl-letf (((symbol-function 'gptel--rewrite-update-status)
+               (lambda (_ov msg &rest _) (setq captured msg))))
+      (gptel-rewrite-ready-banner 'fake-ov)
+      ;; C-c C-m canonicalizes to C-c RET (C-m = RET)
+      (dolist (chunk '("RET menu" "C-c C-a accept" "C-c RET merge"
+                       "C-c C-d diff" "C-c C-r iterate" "C-c C-k reject"))
+        (expect captured :to-match (regexp-quote chunk)))
+      (expect captured :not :to-match "mouse")))
+
+  (it "falls back to ? for unbound actions"
+    (setq gptel-rewrite-actions-map (define-keymap))
+    (cl-letf (((symbol-function 'gptel--rewrite-update-status)
+               (lambda (_ov msg &rest _) (setq captured msg))))
+      (gptel-rewrite-ready-banner 'fake-ov)
+      (expect captured :to-match (regexp-quote "? menu")))))
+
 (describe "gptel-improve-text"
-  :var (buf captured)
+  :var (buf)
   (before-each
     (defvar gptel-model nil)
-    (setq buf (generate-new-buffer "improve-mark"))
-    (setq captured nil))
+    (defvar gptel--rewrite-directive nil)
+    (setq buf (generate-new-buffer "improve-src")))
   (after-each
     (setq gptel-improve-text-prompt nil)
     (when (buffer-live-p buf) (kill-buffer buf)))
 
-  (it "aims the replacement with markers, surviving mid-flight edits"
+  (it "routes in-place prompts through gptel-rewrite with the prompt as directive"
     (with-current-buffer buf
-      (insert "prefix sum txt")
-      (cl-letf (((symbol-function 'gptel-request)
-                 (lambda (_text &rest args)
-                   (setq captured (plist-get args :callback))))
-                ((symbol-function 'gptel-improve-text-show-diff)
-                 (lambda (&rest _))))
-        (let ((transient-mark-mode t))
-          (push-mark 8 t t)
-          (goto-char 15)
-          (gptel-improve-text))
-        (expect captured :to-be-truthy)
-        ;; the buffer shifts while the request is in flight
-        (goto-char (point-min))
-        (insert "XX ")
-        (funcall captured "sum text" '(:data (:model "m")))
-        (expect (buffer-string) :to-equal "XX prefix sum text\n"))))
+      (insert "sum txt to fix")
+      (let (rewrite-args seen-directive requested)
+        (cl-letf (((symbol-function 'gptel--suffix-rewrite)
+                   (lambda (&rest args)
+                     (setq rewrite-args args
+                           seen-directive gptel--rewrite-directive)))
+                  ((symbol-function 'gptel-request)
+                   (lambda (&rest _) (setq requested t))))
+          (let ((transient-mark-mode t))
+            (push-mark (point-min) t t)
+            (goto-char (point-max))
+            (gptel-improve-text)))
+        ;; default prompt says "Correct mistakes" -> in-place -> rewrite
+        (expect rewrite-args :to-be-truthy)
+        (expect seen-directive :to-equal (car gptel-improve-text-prompts-history))
+        (expect requested :to-be nil))))
+
+  (it "routes aside prompts through gptel-request onto the side-buffer handler"
+    (with-current-buffer buf
+      (insert "sum txt to riff on")
+      (let (rewrite-called request-args)
+        (cl-letf (((symbol-function 'gptel--suffix-rewrite)
+                   (lambda (&rest _) (setq rewrite-called t)))
+                  ((symbol-function 'gptel-request)
+                   (lambda (text &rest args) (setq request-args (cons text args)))))
+          (setq gptel-improve-text-prompt
+                (nth 2 gptel-improve-text-prompts-history)) ;variants
+          (let ((transient-mark-mode t))
+            (push-mark (point-min) t t)
+            (goto-char (point-max))
+            (gptel-improve-text)))
+        (expect (car request-args) :to-equal "sum txt to riff on")
+        (expect (plist-get (cdr request-args) :system)
+                :to-equal (nth 2 gptel-improve-text-prompts-history))
+        (expect (plist-get (cdr request-args) :callback)
+                :to-be #'gptel-improve-text-handle-response)
+        (expect rewrite-called :to-be nil))))
 
   (it "refuses to run without a selection"
     (with-current-buffer buf
@@ -209,32 +239,6 @@
       (let ((transient-mark-mode t))
         (deactivate-mark)
         (expect (gptel-improve-text) :to-throw 'user-error)))))
-
-(describe "gptel-improve-text-show-diff"
-  (it "produces a cleaned-up diff in a dedicated buffer"
-    (spy-on 'display-buffer)
-    (let ((diff-buf (gptel-improve-text-show-diff
-                     "teh text\n" "the text\n" "claude-x")))
-      (unwind-protect
-          (with-current-buffer diff-buf
-            (expect (buffer-name) :to-equal "*improve-text diff*")
-            (expect (buffer-string) :to-match "teh text")
-            (expect (buffer-string) :to-match "the text")
-            ;; the "diff ..." command line got scrubbed
-            (expect (buffer-string) :not :to-match "\\`diff "))
-        (kill-buffer diff-buf))))
-
-  (it "cleans up its scratch buffers"
-    (spy-on 'display-buffer)
-    (let ((before (buffer-list))
-          (diff-buf (gptel-improve-text-show-diff "a\n" "b\n" "m")))
-      (unwind-protect
-          (expect (seq-filter
-                   (lambda (b) (string-match-p "\\* m [12] \\*" (buffer-name b)))
-                   (buffer-list))
-                  :to-be nil)
-        (kill-buffer diff-buf)
-        (ignore before)))))
 
 (describe "open-gptel"
   :var (buf-old buf-new buf-quick buf-plain switched agent-called)
