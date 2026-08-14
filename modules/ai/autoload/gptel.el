@@ -289,7 +289,14 @@ embed states as pseudo-keys, so a normal-state binding like
                   (mapcar (lambda (d)
                             (string-remove-prefix "<normal-state> " d)))
                   (seq-remove (lambda (d) (string-match-p "-state>" d)))))
-         (desc (or (car (seq-sort-by #'length #'< descs)) "?"))
+         ;; shortest key wins; among equals (the digit run) the lowest,
+         ;; so a 1-9 binding advertises as "1"
+         (desc (or (car (seq-sort (lambda (a b)
+                                    (or (< (length a) (length b))
+                                        (and (= (length a) (length b))
+                                             (string< a b))))
+                                  descs))
+                   "?"))
          ;; "] ]" reads as two keystrokes only to Emacs; show "]]".
          ;; Multi-char tokens (C-c, RET) keep their separating spaces.
          (desc (if (string-match-p "\\`.\\( .\\)+\\'" desc)
@@ -487,6 +494,40 @@ and turns off `smerge-mode' unless conflicts remain elsewhere."
               (message "improve-text: review complete"))))
     (add-hook 'post-command-hook watch nil t)))
 
+(defun gptel-rewrite-merge-review (beg end improved label)
+  "Replace BEG..END with a sentence-conflict merge against IMPROVED.
+Enables `smerge-mode', arms the review cleanup, and returns the merge's
+start position.  Returns nil - leaving the region untouched - when
+IMPROVED differs from the region only in whitespace.  LABEL names the
+lower conflict side."
+  (let* ((original (buffer-substring-no-properties beg end))
+         (merged (gptel-rewrite-sentence-conflicts original improved label)))
+    (when merged
+      (save-excursion
+        (goto-char beg)
+        (delete-region beg end)
+        (let ((mbeg (point)))
+          ;; a marker-leading merge needs its own line; insert after MBEG
+          ;; so the cleanup region covers this glue
+          (when (and (not (bolp)) (string-prefix-p "<<<<<<<" merged))
+            (insert gptel-rewrite-glue-newline))
+          (insert merged)
+          (require 'smerge-mode)
+          (smerge-mode 1)
+          (gptel-rewrite-arm-review-cleanup mbeg (point))
+          mbeg)))))
+
+(defun gptel-rewrite-review-go (pos)
+  "Drop point inside the first conflict at or after POS; open the panel.
+`smerge-next' skips a conflict already at point, and the keep commands
+need point within one to act."
+  (goto-char pos)
+  (unless (looking-at-p "<<<<<<<")
+    (re-search-forward "^<<<<<<< " nil t))
+  (forward-line 1)
+  (when (fboundp 'smerge-transient)
+    (smerge-transient)))
+
 ;;;###autoload
 (defun gptel-rewrite-merge-sentences (&optional ovs)
   "Merge pending rewrites in OVS as sentence-granular smerge conflicts.
@@ -509,36 +550,122 @@ review is done."
         (dolist (ov (seq-uniq (ensure-list ovs)))
           (when-let* ((improved (overlay-get ov 'gptel-rewrite))
                       ((overlay-buffer ov)))
-            (let* ((beg (overlay-start ov))
-                   (end (overlay-end ov))
-                   (original (buffer-substring-no-properties beg end))
-                   (merged (gptel-rewrite-sentence-conflicts
-                            original improved label)))
-              (if (null merged)
-                  (message "improve-text: only whitespace differences; keeping original")
-                (save-excursion
-                  (goto-char beg)
-                  (delete-region beg end)
-                  (let ((mbeg (point)))
-                    ;; a marker-leading merge needs its own line; insert
-                    ;; after MBEG so the cleanup region covers this glue
-                    (when (and (not (bolp)) (string-prefix-p "<<<<<<<" merged))
-                      (insert gptel-rewrite-glue-newline))
-                    (insert merged)
-                    (require 'smerge-mode)
-                    (smerge-mode 1)
-                    (gptel-rewrite-arm-review-cleanup mbeg (point))
-                    (setq conflicted (or conflicted mbeg))))))))
+            (if-let* ((mbeg (gptel-rewrite-merge-review
+                             (overlay-start ov) (overlay-end ov)
+                             improved label)))
+                (setq conflicted (or conflicted mbeg))
+              (message "improve-text: only whitespace differences; keeping original"))))
         (gptel--rewrite-reject ovs)
         (when conflicted
-          ;; land inside the first conflict: smerge-next skips a conflict
-          ;; at point, and u/l need point within one to act
-          (goto-char conflicted)
-          (unless (looking-at-p "<<<<<<<")
-            (re-search-forward "^<<<<<<< " nil t))
-          (forward-line 1)
-          (when (fboundp 'smerge-transient)
-            (smerge-transient)))))))
+          (gptel-rewrite-review-go conflicted))))))
+
+;;; Variant picking
+
+;; The variants prompt asks for N rewrites separated by "---".  The
+;; response lands in a picker buffer; choosing a variant replays it
+;; through the same sentence-granular smerge review the in-place path
+;; uses, against the origin region captured as markers at request time.
+
+(defvar-local gptel-improve-text-variants nil
+  "Variant strings offered by this picker buffer, in response order.")
+
+(defvar-local gptel-improve-text-origin nil
+  "Cons of markers around the text the picked variant will replace.
+Captured when the request was sent, so the review targets the origin
+region even after edits or a buffer switch.")
+
+(defvar gptel-improve-text-variants-map
+  (let ((map (make-sparse-keymap)))
+    (keymap-set map "RET" #'gptel-improve-text-pick-variant)
+    (keymap-set map "q" #'gptel-improve-text-dismiss-variants)
+    (dotimes (i 9)
+      (keymap-set map (number-to-string (1+ i))
+                  #'gptel-improve-text-pick-nth-variant))
+    map)
+  "Keys on the picker's variant sections.
+Rides on the `keymap' text property, which Emacs consults before evil's
+state maps - digits and RET stay ours even in normal state.")
+
+(defun gptel-improve-text-parse-variants (text)
+  "Split TEXT into the variants the model separated with \"---\" lines.
+Tolerates ragged separators - extra hyphens, stray blanks, missing
+surrounding blank lines.  Hyphen runs inside a line stay untouched.
+Returns trimmed non-empty variants in order."
+  (thread-last
+    (split-string text "^[ \t]*-\\{3,\\}[ \t]*$")
+    (mapcar #'string-trim)
+    (seq-remove #'string-empty-p)))
+
+(defun gptel-improve-text-show-variants (variants region)
+  "Pop a picker buffer offering VARIANTS for the REGION markers.
+Each variant renders under a numbered banner and carries its index as
+the `gptel-improve-text-variant' text property, so both digits and RET
+at point resolve a choice.  The header line advertises the keys."
+  (let ((buf (generate-new-buffer "*improve-text variants*")))
+    (with-current-buffer buf
+      (seq-do-indexed
+       (lambda (variant i)
+         (let ((start (point)))
+           (insert (propertize
+                    (format " %d " (1+ i))
+                    'face '(:weight bold :inherit font-lock-function-name-face))
+                   "\n" variant "\n\n")
+           (put-text-property start (point)
+                              'gptel-improve-text-variant (1+ i))))
+       variants)
+      (add-text-properties (point-min) (point-max)
+                           (list 'keymap gptel-improve-text-variants-map))
+      (setq gptel-improve-text-variants variants
+            gptel-improve-text-origin region)
+      (setq header-line-format
+            (keymap-hint-line
+             gptel-improve-text-variants-map
+             '((gptel-improve-text-pick-variant "pick this" success)
+               (gptel-improve-text-pick-nth-variant "pick nth" warning)
+               (gptel-improve-text-dismiss-variants "dismiss" error))))
+      (visual-line-mode 1)
+      (setq buffer-read-only t)
+      (goto-char (point-min)))
+    (switch-to-buffer-other-window buf)))
+
+(defun gptel-improve-text-pick-variant (&optional n)
+  "Send variant N (default: the one at point) into a sentence review.
+The picker closes and the variant lands on the origin region as
+per-sentence smerge conflicts - the same review the in-place rewrite
+produces.  A variant that only differs in whitespace keeps the picker
+open for another choice."
+  (interactive)
+  (let* ((n (or n (get-text-property (point) 'gptel-improve-text-variant)
+                (user-error "No variant at point")))
+         (variant (or (nth (1- n) gptel-improve-text-variants)
+                      (user-error "No variant %d" n)))
+         (picker (current-buffer)))
+    (pcase-let ((`(,beg . ,end) gptel-improve-text-origin))
+      (unless (and (markerp beg) (marker-buffer beg)
+                   (buffer-live-p (marker-buffer beg)))
+        (user-error "The buffer this text came from is gone"))
+      (if-let* ((mbeg (with-current-buffer (marker-buffer beg)
+                        (gptel-rewrite-merge-review
+                         beg end variant (format "variant %d" n)))))
+          (progn
+            (if-let* ((win (get-buffer-window picker)))
+                (quit-window 'kill win)
+              (kill-buffer picker))
+            (pop-to-buffer (marker-buffer beg))
+            (set-marker beg nil)
+            (set-marker end nil)
+            (gptel-rewrite-review-go mbeg))
+        (message "improve-text: variant %d only differs in whitespace" n)))))
+
+(defun gptel-improve-text-pick-nth-variant ()
+  "Pick the variant numbered by the digit key that invoked this."
+  (interactive)
+  (gptel-improve-text-pick-variant (- last-command-event ?0)))
+
+(defun gptel-improve-text-dismiss-variants ()
+  "Kill the picker, restoring the window it borrowed."
+  (interactive)
+  (quit-window 'kill))
 
 ;;;###autoload
 (transient-define-prefix gptel-improve-text-transient ()
@@ -574,20 +701,26 @@ review is done."
               :transient t)))))))])
 
 (defun gptel-improve-text-handle-response (resp info)
-  "Show improve-text RESP in a side buffer.
+  "Route improve-text RESP to the variant picker or a side buffer.
 Only the aside prompts (variants, code explanations) land here; the
-in-place prompts ride on `gptel-rewrite'.  Per the `gptel-request'
-callback contract, cons cells carry reasoning/tool chunks (ignored),
-and nil means the request failed - its cause lives in INFO."
+in-place prompts ride on `gptel-rewrite'.  A response whose request
+captured an origin region (the variants prompt) opens the picker;
+everything else dumps into a markdown side buffer.  Per the
+`gptel-request' callback contract, cons cells carry reasoning/tool
+chunks (ignored), and nil means the request failed - its cause lives
+in INFO."
   (cond
    ((stringp resp)
-    (let* ((model (or (let-plist info .data.model)
-                      (and (boundp 'gptel-model) gptel-model)))
-           (buf (generate-new-buffer (format "* %s *" model))))
-      (with-current-buffer buf
-        (markdown-mode)
-        (insert resp))
-      (switch-to-buffer-other-window buf)))
+    (if-let* ((region (plist-get (plist-get info :context) :improve-region))
+              (variants (gptel-improve-text-parse-variants resp)))
+        (gptel-improve-text-show-variants variants region)
+      (let* ((model (or (let-plist info .data.model)
+                        (and (boundp 'gptel-model) gptel-model)))
+             (buf (generate-new-buffer (format "* %s *" model))))
+        (with-current-buffer buf
+          (markdown-mode)
+          (insert resp))
+        (switch-to-buffer-other-window buf))))
    ;; reasoning / tool-call / tool-result chunks: not the response
    ((consp resp) nil)
    ((eq resp 'abort) (message "gptel-improve-text: request aborted"))
@@ -620,9 +753,17 @@ and nil means the request failed - its cause lives in INFO."
           (setq-local gptel--rewrite-directive gptel-improve-text-prompt)
           (setq-local gptel--rewrite-message instruction)
           (gptel--suffix-rewrite instruction))
+      ;; the variants prompt comes back through the picker into a review
+      ;; of the origin region - marked now, since the response arrives
+      ;; after point moved on (last-region only exists after a review)
       (gptel-request (buffer-substring-no-properties
                       (region-beginning) (region-end))
         :system gptel-improve-text-prompt
+        :context (when (string-match-p "variant\\|variation"
+                                       gptel-improve-text-prompt)
+                   (list :improve-region
+                         (cons (copy-marker (region-beginning))
+                               (copy-marker (region-end) t))))
         :callback #'gptel-improve-text-handle-response))))
 
 ;;; Chat buffer helpers

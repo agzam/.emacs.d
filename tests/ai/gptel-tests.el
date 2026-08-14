@@ -149,7 +149,165 @@
       (expect (buffer-live-p shown) :to-be t)
       (expect (with-current-buffer shown (buffer-string))
               :to-equal "variant 1\n\n---\n\nvariant 2")
-      (kill-buffer shown))))
+      (kill-buffer shown)))
+
+  (it "routes a response with an origin region into the variant picker"
+    (spy-on 'switch-to-buffer-other-window)
+    (let (shown)
+      (cl-letf (((symbol-function 'gptel-improve-text-show-variants)
+                 (lambda (variants region) (setq shown (list variants region)))))
+        (gptel-improve-text-handle-response
+         "v one\n\n---\n\nv two" '(:context (:improve-region (1 . 5)))))
+      (expect shown :to-equal '(("v one" "v two") (1 . 5)))
+      (expect 'switch-to-buffer-other-window :not :to-have-been-called)))
+
+  (it "falls back to the side buffer when nothing parses as a variant"
+    (spy-on 'markdown-mode)
+    (spy-on 'switch-to-buffer-other-window)
+    (let (shown)
+      (cl-letf (((symbol-function 'gptel-improve-text-show-variants)
+                 (lambda (&rest args) (setq shown args))))
+        (gptel-improve-text-handle-response
+         " \n " '(:context (:improve-region (1 . 5)) :data (:model "m"))))
+      (expect shown :to-be nil))
+    (let ((side (car (spy-calls-args-for 'switch-to-buffer-other-window 0))))
+      (expect (buffer-live-p side) :to-be t)
+      (kill-buffer side))))
+
+(describe "gptel-improve-text-parse-variants"
+  (it "splits on --- separator lines and trims each variant"
+    (expect (gptel-improve-text-parse-variants
+             "One is fine.\n\n---\n\nTwo is fine.\n\n---\n\nThree is fine.")
+            :to-equal '("One is fine." "Two is fine." "Three is fine.")))
+
+  (it "tolerates ragged separators"
+    (expect (gptel-improve-text-parse-variants "One.\n ----- \nTwo.")
+            :to-equal '("One." "Two.")))
+
+  (it "keeps hyphen runs inside a line together"
+    (expect (gptel-improve-text-parse-variants "keep --- this together")
+            :to-equal '("keep --- this together")))
+
+  (it "drops empty chunks from leading or trailing separators"
+    (expect (gptel-improve-text-parse-variants "---\n\nOnly one.\n\n---")
+            :to-equal '("Only one.")))
+
+  (it "returns nil for blank text"
+    (expect (gptel-improve-text-parse-variants "  \n ") :to-be nil)))
+
+(describe "gptel-improve-text variant picker"
+  :var (origin picker region opened)
+  (before-each
+    (setq opened nil)
+    (setq origin (generate-new-buffer " *variants-origin*"))
+    (with-current-buffer origin (insert "Aa bad. Bb fine."))
+    (setq region (with-current-buffer origin
+                   (cons (copy-marker (point-min))
+                         (copy-marker (point-max) t))))
+    (spy-on 'switch-to-buffer-other-window)
+    (gptel-improve-text-show-variants
+     '("Aa one. Bb fine." "Aa two. Bb fine." "Aa  bad. Bb fine.")
+     region)
+    (setq picker (car (spy-calls-args-for 'switch-to-buffer-other-window 0))))
+  (after-each
+    (when (buffer-live-p picker) (kill-buffer picker))
+    (when (buffer-live-p origin) (kill-buffer origin)))
+
+  (cl-macrolet ((with-pick-stubs (&rest body)
+                  ;; batch has no picker window; land review buffer
+                  ;; switches on set-buffer and observe the transient
+                  `(cl-letf (((symbol-function 'pop-to-buffer) #'set-buffer)
+                             ((symbol-function 'smerge-transient)
+                              (lambda () (setq opened t))))
+                     ,@body)))
+
+    (it "renders numbered sections carrying their variant index"
+      (with-current-buffer picker
+        (expect (length gptel-improve-text-variants) :to-equal 3)
+        (expect buffer-read-only :to-be t)
+        (expect gptel-improve-text-origin :to-be region)
+        (goto-char (point-min))
+        (search-forward "Aa two")
+        (expect (get-text-property (match-beginning 0)
+                                   'gptel-improve-text-variant)
+                :to-equal 2)))
+
+    (it "covers the whole content with the picker keymap"
+      (with-current-buffer picker
+        (expect (get-text-property (point-min) 'keymap)
+                :to-be gptel-improve-text-variants-map)
+        (expect (get-text-property (1- (point-max)) 'keymap)
+                :to-be gptel-improve-text-variants-map)))
+
+    (it "advertises the keys in the header line"
+      (with-current-buffer picker
+        (let ((legend (substring-no-properties header-line-format)))
+          (dolist (chunk '("RET pick this" "1 pick nth" "q dismiss"))
+            (expect legend :to-match (regexp-quote chunk))))))
+
+    (it "lands the variant at point as sentence conflicts in the origin"
+      (with-current-buffer picker
+        (goto-char (text-property-any (point-min) (point-max)
+                                      'gptel-improve-text-variant 2))
+        (with-pick-stubs (gptel-improve-text-pick-variant)))
+      (expect (buffer-live-p picker) :to-be nil)
+      (with-current-buffer origin
+        (expect (buffer-string) :to-equal
+                (concat "<<<<<<< original\nAa bad. \n=======\n"
+                        "Aa two. \n>>>>>>> variant 2\nBb fine."))
+        (expect smerge-mode :to-be-truthy)
+        ;; point sits inside the first conflict, ready for u/l
+        (expect (looking-at-p "Aa bad") :to-be-truthy))
+      (expect opened :to-be t))
+
+    (it "dispatches on the digit that invoked pick-nth, not on point"
+      (with-current-buffer picker
+        (goto-char (text-property-any (point-min) (point-max)
+                                      'gptel-improve-text-variant 2))
+        (with-pick-stubs
+         (let ((last-command-event ?1))
+           (gptel-improve-text-pick-nth-variant))))
+      (with-current-buffer origin
+        (expect (buffer-string) :to-match ">>>>>>> variant 1$")))
+
+    (it "keeps the picker open when the variant only differs in whitespace"
+      (with-current-buffer picker
+        (with-pick-stubs
+         (let ((last-command-event ?3))
+           (gptel-improve-text-pick-nth-variant))))
+      (expect (buffer-live-p picker) :to-be t)
+      (with-current-buffer origin
+        (expect (buffer-string) :to-equal "Aa bad. Bb fine.")
+        (expect (bound-and-true-p smerge-mode) :to-be nil))
+      (expect opened :to-be nil))
+
+    (it "resolving the review rejoins the text and records last-region"
+      (with-current-buffer picker
+        (with-pick-stubs
+         (let ((last-command-event ?2))
+           (gptel-improve-text-pick-nth-variant))))
+      (with-current-buffer origin
+        (goto-char (point-min))
+        (re-search-forward "^<<<<<<< " nil t)
+        (smerge-keep-lower)
+        (run-hooks 'post-command-hook)
+        (expect (buffer-string) :to-equal "Aa two. Bb fine.")
+        (expect (buffer-substring-no-properties
+                 (car gptel-improve-text-last-region)
+                 (cdr gptel-improve-text-last-region))
+                :to-equal "Aa two. Bb fine.")))
+
+    (it "refuses to pick when the origin buffer is gone"
+      (kill-buffer origin)
+      (with-current-buffer picker
+        (goto-char (point-min))
+        (expect (gptel-improve-text-pick-variant) :to-throw 'user-error))
+      (expect (buffer-live-p picker) :to-be t))
+
+    (it "refuses when point is past every variant"
+      (with-current-buffer picker
+        (goto-char (point-max))
+        (expect (gptel-improve-text-pick-variant) :to-throw 'user-error)))))
 
 (describe "gptel-rewrite-ready-banner"
   :var (captured)
@@ -204,7 +362,15 @@
       (keymap-set map "<visual-state> x" 'fake-cmd)
       (expect (substring-no-properties
                (keymap-hint-segment map 'fake-cmd "cmd" 'success))
-              :to-equal "? cmd"))))
+              :to-equal "? cmd")))
+
+  (it "breaks length ties toward the lowest key, so a digit run reads as 1"
+    (let ((map (make-sparse-keymap)))
+      (dotimes (i 9)
+        (keymap-set map (number-to-string (1+ i)) 'fake-pick))
+      (expect (substring-no-properties
+               (keymap-hint-segment map 'fake-pick "pick" 'success))
+              :to-equal "1 pick"))))
 
 (describe "gptel-rewrite-sentence-split"
   (it "concatenates back to the exact input"
@@ -498,6 +664,42 @@
         (expect (plist-get (cdr request-args) :callback)
                 :to-be #'gptel-improve-text-handle-response)
         (expect rewrite-called :to-be nil))))
+
+  (it "captures the origin region as markers for the variants prompt"
+    (with-current-buffer buf
+      (insert "sum txt to riff on")
+      (let (request-args)
+        (cl-letf (((symbol-function 'gptel-request)
+                   (lambda (text &rest args) (setq request-args (cons text args)))))
+          (setq gptel-improve-text-prompt
+                (nth 2 gptel-improve-text-prompts-history)) ;variants
+          (let ((transient-mark-mode t))
+            (push-mark (point-min) t t)
+            (goto-char (point-max))
+            (gptel-improve-text)))
+        (pcase-let ((`(,beg . ,end)
+                     (plist-get (plist-get (cdr request-args) :context)
+                                :improve-region)))
+          (expect (marker-buffer beg) :to-be buf)
+          (expect (marker-position beg) :to-equal (point-min))
+          (expect (marker-position end) :to-equal (point-max))
+          ;; the end marker must chase text inserted at the boundary
+          (expect (marker-insertion-type end) :to-be t)))))
+
+  (it "sends no origin region for the other aside prompts"
+    (with-current-buffer buf
+      (insert "(defun riddle ())")
+      (let (request-args)
+        (cl-letf (((symbol-function 'gptel-request)
+                   (lambda (text &rest args) (setq request-args (cons text args)))))
+          (setq gptel-improve-text-prompt
+                (nth 3 gptel-improve-text-prompts-history)) ;explain code
+          (let ((transient-mark-mode t))
+            (push-mark (point-min) t t)
+            (goto-char (point-max))
+            (gptel-improve-text)))
+        (expect (plist-member (cdr request-args) :context) :to-be-truthy)
+        (expect (plist-get (cdr request-args) :context) :to-be nil))))
 
   (it "refuses to run without a selection"
     (with-current-buffer buf
