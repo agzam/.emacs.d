@@ -145,14 +145,20 @@ not block on a credential prompt)."
                               "-l" (str (fs/path root "init.el"))
                               "-l" (str (fs/path root "scripts" driver))))))
 
-  deps {:doc "Install test deps (buttercup, parseedn) into .local/.cache/test-elpa"
+  ;; transient is a test dep on purpose: the suites poke its suffix and
+  ;; layout formats, which drift between the versions Emacs bundles
+  ;; (30.1 ships 0.7, 32 a 0.13 snapshot).  Installing it pins both CI
+  ;; and local batch runs to the same version - the one runtime gets.
+  deps {:doc "Install test deps (buttercup, parseedn, transient) into .local/.cache/test-elpa"
         :task (apply p/shell
                      (concat emacs-batch
                              ["--eval" (format "(setq package-user-dir %s)" (pr-str test-elpa))
                               "--eval" "(require 'package)"
                               "--eval" "(add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\"))"
                               "-f" "package-initialize"
-                              "--eval" "(dolist (p '(buttercup parseedn)) (unless (package-installed-p p) (unless package-archive-contents (package-refresh-contents)) (package-install p)))"]))}
+                              ;; install by archive desc, not by name: name-based install
+                              ;; treats the built-in transient as already satisfied
+                              "--eval" "(dolist (p '(buttercup parseedn transient)) (unless (assq p package-alist) (unless package-archive-contents (package-refresh-contents)) (package-install (cadr (assq p package-archive-contents)))))"]))}
 
   lint {:doc "check-parens over every tracked .el file"
         :task (let [files (->> (p/shell {:out :string :dir root}
