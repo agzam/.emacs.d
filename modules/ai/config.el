@@ -32,6 +32,12 @@
    ;; rewrite overlays advertise their keys instead of a bare "Ready"
    gptel-rewrite-default-action #'gptel-rewrite-ready-banner)
 
+  (after! gptel-rewrite
+    ;; sentence-granular merge is the primary merge for prose; the stock
+    ;; whole-region merge stays reachable from the RET dispatch menu
+    (keymap-set gptel-rewrite-actions-map
+                "C-c C-m" #'gptel-rewrite-merge-sentences))
+
   (after! gptel-transient
     ;; RET stays a newline in the chat buffer; send/confirm move to
     ;; s-<return>.  (`gptel-tools' is gptel's prefix, not the vendored package.)

@@ -158,11 +158,11 @@
     (defvar gptel-rewrite-actions-map nil)
     (setq gptel-rewrite-actions-map
           (define-keymap
-            "RET" 'gptel--rewrite-dispatch
-            "<mouse-1>" 'gptel--rewrite-dispatch
+            "<mouse-1>" 'gptel--rewrite-accept
             "C-c C-a" 'gptel--rewrite-accept
-            "C-c C-m" 'gptel--rewrite-merge
+            "C-c C-m" 'gptel-rewrite-merge-sentences
             "C-c C-d" 'gptel--rewrite-diff
+            "C-c C-e" 'gptel--rewrite-ediff
             "C-c C-r" 'gptel--rewrite-iterate
             "C-c C-k" 'gptel--rewrite-reject)))
 
@@ -171,8 +171,8 @@
                (lambda (_ov msg &rest _) (setq captured msg))))
       (gptel-rewrite-ready-banner 'fake-ov)
       ;; C-c C-m canonicalizes to C-c RET (C-m = RET)
-      (dolist (chunk '("RET menu" "C-c C-a accept" "C-c RET merge"
-                       "C-c C-d diff" "C-c C-r iterate" "C-c C-k reject"))
+      (dolist (chunk '("C-c C-a accept" "C-c RET merge" "C-c C-d diff"
+                       "C-c C-e ediff" "C-c C-r iterate" "C-c C-k reject"))
         (expect captured :to-match (regexp-quote chunk)))
       (expect captured :not :to-match "mouse")))
 
@@ -181,7 +181,222 @@
     (cl-letf (((symbol-function 'gptel--rewrite-update-status)
                (lambda (_ov msg &rest _) (setq captured msg))))
       (gptel-rewrite-ready-banner 'fake-ov)
-      (expect captured :to-match (regexp-quote "? menu")))))
+      (expect captured :to-match (regexp-quote "? accept")))))
+
+(describe "keymap-hint-segment"
+  (it "prefers the shortest key, squeezing single-char evil sequences"
+    (let ((map (make-sparse-keymap)))
+      (keymap-set map "C-c ^ n" 'fake-next)
+      (keymap-set map "<normal-state> ] ]" 'fake-next)
+      (expect (substring-no-properties
+               (keymap-hint-segment map 'fake-next "next" 'success))
+              :to-equal "]] next")))
+
+  (it "keeps separator spaces between multi-char tokens"
+    (let ((map (make-sparse-keymap)))
+      (keymap-set map "C-c ^ n" 'fake-next)
+      (expect (substring-no-properties
+               (keymap-hint-segment map 'fake-next "next" 'success))
+              :to-equal "C-c ^ n next")))
+
+  (it "ignores non-normal evil state bindings"
+    (let ((map (make-sparse-keymap)))
+      (keymap-set map "<visual-state> x" 'fake-cmd)
+      (expect (substring-no-properties
+               (keymap-hint-segment map 'fake-cmd "cmd" 'success))
+              :to-equal "? cmd"))))
+
+(describe "gptel-rewrite-sentence-split"
+  (it "concatenates back to the exact input"
+    (dolist (text '("One. Two. Three."
+                    "Single line paragraph. With two sentences.\n\nSecond paragraph here. Also two sentences."
+                    "A sentence\nhard-wrapped across lines. Another one."
+                    "No trailing newline at all"
+                    "* Org heading\nBody sentence one. Body sentence two.\n"
+                    "Double  spaced.  Sentences  here."))
+      (expect (apply #'concat (gptel-rewrite-sentence-split text))
+              :to-equal text)))
+
+  (it "keeps inter-sentence whitespace on the preceding chunk"
+    (expect (gptel-rewrite-sentence-split "One. Two.")
+            :to-equal '("One. " "Two."))))
+
+(describe "gptel-rewrite-sentence-hunks"
+  (it "returns nil for identical lists"
+    (expect (gptel-rewrite-sentence-hunks '("a" "b") '("a" "b")) :to-be nil))
+
+  (it "reports a change hunk"
+    (expect (gptel-rewrite-sentence-hunks '("a" "b" "c") '("a" "x" "c"))
+            :to-equal '((2 2 2 2))))
+
+  (it "reports a deletion as an empty new side"
+    (expect (gptel-rewrite-sentence-hunks '("a" "b" "c") '("a" "c"))
+            :to-equal '((2 2 2 1))))
+
+  (it "reports an insertion as an empty old side"
+    (expect (gptel-rewrite-sentence-hunks '("a" "c") '("a" "b" "c"))
+            :to-equal '((2 1 2 2)))))
+
+(describe "gptel-rewrite-sentence-conflicts"
+  (it "returns nil when only whitespace differs"
+    (expect (gptel-rewrite-sentence-conflicts "A.  B." "A. B." "M") :to-be nil))
+
+  (it "conflicts only the changed sentences, equal runs verbatim"
+    (let ((merged (gptel-rewrite-sentence-conflicts
+                   "One is fine. Twoo bad. Three is fine. Fourr bad."
+                   "One is fine. Two bad. Three is fine. Four bad."
+                   "M")))
+      (expect (substring-no-properties merged) :to-equal
+              (concat "One is fine. \n"
+                      "<<<<<<< original\nTwoo bad. \n=======\nTwo bad. \n>>>>>>> M\n"
+                      "Three is fine. \n"
+                      "<<<<<<< original\nFourr bad.\n=======\nFour bad.\n>>>>>>> M\n"))))
+
+  (it "marks every injected newline with the glue property"
+    (let ((merged (gptel-rewrite-sentence-conflicts "Aa. Bb." "Aa. Xx." "M")))
+      (dotimes (i (length merged))
+        (when (eq (aref merged i) ?\n)
+          (expect (get-text-property i 'gptel-rewrite-glue merged) :to-be t)))))
+
+  (it "renders deletions with an empty lower side"
+    (let ((merged (gptel-rewrite-sentence-conflicts "Keep. Drop me. End." "Keep. End." "M")))
+      (expect (substring-no-properties merged)
+              :to-match "<<<<<<< original\nDrop me. \n=======\n>>>>>>> M")))
+
+  (it "renders insertions with an empty upper side"
+    (let ((merged (gptel-rewrite-sentence-conflicts "Keep. End." "Keep. Add me. End." "M")))
+      (expect (substring-no-properties merged)
+              :to-match "<<<<<<< original\n=======\nAdd me. \n>>>>>>> M")))
+
+  (it "starts with a marker when the first sentence changed"
+    (expect (substring-no-properties
+             (gptel-rewrite-sentence-conflicts "Bad start. Fine." "Good start. Fine." "M"))
+            :to-match "\\`<<<<<<< original\n")))
+
+(describe "sentence merge smerge roundtrips"
+  :var (buf)
+  (before-all (require 'smerge-mode))
+  (before-each (setq buf (generate-new-buffer " *roundtrip*")))
+  (after-each (when (buffer-live-p buf) (kill-buffer buf)))
+
+  (cl-flet ((resolve-all (original improved keeps)
+              ;; KEEPS: list of smerge commands, one per conflict in order
+              (with-current-buffer buf
+                (insert (gptel-rewrite-sentence-conflicts original improved "M"))
+                (smerge-mode 1)
+                (gptel-rewrite-arm-review-cleanup (point-min) (point-max))
+                (dolist (keep keeps)
+                  ;; land inside the first remaining conflict; smerge-next
+                  ;; would skip a conflict sitting at point
+                  (goto-char (point-min))
+                  (re-search-forward "^<<<<<<< " nil t)
+                  (funcall keep)
+                  (run-hooks 'post-command-hook))
+                (buffer-string))))
+
+    (it "keep-lower everywhere reproduces the improved text"
+      (expect (resolve-all "Aa bad. Bb fine. Cc bad."
+                           "Aa good. Bb fine. Cc good."
+                           (list #'smerge-keep-lower #'smerge-keep-lower))
+              :to-equal "Aa good. Bb fine. Cc good."))
+
+    (it "keep-upper everywhere reproduces the original exactly"
+      (expect (resolve-all "Aa bad. Bb fine. Cc bad."
+                           "Aa good. Bb fine. Cc good."
+                           (list #'smerge-keep-upper #'smerge-keep-upper))
+              :to-equal "Aa bad. Bb fine. Cc bad."))
+
+    (it "cherry-picks per sentence"
+      (expect (resolve-all "Aa bad. Bb fine. Cc bad."
+                           "Aa good. Bb fine. Cc good."
+                           (list #'smerge-keep-lower #'smerge-keep-upper))
+              :to-equal "Aa good. Bb fine. Cc bad."))
+
+    (it "rejoins a multi-paragraph region preserving paragraph breaks"
+      (expect (resolve-all "Para one baad.\n\nPara two fine. Tail baad."
+                           "Para one good.\n\nPara two fine. Tail good."
+                           (list #'smerge-keep-lower #'smerge-keep-lower))
+              :to-equal "Para one good.\n\nPara two fine. Tail good.")))
+
+  (it "leaves the buffer alone until the last conflict resolves"
+    (with-current-buffer buf
+      (insert (gptel-rewrite-sentence-conflicts
+               "Aa bad. Bb fine. Cc bad." "Aa good. Bb fine. Cc good." "M"))
+      (smerge-mode 1)
+      (gptel-rewrite-arm-review-cleanup (point-min) (point-max))
+      (goto-char (point-min))
+      (re-search-forward "^<<<<<<< " nil t)
+      (smerge-keep-lower)
+      (run-hooks 'post-command-hook)
+      (expect (buffer-string) :to-match "^<<<<<<< original")
+      (expect smerge-mode :to-be-truthy)
+      (expect (car-safe header-line-format) :to-equal " REVIEW "))))
+
+(describe "gptel-rewrite-merge-sentences"
+  :var (buf ov rejected)
+  (before-each
+    (setq rejected nil)
+    (setq buf (generate-new-buffer " *merge-cmd*")))
+  (after-each
+    (when (buffer-live-p buf) (kill-buffer buf)))
+
+  (it "replaces the region with conflicts and enables smerge"
+    (with-current-buffer buf
+      (insert "prefix line\nAa bad. Bb fine.\nsuffix line")
+      (setq ov (make-overlay 13 29))    ;the middle line
+      (overlay-put ov 'gptel-rewrite "Aa good. Bb fine.")
+      (cl-letf (((symbol-function 'gptel--rewrite-reject)
+                 (lambda (ovs) (setq rejected ovs))))
+        (gptel-rewrite-merge-sentences (list ov)))
+      (expect (buffer-string) :to-match "^<<<<<<< original\nAa bad. \n")
+      (expect (buffer-string) :to-match "^Aa good. \n")
+      (expect smerge-mode :to-be-truthy)
+      (expect rejected :to-equal (list ov))
+      ;; surrounding lines untouched
+      (expect (buffer-string) :to-match "\\`prefix line\n")
+      (expect (buffer-string) :to-match "suffix line\\'")))
+
+  (it "survives duplicate and evaporated overlay entries"
+    ;; iterating re-pushes the same overlay; the first merge evaporates it
+    (with-current-buffer buf
+      (insert "Aa bad. Bb fine.")
+      (setq ov (make-overlay (point-min) (point-max)))
+      (overlay-put ov 'evaporate t)
+      (overlay-put ov 'gptel-rewrite "Aa good. Bb fine.")
+      (cl-letf (((symbol-function 'gptel--rewrite-reject) #'ignore))
+        (gptel-rewrite-merge-sentences (list ov ov)))
+      (expect (count-matches "^<<<<<<<" (point-min) (point-max)) :to-equal 1)))
+
+  (it "keeps the original on whitespace-only rewrites"
+    (with-current-buffer buf
+      (insert "Aa fine.  Bb fine.")
+      (setq ov (make-overlay (point-min) (point-max)))
+      (overlay-put ov 'gptel-rewrite "Aa fine. Bb fine.")
+      (cl-letf (((symbol-function 'gptel--rewrite-reject)
+                 (lambda (ovs) (setq rejected ovs))))
+        (gptel-rewrite-merge-sentences (list ov)))
+      (expect (buffer-string) :to-equal "Aa fine.  Bb fine.")
+      (expect rejected :to-equal (list ov))))
+
+  (it "pushes a mid-line leading conflict onto its own line"
+    (with-current-buffer buf
+      (insert "head: Aa bad. Bb fine.")
+      (setq ov (make-overlay 7 (point-max))) ;region starts mid-line
+      (overlay-put ov 'gptel-rewrite "Aa good. Bb fine.")
+      (cl-letf (((symbol-function 'gptel--rewrite-reject) #'ignore))
+        (gptel-rewrite-merge-sentences (list ov)))
+      (expect (buffer-string) :to-match "\\`head: \n<<<<<<< original\n")
+      ;; resolving rejoins the head fragment
+      (goto-char (point-min))
+      (re-search-forward "^<<<<<<< " nil t)
+      (smerge-keep-lower)
+      (run-hooks 'post-command-hook)
+      (expect (buffer-string) :to-equal "head: Aa good. Bb fine.")
+      ;; the finished review is remembered for a no-selection re-run
+      (expect (buffer-substring-no-properties
+               (car gptel-improve-text-last-region)
+               (cdr gptel-improve-text-last-region))
+              :to-equal "Aa good. Bb fine."))))
 
 (describe "gptel-improve-text"
   :var (buf)
@@ -210,7 +425,24 @@
         ;; default prompt says "Correct mistakes" -> in-place -> rewrite
         (expect rewrite-args :to-be-truthy)
         (expect seen-directive :to-equal (car gptel-improve-text-prompts-history))
+        ;; iterate resends the buffer-local instruction; nil would 400
+        (expect (buffer-local-value 'gptel--rewrite-message buf)
+                :to-equal (car rewrite-args))
         (expect requested :to-be nil))))
+
+  (it "reuses the last reviewed region when no selection is active"
+    (with-current-buffer buf
+      (insert "Aa bad. Bb fine.")
+      (setq-local gptel-improve-text-last-region
+                  (cons (copy-marker 1) (copy-marker 9 t)))
+      (let (seen-region)
+        (cl-letf (((symbol-function 'gptel--suffix-rewrite)
+                   (lambda (&rest _)
+                     (setq seen-region (cons (region-beginning) (region-end))))))
+          (let ((transient-mark-mode t))
+            (deactivate-mark)
+            (gptel-improve-text)))
+        (expect seen-region :to-equal '(1 . 9)))))
 
   (it "routes aside prompts through gptel-request onto the side-buffer handler"
     (with-current-buffer buf

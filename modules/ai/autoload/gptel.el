@@ -269,9 +269,40 @@ Returns nil if the file does not exist."
 ;; The in-place flow rides on gptel-rewrite, loaded on demand.  The
 ;; defvar keeps the let below dynamic even before that load.
 (defvar gptel--rewrite-directive)
+(defvar gptel--rewrite-message)
 (defvar gptel-rewrite-actions-map)
+(defvar smerge-mode-map)
 (declare-function gptel--suffix-rewrite "gptel-rewrite")
 (declare-function gptel--rewrite-update-status "gptel-rewrite")
+(declare-function gptel--rewrite-overlay-at "gptel-rewrite")
+(declare-function gptel--rewrite-reject "gptel-rewrite")
+
+(defun keymap-hint-segment (map cmd label face)
+  "Render \"KEY LABEL\" for CMD in MAP, spacehammer-edit style.
+Skips mouse bindings and non-normal evil state bindings; evil keymaps
+embed states as pseudo-keys, so a normal-state binding like
+\"<normal-state> ] ]\" is shown as \"]]\".  Prefers the shortest key."
+  (let* ((descs (thread-last
+                  (where-is-internal cmd map)
+                  (mapcar #'key-description)
+                  (seq-remove (lambda (d) (string-match-p "mouse" d)))
+                  (mapcar (lambda (d)
+                            (string-remove-prefix "<normal-state> " d)))
+                  (seq-remove (lambda (d) (string-match-p "-state>" d)))))
+         (desc (or (car (seq-sort-by #'length #'< descs)) "?"))
+         ;; "] ]" reads as two keystrokes only to Emacs; show "]]".
+         ;; Multi-char tokens (C-c, RET) keep their separating spaces.
+         (desc (if (string-match-p "\\`.\\( .\\)+\\'" desc)
+                   (string-replace " " "" desc)
+                 desc)))
+    (concat (propertize desc 'face `(:weight bold :inherit ,face))
+            (propertize (concat " " label) 'face 'shadow))))
+
+(defun keymap-hint-line (map segments)
+  "Join SEGMENTS - (CMD LABEL FACE) lists - into a │-separated hint for MAP."
+  (string-join
+   (mapcar (lambda (seg) (apply #'keymap-hint-segment map seg)) segments)
+   (propertize " │ " 'face 'shadow)))
 
 ;;;###autoload
 (defun gptel-rewrite-ready-banner (ov)
@@ -279,31 +310,224 @@ Returns nil if the file does not exist."
 For `gptel-rewrite-default-action': the rewrite overlay's keys are
 otherwise invisible - RET's dispatch menu is the only discoverable
 entry.  Rendered spacehammer-edit style: key, label, │ separators."
-  (let* ((key-for
-          (lambda (cmd)
-            ;; prefer a keyboard key over <mouse-1>
-            (if-let* ((keys (seq-remove
-                             (lambda (k) (string-match-p "mouse" (key-description k)))
-                             (where-is-internal cmd gptel-rewrite-actions-map))))
-                (key-description (car keys))
-              "?")))
-         (seg (lambda (cmd label face)
-                (concat
-                 (propertize (funcall key-for cmd)
-                             'face `(:weight bold :inherit ,face))
-                 (propertize (concat " " label) 'face 'shadow))))
-         (sep (propertize " │ " 'face 'shadow)))
-    (gptel--rewrite-update-status
-     ov (concat
-         " "
-         (string-join
-          (list (funcall seg 'gptel--rewrite-dispatch "menu" 'font-lock-function-name-face)
-                (funcall seg 'gptel--rewrite-accept "accept" 'success)
-                (funcall seg 'gptel--rewrite-merge "merge" 'font-lock-constant-face)
-                (funcall seg 'gptel--rewrite-diff "diff" 'font-lock-keyword-face)
-                (funcall seg 'gptel--rewrite-iterate "iterate" 'warning)
-                (funcall seg 'gptel--rewrite-reject "reject" 'error))
-          sep)))))
+  (gptel--rewrite-update-status
+   ov (concat
+       " "
+       (keymap-hint-line
+        gptel-rewrite-actions-map
+        '((gptel--rewrite-accept "accept" success)
+          (gptel-rewrite-merge-sentences "merge" font-lock-constant-face)
+          (gptel--rewrite-diff "diff" font-lock-keyword-face)
+          (gptel--rewrite-ediff "ediff" font-lock-type-face)
+          (gptel--rewrite-iterate "iterate" warning)
+          (gptel--rewrite-reject "reject" error))))))
+
+;;; Sentence-granular merge for rewrite overlays
+
+(defvar-local gptel-improve-text-last-region nil
+  "Cons of markers around the last completed sentence review.
+The merge drops the rewrite overlay, so iterating after a review needs
+a new request; this lets `gptel-improve-text' re-run over the same spot
+without re-selecting.")
+
+(defconst gptel-rewrite-glue-newline
+  (propertize "\n" 'gptel-rewrite-glue t)
+  "Structural newline injected to keep conflict markers on their own lines.
+The text property lets the review cleanup find and remove these after
+resolution, restoring the original line joins - unwrapped one-line
+paragraphs come back out as one line.")
+
+(defun gptel-rewrite-sentence-split (text)
+  "Split TEXT into sentence chunks whose concatenation is exactly TEXT.
+Inter-sentence whitespace rides on the preceding chunk, so unchanged
+chunks reproduce the original spacing verbatim."
+  (with-temp-buffer
+    (insert text)
+    (goto-char (point-min))
+    (let ((sentence-end-double-space nil)
+          (pos (point-min))
+          chunks)
+      (while (not (eobp))
+        (forward-sentence)
+        (skip-chars-forward " \t\n")
+        (when (= (point) pos)           ;safety: never stall
+          (goto-char (point-max)))
+        (push (buffer-substring-no-properties pos (point)) chunks)
+        (setq pos (point)))
+      (nreverse chunks))))
+
+(defun gptel-rewrite-sentence-hunks (old-lines new-lines)
+  "Diff two string lists into hunks ((OBEG OEND NBEG NEND) ...), 1-based.
+An empty side is encoded as BEG greater than END.  Returns nil when the
+lists match; degrades to one all-covering hunk if diff is unusable."
+  (let ((old-file (make-temp-file "sentence-hunks-a"))
+        (new-file (make-temp-file "sentence-hunks-b")))
+    (unwind-protect
+        (progn
+          (with-temp-file old-file
+            (dolist (l old-lines) (insert l "\n")))
+          (with-temp-file new-file
+            (dolist (l new-lines) (insert l "\n")))
+          (with-temp-buffer
+            (let ((status (call-process "diff" nil t nil old-file new-file)))
+              (if (not (memq status '(0 1)))
+                  (list (list 1 (length old-lines) 1 (length new-lines)))
+                (goto-char (point-min))
+                (let (hunks)
+                  (while (re-search-forward
+                          "^\\([0-9]+\\)\\(?:,\\([0-9]+\\)\\)?\\([acd]\\)\\([0-9]+\\)\\(?:,\\([0-9]+\\)\\)?$"
+                          nil t)
+                    (let ((ob (string-to-number (match-string 1)))
+                          (oe (string-to-number (or (match-string 2) (match-string 1))))
+                          (op (aref (match-string 3) 0))
+                          (nb (string-to-number (match-string 4)))
+                          (ne (string-to-number (or (match-string 5) (match-string 4)))))
+                      (push (pcase op
+                              (?c (list ob oe nb ne))
+                              (?d (list ob oe (1+ nb) nb))
+                              (?a (list (1+ ob) ob nb ne)))
+                            hunks)))
+                  (nreverse hunks))))))
+      (delete-file old-file)
+      (delete-file new-file))))
+
+(defun gptel-rewrite-sentence-conflicts (original improved label)
+  "Merge IMPROVED into ORIGINAL as per-sentence conflict blocks.
+Returns nil when the two differ only in whitespace.  Unchanged
+sentences are emitted verbatim from ORIGINAL - the model gets no say
+over pure whitespace - and each differing run becomes its own conflict
+block (upper original, lower IMPROVED, labeled LABEL) so smerge can
+accept or reject change by change.  Marker-separating newlines carry
+`gptel-rewrite-glue' for post-resolution removal."
+  (let* ((osents (gptel-rewrite-sentence-split original))
+         (isents (gptel-rewrite-sentence-split improved))
+         (norm (lambda (s) (string-join (split-string s) " ")))
+         (hunks (gptel-rewrite-sentence-hunks
+                 (mapcar norm osents) (mapcar norm isents))))
+    (when hunks
+      (let ((ovec (vconcat osents))
+            (ivec (vconcat isents))
+            (oi 1)
+            (out '()))
+        (cl-flet ((emit (s) (push s out))
+                  (range (vec from to)
+                    (when (<= from to)
+                      (push (mapconcat #'identity
+                                       (cl-subseq vec (1- from) to) "")
+                            out)))
+                  (ensure-bol ()
+                    (when (and out (not (string-suffix-p "\n" (car out))))
+                      (push gptel-rewrite-glue-newline out))))
+          (pcase-dolist (`(,ob ,oe ,nb ,ne) hunks)
+            (range ovec oi (1- ob))     ;equal run before the hunk
+            (ensure-bol)
+            (emit "<<<<<<< original")
+            (emit gptel-rewrite-glue-newline)
+            (range ovec ob oe)
+            (ensure-bol)
+            (emit "=======")
+            (emit gptel-rewrite-glue-newline)
+            (range ivec nb ne)
+            (ensure-bol)
+            (emit (concat ">>>>>>> " label))
+            (emit gptel-rewrite-glue-newline)
+            (setq oi (1+ (max oe (1- ob)))))
+          (range ovec oi (length osents)) ;trailing equal run
+          (apply #'concat (nreverse out)))))))
+
+(defun gptel-rewrite-review-header ()
+  "Header line advertising the smerge keys during a sentence review."
+  (list (propertize " REVIEW "
+                    'face '(:weight bold :inherit font-lock-function-name-face))
+        (propertize "│ " 'face 'shadow)
+        (keymap-hint-line
+         smerge-mode-map
+         '((smerge-next "next" font-lock-function-name-face)
+           (smerge-prev "prev" font-lock-function-name-face)
+           (smerge-keep-upper "keep original" success)
+           (smerge-keep-lower "take rewrite" warning)
+           (smerge-resolve "resolve" font-lock-constant-face)))))
+
+(defun gptel-rewrite-arm-review-cleanup (beg end)
+  "Finish the sentence review once BEG..END holds no more conflicts.
+Watches from a buffer-local `post-command-hook', so any smerge command
+can resolve the last conflict.  Finishing removes the injected glue
+newlines (rejoining unwrapped paragraphs), restores the header line,
+and turns off `smerge-mode' unless conflicts remain elsewhere."
+  (let* ((beg-m (copy-marker beg))
+         (end-m (copy-marker end t))
+         (saved-header header-line-format)
+         (watch nil))
+    (setq header-line-format (gptel-rewrite-review-header))
+    (setq watch
+          (lambda ()
+            (unless (save-excursion
+                      (goto-char beg-m)
+                      (re-search-forward "^<<<<<<< " end-m t))
+              (save-excursion
+                (let (pos)
+                  (while (setq pos (text-property-any
+                                    beg-m end-m 'gptel-rewrite-glue t))
+                    (delete-region
+                     pos (min (or (next-single-property-change
+                                   pos 'gptel-rewrite-glue)
+                                  end-m)
+                              end-m)))))
+              (setq header-line-format saved-header)
+              (when (and (bound-and-true-p smerge-mode)
+                         (not (save-excursion
+                                (goto-char (point-min))
+                                (re-search-forward "^<<<<<<< " nil t))))
+                (smerge-mode -1))
+              (remove-hook 'post-command-hook watch t)
+              (setq gptel-improve-text-last-region
+                    (cons (copy-marker beg-m) (copy-marker end-m t)))
+              (set-marker beg-m nil)
+              (set-marker end-m nil)
+              (message "improve-text: review complete"))))
+    (add-hook 'post-command-hook watch nil t)))
+
+;;;###autoload
+(defun gptel-rewrite-merge-sentences (&optional ovs)
+  "Merge pending rewrites in OVS as sentence-granular smerge conflicts.
+Unchanged sentences stay untouched; each changed run becomes its own
+conflict block, so the rewrite is accepted or rejected change by
+change rather than as one region-sized lump.  A whitespace-only
+rewrite is dropped, keeping the original.  Resolution is watched by
+`gptel-rewrite-arm-review-cleanup', which rejoins the text when the
+review is done."
+  (interactive (list (gptel--rewrite-overlay-at)))
+  (when-let* ((ov-buf (overlay-buffer (or (car-safe ovs) ovs)))
+              ((buffer-live-p ov-buf)))
+    (with-current-buffer ov-buf
+      (let ((label (if (and (boundp 'gptel-backend) (fboundp 'gptel-backend-name))
+                       (gptel-backend-name gptel-backend)
+                     "rewrite")))
+        ;; iterating re-pushes the same overlay onto the pending list, and
+        ;; replacing its region evaporates it - visit each live one once
+        (dolist (ov (seq-uniq (ensure-list ovs)))
+          (when-let* ((improved (overlay-get ov 'gptel-rewrite))
+                      ((overlay-buffer ov)))
+            (let* ((beg (overlay-start ov))
+                   (end (overlay-end ov))
+                   (original (buffer-substring-no-properties beg end))
+                   (merged (gptel-rewrite-sentence-conflicts
+                            original improved label)))
+              (if (null merged)
+                  (message "improve-text: only whitespace differences; keeping original")
+                (save-excursion
+                  (goto-char beg)
+                  (delete-region beg end)
+                  (let ((mbeg (point)))
+                    ;; a marker-leading merge needs its own line; insert
+                    ;; after MBEG so the cleanup region covers this glue
+                    (when (and (not (bolp)) (string-prefix-p "<<<<<<<" merged))
+                      (insert gptel-rewrite-glue-newline))
+                    (insert merged)
+                    (require 'smerge-mode)
+                    (smerge-mode 1)
+                    (gptel-rewrite-arm-review-cleanup mbeg (point))))))))
+        (gptel--rewrite-reject ovs)))))
 
 ;;;###autoload
 (transient-define-prefix gptel-improve-text-transient ()
@@ -362,7 +586,13 @@ and nil means the request failed - its cause lives in INFO."
 (defun gptel-improve-text (&optional _arg)
   (interactive "P")
   (unless (region-active-p)
-    (user-error "no selection"))
+    ;; a finished review dropped its overlay; re-arm over the same spot
+    (pcase-let ((`(,beg . ,end) gptel-improve-text-last-region))
+      (unless (and beg (marker-position beg) (marker-position end))
+        (user-error "no selection"))
+      (goto-char end)
+      (push-mark beg t t)
+      (message "improve-text: reusing the last reviewed region")))
   (setq gptel-improve-text-prompt (or gptel-improve-text-prompt
                                       (car gptel-improve-text-prompts-history)))
   (let ((in-place? (string-match-p
@@ -370,14 +600,15 @@ and nil means the request failed - its cause lives in INFO."
                     gptel-improve-text-prompt)))
     (message "beep-bop... checking your crap with %s" gptel-model)
     (if in-place?
-        (progn
+        (let ((instruction
+               "Apply the directive. Output only the final replacement text."))
           (require 'gptel-rewrite nil t)
-          ;; Let-bound: `gptel-request' captures :system synchronously.
-          ;; Iterating later from the rewrite dispatch falls back to the
-          ;; stock rewrite directive.
-          (let ((gptel--rewrite-directive gptel-improve-text-prompt))
-            (gptel--suffix-rewrite
-             "Apply the directive. Output only the final replacement text.")))
+          ;; Buffer-local so the overlay's iterate resends both.  Iterate
+          ;; reads `gptel--rewrite-message' - nil would become an empty
+          ;; content block, which Anthropic rejects with HTTP 400.
+          (setq-local gptel--rewrite-directive gptel-improve-text-prompt)
+          (setq-local gptel--rewrite-message instruction)
+          (gptel--suffix-rewrite instruction))
       (gptel-request (buffer-substring-no-properties
                       (region-beginning) (region-end))
         :system gptel-improve-text-prompt
