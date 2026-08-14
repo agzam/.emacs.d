@@ -171,7 +171,7 @@
 
 (defun gptel-anthropic-oauth--refresh-token ()
   "Refresh access token using refresh token."
-  (when-let ((refresh-token (nth 1 gptel-anthropic-oauth--token-cache)))
+  (when-let* ((refresh-token (nth 1 gptel-anthropic-oauth--token-cache)))
     (let* ((url-request-method "POST")
            (url-request-extra-headers '(("Content-Type" . "application/json")))
            (url-request-data
@@ -185,7 +185,7 @@
             (goto-char (point-min))
             (when (re-search-forward "^$" nil t)
               (let ((response (json-read)))
-                (when-let ((access-token (cdr (assoc 'access_token response))))
+                (when-let* ((access-token (cdr (assoc 'access_token response))))
                   (let ((new-refresh (or (cdr (assoc 'refresh_token response))
                                          refresh-token))
                         (expires-in (or (cdr (assoc 'expires_in response)) 3600)))
@@ -244,8 +244,8 @@
     (let ((code (read-passwd "Paste the authorization code from browser: ")))
       (when (string-empty-p code)
         (user-error "No authorization code provided"))
-      (if-let ((response (gptel-anthropic-oauth--exchange-code code verifier))
-               (access-token (cdr (assoc 'access_token response))))
+      (if-let* ((response (gptel-anthropic-oauth--exchange-code code verifier))
+                (access-token (cdr (assoc 'access_token response))))
           (progn
             (gptel-anthropic-oauth--save-tokens
              access-token
@@ -385,7 +385,7 @@ MODELS is the list of available models."
          (gptel--make-anthropic-oauth
           :name name
           :host "api.anthropic.com"
-          :header (lambda ()
+          :header (lambda (&optional _info)
                     `(("authorization" . ,(format "Bearer %s" (gptel-anthropic-oauth--get-token)))
                       ("anthropic-version" . "2023-06-01")
                       ("anthropic-beta" . "oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14")))

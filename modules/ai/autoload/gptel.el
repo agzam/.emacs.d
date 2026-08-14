@@ -225,11 +225,14 @@ Returns nil if the file does not exist."
            "keep the three ticks with the language designator (markdown code markup).")))
 
 (defun replace-region-with-string (replacement buffer beg end)
-  "Replace region or buffer content with REPLACEMENT."
+  "Replace BEG..END in BUFFER with REPLACEMENT.
+Inserts at BEG explicitly - point may be anywhere by the time an async
+response lands, and bare `insert' would splice the text there."
   (with-current-buffer buffer
-    (delete-region beg end)
-    (insert replacement)
-    (insert "\n")))
+    (save-excursion
+      (delete-region beg end)
+      (goto-char beg)
+      (insert replacement "\n"))))
 
 ;; Unlike Doom, the lab loads transient lazily - make sure the definers
 ;; below expand no matter which autoload fires first.
@@ -306,16 +309,71 @@ Returns nil if the file does not exist."
                       prompt))
               :transient t)))))))])
 
+(defun gptel-improve-text-show-diff (original improved model)
+  "Display a cleaned-up diff between ORIGINAL and IMPROVED strings.
+MODEL only names the scratch buffers.  Returns the diff buffer."
+  (require 'diff)
+  (let ((fst-buf (generate-new-buffer (format "* %s 1 *" model)))
+        (snd-buf (generate-new-buffer (format "* %s 2 *" model))))
+    (with-current-buffer fst-buf (insert original))
+    (with-current-buffer snd-buf (insert improved))
+    (unwind-protect
+        (let ((diff-buf (diff-no-select
+                         fst-buf snd-buf "--text" 'no-async
+                         (get-buffer-create "*improve-text diff*"))))
+          (with-current-buffer diff-buf
+            (read-only-mode -1)
+            (goto-char (point-min))
+            (dolist (r '("^diff.*\n"
+                         "^. No newline at end of file\n"
+                         "^. No newline at end of file\n"
+                         "^Diff finished.*$"))
+              (when (re-search-forward r nil :noerror)
+                (replace-match "")))
+            (visual-line-mode))
+          (display-buffer diff-buf)
+          diff-buf)
+      (kill-buffer fst-buf)
+      (kill-buffer snd-buf))))
+
+(defun gptel-improve-text-handle-response (resp info buffer beg end text in-place)
+  "Apply improve-text RESP to BUFFER between BEG and END.
+Written against the current `gptel-request' callback contract: RESP is
+the response only when it is a string; cons cells carry reasoning/tool
+chunks (ignored here), and nil means the request failed - its cause
+lives in INFO.  TEXT, the original region, is diffed against RESP when
+IN-PLACE."
+  (cond
+   ((stringp resp)
+    (let ((model (or (let-plist info .data.model)
+                     (and (boundp 'gptel-model) gptel-model))))
+      (if in-place
+          (progn
+            (replace-region-with-string resp buffer beg end)
+            (message "¡Ahí está!")
+            (gptel-improve-text-show-diff text resp model))
+        (let ((buf (generate-new-buffer (format "* %s *" model))))
+          (with-current-buffer buf
+            (markdown-mode)
+            (insert resp))
+          (switch-to-buffer-other-window buf)))))
+   ;; reasoning / tool-call / tool-result chunks: not the response
+   ((consp resp) nil)
+   ((eq resp 'abort) (message "gptel-improve-text: request aborted"))
+   (t (message "gptel-improve-text failed: %s" (plist-get info :status)))))
+
 ;;;###autoload
-(defun gptel-improve-text (&optional arg)
+(defun gptel-improve-text (&optional _arg)
   (interactive "P")
   (unless (region-active-p)
     (user-error "no selection"))
   (setq gptel-improve-text-prompt (or gptel-improve-text-prompt
                                       (car gptel-improve-text-prompts-history)))
   (let* ((buffer (current-buffer))
-         (beg (region-beginning))
-         (end (region-end))
+         ;; markers: keep aiming at the region even if the buffer is
+         ;; edited while the request is in flight
+         (beg (copy-marker (region-beginning)))
+         (end (copy-marker (region-end)))
          (text (buffer-substring-no-properties beg end))
          (in-place? (string-match-p
                      "fix mistakes\\|correct mistakes\\|simplify"
@@ -326,39 +384,8 @@ Returns nil if the file does not exist."
       :buffer buffer
       :callback
       (lambda (resp info)
-        (let* ((model (let-plist info .data.model)))
-          (cond
-           (in-place?
-            (let* ((_ (replace-region-with-string resp buffer beg end))
-                   (_ (message "¡Ahí está!"))
-                   (fst-buf (with-current-buffer (generate-new-buffer (format "* %s 1 *" model))
-                              (insert text)
-                              (current-buffer)))
-                   (snd-buf (with-current-buffer (generate-new-buffer (format "* %s 2 *" model))
-                              (insert resp)
-                              (current-buffer)))
-                   (diff-win (diff fst-buf snd-buf "--text" 'no-async)))
-
-              ;; cleaner diff
-              (with-current-buffer (window-buffer diff-win)
-                (read-only-mode -1)
-                (goto-char (point-min))
-                (dolist (r '("^diff.*\n"
-                             "^. No newline at end of file\n"
-                             "^. No newline at end of file\n"
-                             "^Diff finished.*$"))
-                  (re-search-forward r nil :noerror)
-                  (replace-match ""))
-                (visual-line-mode))
-              (kill-buffer fst-buf)
-              (kill-buffer snd-buf)))
-
-           (t
-            (let ((buf (generate-new-buffer (format "* %s *" model))))
-              (with-current-buffer buf
-                (markdown-mode)
-                (insert resp))
-              (switch-to-buffer-other-window buf)))))))))
+        (gptel-improve-text-handle-response
+         resp info buffer beg end text in-place?)))))
 
 ;;; Chat buffer helpers
 
