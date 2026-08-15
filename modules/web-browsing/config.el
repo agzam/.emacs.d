@@ -119,14 +119,20 @@
   (transient-remap-suffix-key 'consult-hn-transient "RET" "s-<return>"))
 
 ;; hnreader builds in place from ~/GitHub/agzam/emacs-hnreader
-;; (local-dev-packages redirect).  Another hard fork: the pinned branch is
-;; the fork's own major-mode work, and it is also the head of the upstream
-;; PR, so it stays a branch rather than becoming the trunk.
+;; (local-dev-packages redirect).  Another hard fork, tracked on master:
+;; the major-mode branch stays frozen at the head of the upstream PR, so
+;; fixes that upstream has no interest in only ever reach master.
 (use-package hnreader
-  :ensure (hnreader :host github :repo "agzam/emacs-hnreader" :branch "major-mode")
+  :ensure (hnreader :host github :repo "agzam/emacs-hnreader")
   :defer t
   :hook (hnreader-mode . reddigg-hnreader-show-all-h)
   :config
+  ;; HN hands an anonymous client a small request budget and answers 429
+  ;; once it is spent, which is a handful of items; fetching through the
+  ;; logged-in browser carries the session, same trick as reddigg below
+  (when (eq system-type 'darwin)
+    (setq hnreader-fetch-function #'hnreader--fetch-via-browser))
+
   (map! :map hnreader-mode-map
         "C-c C-o" #'hnreader-browse-nh-story-url
         :n "yy" #'hnreader-copy-hn-story-url

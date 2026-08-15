@@ -63,13 +63,16 @@
   (run-with-timer
    0.3 nil
    (lambda (b)
-     ;; don't expand headings on home page
-     (unless (string-match-p
-              "\\*HN\\*\\|\\*reddigg\\*"
-              (buffer-name b))
-       (with-current-buffer b
-         (ignore-errors (org-next-visible-heading 1))
-         (org-fold-show-all))))
+     ;; the buffer can be gone before the timer runs, and `buffer-name'
+     ;; answers nil for a dead one
+     (when (buffer-live-p b)
+       ;; don't expand headings on home page
+       (unless (string-match-p
+                "\\*HN\\*\\|\\*reddigg\\*"
+                (buffer-name b))
+         (with-current-buffer b
+           (ignore-errors (org-next-visible-heading 1))
+           (org-fold-show-all)))))
    (current-buffer)))
 
 ;;;###autoload

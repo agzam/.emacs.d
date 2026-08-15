@@ -39,6 +39,60 @@
         (expect (car kill-ring)
                 :to-equal "https://news.ycombinator.com/item?id=42")))))
 
+(describe "reddigg-hnreader-show-all-h"
+  ;; the hook defers the unfolding by a timer, and the buffer can be killed
+  ;; in between - reading a HN item and closing it at once does exactly that
+  (it "does not error when the buffer dies before the timer runs"
+    (let (timer-fn timer-arg)
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (_secs _rep fn arg) (setq timer-fn fn timer-arg arg) nil)))
+        (let ((buf (get-buffer-create " *hn-hook-spec*")))
+          (with-current-buffer buf
+            (org-mode)
+            (insert "* one\n** two\n")
+            (reddigg-hnreader-show-all-h))
+          (kill-buffer buf)))
+      (expect timer-fn :to-be-truthy)
+      (expect (funcall timer-fn timer-arg) :not :to-throw)))
+
+  (it "unfolds a comments buffer once the timer runs"
+    (let (timer-fn timer-arg)
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (_secs _rep fn arg) (setq timer-fn fn timer-arg arg) nil)))
+        (let ((buf (get-buffer-create "*HNComments*")))
+          (unwind-protect
+              (progn
+                (with-current-buffer buf
+                  (erase-buffer)
+                  (org-mode)
+                  (insert "* one\n** two\n")
+                  (org-overview)
+                  (reddigg-hnreader-show-all-h))
+                (funcall timer-fn timer-arg)
+                (expect (with-current-buffer buf
+                          (seq-some (lambda (o) (overlay-get o 'invisible))
+                                    (with-current-buffer buf (overlays-in (point-min) (point-max)))))
+                        :to-be nil))
+            (kill-buffer buf))))))
+
+  (it "leaves the front page folded"
+    (let (timer-fn timer-arg)
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (_secs _rep fn arg) (setq timer-fn fn timer-arg arg) nil)))
+        (let ((buf (get-buffer-create "*HN*")))
+          (unwind-protect
+              (let (unfolded)
+                (with-current-buffer buf
+                  (erase-buffer)
+                  (org-mode)
+                  (insert "* one\n** two\n")
+                  (reddigg-hnreader-show-all-h))
+                (cl-letf (((symbol-function 'org-fold-show-all)
+                           (lambda (&rest _) (setq unfolded t))))
+                  (funcall timer-fn timer-arg))
+                (expect unfolded :to-be nil))
+            (kill-buffer buf)))))))
+
 (describe "hnreader-frontpage-item-no-rank-a"
   (it "strips ranking numbers and non-breaking spaces"
     (with-temp-buffer

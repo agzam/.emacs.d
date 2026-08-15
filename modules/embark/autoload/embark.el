@@ -132,8 +132,10 @@ targets."
               ((not (string-empty-p str))))
     (cond
      ;; these preview via `consult-preview-key' already; dwim-ing them
-     ;; would additionally run the default action (browser / thread capture)
-     ((memq type '(github-topics-pr slacko-message)) nil)
+     ;; would additionally run the default action (browser / thread capture,
+     ;; and for a HN result a full page fetch - Hacker News answers the
+     ;; resulting concurrent requests with HTTP 429)
+     ((memq type '(github-topics-pr slacko-message consult-hn-result)) nil)
      ((and (member type '(url consult-omni))
            (string-match-p
             ;; only match PRs/Issues or individual files
@@ -159,23 +161,40 @@ targets."
   "(TYPE PATTERN) pairs `embark-target-url-at-point' dispatches on.
 Rebuilt from `embark-url-config' by `embark-setup-url-types'.")
 
+(defconst embark-url-scheme-regexp "[a-z][a-z0-9+.-]*://"
+  "Match a url scheme followed by its separator.")
+
+(defun embark-url-at-point ()
+  "Return the url at point with any wrapping link syntax stripped.
+`bounds-of-thing-at-point' spans the whole [[target][description]]
+construct in org buffers, and `thing-at-point' hands back the org
+target verbatim, so neither yields something an action can fetch:
+`org-mode' targets like elisp:(hnreader-comment \"URL\") and eww:URL
+both carry the real url inside them."
+  (when-let* ((raw (thing-at-point 'url t)))
+    (cond
+     ;; already a url; leave it whole, it may embed another one
+     ((string-match-p (concat "\\`" embark-url-scheme-regexp) raw) raw)
+     ((string-match (concat embark-url-scheme-regexp "[^][ \t\n\"'<>]+") raw)
+      (match-string 0 raw))
+     (t raw))))
+
 (defun embark-target-url-at-point ()
   "Universal embark url resolver."
-  (let ((url (thing-at-point 'url))
+  (let ((url (embark-url-at-point))
         (bounds (bounds-of-thing-at-point 'url)))
     (when (and url bounds)
       (let ((beg (car bounds))
-            (end (cdr bounds))
-            (url-str (buffer-substring-no-properties (car bounds) (cdr bounds))))
+            (end (cdr bounds)))
         (or
          ;; Try each pattern in order
          (cl-loop for (type pattern) in embark-url-patterns
                   when (if (functionp pattern)
-                           (funcall pattern url-str)
-                         (string-match-p pattern url-str))
-                  return `(,type ,url-str . ,(cons beg end)))
+                           (funcall pattern url)
+                         (string-match-p pattern url))
+                  return `(,type ,url . ,(cons beg end)))
          ;; Fallback to generic URL
-         `(url ,url-str . ,(cons beg end)))))))
+         `(url ,url . ,(cons beg end)))))))
 
 ;;;###autoload
 (defun embark-setup-url-types ()

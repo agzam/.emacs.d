@@ -133,6 +133,74 @@
         (goto-char (point-min))
         (expect (embark-target-url-at-point) :to-be nil)))))
 
+(describe "embark-target-url-at-point in org buffers"
+  ;; `bounds-of-thing-at-point' spans the whole [[..][..]] construct, so a
+  ;; spec in fundamental-mode cannot see any of this.  hnreader-mode derives
+  ;; from org-mode, which is where the HN links live.
+  (let ((hn "https://news.ycombinator.com/item?id=49299605"))
+
+    (cl-defmacro with-org-link ((link &optional (search "ycombinator")) &rest body)
+      (declare (indent 1))
+      `(with-temp-buffer
+         (delay-mode-hooks (org-mode))
+         (insert ,link "\n")
+         (font-lock-ensure)
+         (goto-char (point-min))
+         (search-forward ,search)
+         ,@body))
+
+    (it "unwraps an elisp: link around the url"
+      (let ((embark-url-patterns '((hackernews-link "news\\.ycombinator\\.com/"))))
+        (with-org-link ((format "[[elisp:(hnreader-comment \"%s\")][Reload]]" hn))
+          (pcase-let ((`(,type ,url . ,_) (embark-target-url-at-point)))
+            (expect type :to-be 'hackernews-link)
+            (expect url :to-equal hn)))))
+
+    (it "unwraps an eww: link around the url"
+      (let ((embark-url-patterns nil))
+        (with-org-link ("[[eww:https://example.com/story][view story in eww]]" "example")
+          (expect (nth 1 (embark-target-url-at-point))
+                  :to-equal "https://example.com/story"))))
+
+    (it "keeps a plain org link target intact"
+      (let ((embark-url-patterns nil))
+        (with-org-link ((format "[[%s][a story]]" hn))
+          (expect (nth 1 (embark-target-url-at-point)) :to-equal hn))))
+
+    (it "leaves a bare url in org prose alone"
+      (let ((embark-url-patterns nil))
+        (with-org-link ((concat "see " hn " for details"))
+          (expect (nth 1 (embark-target-url-at-point)) :to-equal hn))))
+
+    (it "reports bounds spanning the whole link, not the url"
+      ;; embark highlights and replaces over these, so they stay on the markup
+      (let ((embark-url-patterns nil)
+            (link (format "[[elisp:(hnreader-comment \"%s\")][Reload]]" hn)))
+        (with-org-link (link)
+          (pcase-let ((`(,_ ,_ . ,bounds) (embark-target-url-at-point)))
+            (expect (buffer-substring-no-properties (car bounds) (cdr bounds))
+                    :to-equal link)))))))
+
+(describe "embark-url-at-point"
+  (it "keeps a url that embeds another url whole"
+    (with-temp-buffer
+      (insert "https://web.archive.org/web/2020/https://example.com/x")
+      (goto-char (+ (point-min) 5))
+      (expect (embark-url-at-point)
+              :to-equal "https://web.archive.org/web/2020/https://example.com/x")))
+
+  (it "passes through a scheme it cannot unwrap"
+    (with-temp-buffer
+      (insert "mailto:someone@example.com")
+      (goto-char (+ (point-min) 10))
+      (expect (embark-url-at-point) :to-equal "mailto:someone@example.com")))
+
+  (it "returns nil off-url"
+    (with-temp-buffer
+      (insert "no links here")
+      (goto-char (point-min))
+      (expect (embark-url-at-point) :to-be nil))))
+
 (describe "embark-target-org-block"
   (it "targets the enclosing block with its type"
     (with-temp-buffer
@@ -315,7 +383,25 @@
                   ((symbol-function 'embark--act)
                    (lambda (&rest _) (setq acted t))))
           (embark-preview)))
-      (expect acted :to-be nil))))
+      (expect acted :to-be nil)))
+
+  ;; consult previews these itself.  Dwim-ing one runs its default action,
+  ;; and for a HN result that is a full page fetch - preview them by moving
+  ;; through candidates and Hacker News gets concurrent requests, which it
+  ;; answers with HTTP 429 for minutes afterwards.
+  (dolist (type '(consult-hn-result github-topics-pr slacko-message))
+    (it (format "does not act or dwim on a %s target" type)
+      (let (acted dwim)
+        (with-fake-feature 'embark
+          (cl-letf (((symbol-function 'embark--targets)
+                     (lambda () `((:type ,type :target "some candidate"))))
+                    ((symbol-function 'embark--act)
+                     (lambda (&rest _) (setq acted t)))
+                    ((symbol-function 'embark-dwim)
+                     (lambda () (setq dwim t))))
+            (embark-preview)))
+        (expect acted :to-be nil)
+        (expect dwim :to-be nil)))))
 
 ;; `embark-url-config's default lives in modules/embark/config.el, which
 ;; can't load in batch (real embark keymaps at map! time) - read it as
