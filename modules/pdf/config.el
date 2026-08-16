@@ -190,10 +190,20 @@
             :n "i" nil
             "DEL" nil))))
 
-;; pdf-text: reflowed plain-text companion view (autoload/pdf-text.el).
-;; general defers :map bindings until the keymap exists, so binding here
-;; works although pdf-text-mode-map is defined in a lazily-loaded file.
-(add-hook 'pdf-text-mode-hook #'jinx-mode-off-h)
+;; pdf-text: reflowed companion view (autoload/pdf-text.el), org-derived
+;; so the PDF outline folds.  general defers :map bindings until the
+;; keymap exists, so binding here works although pdf-text-mode-map is
+;; defined in a lazily-loaded file.
+(add-hook! 'pdf-text-mode-hook
+  #'jinx-mode-off-h
+  (defun pdf-text-reading-setup-h ()
+    "Trim org editing amenities out of the read-only reading view.
+`org-indent-mode' re-indents the whole multi-megabyte buffer for no
+reading benefit.  evil-org's normal-state RET (a minor-mode map, so it
+outranks `pdf-text-mode-map') would shadow the page sync-back, which
+owns RET; the buffer-local state binding outranks minor modes."
+    (org-indent-mode -1)
+    (evil-local-set-key 'normal (kbd "RET") #'pdf-text-show-in-pdf)))
 
 (map! :map pdf-text-mode-map
       :n "q" #'bury-buffer

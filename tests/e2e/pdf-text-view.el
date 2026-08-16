@@ -3,8 +3,10 @@
 ;; buttercup (the name stays clear of *-tests.el so discovery skips it).
 ;;
 ;; The buttercup suite proves the pure transforms; what only shows up
-;; here is the wiring: mode activation over a real displayed buffer and
-;; RET/q dispatching through pdf-text-mode-map under evil.
+;; here is the wiring: mode activation over a real displayed buffer,
+;; q through pdf-text-mode-map, RET through the buffer-local evil
+;; binding that outranks evil-org's, and org folding driven by TAB and
+;; C-c / with the full config's org hooks live.
 ;;
 ;; Two legs.  The companion leg runs in any frame: the buffer is built
 ;; exactly the way pdf-view-as-text builds it (mode, then insert-pages),
@@ -79,17 +81,30 @@ ASCII only, so string length equals byte offset."
     ("Charlie page three"))
   "Per-page line lists; the wrapped hyphenated word exercises unfill.")
 
+(defvar pdf-text-view--fixture-outline
+  '(((depth . 1) (type . goto-dest) (title . "Alpha") (page . 1))
+    ((depth . 1) (type . goto-dest) (title . "Bravo") (page . 2))
+    ((depth . 2) (type . goto-dest) (title . "Bravo detail") (page . 2))
+    ((depth . 1) (type . goto-dest) (title . "Charlie") (page . 3)))
+  "Canned `pdf-info-outline' shape; the generated fixture PDF itself
+carries no outline, so the GUI leg doubles as the degrade-to-flat
+path while the companion leg exercises headings and folding.")
+
 (defun pdf-text-view--case (label ok got want &optional err)
   (list :label label :ok (and ok (null err)) :got got :want want :err err))
 
 (defun pdf-text-view--companion-buffer ()
   "Companion buffer constructed the way `pdf-view-as-text' constructs it.
-Pages come from the same fixture lines gettext would yield, run through
-the real unfill; the source PDF buffer is dead on purpose, so a
+Pages come from the same fixture lines gettext would yield, through the
+real render pipeline with the canned outline interleaved and the same
+overview fold; the source PDF buffer is dead on purpose, so a
 dispatched sync-back has to answer with its own user-error."
   (let ((buf (get-buffer-create "*pdf-text: e2e-companion*"))
-        (pages (mapcar (lambda (lines) (pdf-text-unfill (string-join lines "\n")))
-                       pdf-text-view--fixture-pages)))
+        (pages (pdf-text--interleave-outline
+                (pdf-text-render-pages
+                 (mapcar (lambda (lines) (string-join lines "\n"))
+                         pdf-text-view--fixture-pages))
+                pdf-text-view--fixture-outline)))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
         (erase-buffer)
@@ -98,7 +113,8 @@ dispatched sync-back has to answer with its own user-error."
         (setq pdf-text--pdf-buffer
               (let ((b (generate-new-buffer " e2e-dead-pdf")))
                 (kill-buffer b)
-                b))))
+                b))
+        (org-cycle-overview)))
     buf))
 
 (defun pdf-text-view-companion-cases ()
@@ -135,6 +151,64 @@ dispatched sync-back has to answer with its own user-error."
                            '(1 2 3))
                  "walked pages 1-3" "page-at-point equals the page jumped to")
                 results)
+          (let ((marker-pos (save-excursion
+                              (goto-char (point-min))
+                              (search-forward "Bravo page two marker")
+                              (1- (point)))))
+            (push (pdf-text-view--case
+                   "overview fold hides chapter bodies"
+                   (invisible-p marker-pos)
+                   (format "invisible=%s" (invisible-p marker-pos))
+                   "body under * Bravo invisible after org-cycle-overview")
+                  results)
+            (goto-char (pdf-text--page-start 2)) ; the * Bravo heading line
+            (let (err
+                  (detail-pos (save-excursion
+                                (goto-char (point-min))
+                                (search-forward "Bravo detail")
+                                (1- (point)))))
+              ;; the config's TAB is the local-fold toggle
+              ;; (org-cycle-only-current-subtree-h), not org's 3-state
+              ;; cycle: it peeks children open, never the whole subtree.
+              (condition-case e (execute-kbd-macro (kbd "TAB"))
+                (error (setq err e)))
+              (push (pdf-text-view--case
+                     "TAB peeks the heading open to its children"
+                     (and (not (invisible-p detail-pos))
+                          (invisible-p marker-pos))
+                     (format "child-invisible=%s body-invisible=%s"
+                             (invisible-p detail-pos) (invisible-p marker-pos))
+                     "child heading visible, body under it still folded"
+                     err)
+                    results))
+            (let (err)
+              (condition-case e (execute-kbd-macro (kbd "zO"))
+                (error (setq err e)))
+              (push (pdf-text-view--case
+                     "zO opens the full subtree down to the body"
+                     (not (invisible-p marker-pos))
+                     (format "invisible=%s" (invisible-p marker-pos))
+                     "body visible after outline-show-subtree"
+                     err)
+                    results))
+            (let (err
+                  (alpha-pos (save-excursion
+                               (goto-char (point-min))
+                               (search-forward "Alpha page one")
+                               (1- (point)))))
+              (condition-case e
+                  (execute-kbd-macro
+                   (vconcat (kbd "C-c / /") "marker" (kbd "RET")))
+                (error (setq err e)))
+              (push (pdf-text-view--case
+                     "sparse tree folds the buffer down to the match"
+                     (and (not (invisible-p marker-pos))
+                          (invisible-p alpha-pos))
+                     (format "marker-invisible=%s alpha-invisible=%s"
+                             (invisible-p marker-pos) (invisible-p alpha-pos))
+                     "match visible, non-matching chapter body folded"
+                     err)
+                    results)))
           (goto-char (pdf-text--page-start 3))
           (let (err)
             (condition-case e (execute-kbd-macro (kbd "RET"))
