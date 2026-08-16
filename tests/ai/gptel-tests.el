@@ -59,20 +59,49 @@
   (before-all
     (let ((props (make-hash-table :test 'equal))
           (q (make-hash-table :test 'equal))
-          (n (make-hash-table :test 'equal)))
+          (n (make-hash-table :test 'equal))
+          (tags (make-hash-table :test 'equal))
+          (items (make-hash-table :test 'equal))
+          (mode (make-hash-table :test 'equal)))
       (puthash :type "string" q)
       (puthash :description "the query" q)
       (puthash :type "integer" n)
+      (puthash :type "string" items)
+      (puthash :type "array" tags)
+      (puthash :items items tags)
+      (puthash :type "string" mode)
+      (puthash :enum ["fast" "slow"] mode)
       (puthash :query q props)
       (puthash :count n props)
+      (puthash :tags tags props)
+      (puthash :mode mode props)
       (setq schema (make-hash-table :test 'equal))
       (puthash :properties props schema)
       (puthash :required ["query"] schema)))
 
+  ;; gptel drops a tool whose array argument does not describe its items,
+  ;; which used to silently lose every org-roam-mcp tool.
+  (it "carries :items through for array arguments"
+    (let* ((args (mcp-schema->gptel-args schema))
+           (tags (seq-find (lambda (a) (equal (plist-get a :name) "tags")) args)))
+      (expect (plist-get tags :type) :to-equal "array")
+      (expect (plist-get tags :items) :to-equal '(:type "string"))))
+
+  (it "carries :enum through as a vector"
+    (let* ((args (mcp-schema->gptel-args schema))
+           (mode (seq-find (lambda (a) (equal (plist-get a :name) "mode")) args)))
+      (expect (plist-get mode :enum) :to-equal ["fast" "slow"])))
+
+  (it "leaves :items and :enum off arguments that have neither"
+    (let* ((args (mcp-schema->gptel-args schema))
+           (q (seq-find (lambda (a) (equal (plist-get a :name) "query")) args)))
+      (expect (plist-member q :items) :to-be nil)
+      (expect (plist-member q :enum) :to-be nil)))
+
   (it "converts properties into gptel arg plists"
     (let* ((args (mcp-schema->gptel-args schema))
            (q (seq-find (lambda (a) (equal (plist-get a :name) "query")) args)))
-      (expect (length args) :to-equal 2)
+      (expect (length args) :to-equal 4)
       (expect (plist-get q :type) :to-equal "string")
       (expect (plist-get q :description) :to-equal "the query")))
 
@@ -84,7 +113,42 @@
       (expect (plist-get n :description) :to-equal "")
       (expect (plist-member q :optional) :to-be nil))))
 
-(describe "extract-tool-defs-from-bb"
+(describe "mcp-tool-source-file"
+  :var (dir launcher)
+  (before-each
+    (setq dir (make-temp-file "mcp-server" t))
+    (setq launcher (expand-file-name "start.sh" dir))
+    (make-directory (expand-file-name "src/my_srv" dir) t)
+    (with-temp-file (expand-file-name "src/my_srv/core.clj" dir)
+      (insert "(ns my-srv.core)\n")))
+  (after-each
+    (delete-directory dir t))
+
+  (it "returns a Clojure or Babashka command unchanged"
+    (let ((f (expand-file-name "server.bb" dir)))
+      (with-temp-file f (insert "#!/usr/bin/env bb\n"))
+      (expect (mcp-tool-source-file f) :to-equal f)))
+
+  ;; org-roam-mcp needs JVM flags, so its command is a shell script and the
+  ;; tool definitions live in the namespace it launches.
+  (it "follows a launcher script's -m namespace to its source"
+    (with-temp-file launcher
+      (insert "#!/usr/bin/env bash\n"
+              "exec clojure -J-Xmx512m -J--add-modules -Jjdk.incubator.vector \\\n"
+              "     -M -m my-srv.core config.edn\n"))
+    (expect (mcp-tool-source-file launcher)
+            :to-equal (expand-file-name "src/my_srv/core.clj" dir)))
+
+  (it "returns nil when the launched namespace has no source"
+    (with-temp-file launcher
+      (insert "#!/usr/bin/env bash\nexec clojure -M -m absent.core\n"))
+    (expect (mcp-tool-source-file launcher) :to-be nil))
+
+  (it "returns nil for unreadable or non-string commands"
+    (expect (mcp-tool-source-file "/nonexistent/server.bb") :to-be nil)
+    (expect (mcp-tool-source-file nil) :to-be nil)))
+
+(describe "mcp-tool-defs-from-source"
   (it "parses a collected (def tools [...]) vector"
     (let ((f (make-temp-file "server" nil ".bb")))
       (unwind-protect
@@ -97,10 +161,24 @@
                       "                  :properties {:query {:type \"string\"}}\n"
                       "                  :required [\"query\"]}}\n"
                       "   {:name \"other-thing\"}])\n"))
-            (let ((defs (extract-tool-defs-from-bb f)))
+            (let ((defs (mcp-tool-defs-from-source f)))
               (expect (length defs) :to-equal 2)
               (expect (gethash :name (car defs)) :to-equal "do-thing")
               (expect (hash-table-p (gethash :inputSchema (car defs))) :to-be t)))
+        (delete-file f))))
+
+  ;; org-roam-mcp writes (def ^:private tools ...); the metadata used to make
+  ;; the whole server register zero tools.
+  (it "sees through reader metadata on the def"
+    (let ((f (make-temp-file "server" nil ".clj")))
+      (unwind-protect
+          (progn
+            (with-temp-file f
+              (insert "(ns server)\n"
+                      "(def ^:private tools [{:name \"do-thing\"}])\n"))
+            (expect (mapcar (lambda (d) (gethash :name d))
+                            (mcp-tool-defs-from-source f))
+                    :to-equal '("do-thing")))
         (delete-file f))))
 
   (it "falls back to individual (def x-tool {...}) forms"
@@ -110,15 +188,15 @@
             (with-temp-file f
               (insert "(ns server)\n"
                       "(def ping-tool {:name \"ping\"})\n"
-                      "(def pong-tool {:name \"pong\"})\n"))
-            (let ((defs (extract-tool-defs-from-bb f)))
+                      "(def ^:private pong-tool {:name \"pong\"})\n"))
+            (let ((defs (mcp-tool-defs-from-source f)))
               (expect (mapcar (lambda (d) (gethash :name d)) defs)
                       :to-equal '("ping" "pong"))))
         (delete-file f))))
 
   (it "returns nil for unreadable or non-string commands"
-    (expect (extract-tool-defs-from-bb "/nonexistent/server.bb") :to-be nil)
-    (expect (extract-tool-defs-from-bb nil) :to-be nil)))
+    (expect (mcp-tool-defs-from-source "/nonexistent/server.bb") :to-be nil)
+    (expect (mcp-tool-defs-from-source nil) :to-be nil)))
 
 (describe "gptel-improve-text-handle-response"
   (it "ignores reasoning and tool chunks"

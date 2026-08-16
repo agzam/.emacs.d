@@ -63,18 +63,46 @@ ARG-NAMES is a list of argument name strings for reconstructing the MCP plist."
                      (format "MCP tool %s error: [%s] %s"
                              tool-name code message)))))))))
 
-(defun extract-tool-defs-from-bb (file)
-  "Extract tool definitions from a Babashka MCP server script FILE.
-Returns a list of parsed tool definition hash-tables, nil when FILE
-isn't readable (missing harness checkout, CI).
+(defconst mcp-tool-def-re
+  (let ((meta "\\(?:\\^[^][ \t\n(){}]+[ \t]+\\)*"))
+    (cons (concat "(def[ \t]+" meta "\\(?:tool-defs?\\|tools\\)\\_>")
+          (concat "(def[ \t]+" meta "[a-zA-Z0-9_-]+-tools?\\_>")))
+  "Regexps matching a collected and an individual tool definition.
+Both tolerate reader metadata, as in (def ^:private tools [...]).")
+
+(defun mcp-tool-source-file (command)
+  "Return the file holding COMMAND's MCP tool definitions, or nil.
+A launcher shell script hides the definitions, so follow its `-m
+NAMESPACE' to the Clojure file that namespace maps to."
+  (when (and (stringp command) (file-readable-p command))
+    (if (string-match-p "\\.\\(bb\\|clj[sc]?\\)\\'" command)
+        command
+      (with-temp-buffer
+        (insert-file-contents command)
+        (goto-char (point-min))
+        (let ((case-fold-search nil))
+          (when (re-search-forward
+                 "\\(?:^\\|[ \t]\\)-m[ \t]+\\([^ \t\n\"']+\\)" nil t)
+            (let ((file (expand-file-name
+                         (concat "src/"
+                                 (subst-char-in-string
+                                  ?. ?/ (subst-char-in-string ?- ?_ (match-string 1)))
+                                 ".clj")
+                         (file-name-directory (expand-file-name command)))))
+              (and (file-readable-p file) file))))))))
+
+(defun mcp-tool-defs-from-source (command)
+  "Extract tool definitions from the MCP server started by COMMAND.
+Returns a list of parsed tool definition hash-tables, nil when the
+source isn't readable (missing harness checkout, CI).
 Handles both collected defs like (def tools [...]) and individual
 defs like (def my-tool {...})."
-  (when (and (stringp file) (file-readable-p file))
+  (when-let* ((file (mcp-tool-source-file command)))
     (require 'parseedn)
     (with-temp-buffer
       (insert-file-contents file)
       (goto-char (point-min))
-      (if (re-search-forward "(def \\(?:tool-defs?\\|tools\\)\\b" nil t)
+      (if (re-search-forward (car mcp-tool-def-re) nil t)
           ;; Collected: (def tools [...]) or (def tool-def {...})
           (when (re-search-forward "[{[]" nil t)
             (backward-char 1)
@@ -89,7 +117,7 @@ defs like (def my-tool {...})."
         ;; Fallback: collect individual (def ...-tool {...}) forms
         (goto-char (point-min))
         (let (tools)
-          (while (re-search-forward "(def [a-zA-Z0-9_-]+-tools?\\b" nil t)
+          (while (re-search-forward (cdr mcp-tool-def-re) nil t)
             (when (re-search-forward "{" nil t)
               (backward-char 1)
               (let* ((start (point))
@@ -99,6 +127,18 @@ defs like (def my-tool {...})."
                 (when (hash-table-p result)
                   (push result tools)))))
           (nreverse tools))))))
+
+(defun mcp-schema-node->plist (node)
+  "Convert a parsed JSON-schema NODE into the plist shape gptel serializes."
+  (cond
+   ((hash-table-p node)
+    (let (plist)
+      (maphash (lambda (k v)
+                 (setq plist (nconc plist (list k (mcp-schema-node->plist v)))))
+               node)
+      plist))
+   ((vectorp node) (vconcat (mapcar #'mcp-schema-node->plist node)))
+   (t node)))
 
 (defun mcp-schema->gptel-args (schema)
   "Convert MCP inputSchema hash-table to gptel args format."
@@ -113,6 +153,11 @@ defs like (def my-tool {...})."
                 (arg (list :name name
                            :type (gethash :type val "string")
                            :description (or (gethash :description val) ""))))
+           ;; gptel rejects an array argument that does not describe its
+           ;; items, so these constraints have to survive the conversion.
+           (dolist (extra '(:enum :items))
+             (when-let* ((v (gethash extra val)))
+               (setq arg (append arg (list extra (mcp-schema-node->plist v))))))
            (unless (member name required)
              (setq arg (append arg '(:optional t))))
            (push arg args)))
@@ -122,13 +167,13 @@ defs like (def my-tool {...})."
 ;;;###autoload
 (defun register-mcp-tools-lazy ()
   "Register MCP tools with gptel from server script schemas.
-Reads tool definitions directly from .bb files using parseedn.
+Reads tool definitions directly from the server sources using parseedn.
 Tools appear in gptel immediately; servers start lazily on first use."
   (dolist (server mcp-hub-servers)
     (let* ((server-name (car server))
            (command (plist-get (cdr server) :command))
            (category server-name)
-           (tool-defs (extract-tool-defs-from-bb command)))
+           (tool-defs (mcp-tool-defs-from-source command)))
       (dolist (td tool-defs)
         (let* ((tool-name (gethash :name td))
                (description (or (gethash :description td) ""))

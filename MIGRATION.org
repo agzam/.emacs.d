@@ -741,7 +741,7 @@ these. Each restores the parked leader rows when its foundation lands.
   writes the files these read - elisp names never called externally):
   eca-agents-md-content, mcp-servers-from-eca-config,
   register-mcp-tools-lazy, ensure-mcp-server, lazy-mcp-tool-fn,
-  mcp-schema->gptel-args, extract-tool-defs-from-bb; plus gptel+ ->
+  mcp-schema->gptel-args, mcp-tool-defs-from-source; plus gptel+ ->
   open-gptel, gptel-clear-buffer+ -> gptel-clear-buffer,
   +gptel-improve-text* -> gptel-improve-text*.  parseedn explicit now
   (doom.d rides the clojure module's dep tree); .bb reads guarded, so

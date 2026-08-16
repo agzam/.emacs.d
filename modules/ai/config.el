@@ -133,7 +133,7 @@
 ;; upstream's M-RET in dired and friends; an evil-level g-sequence wins).
 (map! :n "gi" #'gptel-inline-dwim)
 
-;; extract-tool-defs-from-bb parses the MCP harness .bb files with parseedn;
+;; mcp-tool-defs-from-source parses the MCP harness sources with parseedn;
 ;; doom.d gets it transitively from the clojure module - explicit here until
 ;; clojure ports.
 (use-package parseedn :defer t)
