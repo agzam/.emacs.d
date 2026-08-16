@@ -9,8 +9,7 @@
 
 (load-module-file "modules/hammerspoon/autoload/monroe.el")
 
-(defvar monroe-default-port 7888)
-(defvar monroe-default-host "localhost")
+(defvar monroe-default-host "localhost:7888")
 
 (describe "hammerspoon-monroe--cleanup"
   (it "kills only monroe buffers"
@@ -50,7 +49,7 @@
         (expect timer-set :to-be nil)))))
 
 (describe "hammerspoon-monroe-connect"
-  (it "cleans up stale state, then connects to the configured port"
+  (it "cleans up stale state, then connects to the configured endpoint"
     (let (connected cleaned)
       (cl-letf (((symbol-function 'hammerspoon-monroe--cleanup)
                  (lambda () (setq cleaned t)))
@@ -58,7 +57,33 @@
                  (lambda (host) (setq connected host))))
         (hammerspoon-monroe-connect)
         (expect cleaned :to-be t)
-        (expect connected :to-equal "localhost:7888")))))
+        (expect connected :to-equal "localhost:7888"))))
+
+  ;; monroe carries host and port in one option, and names its buffers
+  ;; after the string it was handed - so every endpoint here reads that
+  ;; option instead of assembling its own
+  (it "takes the endpoint from monroe-default-host"
+    (let ((monroe-default-host "elsewhere:1234")
+          connected)
+      (cl-letf (((symbol-function 'hammerspoon-monroe--cleanup) #'ignore)
+                ((symbol-function 'monroe)
+                 (lambda (host) (setq connected host))))
+        (hammerspoon-monroe-connect)
+        (expect connected :to-equal "elsewhere:1234")))))
+
+(describe "hammerspoon-monroe--repl-buffer"
+  (it "finds the repl monroe named after the configured endpoint"
+    (let* ((monroe-default-host "elsewhere:1234")
+           (repl (generate-new-buffer "*monroe: elsewhere:1234*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'get-buffer-process) (lambda (_) 'proc))
+                    ((symbol-function 'process-live-p) (lambda (_) t)))
+            (expect (hammerspoon-monroe--repl-buffer) :to-be repl))
+        (kill-buffer repl))))
+
+  (it "reports nothing when the endpoint has no repl buffer"
+    (let ((monroe-default-host "nowhere:1"))
+      (expect (hammerspoon-monroe--repl-buffer) :to-be nil))))
 
 (describe "hammerspoon-monroe-eval-sync"
   (it "user-errors when no connection is live"

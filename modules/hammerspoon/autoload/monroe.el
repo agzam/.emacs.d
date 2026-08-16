@@ -22,7 +22,7 @@
   "Connect to Hammerspoon's nREPL server via Monroe."
   (interactive)
   (hammerspoon-monroe--cleanup)
-  (monroe (format "localhost:%d" monroe-default-port)))
+  (monroe monroe-default-host))
 
 ;;;###autoload
 (defun hammerspoon-monroe--try-reconnect ()
@@ -31,7 +31,7 @@
     (cancel-timer hammerspoon-monroe--reconnect-timer)
     (setq hammerspoon-monroe--reconnect-timer nil))
   (condition-case nil
-      (let* ((host (format "localhost:%d" monroe-default-port))
+      (let* ((host monroe-default-host)
              (win (cl-some (lambda (b)
                              (and (string-match-p "\\*monroe" (buffer-name b))
                                   (get-buffer-window b)))
@@ -63,7 +63,7 @@
   "REPL buffer of a live Hammerspoon monroe connection, or nil.
 Liveness is judged by the connection process, which monroe keeps on a
 separate *monroe-connection* buffer."
-  (let* ((host (format "%s:%d" monroe-default-host monroe-default-port))
+  (let* ((host monroe-default-host)
          (repl (get-buffer (format "*monroe: %s*" host)))
          (proc (get-buffer-process (format "*monroe-connection: %s*" host))))
     (when (and repl (process-live-p proc))

@@ -10,8 +10,7 @@
   :defer t
   :commands (monroe monroe-connect)
   :init
-  (setq monroe-default-host "localhost"
-        monroe-default-port 7888)
+  (setq monroe-default-host "localhost:7888")
 
   (advice-add 'monroe-sentinel :around #'hammerspoon-monroe-sentinel-a)
 
