@@ -24,6 +24,9 @@
 ;;   so this module fills the slot itself.
 ;; - buffer-to-pdf added (Prot's; nothing like it in the Doom original) -
 ;;   this module now writes PDFs as well as reads them.
+;; - pdf-text added (autoload/pdf-text.el; nothing like it in the Doom
+;;   original): pdf-view-as-text extracts the document through epdfinfo into
+;;   a reflowed pdf-text-mode companion buffer, nov's reading UX as model.
 ;;; Code:
 
 (use-package pdf-tools
@@ -82,6 +85,7 @@
                  "k" #'pdf-view-enlarge
                  "j" #'pdf-view-shrink
                  "0" #'pdf-view-scale-reset)
+        "x" #'pdf-view-as-text
         "n" #'org-noter-transient))
 
 (use-package hide-mode-line
@@ -185,6 +189,19 @@
             "SPC" nil
             :n "i" nil
             "DEL" nil))))
+
+;; pdf-text: reflowed plain-text companion view (autoload/pdf-text.el).
+;; general defers :map bindings until the keymap exists, so binding here
+;; works although pdf-text-mode-map is defined in a lazily-loaded file.
+(add-hook 'pdf-text-mode-hook #'jinx-mode-off-h)
+
+(map! :map pdf-text-mode-map
+      :n "q" #'bury-buffer
+      :n "RET" #'pdf-text-show-in-pdf
+      (:localleader
+       "p" #'pdf-text-show-in-pdf
+       "t" #'google-translate-posframe-at-point
+       "T" #'translate-at-point-smart))
 
 ;; Doom's `SPC n e' org-noter row is pruned in the lab (its
 ;; (modulep! :lang org +noter) guard is structurally false - org registers as
