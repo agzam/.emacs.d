@@ -296,6 +296,7 @@
   ;; transient (SPC z f)
   (setq writeroom-global-effects nil
         writeroom-maximize-window t)
+  (setopt visual-fill-column-adjust-for-text-scale nil)
   (add-hook 'writeroom-local-effects #'zen-text-scale-h t)
   ;; manual zoom inside zen must re-fit the centered column
   (advice-add #'text-scale-adjust :after #'visual-fill-column-adjust))
