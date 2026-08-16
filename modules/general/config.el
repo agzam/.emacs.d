@@ -267,10 +267,10 @@
       (ibuffer-do-sort-by-recency)
       (call-interactively #'ibuffer-filter-by-non-special-buffers)))
 
-  (setq ibuffer-sidebar-use-custom-font t
-        ibuffer-sidebar-face `(:height 0.9)
-        ibuffer-sidebar-width 30
-        ibuffer-sidebar-pop-to-sidebar-on-toggle-open nil))
+  (setopt ibuffer-sidebar-use-custom-font t
+          ibuffer-sidebar-width 30
+          ibuffer-sidebar-pop-to-sidebar-on-toggle-open nil)
+  (set-face-attribute 'ibuffer-sidebar-face nil :height 0.9))
 
 ;;; scratch: the persistent scratch replaces the built-in *scratch*
 

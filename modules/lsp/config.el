@@ -54,7 +54,6 @@
    lsp-enable-symbol-highlighting t
    lsp-enable-imenu nil
    lsp-treemacs-errors-position-params '((side . right))
-   lsp-treemacs-sync-mode nil
 
    lsp-ui-sideline-enable nil
    lsp-ui-doc-enable nil

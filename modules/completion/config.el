@@ -244,10 +244,8 @@
   :config
   (setopt vertico-posframe-poshandler 'posframe-poshandler-frame-bottom-center)
   (setq
-   vertico-posframe-global t
    vertico-posframe-height nil
    vertico-posframe-width 150
-   marginalia-margin-threshold 500
    vertico-posframe-parameters `((alpha . 1.0))
    ;; Ignore buffer-local text-scale and use frame's default font size
    posframe-text-scale-factor-function (lambda (_) 0))

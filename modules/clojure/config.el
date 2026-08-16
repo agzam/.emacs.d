@@ -99,40 +99,39 @@
 
   (setopt cider-clojure-cli-aliases ":dbg")
 
-  (setq nrepl-hide-special-buffers nil
-        nrepl-log-messages nil
-        cider-auto-mode nil
-        cider-font-lock-dynamically nil
-        cider-dynamic-indentation nil
-        cider-overlays-use-font-lock nil
-        cider-prompt-for-symbol nil
+  (setopt nrepl-hide-special-buffers nil
+          nrepl-log-messages nil
+          cider-auto-mode nil
+          cider-font-lock-dynamically nil
+          cider-dynamic-indentation nil
+          cider-prompt-for-symbol nil
 
-        cider-jack-in-default 'babashka
-        cider-repl-display-help-banner nil
-        cider-repl-history-display-duplicates nil
-        cider-repl-history-display-style 'one-line
-        cider-repl-history-file (concat doom-cache-dir "cider-repl-history")
-        cider-repl-history-highlight-current-entry t
-        cider-repl-history-quit-action 'delete-and-restore
-        cider-repl-history-highlight-inserted-item t
-        cider-repl-history-size 1000
-        cider-repl-result-prefix ";; => "
-        cider-print-options '(("length" 10000) ("right-margin" 70))
-        cider-repl-use-clojure-font-lock nil
-        cider-repl-use-pretty-printing t
-        cider-repl-wrap-history nil
-        cider-stacktrace-default-filters '(tooling dup)
+          cider-jack-in-default 'babashka
+          cider-repl-display-help-banner nil
+          cider-history-display-duplicates nil
+          cider-history-display-style 'one-line
+          cider-repl-history-file (concat doom-cache-dir "cider-repl-history")
+          cider-history-highlight-current-entry t
+          cider-history-quit-action 'delete-and-restore
+          cider-history-highlight-inserted-item t
+          cider-repl-history-size 1000
+          cider-repl-result-prefix ";; => "
+          cider-print-options '(("length" 10000) ("right-margin" 70))
+          cider-repl-use-clojure-font-lock nil
+          cider-repl-use-pretty-printing t
+          cider-repl-wrap-history nil
+          cider-stacktrace-default-filters '(tooling dup)
 
-        ;; Don't focus the CIDER REPL when it starts. Since it can take so
-        ;; long to start up, you either wait for a minute doing nothing or be
-        ;; prepared for your cursor to suddenly change buffers without
-        ;; warning. See https://github.com/clojure-emacs/cider/issues/1872
-        cider-repl-pop-to-buffer-on-connect 'display-only
+          ;; Don't focus the CIDER REPL when it starts. Since it can take so
+          ;; long to start up, you either wait for a minute doing nothing or be
+          ;; prepared for your cursor to suddenly change buffers without
+          ;; warning. See https://github.com/clojure-emacs/cider/issues/1872
+          cider-repl-pop-to-buffer-on-connect 'display-only
 
-        cider-test-show-report-on-success t
+          cider-test-show-report-on-success t
 
-        ;; specialized fn for Polylith compatibility
-        clojure-project-root-function #'clojure-project-root-path-poly)
+          ;; specialized fn for Polylith compatibility
+          clojure-project-root-function #'clojure-project-root-path-poly)
 
   (setq cider--jack-in-cmd-history
         `(,(concat

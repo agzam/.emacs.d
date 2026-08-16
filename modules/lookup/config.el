@@ -102,7 +102,7 @@ window/point.  See `set-lookup-handlers!' about adding to this list.")
   (setopt dumb-jump-default-project doom-emacs-dir
           dumb-jump-prefer-searcher 'rg
           dumb-jump-aggressive nil
-          dumb-jump-selector 'popup))
+          dumb-jump-selector 'completing-read))
 
 ;;; xref
 
