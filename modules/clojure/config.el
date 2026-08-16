@@ -36,7 +36,7 @@
     :around 'cider--setup-clojure-major-mode
     nil)
   :config
-  (setq clojure-toplevel-inside-comment-form t)
+  (setopt clojure-toplevel-inside-comment-form t)
 
   (add-to-list
    'lookup-provider-url-alist
@@ -97,7 +97,7 @@
              #'clojure-set-completion-at-point-h
              #'hs-minor-mode)
 
-  (setq cider-clojure-cli-aliases ":dbg")
+  (setopt cider-clojure-cli-aliases ":dbg")
 
   (setq nrepl-hide-special-buffers nil
         nrepl-log-messages nil
@@ -142,7 +142,7 @@
             cider-required-middleware-version
             "\"}}}' -M -m nrepl.cmdline --middleware \"[cider.nrepl/cider-middleware]\"\n")))
 
-  (setq
+  (setopt
    clojure-align-forms-automatically nil
    cider-repl-display-in-current-window nil
    cider-comment-prefix  "; => "
@@ -351,8 +351,8 @@
   :after clojure-mode
   :hook (clojure-mode . clj-refactor-mode)
   :config
-  (setq cljr-magic-requires nil
-        cljr-favor-prefix-notation nil)
+  (setopt cljr-magic-requires nil
+          cljr-favor-prefix-notation nil)
   (map! :map (clojure-mode-map
               clojure-ts-mode-map)
         :localleader
@@ -365,7 +365,7 @@
   :ensure (neil :host github :repo "babashka/neil" :files ("*.el"))
   :commands (neil-find-clojure-package)
   :config
-  (setq neil-prompt-for-version-p t))
+  (setopt neil-prompt-for-version-p t))
 
 (after! separedit
   ;; edit Clojure (str) multiline blocks
@@ -417,7 +417,7 @@
   (defvar cider-storm-styles-path
     (expand-file-name
      "~/.config/flowstorm/styles.css"))
-  (setq cider-storm-flow-storm-theme 'light))
+  (setopt cider-storm-flow-storm-theme "light"))
 
 ;; logview + datetime ride along here like in doom.d (bb/nREPL log files);
 ;; install-only, entry via auto-mode or M-x logview.

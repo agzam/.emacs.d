@@ -43,19 +43,19 @@
   ;; keys resolve lazily from authinfo at search time - function values
   ;; are package-sanctioned (consult-omni-expand-variable-function);
   ;; with-temp-message keeps epa's "Decrypting..." out of the minibuffer
-  (setq consult-omni-brave-api-key
-        (lambda () (with-temp-message ""
-                     (auth-host->pass "api.search.brave.com")))
-        consult-omni-youtube-search-key
-        (lambda () (with-temp-message ""
-                     (auth-host->pass "youtube-api")))
-        ;; the googleapis.com record is "CX:KEY", colon-separated
-        consult-omni-google-customsearch-cx
-        (lambda () (with-temp-message ""
-                     (car (split-string (auth-host->pass "www.googleapis.com") ":"))))
-        consult-omni-google-customsearch-key
-        (lambda () (with-temp-message ""
-                     (cadr (split-string (auth-host->pass "www.googleapis.com") ":")))))
+  (setopt consult-omni-brave-api-key
+          (lambda () (with-temp-message ""
+                       (auth-host->pass "api.search.brave.com")))
+          consult-omni-youtube-search-key
+          (lambda () (with-temp-message ""
+                       (auth-host->pass "youtube-api")))
+          ;; the googleapis.com record is "CX:KEY", colon-separated
+          consult-omni-google-customsearch-cx
+          (lambda () (with-temp-message ""
+                       (car (split-string (auth-host->pass "www.googleapis.com") ":"))))
+          consult-omni-google-customsearch-key
+          (lambda () (with-temp-message ""
+                       (cadr (split-string (auth-host->pass "www.googleapis.com") ":")))))
 
   (defadvice! consult-omni-use-thing-at-point-a
     (fn &optional initial no-cb &rest args)

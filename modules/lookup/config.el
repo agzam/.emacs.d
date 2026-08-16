@@ -99,10 +99,10 @@ window/point.  See `set-lookup-handlers!' about adding to this list.")
 (use-package dumb-jump
   :commands dumb-jump-result-follow
   :config
-  (setq dumb-jump-default-project doom-emacs-dir
-        dumb-jump-prefer-searcher 'rg
-        dumb-jump-aggressive nil
-        dumb-jump-selector 'popup))
+  (setopt dumb-jump-default-project doom-emacs-dir
+          dumb-jump-prefer-searcher 'rg
+          dumb-jump-aggressive nil
+          dumb-jump-selector 'popup))
 
 ;;; xref
 
@@ -113,8 +113,8 @@ window/point.  See `set-lookup-handlers!' about adding to this list.")
 
 (after! xref
   ;; Use consult to display xref candidate lists (Doom's vertico glue).
-  (setq xref-show-xrefs-function #'consult-xref
-        xref-show-definitions-function #'consult-xref))
+        (setopt xref-show-xrefs-function #'consult-xref
+                xref-show-definitions-function #'consult-xref))
 
 ;;; Keybindings
 

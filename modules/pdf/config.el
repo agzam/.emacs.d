@@ -48,8 +48,8 @@
   ;; For consistency with other special modes.
   (setq-default pdf-view-display-size 'fit-page)
   ;; Enable hiDPI support, but at the cost of memory! See politza/pdf-tools#51
-  (setq pdf-view-use-scaling t
-        pdf-view-use-imagemagick nil)
+  (setopt pdf-view-use-scaling t
+          pdf-view-use-imagemagick nil)
 
   (map! :map pdf-view-mode-map
         :gn "q" #'kill-current-buffer
@@ -111,7 +111,7 @@
   :ensure (org-noter :host github :repo "org-noter/org-noter")
   :after (org pdf-tools)
   :config
-  (setq
+  (setopt
    org-noter-notes-search-path (list org-directory)
    org-noter-auto-save-last-location nil
    org-noter-separate-notes-from-heading t

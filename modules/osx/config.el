@@ -9,16 +9,16 @@
 ;; ('none); restore Meta so right-Opt+Backspace stays M-DEL.  The mac-*
 ;; name aliases ns-right-alternate-modifier in the NS build and is the
 ;; real variable on the emacs-mac port - one setq covers both.
-(setq mac-right-option-modifier 'meta)
+(setopt mac-right-option-modifier 'meta)
 
 ;;
 ;;; Doom os/macos subset (minus the emacs-mac-port-only scroll vars)
 
-(setq locate-command "mdfind"  ; Spotlight backs M-x locate
-      ;; visit files opened outside of Emacs in the existing frame
-      ns-pop-up-frames nil
-      ;; trash instead of rm, as a layer of precaution
-      delete-by-moving-to-trash (not noninteractive))
+(setopt locate-command "mdfind"  ; Spotlight backs M-x locate
+        ;; visit files opened outside of Emacs in the existing frame
+        ns-pop-up-frames nil
+        ;; trash instead of rm, as a layer of precaution
+        delete-by-moving-to-trash (not noninteractive))
 
 ;; Match the macOS titlebar to the theme.  Install unconditionally so tty
 ;; boots (smoke, CI-less probes) still pre-build it; activate per Doom's

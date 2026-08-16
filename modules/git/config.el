@@ -181,7 +181,7 @@
                   "y" #'git-link-forge-topic)))
 
   ;; forge-topic uses markdown to display images, sometimes they get too big
-  (setq markdown-max-image-size '(700 . nil))
+  (setopt markdown-max-image-size '(700 . nil))
 
   ;; remove after https://github.com/magit/forge/discussions/861 addressed
   (defadvice! forge-graphql-tolerate-http-errors-a (fn req errors headers status)
@@ -203,7 +203,7 @@ GraphQL `errors' alist, which otherwise dies with `listp, http'."
   :defer t
   :after magit
   :config
-  (setq browse-at-remote-add-line-number-if-no-region-selected t))
+  (setopt browse-at-remote-add-line-number-if-no-region-selected t))
 
 (use-package gh-notify
   :ensure (gh-notify :host github :repo "anticomputer/gh-notify")
@@ -345,7 +345,7 @@ GraphQL `errors' alist, which otherwise dies with `listp, http'."
 (add-hook! (org-mode markdown-mode) #'bug-reference-mode)
 
 (after! diff-mode
-  (setq diff-add-log-use-relative-names t))
+  (setopt diff-add-log-use-relative-names t))
 
 (after! smerge-mode
   (map! :map smerge-mode-map :n "gm" #'smerge-transient))

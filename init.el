@@ -62,7 +62,7 @@
 ;; extensions, posframes, evil-traces) need demand-after-parents semantics,
 ;; which always-defer silently disables - packages built but never loaded.
 ;; Laziness comes from explicit :defer/:hook/:commands keywords instead.
-(setq use-package-always-ensure t)
+(setopt use-package-always-ensure t)
 
 (add-to-list 'load-path (expand-file-name "lisp/" user-emacs-directory))
 

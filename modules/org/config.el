@@ -11,7 +11,7 @@
 ;; org builds via elpaca's own menu (elpaca-menu-org generates
 ;; org-version/loaddefs) - doom.d's straight :pre-build fake is obsolete.
 ;; The manual needs makeinfo (absent on CI); Doom never built it either.
-(setq elpaca-menu-org-make-manual nil)
+(setopt elpaca-menu-org-make-manual nil)
 
 (defvar org-default-folder (expand-file-name "~/Sync/org/"))
 

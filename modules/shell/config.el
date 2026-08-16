@@ -76,7 +76,7 @@
   :init
   (setq shell-pop-shell-type '("ghostel" "*ghostel*" (lambda () (ghostel))))
   :config
-  (setq shell-pop-window-position "bottom"))
+  (setopt shell-pop-window-position "bottom"))
 
 (use-package vimrc-mode
   :ensure t

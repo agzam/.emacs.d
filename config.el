@@ -6,8 +6,8 @@
 ;; theme (colors), doom-font machinery, undo-fu.
 ;;; Code:
 
-(setq user-full-name "Ag Ibragimov"
-      user-mail-address "agzam.ibragimov@gmail.com")
+(setopt user-full-name "Ag Ibragimov"
+        user-mail-address "agzam.ibragimov@gmail.com")
 
 ;; TODO: (setopt doom-theme 'ag-themes-spacemacs-light) - ag-themes live in
 ;; the colors module; default theme until it ports.
@@ -66,11 +66,11 @@
 
 (after! man
   ;; open man pages in the same window
-  (setq Man-notify-method 'pushy))
+  (setopt Man-notify-method 'pushy))
 
 (after! dumb-jump
   ;; https://github.com/jacktasia/dumb-jump#emacs-options
-  (setq dumb-jump-force-searcher 'rg))
+  (setopt dumb-jump-force-searcher 'rg))
 
 (after! which-key
   (setopt
@@ -187,7 +187,7 @@
            #'visual-line-mode)
 
 (after! writeroom-mode
-  (setq writeroom-maximize-window t))
+  (setopt writeroom-maximize-window t))
 
 (after! general
   (general-auto-unbind-keys))

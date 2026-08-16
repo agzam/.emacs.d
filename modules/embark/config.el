@@ -295,10 +295,10 @@
       (visual-line-mode -1)))
 
   ;; don't ask when killing buffers
-  (setq embark-pre-action-hooks
-        (cl-remove
-         '(kill-buffer embark--confirm)
-         embark-pre-action-hooks :test #'equal))
+  (setopt embark-pre-action-hooks
+          (cl-remove
+           '(kill-buffer embark--confirm)
+           embark-pre-action-hooks :test #'equal))
 
   (defadvice! embark-prev-next-recenter-a ()
     :after #'embark-previous-symbol

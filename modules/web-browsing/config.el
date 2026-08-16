@@ -87,7 +87,7 @@
 (use-package mpv
   :defer t
   :config
-  (setq mpv-volume-step 1.1))
+  (setopt mpv-volume-step 1.1))
 
 (use-package rfc-mode
   :after org)
@@ -131,7 +131,7 @@
   ;; once it is spent, which is a handful of items; fetching through the
   ;; logged-in browser carries the session, same trick as reddigg below
   (when (eq system-type 'darwin)
-    (setq hnreader-fetch-function #'hnreader--fetch-via-browser))
+    (setopt hnreader-fetch-function #'hnreader--fetch-via-browser))
 
   (map! :map hnreader-mode-map
         "C-c C-o" #'hnreader-browse-nh-story-url
@@ -159,10 +159,10 @@
   ;; reddit 403-blocks Emacs's TLS fingerprint; fetch through the live
   ;; browser on macOS, headless chromium elsewhere (needs one-time
   ;; M-x reddigg-chromium-warmup)
-  (setq reddigg-fetch-function (if (eq system-type 'darwin)
-                                   #'reddigg--fetch-via-browser
-                                 #'reddigg--fetch-via-chromium)
-        reddigg-subs '(emacs clojure programming))
+  (setopt reddigg-fetch-function (if (eq system-type 'darwin)
+                                     #'reddigg--fetch-via-browser
+                                   #'reddigg--fetch-via-chromium)
+          reddigg-subs '(emacs clojure programming))
   (map! :map reddigg-mode-map
         "C-c C-o" #'reddigg-browse-current-sub-url
         :n "yy" #'reddigg-copy-current-sub-url

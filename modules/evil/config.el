@@ -80,21 +80,21 @@
       (cl-callf2 delq sym evil-collection-mode-list)))
 
   ;; Flags resolved statically: :tools lookup and :tools eval are "enabled".
-  (setq evil-collection-binding-overrides
-        '((repl-submit :enabled nil)
-          (repl-newline :enabled nil)
-          (pop-definition :enabled nil)
-          (find-file :enabled nil)
-          (find-definition :enabled nil)
-          (find-usages :enabled nil)
-          (lookup-doc :enabled nil)
-          (goto-repl :enabled nil))
-        evil-collection-key-blacklist
-        (append (list doom-leader-key
-                      doom-localleader-key
-                      doom-leader-alt-key)
-                evil-collection-key-blacklist
-                '("gz" "<escape>"))))
+  (setopt evil-collection-binding-overrides
+          '((repl-submit :enabled nil)
+            (repl-newline :enabled nil)
+            (pop-definition :enabled nil)
+            (find-file :enabled nil)
+            (find-definition :enabled nil)
+            (find-usages :enabled nil)
+            (lookup-doc :enabled nil)
+            (goto-repl :enabled nil))
+          evil-collection-key-blacklist
+          (append (list doom-leader-key
+                        doom-localleader-key
+                        doom-leader-alt-key)
+                  evil-collection-key-blacklist
+                  '("gz" "<escape>"))))
 
 (use-package evil-escape
   :ensure (:host github :repo "hlissner/evil-escape")

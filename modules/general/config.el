@@ -56,14 +56,14 @@
   ;; default pair rules for various languages
   (require 'smartparens-config)
   ;; show-parens covers this faster and without overlay distraction
-  (setq sp-highlight-pair-overlay nil
-        sp-highlight-wrap-overlay nil
-        sp-highlight-wrap-tag-overlay nil)
+  (setopt sp-highlight-pair-overlay nil
+          sp-highlight-wrap-overlay nil
+          sp-highlight-wrap-tag-overlay nil)
   (after! evil
     ;; under evil, point sits ON the closing char in insert mode - sp must
     ;; treat that as inside the pair
-    (setq sp-show-pair-from-inside t
-          sp-cancel-autoskip-on-backward-movement nil)
+          (setopt sp-show-pair-from-inside t
+                  sp-cancel-autoskip-on-backward-movement nil)
     ;; sp binds C-g while pair overlays are active (even invisible ones),
     ;; forcing a double ESC out of insert mode
     (setq sp-pair-overlay-keymap (make-sparse-keymap)))
@@ -280,7 +280,7 @@
 ;; fallbacks) - hands out the persistent buffer, so a killed scratch
 ;; resurrects with its persisted state instead of as dead weight.
 (unless noninteractive
-  (setq initial-buffer-choice #'startup-scratch-buffer)
+  (setopt initial-buffer-choice #'startup-scratch-buffer)
   (defadvice! get-scratch-buffer-create-a ()
     :override #'get-scratch-buffer-create
     (scratch-buffer-create nil (scratch--initial-mode) default-directory nil)))
@@ -294,8 +294,8 @@
   :config
   ;; per-buffer zen: no frame-wide effects, frame geometry has its own
   ;; transient (SPC z f)
-  (setq writeroom-global-effects nil
-        writeroom-maximize-window t)
+  (setopt writeroom-global-effects nil
+          writeroom-maximize-window t)
   (setopt visual-fill-column-adjust-for-text-scale nil)
   (add-hook 'writeroom-local-effects #'zen-text-scale-h t)
   ;; manual zoom inside zen must re-fit the centered column
@@ -326,7 +326,7 @@
           (max 0 (/ (- (plist-get info :parent-frame-height)
                        (plist-get info :posframe-height))
                     2))))
-  (setq which-key-posframe-poshandler 'posframe-poshandler-frame-right-vertical)
+  (setopt which-key-posframe-poshandler 'posframe-poshandler-frame-right-vertical)
 
   (defadvice! which-key-posframe-dynamic-height-a (fn act-popup-dim)
     :around #'which-key-posframe--show-buffer
@@ -353,8 +353,8 @@
   :after-call (doom-first-file-hook)
   :defer t
   :init
-  (setq scroll-conservatively 101 ; important
-        scroll-margin 0)
+  (setopt scroll-conservatively 101 ; important
+          scroll-margin 0)
   :config
   (ultra-scroll-mode 1))
 

@@ -12,9 +12,9 @@
 
 ;;; * in-buffer completion defaults
 
-(setq completion-cycle-threshold 1
-      tab-always-indent 'complete
-      dabbrev-ignored-buffer-modes '(pdf-view-mode dired-mode ghostel-mode))
+(setopt completion-cycle-threshold 1
+        tab-always-indent 'complete
+        dabbrev-ignored-buffer-modes '(pdf-view-mode dired-mode ghostel-mode))
 
 (add-hook! 'doom-init-modules-hook
   (defun reset-lsp-completion-provider-h ()
@@ -166,9 +166,9 @@
                   (car args))
           (cdr args)))
   :config
-  (setq vertico-resize nil
-        vertico-count 17
-        vertico-cycle t)
+  (setopt vertico-resize nil
+          vertico-count 17
+          vertico-cycle t)
   (setq-default completion-in-region-function
                 (lambda (&rest args)
                   (apply (if vertico-mode
@@ -185,8 +185,8 @@
     :around #'ffap-menu-ask
     (letf! ((#'minibuffer-completion-help #'ignore))
       (apply fn args)))
-  (setq completion-ignore-case t
-        read-buffer-completion-ignore-case t)
+  (setopt completion-ignore-case t
+          read-buffer-completion-ignore-case t)
 
   (defadvice! vertico-current-with-arrow-a
     ;; Prefix current candidate with arrow
@@ -242,7 +242,7 @@
   :ensure (vertico-posframe :host github :repo "tumashu/vertico-posframe")
   :after vertico
   :config
-  (setq vertico-posframe-poshandler 'posframe-poshandler-frame-bottom-center)
+  (setopt vertico-posframe-poshandler 'posframe-poshandler-frame-bottom-center)
   (setq
    vertico-posframe-global t
    vertico-posframe-height nil
@@ -359,10 +359,10 @@
          "C-x C-d" #'consult-dir
          "C-x C-j" #'consult-dir-jump-file))
   :config
-  (setq consult-dir-project-list-function #'consult-dir-project-dirs
-        consult-dir-shadow-filenames nil
-        ;; Jump straight into the picked dir instead of re-prompting via find-file.
-        consult-dir-default-command #'consult-dir-dired))
+  (setopt consult-dir-project-list-function #'consult-dir-project-dirs
+          consult-dir-shadow-filenames nil
+          ;; Jump straight into the picked dir instead of re-prompting via find-file.
+          consult-dir-default-command #'consult-dir-dired))
 
 (use-package marginalia
   :hook (doom-first-input . marginalia-mode)
@@ -424,15 +424,15 @@
 (use-package consult-yasnippet
   :after (consult yasnippet)
   :config
-  (setq consult-yasnippet-use-thing-at-point t))
+  (setopt consult-yasnippet-use-thing-at-point t))
 
 ;;; * dash docs
 
 (use-package dash-docs
   :defer t
   :config
-  (setq dash-docs-browser-func #'browse-dash-doc
-        dash-docs-enable-debugging nil)
+  (setopt dash-docs-browser-func #'browse-dash-doc
+          dash-docs-enable-debugging nil)
 
   ;; a check, before activation of a docset to install it if needed
   (advice-add 'dash-docs-activate-docset :around #'dash-docs-activate-docset-a)
