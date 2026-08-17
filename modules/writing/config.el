@@ -90,16 +90,16 @@
   :config
   ;; Google rotates the real TKK; this static pair keeps the API usable.
   (defun google-translate--search-tkk () "Search TKK." (list 430675 2721866130))
-  (setopt google-translate-pop-up-buffer-set-focus t
-          google-translate-default-source-language "auto"
-          google-translate-default-target-language "en")
-  (setopt google-translate-listen-program (executable-find "ffplay")
-          google-translate-listen-program-args '("-nodisp" "-autoexit" "-loglevel" "quiet"))
-  (setopt google-translate-input-method-auto-toggling t
-          google-translate-preferable-input-methods-alist
-          '((nil . ("en"))
-            (spanish-prefix . ("es"))
-            (russian-computer . ("ru"))))
+  (setq google-translate-pop-up-buffer-set-focus t
+        google-translate-default-source-language "auto"
+        google-translate-default-target-language "en")
+  (setq google-translate-listen-program (executable-find "ffplay")
+        google-translate-listen-program-args '("-nodisp" "-autoexit" "-loglevel" "quiet"))
+  (setq google-translate-input-method-auto-toggling t
+        google-translate-preferable-input-methods-alist
+        '((nil . ("en"))
+          (spanish-prefix . ("es"))
+          (russian-computer . ("ru"))))
 
   (add-hook! 'google-translate-mode-hook
     (defun google-translate-mode-h ()

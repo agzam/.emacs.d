@@ -105,9 +105,8 @@
 ;; background.  No standalone repo - the single file lives in his config;
 ;; local-dev-packages redirects the recipe to the ~/GitHub/karthink checkout.
 (use-package gptel-inline
-  :ensure (gptel-inline :host github :repo "karthink/.emacs.d"
-                        :main "plugins/gptel-inline.el"
-                        :files ("plugins/gptel-inline.el"))
+  :ensure ( :host github :repo "karthink/gptel-inline"
+            :protocol ssh)
   :defer t
   :config
   ;; Abandoned prompt strips leak gptel-mode indirect clones into the
