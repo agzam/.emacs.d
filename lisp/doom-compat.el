@@ -30,6 +30,7 @@
 (setq auto-save-list-file-prefix (concat doom-cache-dir "autosave/")
       savehist-file (concat doom-state-dir "savehist")
       save-place-file (concat doom-state-dir "saveplace")
+      nov-save-place-file (concat doom-state-dir "nov-places")
       recentf-save-file (concat doom-state-dir "recentf")
       bookmark-default-file (concat doom-state-dir "bookmarks")
       project-list-file (concat doom-state-dir "projects")
