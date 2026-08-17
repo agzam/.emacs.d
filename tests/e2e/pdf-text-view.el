@@ -14,7 +14,9 @@
 ;; window-system frame - pdf-view-mode refuses tty frames outright - and
 ;; a built epdfinfo, so under the -nw harness (and CI) it reports a loud
 ;; skip; in a GUI session `pdf-text-view-pdf-flow-cases' runs the full
-;; SPC m x / RET / q round trip against a generated fixture PDF.
+;; round trip against generated fixture PDFs: localleader x / RET / q,
+;; companion reuse and mtime staleness, pdf-text-sync-mode in both
+;; directions, and the no-text-layer refusal on a scan-like fixture.
 
 (require 'cl-lib)
 
@@ -170,7 +172,11 @@ dispatched sync-back has to answer with its own user-error."
               ;; the config's TAB is the local-fold toggle
               ;; (org-cycle-only-current-subtree-h), not org's 3-state
               ;; cycle: it peeks children open, never the whole subtree.
-              (condition-case e (execute-kbd-macro (kbd "TAB"))
+              ;; A GUI Tab press sends the <tab> function key (the C-i
+              ;; char would hit evil's motion-state jump instead); a tty
+              ;; Tab is the C-i char itself.
+              (condition-case e (execute-kbd-macro
+                                 (if (display-graphic-p) (kbd "<tab>") (kbd "TAB")))
                 (error (setq err e)))
               (push (pdf-text-view--case
                      "TAB peeks the heading open to its children"
@@ -219,6 +225,19 @@ dispatched sync-back has to answer with its own user-error."
                                             (error-message-string err)))
                    (format "err=%s" (and err (error-message-string err)))
                    "the command's own user-error: The source PDF buffer is gone")
+                  results))
+          (let (err)
+            ;; GUI frames send the function key, and evil-org's direct
+            ;; <return> binding preempts the translation to RET - the
+            ;; buffer-local <return> binding must win on its own.
+            (condition-case e (execute-kbd-macro (kbd "<return>"))
+              (error (setq err e)))
+            (push (pdf-text-view--case
+                   "<return> dispatches the sync-back through the local binding"
+                   (and err (string-match-p "source PDF buffer is gone"
+                                            (error-message-string err)))
+                   (format "err=%s" (and err (error-message-string err)))
+                   "the command's own user-error through the direct <return> binding")
                   results))
           (let (err)
             (condition-case e (execute-kbd-macro (kbd "q"))
@@ -303,6 +322,97 @@ single loud skip entry."
                          (format "buffer=%s page=3" (buffer-name pdf-buf))
                          err)
                         results))
+                ;; the RET jump left pdf-buf selected on page 3: the next
+                ;; invocation must reuse the companion without re-extracting
+                ;; (chars tick untouched) and land on the now-viewed page
+                (let (err (tick (buffer-chars-modified-tick text-buf)))
+                  (condition-case e
+                      (execute-kbd-macro (kbd (concat doom-localleader-key " x")))
+                    (error (setq err e)))
+                  (push (pdf-text-view--case
+                         "re-invocation reuses the companion at the viewed page"
+                         (and (eq (current-buffer) text-buf)
+                              (eql tick (buffer-chars-modified-tick text-buf))
+                              (eql 3 (ignore-errors (pdf-text-page-at-point))))
+                         (format "buffer=%s tick=%s->%s page=%s"
+                                 (buffer-name) tick
+                                 (buffer-chars-modified-tick text-buf)
+                                 (ignore-errors (pdf-text-page-at-point)))
+                         "same buffer, unchanged tick, page 3"
+                         err)
+                        results))
+                (switch-to-buffer pdf-buf)
+                (let (err (tick (buffer-chars-modified-tick text-buf)))
+                  (set-file-times fixture (encode-time '(0 0 0 1 1 2020)))
+                  (condition-case e
+                      (execute-kbd-macro (kbd (concat doom-localleader-key " x")))
+                    (error (setq err e)))
+                  (push (pdf-text-view--case
+                         "a changed file mtime forces re-extraction"
+                         (and (eq (current-buffer) text-buf)
+                              (not (eql tick (buffer-chars-modified-tick text-buf)))
+                              (eql 3 (ignore-errors (pdf-text-page-at-point))))
+                         (format "buffer=%s tick=%s->%s page=%s"
+                                 (buffer-name) tick
+                                 (buffer-chars-modified-tick text-buf)
+                                 (ignore-errors (pdf-text-page-at-point)))
+                         "same buffer, advanced tick, page 3"
+                         err)
+                        results))
+                ;; sync mode, both directions over the live pair; the
+                ;; staleness landing left the companion selected on page 3
+                (let (err)
+                  (condition-case e
+                      (execute-kbd-macro (kbd (concat doom-localleader-key " s")))
+                    (error (setq err e)))
+                  (push (pdf-text-view--case
+                         "localleader s enables pdf-text-sync-mode"
+                         (buffer-local-value 'pdf-text-sync-mode text-buf)
+                         (format "sync=%s"
+                                 (buffer-local-value 'pdf-text-sync-mode text-buf))
+                         "pdf-text-sync-mode on in the companion"
+                         err)
+                        results))
+                (let (err)
+                  (condition-case e (execute-kbd-macro (kbd "gg"))
+                    (error (setq err e)))
+                  (push (pdf-text-view--case
+                         "sync: point on page 1 flips the pdf window there"
+                         (eql 1 (with-current-buffer pdf-buf
+                                  (ignore-errors (pdf-view-current-page))))
+                         (format "pdf-page=%s"
+                                 (with-current-buffer pdf-buf
+                                   (ignore-errors (pdf-view-current-page))))
+                         "pdf-view on page 1"
+                         err)
+                        results))
+                (let (err)
+                  (condition-case e
+                      (with-selected-window (get-buffer-window pdf-buf t)
+                        (pdf-view-goto-page 2))
+                    (error (setq err e)))
+                  (push (pdf-text-view--case
+                         "sync: flipping the pdf page moves point in the companion"
+                         (eql 2 (with-current-buffer text-buf
+                                  (pdf-text-page-at-point)))
+                         (format "text-page=%s"
+                                 (with-current-buffer text-buf
+                                   (pdf-text-page-at-point)))
+                         "companion point on page 2"
+                         err)
+                        results))
+                (let (err)
+                  (condition-case e
+                      (execute-kbd-macro (kbd (concat doom-localleader-key " s")))
+                    (error (setq err e)))
+                  (push (pdf-text-view--case
+                         "localleader s disables the sync again"
+                         (not (buffer-local-value 'pdf-text-sync-mode text-buf))
+                         (format "sync=%s"
+                                 (buffer-local-value 'pdf-text-sync-mode text-buf))
+                         "pdf-text-sync-mode off"
+                         err)
+                        results))
                 (switch-to-buffer text-buf)
                 (let (err)
                   (condition-case e (execute-kbd-macro (kbd "q"))
@@ -315,7 +425,33 @@ single loud skip entry."
                                  (buffer-name) (buffer-live-p text-buf))
                          "current != text buffer, text buffer still live"
                          err)
-                        results)))))
+                        results))
+                ;; a text-less (scanned) fixture must refuse, leaving nothing
+                (let ((scanfix (expand-file-name "pdf-text-scan.pdf" dir))
+                      scan-buf err)
+                  (pdf-text-view--make-pdf scanfix '(() () ()))
+                  (setq scan-buf (find-file-noselect scanfix))
+                  (switch-to-buffer scan-buf)
+                  (condition-case e
+                      (execute-kbd-macro (kbd (concat doom-localleader-key " x")))
+                    (error (setq err e)))
+                  (push (pdf-text-view--case
+                         "a scan refuses with a no-text-layer error, no companion"
+                         (and err
+                              (string-match-p "no text layer"
+                                              (error-message-string err))
+                              (not (get-buffer "*pdf-text: pdf-text-scan.pdf*"))
+                              (eq (current-buffer) scan-buf))
+                         (format "err=%s companion=%s current=%s"
+                                 (and err (error-message-string err))
+                                 (get-buffer "*pdf-text: pdf-text-scan.pdf*")
+                                 (buffer-name))
+                         "user-error mentioning no text layer, no companion buffer")
+                        results)
+                  (when (buffer-live-p scan-buf)
+                    (let ((kill-buffer-query-functions nil))
+                      (with-current-buffer scan-buf (set-buffer-modified-p nil))
+                      (kill-buffer scan-buf)))))))
         (dolist (b (list text-buf pdf-buf))
           (when (buffer-live-p b)
             (let ((kill-buffer-query-functions nil))
