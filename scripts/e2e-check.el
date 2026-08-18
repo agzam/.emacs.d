@@ -143,6 +143,20 @@ No results at all is a failure: an empty run reads as a pass otherwise."
     (with-temp-file e2e-result-file (insert text))
     (kill-emacs (if ok 0 1))))
 
+(defun e2e-prewarm ()
+  "Force cold-start side effects before any scenario runs.
+On a fresh machine the first text-mode buffer makes jinx compile its
+native module: the compilation buffer pops up mid-scenario and the
+window it steals eats the keys of whichever act is running.  The
+compile is synchronous (jinx.el `call-process'), so triggering it here
+absorbs pop and wait both.  Best-effort: a config without jinx runs on."
+  (ignore-errors
+    (when (require 'jinx nil t)
+      (with-temp-buffer
+        (text-mode)
+        (jinx-mode 1)
+        (jinx-mode -1)))))
+
 (defun e2e-run ()
   "Load the scenarios, run them, write the marker, exit."
   (let (results)
@@ -150,6 +164,7 @@ No results at all is a failure: an empty run reads as a pass otherwise."
         (progn
           (setq e2e-work-dir
                 (file-name-as-directory (make-temp-file "emacs-lab-e2e" t)))
+          (e2e-prewarm)
           (setq results (append (e2e-load-scenarios) (e2e-run-scenarios))))
       (when (and e2e-work-dir (file-directory-p e2e-work-dir))
         (delete-directory e2e-work-dir t))

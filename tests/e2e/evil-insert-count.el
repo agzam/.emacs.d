@@ -17,7 +17,9 @@
 
 (defun evil-insert-count-e2e ()
   "Stray counts before insert commands must not multiply the insertion."
-  (let* ((file (expand-file-name "insert-count.txt" e2e-work-dir))
+  ;; extension-less fixture: fundamental-mode, so the first act never
+  ;; races jinx compiling its module on a cold machine (.txt would)
+  (let* ((file (expand-file-name "insert-count" e2e-work-dir))
          (buf (find-file-noselect file))
          (results '()))
     (cl-flet ((act (label keys want &optional text)

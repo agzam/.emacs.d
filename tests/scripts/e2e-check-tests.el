@@ -23,6 +23,12 @@
         (insert (cdr file))))
     root))
 
+(describe "e2e-prewarm"
+  ;; the sandbox has no jinx on the load-path: the require must fail
+  ;; softly and the run proceed, same as a config without the package
+  (it "tolerates an environment without jinx"
+    (expect (e2e-prewarm) :not :to-throw)))
+
 (describe "e2e-report"
   ;; the whole point of the tier is that nothing passes quietly; a run that
   ;; loaded no scenario, or whose only scenario died, must not read as green
