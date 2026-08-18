@@ -34,6 +34,7 @@
       recentf-save-file (concat doom-state-dir "recentf")
       bookmark-default-file (concat doom-state-dir "bookmarks")
       project-list-file (concat doom-state-dir "projects")
+      multisession-directory (concat doom-state-dir "multisession/")
       tramp-persistency-file-name (concat doom-cache-dir "tramp")
       tramp-auto-save-directory (concat doom-cache-dir "tramp-autosave/")
       url-configuration-directory (concat doom-data-dir "url/")

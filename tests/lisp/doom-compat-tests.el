@@ -16,6 +16,7 @@
   (it "keeps state files under doom-local-dir (the git-ignored .local/)"
     (dolist (var '(savehist-file save-place-file recentf-save-file
                    bookmark-default-file project-list-file
+                   multisession-directory
                    transient-history-file auto-save-list-file-prefix
                    url-cache-directory eshell-directory-name
                    request-storage-directory))
@@ -24,6 +25,8 @@
   (it "points state files at the quarantine dirs"
     (expect (file-in-directory-p savehist-file doom-state-dir) :to-be-truthy)
     (expect (file-in-directory-p save-place-file doom-state-dir) :to-be-truthy)
+    (expect (file-in-directory-p multisession-directory doom-state-dir)
+            :to-be-truthy)
     (expect (file-in-directory-p tramp-persistency-file-name doom-cache-dir)
             :to-be-truthy)
     (expect (file-in-directory-p url-configuration-directory doom-data-dir)
