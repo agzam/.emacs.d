@@ -49,10 +49,13 @@ jobs:
           path: |
             .local/elpaca
             .local/.cache/eln
+          # v2: v1 caches predate gptel-inline's standalone repo and hold a
+          # build without its source dir, which fails every boot before a
+          # good cache can be saved
           # yamllint disable-line rule:line-length
-          key: elpaca-${{ runner.os }}-${{ hashFiles('init.el', 'modules/**/config.el', '.github/workflows/ci.yml') }}
+          key: elpaca-v2-${{ runner.os }}-${{ hashFiles('init.el', 'modules/**/config.el', '.github/workflows/ci.yml') }}
           restore-keys: |
-            elpaca-${{ runner.os }}-
+            elpaca-v2-${{ runner.os }}-
       # Private package repos (khalendario.el) need credentials; the
       # fine-grained PAT has Contents:read on them.  The blanket rewrite
       # authenticates every github https clone - public ones included,
