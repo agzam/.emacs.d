@@ -249,6 +249,9 @@ not block on a credential prompt)."
                         (concat emacs-batch
                                 ["-l" (str (fs/path root "scripts" "install-docsets.el"))]))}
 
+  tcc {:doc "Verify/repair the macOS TCC grants Emacs needs (screen capture, accessibility); idempotent, sudo only when rows drifted, no-op off macOS"
+       :task (load-file (str (fs/path root "scripts" "tcc.bb")))}
+
   check-root {:doc "Fail on anything at the config root that is neither tracked nor a sanctioned exception - a stray means some run wrote outside .local/"
               :task (System/exit
                      (:exit (apply p/shell {:continue true}
