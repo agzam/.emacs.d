@@ -52,6 +52,14 @@
   (when (called-interactively-p 'any)
     (call-interactively #'doom/escape)))
 
+(defadvice! drop-insert-repeat-count-a (&rest _)
+  "Never replay an insertion on insert-state exit.
+A stray count typed before `i'/`a'/`o' silently arms
+`evil-insert-count', and ESC then repeats the whole insertion.
+Leaves `evil-insert-vcount' alone, so visual-block I/A still works."
+  :before #'evil-cleanup-insert-state
+  (setq evil-insert-count nil))
+
 ;; vim's jump-forward; reachable in GUI frames only, where doom-defaults'
 ;; key-translation hack synthesizes [C-i] distinct from TAB.
 (map! :m [C-i] #'evil-jump-forward)
