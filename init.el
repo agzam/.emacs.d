@@ -76,6 +76,7 @@
 (defvar local-dev-packages
   '((remoto . "~/GitHub/agzam/remoto.el")
     (github-topics . "~/GitHub/agzam/github-topics")
+    (magit-gha-badge . "~/GitHub/agzam/magit-gha-badge.el")
     (ag-themes . "~/GitHub/agzam/ag-themes.el")
     (browser-hist . "~/GitHub/agzam/browser-hist.el")
     (consult-hn . "~/GitHub/agzam/consult-hn")

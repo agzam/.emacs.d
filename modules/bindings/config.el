@@ -502,7 +502,8 @@
          :desc "Browse an issue"           "i"   #'forge-browse-issue
          :desc "Browse a pull request"     "p"   #'forge-browse-pullreq
          :desc "Browse issues"             "I"   #'forge-browse-issues
-         :desc "Browse pull requests"      "P"   #'forge-browse-pullreqs)
+         :desc "Browse pull requests"      "P"   #'forge-browse-pullreqs
+         :desc "Browse latest workflow run" "w"  #'magit-gha-badge-browse-run)
         (:prefix ("l" . "list")
          (:when (modulep! :tools gist)
           :desc "List gists"              "g"   #'gist-list)

@@ -43,6 +43,13 @@
       #'magit-insert-head-branch-header
       #'magit-insert-push-branch-header))
 
+  ;; GHA status badge line right below the status headers; the inserter
+  ;; (magit-gha-badge package) renders from cache and never blocks refresh
+  (magit-add-section-hook 'magit-status-sections-hook
+                          #'magit-gha-badge-insert
+                          'magit-insert-status-headers
+                          'append)
+
   ;; `git log ORIG_HEAD..HEAD': log only changes since the last pull
   (transient-append-suffix 'magit-log "l"
     '("p" "orig_head..head" magit-log-orig_head--head))
@@ -137,6 +144,11 @@
      magit-diff-mode-map)
     [tab] #'magit-section-toggle)
 
+  ;; `,' only shadows evil-repeat-find-char-reverse here, useless in magit
+  (map! :localleader
+        :map magit-mode-map
+        :desc "Browse latest workflow run" "w" #'magit-gha-badge-browse-run)
+
   (after! git-rebase
     (dolist (key '(("M-k" . "gk") ("M-j" . "gj")))
       (when-let* ((desc (assoc (car key) evil-collection-magit-rebase-commands-w-descriptions)))
@@ -197,6 +209,12 @@ GraphQL `errors' alist, which otherwise dies with `listp, http'."
               (ghub--graphql-run-callback req cb nil)
             (ghub--signal-error errors)))
       (funcall fn req errors headers status))))
+
+;; own package; `local-checkout-recipe' (init.el) builds it in place from
+;; ~/GitHub/agzam/magit-gha-badge.el on machines that have the checkout
+(use-package magit-gha-badge
+  :ensure (magit-gha-badge :host github :repo "agzam/magit-gha-badge.el")
+  :defer t)
 
 (use-package git-link
   :ensure t
