@@ -102,11 +102,9 @@
 
 ;; Karthik's experimental overlay UI for gptel: prompt in a small window,
 ;; response in an overlay at point, chat session routed per project in the
-;; background.  No standalone repo - the single file lives in his config;
-;; local-dev-packages redirects the recipe to the ~/GitHub/karthink checkout.
+;; background.
 (use-package gptel-inline
-  :ensure ( :host github :repo "karthink/gptel-inline"
-            :protocol ssh)
+  :ensure (:host github :repo "karthink/gptel-inline")
   :defer t
   :config
   ;; Abandoned prompt strips leak gptel-mode indirect clones into the
