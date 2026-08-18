@@ -33,11 +33,23 @@
                     (goto-char (point-min)))
                   ;; a command signalling mid-macro rings the bell, which
                   ;; aborts the macro, this scenario and the ones after
-                  ;; it; swallow the ding, record the culprit instead
-                  (let ((command-error-function
-                         (lambda (data _ctx _caller)
-                           (push (list this-command (this-command-keys) data)
-                                 errs))))
+                  ;; it; swallow the ding, record the culprit instead.
+                  ;; `ding' itself is overridden too: it aborts macros
+                  ;; before ring-bell-function is consulted, and the
+                  ;; recorded backtrace names the caller in the transcript
+                  (cl-letf ((command-error-function
+                             (lambda (data _ctx _caller)
+                               (push (list this-command (this-command-keys) data)
+                                     errs)))
+                            ((symbol-function 'ding)
+                             (lambda (&rest _)
+                               (push (list 'ding this-command
+                                           (cl-loop for f in (backtrace-frames)
+                                                    for fn = (nth 1 f)
+                                                    when (symbolp fn) collect fn
+                                                    into fns
+                                                    finally return (seq-take fns 20)))
+                                     errs))))
                     (condition-case e
                         (execute-kbd-macro keys)
                       (error (push (list 'execute-kbd-macro keys e) errs))))
