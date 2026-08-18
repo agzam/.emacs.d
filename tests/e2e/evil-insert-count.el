@@ -32,6 +32,11 @@
                     (evil-force-normal-state)
                     (goto-char (point-min)))
                   (setq win (selected-window))
+                  ;; pending real events (stray tty bytes) must not
+                  ;; interleave with the macro: a NUL runs set-mark and
+                  ;; flips evil to visual state mid-sequence
+                  (discard-input)
+                  (deactivate-mark)
                   ;; a command signalling mid-macro rings the bell, which
                   ;; aborts the macro, this scenario and the ones after
                   ;; it; swallow the ding, record the culprit instead.

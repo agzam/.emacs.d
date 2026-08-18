@@ -155,7 +155,13 @@ absorbs pop and wait both.  Best-effort: a config without jinx runs on."
       (with-temp-buffer
         (text-mode)
         (jinx-mode 1)
-        (jinx-mode -1)))))
+        (jinx-mode -1))))
+  ;; The Linux pty leaves stray events queued from terminal init (a
+  ;; switch-frame event and a NUL byte that runs `set-mark-command');
+  ;; the first scenario that reads input would drain them into its own
+  ;; key stream - a NUL-set mark flips evil to visual state and every
+  ;; key after it dispatches under the wrong maps.  Flush them here.
+  (discard-input))
 
 (defun e2e-run ()
   "Load the scenarios, run them, write the marker, exit."
