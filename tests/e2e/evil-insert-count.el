@@ -23,7 +23,7 @@
          (buf (find-file-noselect file))
          (results '()))
     (cl-flet ((act (label keys want &optional text)
-                (let (errs)
+                (let (errs win)
                   (with-current-buffer buf
                     (switch-to-buffer buf)
                     (delete-other-windows)
@@ -31,12 +31,14 @@
                     (when text (insert text))
                     (evil-force-normal-state)
                     (goto-char (point-min)))
+                  (setq win (selected-window))
                   ;; a command signalling mid-macro rings the bell, which
                   ;; aborts the macro, this scenario and the ones after
                   ;; it; swallow the ding, record the culprit instead.
                   ;; `ding' itself is overridden too: it aborts macros
                   ;; before ring-bell-function is consulted, and the
-                  ;; recorded backtrace names the caller in the transcript
+                  ;; recorded backtrace names caller and window in the
+                  ;; transcript
                   (cl-letf ((command-error-function
                              (lambda (data _ctx _caller)
                                (push (list this-command (this-command-keys) data)
@@ -44,15 +46,38 @@
                             ((symbol-function 'ding)
                              (lambda (&rest _)
                                (push (list 'ding this-command
+                                           (buffer-name (window-buffer))
                                            (cl-loop for f in (backtrace-frames)
                                                     for fn = (nth 1 f)
                                                     when (symbolp fn) collect fn
                                                     into fns
                                                     finally return (seq-take fns 20)))
                                      errs))))
-                    (condition-case e
-                        (execute-kbd-macro keys)
-                      (error (push (list 'execute-kbd-macro keys e) errs))))
+                    ;; async pop-ups on a cold machine (native-comp
+                    ;; warnings, package sub-process logs) can select
+                    ;; another window between two macro commands; the next
+                    ;; key is then looked up in that buffer's keymaps -
+                    ;; suppress-keymap buffers ding on printable keys.
+                    ;; Pin the fixture window from post-command-hook: it
+                    ;; runs before the next key's lookup, and the single
+                    ;; macro call keeps pending prefix counts intact
+                    ;; (splitting per key drops them with the command loop)
+                    (let ((pin (lambda ()
+                                 (unless (window-live-p win)
+                                   (setq win (frame-selected-window)))
+                                 (unless (eq (selected-window) win)
+                                   (select-window win))
+                                 (unless (eq (window-buffer win) buf)
+                                   (set-window-buffer win buf)))))
+                      (unwind-protect
+                          (progn
+                            (add-hook 'post-command-hook pin)
+                            (condition-case e
+                                (execute-kbd-macro keys)
+                              (error (push (list 'execute-kbd-macro keys e
+                                                 (buffer-name (window-buffer)))
+                                           errs))))
+                        (remove-hook 'post-command-hook pin))))
                   (let ((got (with-current-buffer buf
                                (buffer-substring-no-properties
                                 (point-min) (point-max)))))
