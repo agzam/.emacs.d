@@ -45,7 +45,28 @@
             ("19:00" . ag-themes-doom-feather-light)
             ("20:00" . ag-themes-base16-ocean)
             ("21:00" . ag-themes-base16-ashes)
-            ("23:00" . ag-themes-doom-plain-dark))))
+            ("23:00" . ag-themes-doom-plain-dark)))
+
+  (defadvice! circadian-encode-time-as-time-value-a (time)
+    "Keep the next switch off `run-at-time''s relative-seconds path.
+`circadian-encode-time' builds an absolute moment with `encode-time', which
+answers a bare integer while `current-time-list' is nil; `run-at-time' reads
+a number as an offset from now and parks the timer decades out.
+Reported as guidoschmidt/circadian.el#42."
+    :filter-return #'circadian-encode-time
+    (time-convert time 'list))
+
+  (defadvice! circadian-clear-fired-timer-a (&rest _)
+    "Let `circadian-schedule' arm the following switch unconditionally.
+It arms one only while `circadian-next-timer' is nil, and
+`circadian-enable-theme' clears that variable on the branch that changes the
+theme alone - so reaching the scheduled theme by any other route, such as
+`cycle-themes', ends the day's switching.
+Reported as guidoschmidt/circadian.el#43."
+    :before #'circadian-enable-theme
+    (when circadian-next-timer
+      (cancel-timer circadian-next-timer)
+      (setq circadian-next-timer nil))))
 
 (use-package rainbow-mode
   :defer t)
