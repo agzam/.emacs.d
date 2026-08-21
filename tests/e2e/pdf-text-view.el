@@ -14,9 +14,10 @@
 ;; window-system frame - pdf-view-mode refuses tty frames outright - and
 ;; a built epdfinfo, so under the -nw harness (and CI) it reports a loud
 ;; skip; in a GUI session `pdf-text-view-pdf-flow-cases' runs the full
-;; round trip against generated fixture PDFs: localleader x / RET / q,
-;; companion reuse and mtime staleness, pdf-text-sync-mode in both
-;; directions, and the no-text-layer refusal on a scan-like fixture.
+;; round trip against generated fixture PDFs: themed-mode blending on
+;; open, localleader x / RET / q, companion reuse and mtime staleness,
+;; pdf-text-sync-mode in both directions, and the no-text-layer refusal
+;; on a scan-like fixture.
 
 (require 'cl-lib)
 
@@ -278,6 +279,20 @@ single loud skip entry."
                                (buffer-local-value 'major-mode pdf-buf))
                        t "skip" "skip")
                       results)
+              (let* ((themed (buffer-local-value 'pdf-view-themed-minor-mode pdf-buf))
+                     (opts (with-current-buffer pdf-buf (pdf-info-getoptions)))
+                     (fg (downcase (or (plist-get opts :render/foreground) "")))
+                     (want-fg (downcase (pdf-util-hexcolor
+                                         (face-foreground 'default nil)))))
+                (push (pdf-text-view--case
+                       "opening a PDF blends it into the current theme"
+                       (and themed
+                            (eql 1 (plist-get opts :render/usecolors))
+                            (equal fg want-fg))
+                       (format "themed=%s usecolors=%s fg=%s"
+                               themed (plist-get opts :render/usecolors) fg)
+                       (format "themed=t usecolors=1 fg=%s" want-fg))
+                      results))
               (pdf-view-goto-page 2)
               (let (err)
                 ;; the config rebinds doom-localleader-key to ","

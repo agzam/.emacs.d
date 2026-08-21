@@ -109,6 +109,8 @@
     :after #'pdf-view-next-page-command
     (image-scroll-down))
 
+  (add-hook! 'pdf-view-mode-hook #'pdf-view-themed-minor-mode)
+
   (add-hook! 'enable-theme-functions #'adjust-pdf-colors-on-theme-change-h))
 
 (use-package org-noter
