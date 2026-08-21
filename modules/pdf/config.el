@@ -24,9 +24,10 @@
 ;;   so this module fills the slot itself.
 ;; - buffer-to-pdf added (Prot's; nothing like it in the Doom original) -
 ;;   this module now writes PDFs as well as reads them.
-;; - pdf-text added (autoload/pdf-text.el; nothing like it in the Doom
-;;   original): pdf-view-as-text extracts the document through epdfinfo into
-;;   a reflowed pdf-text-mode companion buffer, nov's reading UX as model.
+;; - pdf-text added (its own package, agzam/pdf-text; nothing like it in the
+;;   Doom original): pdf-view-as-text extracts the document through epdfinfo
+;;   into a reflowed pdf-text-mode companion buffer, nov's reading UX as
+;;   model.  Only the reading-view wiring below stays config-local.
 ;;; Code:
 
 (use-package pdf-tools
@@ -192,10 +193,14 @@
             :n "i" nil
             "DEL" nil))))
 
-;; pdf-text: reflowed companion view (autoload/pdf-text.el), org-derived
-;; so the PDF outline folds.  general defers :map bindings until the
-;; keymap exists, so binding here works although pdf-text-mode-map is
-;; defined in a lazily-loaded file.
+;; pdf-text: reflowed companion view, org-derived so the PDF outline folds.
+;; Autoloads `pdf-view-as-text', which the pdf-view localleader block binds.
+(use-package pdf-text
+  :ensure (pdf-text :host github :repo "agzam/pdf-text")
+  :defer t)
+
+;; general defers :map bindings until the keymap exists, so binding here
+;; works although pdf-text-mode-map arrives with the package.
 (add-hook! 'pdf-text-mode-hook
   #'jinx-mode-off-h
   (defun pdf-text-reading-setup-h ()

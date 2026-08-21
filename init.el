@@ -86,6 +86,7 @@
     (navegosa . "~/GitHub/agzam/navegosa.el")
     (google-translate . "~/GitHub/agzam/google-translate")
     (occult . "~/GitHub/agzam/occult.el")
+    (pdf-text . "~/GitHub/agzam/pdf-text")
     (prisma . "~/GitHub/agzam/prisma.el")
     (wiktionary-bro . "~/GitHub/agzam/wiktionary-bro.el")
     (slacko . "~/GitHub/agzam/slacko.el")
