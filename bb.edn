@@ -181,6 +181,49 @@ not block on a credential prompt)."
                               "--eval" "(setq buttercup-stack-frame-style 'omit)"
                               "-f" "buttercup-run-discover" (str (fs/path root "tests"))]))}
 
+  corpus-add {:doc "Capture a page of a real book into tests/pdf/corpus: `bb corpus-add BOOK PAGE [SLUG]'. BOOK is a path or a fragment of one under ~/SyncMobile/Books; the page travels with its neighbours, since the reflow reads geometry across pages. Needs epdfinfo built."
+              :task (let [[book page slug] *command-line-args*]
+                      (when-not (and book page)
+                        (println "usage: bb corpus-add BOOK PAGE [SLUG]")
+                        (System/exit 2))
+                      (System/exit
+                       (:exit (apply p/shell {:continue true}
+                                     (concat emacs-batch
+                                             ["-l" (str (fs/path root "scripts" "pdf-corpus.el"))
+                                              "--eval" (format "(pdf-corpus-add %s %s %s)"
+                                                               (pr-str book) (pr-str page)
+                                                               (pr-str slug))])))))}
+
+  corpus-accept {:doc "Rewrite corpus goldens from the stored records after an intended change, so the review happens in `git diff': `bb corpus-accept [SLUG]'. Opens no PDF."
+                 :task (System/exit
+                        (:exit (apply p/shell {:continue true}
+                                      (concat emacs-batch
+                                              ["-l" (str (fs/path root "scripts" "pdf-corpus.el"))
+                                               "--eval" (format "(pdf-corpus-accept %s)"
+                                                                (pr-str (first *command-line-args*)))]))))}
+
+  corpus-sweep {:doc "Render a whole book and rank its pages by the invariants they break: `bb corpus-sweep BOOK [FIRST] [LAST]'. Where the next case comes from. Needs epdfinfo built."
+                :task (let [[book first last] *command-line-args*]
+                        (when-not book
+                          (println "usage: bb corpus-sweep BOOK [FIRST] [LAST]")
+                          (System/exit 2))
+                        (System/exit
+                         (:exit (apply p/shell {:continue true}
+                                       (concat emacs-batch
+                                               ["-l" (str (fs/path root "scripts" "pdf-corpus.el"))
+                                                "--eval" (format "(pdf-corpus-sweep %s %s %s)"
+                                                                 (pr-str book) (pr-str first)
+                                                                 (pr-str last))])))))}
+
+  corpus-audit {:doc "Render every book under ~/SyncMobile/Books and account for the conversion, one line each: `bb corpus-audit [FRAGMENT] [LIMIT]'. Where the library-wide verdict comes from. Needs epdfinfo built."
+                :task (let [[fragment limit] *command-line-args*]
+                        (System/exit
+                         (:exit (apply p/shell {:continue true}
+                                       (concat emacs-batch
+                                               ["-l" (str (fs/path root "scripts" "pdf-corpus.el"))
+                                                "--eval" (format "(pdf-corpus-audit %s %s)"
+                                                                 (pr-str fragment) (pr-str limit))])))))}
+
   smoke {:doc "Full Elpaca boot in a pty; verdict comes from the result marker"
          :task (run-pty-probe
                 "smoke-check.el" "SMOKE_RESULT_FILE" "SMOKE-OK"
