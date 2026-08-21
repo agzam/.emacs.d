@@ -199,6 +199,10 @@
           save-abbrevs 'silently)
   (when (file-exists-p abbrev-file-name)
     (quietly-read-abbrev-file abbrev-file-name))
+  ;; Contractions typed at speed land the apostrophe after the word, where
+  ;; it either fires the expansion or hides the abbrev name behind itself.
+  (setopt abbrev-expand-function #'expand-abbrev-tolerating-late-apostrophe)
+  (add-hook 'post-self-insert-hook #'drop-redundant-apostrophe-h :append)
   (add-hook! '(text-mode-hook git-commit-setup-hook) #'abbrev-mode))
 
 (after! quail
