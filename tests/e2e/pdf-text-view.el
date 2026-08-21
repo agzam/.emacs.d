@@ -23,7 +23,7 @@
 
 ;; The loaddefs autoload only pdf-view-as-text; the companion leg calls
 ;; the transforms directly, so pull the module file in explicitly.
-(unless (fboundp 'pdf-text-unfill)
+(unless (fboundp 'pdf-text-render-pages)
   (load (expand-file-name "modules/pdf/autoload/pdf-text.el"
                           (if (boundp 'e2e-root) e2e-root user-emacs-directory))
         nil 'nomessage))
