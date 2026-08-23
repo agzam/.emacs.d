@@ -633,7 +633,11 @@
 (use-package orgit-forge
   :after (orgit forge))
 
+;; ox-gfm ships no Version header and its v1.0 tag sits on a commit a
+;; depth-1 clone never fetches, so consult-gh's (ox-gfm "1.0") requirement
+;; reads "version 0" on every cold build; declare the version explicitly.
 (use-package ox-gfm
+  :ensure (ox-gfm :version (lambda (_) "1.0"))
   :after org
   :config
   (setopt org-export-with-toc nil))
