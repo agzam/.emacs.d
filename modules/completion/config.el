@@ -218,6 +218,7 @@
          "t" #'vertico-posframe-briefly-tall
          "u" #'vertico-multiform-unobtrusive
          "C-;" #'embark-act
+         "a" #'marginalia-cycle
          :desc "insert ;" "SPC" (cmd! (insert ";")))
         "DEL" #'delete-backward-char
         "C-h" #'vertico-directory-delete-word
