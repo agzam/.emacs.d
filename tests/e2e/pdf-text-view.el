@@ -372,19 +372,17 @@ single loud skip entry."
                          err)
                         results))
                 ;; sync mode, both directions over the live pair; the
-                ;; staleness landing left the companion selected on page 3
-                (let (err)
-                  (condition-case e
-                      (execute-kbd-macro (kbd (concat doom-localleader-key " s")))
-                    (error (setq err e)))
-                  (push (pdf-text-view--case
-                         "localleader s enables pdf-text-sync-mode"
-                         (buffer-local-value 'pdf-text-sync-mode text-buf)
-                         (format "sync=%s"
-                                 (buffer-local-value 'pdf-text-sync-mode text-buf))
-                         "pdf-text-sync-mode on in the companion"
-                         err)
-                        results))
+                ;; staleness case just re-rendered, and a fresh render
+                ;; starts the sync on its own (pdf-text-sync-default),
+                ;; so no keypress precedes the first assertion
+                (push (pdf-text-view--case
+                       "a fresh render starts pdf-text-sync-mode by itself"
+                       (buffer-local-value 'pdf-text-sync-mode text-buf)
+                       (format "sync=%s"
+                               (buffer-local-value 'pdf-text-sync-mode text-buf))
+                       "pdf-text-sync-mode on in the companion"
+                       nil)
+                      results)
                 (let (err)
                   (condition-case e (execute-kbd-macro (kbd "gg"))
                     (error (setq err e)))

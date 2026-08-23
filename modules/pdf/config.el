@@ -204,16 +204,13 @@
 (add-hook! 'pdf-text-mode-hook
   #'jinx-mode-off-h
   (defun pdf-text-reading-setup-h ()
-    "Trim org editing amenities out of the read-only reading view.
-`org-indent-mode' re-indents the whole multi-megabyte buffer for no
-reading benefit.  evil-org's normal-state maps (minor-mode maps, so
-they outrank `pdf-text-mode-map') would shadow the page sync-back,
-which owns the Return key; the buffer-local state bindings outrank
-minor modes.  <return> needs its own binding: evil-org binds the
-function key directly, and any direct <return> binding wins before
-the terminal translation to RET ever runs, so in a GUI frame a bare
-RET binding is unreachable."
-    (org-indent-mode -1)
+    "Give the page sync-back the Return key in the reading view.
+evil-org's normal-state maps (minor-mode maps, so they outrank
+`pdf-text-mode-map') would shadow it; the buffer-local state
+bindings outrank minor modes.  <return> needs its own binding:
+evil-org binds the function key directly, and any direct <return>
+binding wins before the terminal translation to RET ever runs, so in
+a GUI frame a bare RET binding is unreachable."
     (evil-local-set-key 'normal (kbd "RET") #'pdf-text-show-in-pdf)
     (evil-local-set-key 'normal (kbd "<return>") #'pdf-text-show-in-pdf)))
 
