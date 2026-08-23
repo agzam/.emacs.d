@@ -9,10 +9,11 @@
   :config
   ;; Make AGENTS.md the default system prompt everywhere.  A function value
   ;; is re-read per request, so `bb setup.bb' regenerations apply without
-  ;; reloading.  gptel-agent/gptel-plan presets set their own :system, so
+  ;; reloading, and the no-tools note tracks whichever tools the buffer
+  ;; carries now.  gptel-agent/gptel-plan presets set their own :system, so
   ;; AGENTS.md is not injected twice when those presets are active.
-  (setf (alist-get 'default gptel-directives) #'eca-agents-md-content)
-  (setq-default gptel--system-message #'eca-agents-md-content)
+  (setf (alist-get 'default gptel-directives) #'gptel-chat-directive)
+  (setq-default gptel--system-message #'gptel-chat-directive)
 
   (setf (alist-get 'chat gptel-directives)
         (concat

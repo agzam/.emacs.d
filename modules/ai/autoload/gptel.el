@@ -70,6 +70,52 @@ ARG-NAMES is a list of argument name strings for reconstructing the MCP plist."
   "Regexps matching a collected and an individual tool definition.
 Both tolerate reader metadata, as in (def ^:private tools [...]).")
 
+(defconst mcp-tool-def-binding-re
+  "^(def[ \t\n]+\\(?:\\^[^][ \t\n(){}]+[ \t\n]+\\)*\\([^][ \t\n(){}]+\\)"
+  "Regexp matching a top-level def, capturing the name it binds.")
+
+(defun mcp-tool-def-bindings ()
+  "Return a table of the top-level (def NAME {...}) maps in this buffer.
+Server sources factor a schema fragment shared by several tools into its
+own def and reference it by name inside the tool list; reading the source
+as data leaves those references as bare symbols."
+  (let ((bindings (make-hash-table :test 'eq)))
+    (save-excursion
+      (goto-char (point-min))
+      (while (re-search-forward mcp-tool-def-binding-re nil t)
+        (let ((name (intern (match-string 1))))
+          (skip-chars-forward " \t\n")
+          (when (eq (char-after) ?\")
+            (forward-sexp 1)
+            (skip-chars-forward " \t\n"))
+          (when (eq (char-after) ?{)
+            (let ((start (point)))
+              (forward-sexp 1)
+              (when-let* ((value (parseedn-read-str
+                                  (buffer-substring-no-properties start (point))))
+                          ((hash-table-p value)))
+                (puthash name value bindings)))))))
+    bindings))
+
+(defun mcp-resolve-schema-refs (node bindings &optional seen)
+  "Substitute the maps BINDINGS holds for the symbols naming them in NODE.
+SEEN carries the names already substituted along this branch, so a def
+that reaches itself resolves to the bare symbol instead of looping."
+  (cond
+   ((and node (symbolp node) (not (keywordp node))
+         (not (memq node seen))
+         (gethash node bindings))
+    (mcp-resolve-schema-refs (gethash node bindings) bindings (cons node seen)))
+   ((hash-table-p node)
+    (let ((out (make-hash-table :test 'equal)))
+      (maphash (lambda (k v)
+                 (puthash k (mcp-resolve-schema-refs v bindings seen) out))
+               node)
+      out))
+   ((vectorp node)
+    (vconcat (mapcar (lambda (n) (mcp-resolve-schema-refs n bindings seen)) node)))
+   (t node)))
+
 (defun mcp-tool-source-file (command)
   "Return the file holding COMMAND's MCP tool definitions, or nil.
 A launcher shell script hides the definitions, so follow its `-m
@@ -96,37 +142,42 @@ NAMESPACE' to the Clojure file that namespace maps to."
 Returns a list of parsed tool definition hash-tables, nil when the
 source isn't readable (missing harness checkout, CI).
 Handles both collected defs like (def tools [...]) and individual
-defs like (def my-tool {...})."
+defs like (def my-tool {...}), and resolves schema fragments the source
+shares through a separate def."
   (when-let* ((file (mcp-tool-source-file command)))
     (require 'parseedn)
     (with-temp-buffer
       (insert-file-contents file)
-      (goto-char (point-min))
-      (if (re-search-forward (car mcp-tool-def-re) nil t)
-          ;; Collected: (def tools [...]) or (def tool-def {...})
-          (when (re-search-forward "[{[]" nil t)
-            (backward-char 1)
-            (let* ((start (point))
-                   (_ (forward-sexp 1))
-                   (edn-str (buffer-substring-no-properties start (point)))
-                   (result (parseedn-read-str edn-str)))
-              (cond
-               ((hash-table-p result) (list result))
-               ((vectorp result) (append result nil))
-               (t nil))))
-        ;; Fallback: collect individual (def ...-tool {...}) forms
-        (goto-char (point-min))
-        (let (tools)
-          (while (re-search-forward (cdr mcp-tool-def-re) nil t)
-            (when (re-search-forward "{" nil t)
-              (backward-char 1)
-              (let* ((start (point))
-                     (_ (forward-sexp 1))
-                     (edn-str (buffer-substring-no-properties start (point)))
-                     (result (parseedn-read-str edn-str)))
-                (when (hash-table-p result)
-                  (push result tools)))))
-          (nreverse tools))))))
+      (let ((bindings (mcp-tool-def-bindings))
+            (defs
+             (progn
+               (goto-char (point-min))
+               (if (re-search-forward (car mcp-tool-def-re) nil t)
+                   ;; Collected: (def tools [...]) or (def tool-def {...})
+                   (when (re-search-forward "[{[]" nil t)
+                     (backward-char 1)
+                     (let* ((start (point))
+                            (_ (forward-sexp 1))
+                            (edn-str (buffer-substring-no-properties start (point)))
+                            (result (parseedn-read-str edn-str)))
+                       (cond
+                        ((hash-table-p result) (list result))
+                        ((vectorp result) (append result nil))
+                        (t nil))))
+                 ;; Fallback: collect individual (def ...-tool {...}) forms
+                 (goto-char (point-min))
+                 (let (tools)
+                   (while (re-search-forward (cdr mcp-tool-def-re) nil t)
+                     (when (re-search-forward "{" nil t)
+                       (backward-char 1)
+                       (let* ((start (point))
+                              (_ (forward-sexp 1))
+                              (edn-str (buffer-substring-no-properties start (point)))
+                              (result (parseedn-read-str edn-str)))
+                         (when (hash-table-p result)
+                           (push result tools)))))
+                   (nreverse tools))))))
+        (mapcar (lambda (def) (mcp-resolve-schema-refs def bindings)) defs)))))
 
 (defun mcp-schema-node->plist (node)
   "Convert a parsed JSON-schema NODE into the plist shape gptel serializes."
@@ -164,30 +215,48 @@ defs like (def my-tool {...})."
        properties))
     (nreverse args)))
 
+(defun mcp-tool-registration-warn (server-name tool-name err)
+  "Warn that TOOL-NAME of SERVER-NAME stayed unregistered, because of ERR."
+  (display-warning
+   'mcp-tools
+   (format "%s: skipped %s - %s"
+           server-name (or tool-name "all tools") (error-message-string err))
+   :warning))
+
 ;;;###autoload
 (defun register-mcp-tools-lazy ()
   "Register MCP tools with gptel from server script schemas.
 Reads tool definitions directly from the server sources using parseedn.
-Tools appear in gptel immediately; servers start lazily on first use."
+Tools appear in gptel immediately; servers start lazily on first use.
+A definition the reader or gptel rejects is skipped with a warning - the
+servers are walked in one pass, so an unguarded error would drop every
+server behind the offending one."
   (dolist (server mcp-hub-servers)
     (let* ((server-name (car server))
            (command (plist-get (cdr server) :command))
-           (category server-name)
-           (tool-defs (mcp-tool-defs-from-source command)))
+           (tool-defs (condition-case err
+                          (mcp-tool-defs-from-source command)
+                        (error (mcp-tool-registration-warn server-name nil err)
+                               nil))))
       (dolist (td tool-defs)
-        (let* ((tool-name (gethash :name td))
-               (description (or (gethash :description td) ""))
-               (schema (gethash :inputSchema td))
-               (args (when schema (mcp-schema->gptel-args schema))))
-          (gptel-make-tool
-           :function (lazy-mcp-tool-fn
-                      server-name tool-name
-                      (mapcar (lambda (a) (plist-get a :name)) args))
-           :name tool-name
-           :async t
-           :description description
-           :args args
-           :category category))))))
+        (condition-case err
+            (let* ((tool-name (gethash :name td))
+                   (description (or (gethash :description td) ""))
+                   (schema (gethash :inputSchema td))
+                   (args (when schema (mcp-schema->gptel-args schema))))
+              (gptel-make-tool
+               :function (lazy-mcp-tool-fn
+                          server-name tool-name
+                          (mapcar (lambda (a) (plist-get a :name)) args))
+               :name tool-name
+               :async t
+               :description description
+               :args args
+               :category server-name))
+          (error (mcp-tool-registration-warn
+                  server-name
+                  (and (hash-table-p td) (gethash :name td))
+                  err)))))))
 
 ;;;###autoload
 (defun mcp-servers-from-eca-config (&optional config-file)
@@ -226,6 +295,21 @@ Returns nil if the file does not exist."
       (with-temp-buffer
         (insert-file-contents file)
         (buffer-string)))))
+
+(defconst gptel-toolless-directive
+  "\n\n# Session capabilities\n\nThis session has no tools. Never emit a tool call in any form, whatever earlier turns in this conversation did. Answer directly from the text you were given."
+  "Note appended to the chat directive while gptel carries no tools.")
+
+;;;###autoload
+(defun gptel-chat-directive ()
+  "Return AGENTS.md, plus a no-tools note while `gptel-tools' is empty.
+The OAuth backend prepends \"You are Claude Code\", and AGENTS.md reads
+as a harness ruleset, so a file path in the prompt is enough to make the
+model answer with Claude Code's textual tool-call protocol instead of
+prose.  A chat buffer replays that turn on every send, and the model
+follows its own precedent, so one such answer wedges the buffer."
+  (concat (eca-agents-md-content)
+          (unless (bound-and-true-p gptel-tools) gptel-toolless-directive)))
 
 ;;; Improve-text transient
 

@@ -12,6 +12,11 @@
 (load-module-file "modules/elisp/autoload/let-plist.el")
 (load-module-file "modules/ai/autoload/gptel.el")
 
+;; Owned by mcp-hub and gptel, neither installed here; declared so the specs
+;; can bind them dynamically for the functions that read them.
+(defvar mcp-hub-servers)
+(defvar gptel-tools)
+
 (describe "mcp-servers-from-eca-config"
   :var (config-file)
   (before-all
@@ -194,9 +199,149 @@
                       :to-equal '("ping" "pong"))))
         (delete-file f))))
 
+  ;; jxa-browser factors the tab_id schema into its own def and references it
+  ;; by name; the reader used to hand gptel that bare symbol, and the gethash
+  ;; on it aborted registration for every server behind jxa-browser.
+  (it "resolves a schema fragment shared through a separate def"
+    (let ((f (make-temp-file "server" nil ".bb")))
+      (unwind-protect
+          (progn
+            (with-temp-file f
+              (insert "(ns server)\n"
+                      "(def tab-id-prop\n"
+                      "  \"Shared schema for the tab_id override.\"\n"
+                      "  {:type \"string\" :description \"Tab id\"})\n"
+                      "(def tools\n"
+                      "  [{:name \"click\"\n"
+                      "    :inputSchema {:type \"object\"\n"
+                      "                  :properties {:tab_id tab-id-prop}}}])\n"))
+            (let* ((defs (mcp-tool-defs-from-source f))
+                   (props (gethash :properties
+                                   (gethash :inputSchema (car defs))))
+                   (tab-id (gethash :tab_id props)))
+              (expect (hash-table-p tab-id) :to-be t)
+              (expect (gethash :type tab-id) :to-equal "string")
+              (expect (mapcar (lambda (a) (plist-get a :name))
+                              (mcp-schema->gptel-args
+                               (gethash :inputSchema (car defs))))
+                      :to-equal '("tab_id"))))
+        (delete-file f))))
+
+  (it "resolves a shared def that references another shared def"
+    (let ((f (make-temp-file "server" nil ".bb")))
+      (unwind-protect
+          (progn
+            (with-temp-file f
+              (insert "(ns server)\n"
+                      "(def leaf {:type \"string\"})\n"
+                      "(def wrapper {:type \"array\" :items leaf})\n"
+                      "(def tools\n"
+                      "  [{:name \"tag\"\n"
+                      "    :inputSchema {:type \"object\"\n"
+                      "                  :properties {:tags wrapper}}}])\n"))
+            (let* ((defs (mcp-tool-defs-from-source f))
+                   (tags (gethash :tags
+                                  (gethash :properties
+                                           (gethash :inputSchema (car defs))))))
+              (expect (gethash :type (gethash :items tags)) :to-equal "string")))
+        (delete-file f))))
+
+  ;; a def reaching itself would otherwise spin the substitution forever,
+  ;; hanging Emacs during startup rather than raising
+  (it "leaves a self-referential def alone instead of looping"
+    (let ((f (make-temp-file "server" nil ".bb")))
+      (unwind-protect
+          (progn
+            (with-temp-file f
+              (insert "(ns server)\n"
+                      "(def loopy {:type \"object\" :properties {:self loopy}})\n"
+                      "(def tools\n"
+                      "  [{:name \"spin\"\n"
+                      "    :inputSchema {:type \"object\"\n"
+                      "                  :properties {:arg loopy}}}])\n"))
+            (let* ((defs (mcp-tool-defs-from-source f))
+                   (arg (gethash :arg
+                                 (gethash :properties
+                                          (gethash :inputSchema (car defs))))))
+              (expect (gethash :type arg) :to-equal "object")
+              (expect (gethash :self (gethash :properties arg))
+                      :to-equal 'loopy)))
+        (delete-file f))))
+
   (it "returns nil for unreadable or non-string commands"
     (expect (mcp-tool-defs-from-source "/nonexistent/server.bb") :to-be nil)
     (expect (mcp-tool-defs-from-source nil) :to-be nil)))
+
+(describe "register-mcp-tools-lazy"
+  :var (dir registered server)
+  (before-each
+    (setq dir (make-temp-file "mcp-servers" t)
+          registered nil
+          server (lambda (name body)
+                   (let ((f (expand-file-name (concat name ".bb") dir)))
+                     (with-temp-file f (insert "(ns server)\n" body))
+                     (list name :command f))))
+    ;; gptel is absent here; record what would have been registered
+    (spy-on 'gptel-make-tool :and-call-fake
+            (lambda (&rest args)
+              (push (cons (plist-get args :category) (plist-get args :name))
+                    registered)))
+    (spy-on 'lazy-mcp-tool-fn :and-return-value #'ignore)
+    (spy-on 'display-warning))
+  (after-each
+    (delete-directory dir t))
+
+  ;; the servers are walked in one pass, so an unguarded error used to drop
+  ;; every server behind the one carrying the offending definition
+  (it "skips a tool gptel rejects and keeps going"
+    (let ((mcp-hub-servers
+           (list (funcall server "first" "(def tools [{:name \"a\"}])\n")
+                 (funcall server "broken"
+                          (concat "(def tools\n"
+                                  "  [{:name \"ok\"}\n"
+                                  "   {:name \"bad\"\n"
+                                  "    :inputSchema {:type \"object\"\n"
+                                  "                  :properties {:x unresolved}}}])\n"))
+                 (funcall server "last" "(def tools [{:name \"z\"}])\n"))))
+      (register-mcp-tools-lazy))
+    (expect (reverse registered)
+            :to-equal '(("first" . "a") ("broken" . "ok") ("last" . "z")))
+    (expect 'display-warning :to-have-been-called))
+
+  (it "names the skipped tool and its server in the warning"
+    (let ((mcp-hub-servers
+           (list (funcall server "broken"
+                          (concat "(def tools\n"
+                                  "  [{:name \"bad\"\n"
+                                  "    :inputSchema {:type \"object\"\n"
+                                  "                  :properties {:x unresolved}}}])\n")))))
+      (register-mcp-tools-lazy))
+    (let ((msg (nth 1 (spy-calls-args-for 'display-warning 0))))
+      (expect msg :to-match "broken")
+      (expect msg :to-match "bad")))
+
+  (it "registers every tool when nothing is malformed"
+    (let ((mcp-hub-servers
+           (list (funcall server "fine" "(def tools [{:name \"a\"} {:name \"b\"}])\n"))))
+      (register-mcp-tools-lazy))
+    (expect (reverse registered) :to-equal '(("fine" . "a") ("fine" . "b")))
+    (expect 'display-warning :not :to-have-been-called)))
+
+(describe "gptel-chat-directive"
+  (before-each
+    (spy-on 'eca-agents-md-content :and-call-fake
+            (lambda (&rest _) "# AGENTS\nbe nice\n")))
+
+  ;; the OAuth backend asserts "You are Claude Code", so a toolless request
+  ;; carrying a file path draws a textual tool call instead of an answer
+  (it "appends the no-tools note while gptel carries no tools"
+    (let ((gptel-tools nil))
+      (expect (gptel-chat-directive)
+              :to-equal (concat "# AGENTS\nbe nice\n" gptel-toolless-directive))))
+
+  (it "leaves the note off once tools are active"
+    (let ((gptel-tools '(some-tool)))
+      (expect (gptel-chat-directive) :to-equal "# AGENTS\nbe nice\n"))))
 
 (describe "gptel-improve-text-handle-response"
   (it "ignores reasoning and tool chunks"
