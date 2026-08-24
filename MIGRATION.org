@@ -87,7 +87,8 @@ these. Each restores the parked leader rows when its foundation lands.
   evil extras stay disabled by omission
 - testing/CI :: buttercup suites (tests/, XDG-sandboxed via helper.el),
   bb.edn tasks (deps/lint/test/smoke/ci), scripts/{lint,smoke-check}.el,
-  GitHub workflow (test + smoke jobs on Emacs 30.1, cached elpaca dirs)
+  GitHub workflow (test job on Emacs 30.1 + 31.1, smoke on the 30.1
+  floor, cached elpaca dirs)
 
 * Decisions log
 - [2026-07] :tools lookup core vendored (new modules/lookup/, loads right
