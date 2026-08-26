@@ -517,6 +517,17 @@
   (it "returns nil for blank text"
     (expect (gptel-improve-text-parse-variants "  \n ") :to-be nil)))
 
+(describe "gptel-improve-text-transient"
+  ;; The model selector is gptel's suffix, keyed "-m" in its own definition.
+  ;; A suffix's key is per-prefix, so `gptel-menu' taking it to "m" (in
+  ;; modules/ai/config.el) says nothing about this prefix: it keeps the
+  ;; inherited key unless its own layout names one.
+  (it "keys the model selector on m, the key gptel-menu shows it on"
+    (expect (plist-get (cdr (transient-get-suffix 'gptel-improve-text-transient
+                                                  'gptel--infix-provider))
+                       :key)
+            :to-equal "m")))
+
 (describe "gptel-improve-text variant picker"
   :var (origin picker region opened)
   (before-each

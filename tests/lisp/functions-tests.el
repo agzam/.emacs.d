@@ -123,6 +123,47 @@
     (expect (transient-remap-suffix-key 'probe-menu-no-ret "RET" "s-<return>")
             :not :to-throw)))
 
+(describe "transient-set-suffix-key"
+  ;; Mirrors gptel-menu's "m"/"-m" exchange: the selector keys itself on the
+  ;; suffix definition, the switch keys itself in the layout.  The switch's
+  ;; command is the one transient generates for the argument, "m".
+  (before-each
+    (transient-define-suffix probe-suffix-provider ()
+      :key "-m" :description "provider"
+      (interactive))
+    (transient-define-prefix probe-swap-menu ()
+      "probe"
+      [(probe-suffix-provider)
+       ("m" "minibuffer" "m")]))
+  (after-each
+    (dolist (s '(probe-suffix-provider probe-swap-menu transient:probe-swap-menu:m))
+      (when (fboundp s) (fmakunbound s))
+      (put s 'transient--prefix nil)
+      (put s 'transient--layout nil)
+      (put s 'transient--suffix nil)))
+
+  (cl-flet ((command-on (key)
+              (plist-get (cdr (transient-get-suffix 'probe-swap-menu key))
+                         :command))
+            (swap ()
+              (transient-set-suffix-key 'probe-swap-menu 'transient:probe-swap-menu:m "-m")
+              (transient-set-suffix-key 'probe-swap-menu 'probe-suffix-provider "m")))
+
+    (it "exchanges two keys, wherever each key is defined"
+      (swap)
+      (expect (command-on "m") :to-be 'probe-suffix-provider)
+      (expect (command-on "-m") :to-be 'transient:probe-swap-menu:m))
+
+    (it "is idempotent - a second run (as reload-config triggers) keeps the keys"
+      (swap)
+      (swap)
+      (expect (command-on "m") :to-be 'probe-suffix-provider)
+      (expect (command-on "-m") :to-be 'transient:probe-swap-menu:m))
+
+    (it "no-ops on a prefix without that command"
+      (expect (transient-set-suffix-key 'probe-swap-menu 'ignore "z") :not :to-throw)
+      (expect (ignore-errors (transient-get-suffix 'probe-swap-menu "z")) :to-be nil))))
+
 (describe "build-dir-half-built-p"
   ;; A link-only build dir (interrupted between elpaca's link and
   ;; autoloads/compile steps) is the state that silently voids commands.

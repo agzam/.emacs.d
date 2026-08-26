@@ -43,7 +43,20 @@
     ;; RET stays a newline in the chat buffer; send/confirm move to
     ;; s-<return>.  (`gptel-tools' is gptel's prefix, not the vendored package.)
     (transient-remap-suffix-key 'gptel-menu "RET" "s-<return>")
-    (transient-remap-suffix-key 'gptel-tools "RET" "s-<return>"))
+    (transient-remap-suffix-key 'gptel-tools "RET" "s-<return>")
+
+    ;; Meta+Return arrives as <M-return>, and Emacs only falls back to
+    ;; translating it into M-RET while no active map binds it.  An evil
+    ;; auxiliary map binds it in an org chat buffer, so the translation never
+    ;; happens and transient's M-RET suffix is unreachable there.  Bind the
+    ;; event the key actually produces.
+    (transient-remap-suffix-key 'gptel-menu "M-RET" "M-<return>")
+
+    ;; Model selector on "m", the key eca uses for it; the prompt-from-
+    ;; minibuffer switch takes "-m".  Both are located by command, since
+    ;; halfway through the exchange one key names two suffixes.
+    (transient-set-suffix-key 'gptel-menu 'transient:gptel-menu:m "-m")
+    (transient-set-suffix-key 'gptel-menu 'gptel--infix-provider "m"))
 
   (setf (alist-get 'org-mode gptel-prompt-prefix-alist) "* ")
 

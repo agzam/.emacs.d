@@ -848,7 +848,9 @@ open for another choice."
      (concat
       (or gptel-improve-text-prompt
           (car gptel-improve-text-prompts-history)) "\n"))
-   [(gptel--infix-provider)
+   ;; Keyed here, not inherited: gptel defines the selector on "-m", and
+   ;; `modules/ai/config.el' moves it to "m" in `gptel-menu' only.
+   [(gptel--infix-provider :key "m")
     (gptel-improve-text--infix-prompt)
     (gptel-improve-text--write-own-prompt)]
    [""

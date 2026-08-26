@@ -49,6 +49,15 @@ strings like \"RET\", not `kbd' output, which it will not match."
   (when (ignore-errors (transient-get-suffix prefix from))
     (transient-suffix-put prefix from :key to)))
 
+(defun transient-set-suffix-key (prefix command key)
+  "In transient PREFIX, put COMMAND's suffix on KEY.
+Locating the suffix by its command is what makes exchanging two keys
+work: a lookup by key finds whichever suffix sits there now, so the
+second half of a swap would move the suffix the first half just placed.
+No-op when PREFIX has no such suffix."
+  (when (ignore-errors (transient-get-suffix prefix command))
+    (transient-suffix-put prefix command :key key)))
+
 ;; Doom hook names kept: vendored doom-keybinds.el registers on the before
 ;; hook (which-key replacement-alist reset).
 (defvar doom-before-reload-hook nil
