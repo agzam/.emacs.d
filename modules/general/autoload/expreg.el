@@ -125,6 +125,7 @@ has fontified the current window."
     ("C-c L" "insert browser url" expreg-transient--insert-browser-url)
     ("; l" "insert link" markdown-insert-link)
     ("; L" "insert browser url" expreg-transient--insert-browser-url)
+    ("; q" "toggle quote block" markdown-toggle-blockquote)
     ("; c" "wrap in code block" markdown-wrap-code-generic)
     ("; <" "wrap in collapsible" markdown-wrap-collapsible)]]
   ["Clojure"

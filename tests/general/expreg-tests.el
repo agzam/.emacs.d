@@ -44,6 +44,7 @@
               markdown-insert-bold markdown-insert-italic markdown-insert-code
               markdown-insert-strike-through markdown-insert-link
               markdown-wrap-code-generic markdown-wrap-collapsible
+              markdown-toggle-blockquote
               ;; Clojure section restored with the clojure module (2026-07);
               ;; :if-gated to its mode but always present in the layout.
               clojure-wrap-rich-comment)))

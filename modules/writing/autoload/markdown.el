@@ -117,6 +117,40 @@ YANK-HANDLER pass through to ORIG-FN untouched.
         (evil-insert-state)))))
 
 ;;;###autoload
+(defun markdown-toggle-blockquote ()
+  "Add or strip the `> ' marker on every line of the region.
+Strips when each non-blank line already carries the marker, so the same
+key round-trips.  Blank lines get a bare `>' to keep the quote one block."
+  (interactive)
+  (when (region-active-p)
+    (let* ((beg (save-excursion
+                  (goto-char (region-beginning))
+                  (line-beginning-position)))
+           (end (save-excursion
+                  (goto-char (region-end))
+                  ;; a line-wise selection ends at the next line's bol
+                  (if (and (bolp) (< beg (point)))
+                      (1- (point))
+                    (line-end-position))))
+           (lines (split-string (buffer-substring-no-properties beg end) "\n"))
+           (content (seq-remove #'string-blank-p lines))
+           (quoted (and content
+                        (seq-every-p
+                         (lambda (line) (string-match-p "\\`[ \t]*>" line))
+                         content))))
+      (delete-region beg end)
+      (goto-char beg)
+      (insert (mapconcat
+               (lambda (line)
+                 (cond
+                  (quoted (replace-regexp-in-string "\\`[ \t]*> ?" "" line))
+                  ((string-blank-p line) ">")
+                  (t (concat "> " line))))
+               lines "\n"))
+      (deactivate-mark)
+      (goto-char beg))))
+
+;;;###autoload
 (defun markdown-wrap-code-clojure ()
   "Wrap region in a clojure fenced code block."
   (interactive)
