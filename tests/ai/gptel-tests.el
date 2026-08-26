@@ -268,15 +268,79 @@
                       :to-equal 'loopy)))
         (delete-file f))))
 
+  ;; kibana composes its descriptions with (str ...); the reader used to hand
+  ;; gptel that list, which registered fine and then broke every request
+  (it "concatenates the parts of a (str ...) description"
+    (let ((f (make-temp-file "server" nil ".bb")))
+      (unwind-protect
+          (progn
+            (with-temp-file f
+              (insert "(ns server)\n"
+                      "(def tools\n"
+                      "  [{:name \"look\"\n"
+                      "    :description (str \"Lists indices - \"\n"
+                      "                      \"the retention check. \"\n"
+                      "                      \"Requires VPN.\")}])\n"))
+            (expect (gethash :description (car (mcp-tool-defs-from-source f)))
+                    :to-equal "Lists indices - the retention check. Requires VPN."))
+        (delete-file f))))
+
+  (it "resolves a def-bound string inside a (str ...)"
+    (let ((f (make-temp-file "server" nil ".bb")))
+      (unwind-protect
+          (progn
+            (with-temp-file f
+              (insert "(ns server)\n"
+                      "(def default-index \"logstash-*\")\n"
+                      "(def tools\n"
+                      "  [{:name \"search\"\n"
+                      "    :inputSchema\n"
+                      "    {:type \"object\"\n"
+                      "     :properties {:index {:type \"string\"\n"
+                      "                          :description (str \"default '\"\n"
+                      "                                            default-index \"'\")}}}}])\n"))
+            (expect (plist-get (car (mcp-schema->gptel-args
+                                     (gethash :inputSchema
+                                              (car (mcp-tool-defs-from-source f)))))
+                               :description)
+                    :to-equal "default 'logstash-*'"))
+        (delete-file f))))
+
+  ;; a docstring sits where a bound string does, so telling them apart is the
+  ;; only way both shapes resolve
+  (it "keeps a def's docstring out of the value it binds"
+    (let ((f (make-temp-file "server" nil ".bb")))
+      (unwind-protect
+          (progn
+            (with-temp-file f
+              (insert "(ns server)\n"
+                      "(def host \"Where the cluster answers.\" \"es.example\")\n"
+                      "(def tools [{:name \"ping\" :description (str \"at \" host)}])\n"))
+            (expect (gethash :description (car (mcp-tool-defs-from-source f)))
+                    :to-equal "at es.example"))
+        (delete-file f))))
+
+  (it "leaves a (str ...) whose parts do not all resolve"
+    (let ((f (make-temp-file "server" nil ".bb")))
+      (unwind-protect
+          (progn
+            (with-temp-file f
+              (insert "(ns server)\n"
+                      "(def tools [{:name \"look\" :description (str \"at \" (host))}])\n"))
+            (expect (gethash :description (car (mcp-tool-defs-from-source f)))
+                    :to-equal '(str "at " (host))))
+        (delete-file f))))
+
   (it "returns nil for unreadable or non-string commands"
     (expect (mcp-tool-defs-from-source "/nonexistent/server.bb") :to-be nil)
     (expect (mcp-tool-defs-from-source nil) :to-be nil)))
 
 (describe "register-mcp-tools-lazy"
-  :var (dir registered server)
+  :var (dir registered descriptions server)
   (before-each
     (setq dir (make-temp-file "mcp-servers" t)
           registered nil
+          descriptions nil
           server (lambda (name body)
                    (let ((f (expand-file-name (concat name ".bb") dir)))
                      (with-temp-file f (insert "(ns server)\n" body))
@@ -285,7 +349,9 @@
     (spy-on 'gptel-make-tool :and-call-fake
             (lambda (&rest args)
               (push (cons (plist-get args :category) (plist-get args :name))
-                    registered)))
+                    registered)
+              (push (cons (plist-get args :name) (plist-get args :description))
+                    descriptions)))
     (spy-on 'lazy-mcp-tool-fn :and-return-value #'ignore)
     (spy-on 'display-warning))
   (after-each
@@ -320,11 +386,44 @@
       (expect msg :to-match "broken")
       (expect msg :to-match "bad")))
 
+  ;; gptel-make-tool accepts a description of any type and gptel serializes it
+  ;; per request, so such a tool takes down every request instead of itself
+  (it "skips a tool whose description stayed an unevaluated form"
+    (let ((mcp-hub-servers
+           (list (funcall server "broken"
+                          (concat "(def tools\n"
+                                  "  [{:name \"bad\" :description (str \"at \" (host))}\n"
+                                  "   {:name \"ok\" :description \"fine\"}])\n")))))
+      (register-mcp-tools-lazy))
+    (expect (reverse registered) :to-equal '(("broken" . "ok")))
+    (expect (nth 1 (spy-calls-args-for 'display-warning 0)) :to-match "bad"))
+
+  (it "skips a tool whose arg description stayed an unevaluated form"
+    (let ((mcp-hub-servers
+           (list (funcall server "broken"
+                          (concat "(def tools\n"
+                                  "  [{:name \"bad\"\n"
+                                  "    :inputSchema\n"
+                                  "    {:type \"object\"\n"
+                                  "     :properties {:q {:type \"string\"\n"
+                                  "                      :description (str (fmt))}}}}])\n")))))
+      (register-mcp-tools-lazy))
+    (expect registered :to-be nil)
+    (expect (nth 1 (spy-calls-args-for 'display-warning 0)) :to-match "bad"))
+
   (it "registers every tool when nothing is malformed"
     (let ((mcp-hub-servers
            (list (funcall server "fine" "(def tools [{:name \"a\"} {:name \"b\"}])\n"))))
       (register-mcp-tools-lazy))
     (expect (reverse registered) :to-equal '(("fine" . "a") ("fine" . "b")))
+    (expect 'display-warning :not :to-have-been-called))
+
+  (it "registers a (str ...) description as one string"
+    (let ((mcp-hub-servers
+           (list (funcall server "fine"
+                          "(def tools [{:name \"a\" :description (str \"one \" \"two\")}])\n"))))
+      (register-mcp-tools-lazy))
+    (expect (cdr (assoc "a" descriptions)) :to-equal "one two")
     (expect 'display-warning :not :to-have-been-called)))
 
 (describe "gptel-chat-directive"
