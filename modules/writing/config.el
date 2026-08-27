@@ -406,16 +406,8 @@
           (occult-toggle)
         (apply fn args)))))
 
-;; Install-only: `paste-convert-kill' requires prisma at call time.  doom.d's
-;; `:after (markdown org)' gate was rot - no `markdown' feature exists, so
-;; the block never fired there either.
 (use-package prisma
   :ensure (prisma :host github :repo "agzam/prisma.el")
-  :defer t)
-
-(after! evil
-  ;; cross-format yank/paste: kills remember their origin format,
-  ;; md<->org conversion happens at paste time; bare C-u pastes verbatim
-  (advice-add 'evil-yank :after #'yank-remember-format-a)
-  (advice-add 'evil-paste-after :around #'paste-maybe-convert-a)
-  (advice-add 'evil-paste-before :around #'paste-maybe-convert-a))
+  ;; kills remember their origin format and convert md<->org at paste
+  ;; time; bare C-u pastes verbatim
+  :hook (doom-first-input . prisma-yank-mode))
