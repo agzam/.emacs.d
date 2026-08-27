@@ -61,7 +61,8 @@
           (:prefix ("j" . "jira")
            :desc "change status" "s" #'go-jira-change-status
            :desc "assign"        "a" #'go-jira-assign
-           :desc "PRs"           "p" #'go-jira-find-pull-requests-on-github)
+           :desc "PRs"           "p" #'go-jira-find-pull-requests-on-github
+           :desc "popup"         "j" #'go-jira-popup-show)
           (:prefix ("b" . "browse")
            :desc "view" "b" #'go-jira-view-ticket
            :desc "in browser" "o" #'go-jira-browse-ticket-url)
