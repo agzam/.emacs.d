@@ -1,4 +1,4 @@
-;;; tests/pdf/pdf-tests.el --- pdf/autoload/pdf.el specs -*- lexical-binding: t; -*-
+;;; tests/pdf/pdf-tests.el --- pdf-tools specs -*- lexical-binding: t; -*-
 
 (require 'test-helper
          (expand-file-name
@@ -107,5 +107,38 @@
         (kill-buffer themed)
         (kill-buffer plain)
         (kill-buffer other)))))
+
+(defun pdf-tests--read-form (marker)
+  "Read the form that starts at MARKER in modules/pdf/config.el.
+The spec reads source: config.el cannot be loaded in the batch tier, where
+neither `use-package' nor general (behind `map!') is available."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "modules/pdf/config.el" test-config-root))
+    (emacs-lisp-mode)
+    (goto-char (point-min))
+    (search-forward marker)
+    (goto-char (match-beginning 0))
+    (read (current-buffer))))
+
+(describe "epdfinfo program location"
+  (let (form path)
+    (before-all
+      (setq form (pdf-tests--read-form "(setopt pdf-info-epdfinfo-program")
+            path (expand-file-name (eval (nth 2 form) t))))
+
+    (it "keeps the server binary out of the package directories"
+      ;; The regression: pdf-tools-install leaves the binary in the elpaca
+      ;; build dir, elpaca wipes that dir on the next build, and every
+      ;; `bb update' ends with PDFs opening in fundamental-mode.  The source
+      ;; tree is no home either - `pdf-tools-install' installs from there to
+      ;; this path, and install refuses to copy a file onto itself.
+      (expect (nth 1 form) :to-be 'pdf-info-epdfinfo-program)
+      (expect (file-in-directory-p path doom-data-dir) :to-be-truthy))
+
+    (it "names a directory that exists before the build runs"
+      ;; `pdf-tools-build-server' cl-check-types its target directory, so a
+      ;; path through a directory nothing creates errors out before autobuild
+      ;; gets its own mkdir -p.
+      (expect (file-directory-p (file-name-directory path)) :to-be-truthy))))
 
 ;;; pdf-tests.el ends here

@@ -6,11 +6,14 @@
 ;;   " Continuous") as of v1.2.0 (2025-12), so the dalanicolai fork + its
 ;;   pdf-roll branch AND the separate image-roll package are both gone - the
 ;;   roll code was absorbed into pdf-roll.el, which only requires pdf-view.
-;;   The recipe tracks vedang's default branch; :files keeps build/{Makefile,
-;;   server} so epdfinfo still compiles at first PDF open (runtime, not at
-;;   elpaca build time - CI smoke never opens a PDF).  The fork-era
-;;   <wheel-up>/<wheel-down> remaps in pdf-view-roll-minor-mode-map are
-;;   dropped: the upstream mode drives the wheel itself via
+;;   The recipe tracks vedang's default branch; :files carries Makefile and
+;;   server/ so epdfinfo still compiles at first PDF open (runtime, not at
+;;   elpaca build time - CI smoke never opens a PDF).  Elpaca ignores the
+;;   subdir of a ("build" PATH) entry and links PATH at the build root, so
+;;   `pdf-tools-locate-build-directory' reaches the sources through
+;;   builds/pdf-tools/server, not the build/server the recipe names.  The
+;;   fork-era <wheel-up>/<wheel-down> remaps in pdf-view-roll-minor-mode-map
+;;   are dropped: the upstream mode drives the wheel itself via
 ;;   mwheel-scroll-{up,down}-function.  `pdf-view-continuous' (the s c toggle)
 ;;   is a distinct, long-standing per-line variable and survives untouched.
 ;; - calibredb dropped (unused).
@@ -46,6 +49,14 @@
       ;; graceful failure is better UX.
       (fundamental-mode)
       (message "Viewing PDFs in Emacs requires epdfinfo.  Use `M-x pdf-tools-install' to build it")))
+
+  ;; Keep the compiled server outside the elpaca build dir, which every build
+  ;; wipes and relinks - the binary `pdf-tools-install' put there dies with it,
+  ;; and each update asks to install again.  This variable is also where
+  ;; `pdf-tools-install' reads its install target, so the binary must not sit
+  ;; in the source tree it compiles in either: install refuses to copy a file
+  ;; onto itself.
+  (setopt pdf-info-epdfinfo-program (expand-file-name "epdfinfo" doom-data-dir))
 
   (pdf-tools-install-noverify)
 
