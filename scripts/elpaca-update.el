@@ -163,7 +163,8 @@ that is genuinely empty."
       ;; multi-minute silent hang with no clue which package is in flight.
       (elpaca-subscribe 'finished #'elpaca-update--on-finished)
       (elpaca-subscribe 'failed #'elpaca-update--on-failed)
-      (elpaca-update-all)          ; queue fetch+merge+rebuild for every package
+      ;; queue fetch+merge+rebuild for every package elpaca clones
+      (elpaca-local-update-remotes nil nil #'elpaca-update--emit)
       (elpaca-wait)                ; settle the update queue (streamed as it goes)
       ;; A git update only rebuilds a package when its merge moved HEAD; a
       ;; build-in-place local checkout edited on disk (new files, edits) won't

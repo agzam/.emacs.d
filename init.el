@@ -12,6 +12,12 @@
 ;; elpaca finds no elisp files
 (setq elpaca-order-defaults (list :type 'git :protocol 'https :inherit t :depth 1))
 
+;; Cap the packages building at once.  Elpaca forks git and byte compilation,
+;; but every process filter, sentinel and status transition runs in this Emacs
+;; - unlimited concurrency across the whole package set is what turns an update
+;; into a freeze.  Read before elpaca loads, so `defcustom' keeps this value.
+(setq elpaca-queue-limit 8)
+
 (defvar elpaca-installer-version 0.12)
 ;; Deviation from the stock installer: repos/builds live outside the config
 ;; dir (see early-init.el quarantine).

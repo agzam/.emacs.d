@@ -33,6 +33,7 @@
 (defvar elpaca-live-update--total 0 "Packages expected to reach a terminal status.")
 (defvar elpaca-live-update--failed 0 "Packages failed so far.")
 (defvar elpaca-live-update--saved-log-fns 'unset "Saved `elpaca-log-functions'.")
+(defvar elpaca-live-update--saved-jit 'unset "Saved `native-comp-jit-compilation'.")
 (defvar elpaca-live-update--poll nil "Completion poll timer.")
 (defvar elpaca-live-update--watchdog nil "Safety timer.")
 (defvar elpaca-live-update--snapshot nil
@@ -90,7 +91,7 @@ is covered on the caller's side by its pid liveness check and deadline."
          "31" (concat "failed: " (symbol-name (elpaca<-id e))))))
 
 (defun elpaca-live-update--cleanup ()
-  "Cancel timers, drop subscribers, restore `elpaca-log-functions'."
+  "Cancel timers, drop subscribers, restore what the run rebound."
   (when elpaca-live-update--poll (cancel-timer elpaca-live-update--poll))
   (when elpaca-live-update--watchdog (cancel-timer elpaca-live-update--watchdog))
   (setq elpaca-live-update--poll nil elpaca-live-update--watchdog nil)
@@ -99,6 +100,9 @@ is covered on the caller's side by its pid liveness check and deadline."
   (unless (eq elpaca-live-update--saved-log-fns 'unset)
     (setq elpaca-log-functions elpaca-live-update--saved-log-fns
           elpaca-live-update--saved-log-fns 'unset))
+  (unless (eq elpaca-live-update--saved-jit 'unset)
+    (setq native-comp-jit-compilation elpaca-live-update--saved-jit
+          elpaca-live-update--saved-jit 'unset))
   (setq elpaca-update-report-color nil
         elpaca-live-update--batcher nil))
 
@@ -243,6 +247,11 @@ UPDATE-ERROR line."
           ;; Suppress the log buffer for the async run (its refresh is the freeze).
           (setq elpaca-live-update--saved-log-fns elpaca-log-functions
                 elpaca-log-functions nil)
+          ;; Every package that activates would otherwise queue an eln job while
+          ;; the session is being typed in; the jobs return with the setting.
+          (when (boundp 'native-comp-jit-compilation)
+            (setq elpaca-live-update--saved-jit native-comp-jit-compilation
+                  native-comp-jit-compilation nil))
           (elpaca-subscribe 'finished #'elpaca-live-update--on-finished)
           (elpaca-subscribe 'failed #'elpaca-live-update--on-failed)
           (setq elpaca-live-update--watchdog
@@ -257,9 +266,7 @@ UPDATE-ERROR line."
            "update: fetching + merging + rebuilding %d package(s)..."
            elpaca-live-update--total)
           ;; interactive=t => elpaca processes the queue (async), returns at once.
-          (if packages
-              (dolist (p packages) (elpaca-update p t))
-            (elpaca-update-all t))
+          (elpaca-local-update-remotes packages t #'elpaca-live-update--emit)
           (setq elpaca-live-update--poll
                 (run-at-time 1 1 #'elpaca-live-update--advance))
           logfile)

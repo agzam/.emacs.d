@@ -1,5 +1,9 @@
-;;; scripts/elpaca-local.el --- rebuild changed build-in-place packages -*- lexical-binding: t; -*-
+;;; scripts/elpaca-local.el --- build-in-place packages during an update -*- lexical-binding: t; -*-
 ;; Shared by `bb update's two drivers (elpaca-update.el, elpaca-live-update.el).
+;; Two jobs, both about packages elpaca builds in place - the
+;; `local-dev-packages' checkouts and the vendored in-module ones: keep git out
+;; of their sources (`elpaca-local-update-remotes'), and rebuild them when
+;; those sources change (`elpaca-local-rebuild-changed').
 ;;
 ;; A git-driven update (fetch + ff-only merge) only rebuilds a package when the
 ;; merge moves its HEAD.  A build-in-place local checkout - the
@@ -62,6 +66,84 @@ Local checkouts and the in-module vendored packages live outside
   (when-let* ((build (ignore-errors (elpaca<-build-dir e)))
               (files (ignore-errors (elpaca--files e))))
     (elpaca-local--dirty-p files build)))
+
+(defun elpaca-local--branch (dir)
+  "Return the branch checked out in DIR, or nil when DIR is no git worktree.
+A detached HEAD answers with its short sha, having no branch to name."
+  (let ((default-directory (file-name-as-directory (expand-file-name dir))))
+    (with-temp-buffer
+      (when (eq 0 (call-process "git" nil t nil "rev-parse" "--abbrev-ref" "HEAD"))
+        (let ((branch (string-trim (buffer-string))))
+          (if (not (equal branch "HEAD"))
+              branch
+            (erase-buffer)
+            (when (eq 0 (call-process "git" nil t nil "rev-parse" "--short" "HEAD"))
+              (string-trim (buffer-string)))))))))
+
+(defun elpaca-local--skip-lines (packages)
+  "Return one aligned line per entry of PACKAGES, an alist of (ID . SOURCE-DIR).
+Each line reads `ID - PATH', with ` -- BRANCH' appended where the checkout sits
+off `main' or `master' - those two would be on nearly every line and say
+nothing.  Names and paths are padded to the widest of the set, which is why the
+caller hands the whole set over at once; a tab cannot align columns whose width
+is only known here."
+  (let* ((rows (mapcar
+                (lambda (cell)
+                  (let ((branch (elpaca-local--branch (cdr cell))))
+                    (list (symbol-name (car cell))
+                          (abbreviate-file-name (directory-file-name (cdr cell)))
+                          (unless (member branch '(nil "main" "master")) branch))))
+                packages))
+         (id-width (apply #'max 0 (mapcar (lambda (r) (length (nth 0 r))) rows)))
+         ;; Only branch-carrying lines need their path padded; padding the rest
+         ;; would trail whitespace to the end of the block.
+         (path-width (apply #'max 0 (mapcar (lambda (r) (if (nth 2 r)
+                                                            (length (nth 1 r))
+                                                          0))
+                                            rows))))
+    (mapcar (lambda (row)
+              (pcase-let ((`(,id ,path ,branch) row))
+                (if branch
+                    (concat (string-pad id id-width) " - "
+                            (string-pad path path-width) " -- " branch)
+                  (concat (string-pad id id-width) " - " path))))
+            rows)))
+
+(defun elpaca-local--skip-merge-a (fn id &optional fetch interactive)
+  "Leave a build-in-place package's source untouched, else call FN on ID.
+FN is `elpaca-merge'; FETCH and INTERACTIVE are its own arguments."
+  (unless (when-let* ((e (elpaca-get id))) (elpaca-local-package-p e))
+    (funcall fn id fetch interactive)))
+
+(defun elpaca-local-update-remotes (&optional packages interactive emit)
+  "Fetch and merge the packages elpaca cloned, leaving build-in-place ones alone.
+PACKAGES, when non-nil, limits the update to those ids.  INTERACTIVE processes
+the queue at once, as in `elpaca-update-all'.  EMIT, when non-nil, is called as
+\(EMIT FMT &rest ARGS) once per skipped package.
+
+Neither kind of build-in-place package is elpaca's to update.  A checkout
+redirected by `local-dev-packages' is a working tree its author drives with git
+- its branch, its unpushed commits, its rebases - and the ff-only merge fails
+outright on a branch with no upstream.  A package vendored into a module has no
+upstream at all: its `:repo' points inside the config, so the same merge would
+run in the config repo.  Both change on disk instead, and reach the build
+through `elpaca-local-rebuild-changed'.
+
+The skipped set is known from the queue before anything runs, so its block
+prints up front rather than trickling in among the fetches."
+  (let ((skipped (cl-loop for (id . e) in (elpaca--queued)
+                          when (and (elpaca-local-package-p e)
+                                    (or (null packages) (memq id packages)))
+                          collect (cons id (elpaca<-source-dir e)))))
+    (when emit
+      (dolist (line (elpaca-local--skip-lines skipped)) (funcall emit "%s" line)))
+    (advice-add 'elpaca-merge :around #'elpaca-local--skip-merge-a)
+    (unwind-protect
+        (if packages
+            (dolist (id packages) (elpaca-update id interactive))
+          (elpaca-update-all interactive))
+      (advice-remove 'elpaca-merge #'elpaca-local--skip-merge-a))
+    (mapcar #'car skipped)))
 
 (defun elpaca-local-changed ()
   "Return queued build-in-place local elpacas whose source changed since build."
