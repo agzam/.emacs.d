@@ -117,10 +117,15 @@ build-in-place to clone."
 
 ;; Clone any own package this machine hasn't checked out yet into its dev
 ;; folder over ssh, before elpaca resolves recipes, so `local-checkout-recipe'
-;; redirects to it and elpaca builds in place.  Skipped under CI (no ssh key;
-;; it only needs the public repos, which clone anonymously over https).
+;; redirects to it and elpaca builds in place.  CI keeps no checkout between
+;; runs, so it clones every own package - over https, the scheme its credential
+;; rewrite authenticates - and drops the builds its restored elpaca cache
+;; carries, which elpaca would otherwise activate instead of building the
+;; checkout just cloned.
 (require 'local-dev)
-(unless (getenv "CI")
+(if (getenv "CI")
+    (let ((local-dev-clone-url-format "https://github.com/%s.git"))
+      (drop-local-dev-builds (ensure-local-dev-checkouts)))
   (ensure-local-dev-checkouts))
 
 ;; Import the shell PATH; a compositor-launched Emacs inherits a minimal one.

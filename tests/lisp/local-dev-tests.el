@@ -10,6 +10,10 @@
 
 (load-module-file "lisp/local-dev.el")
 
+;; The suites run without init.el, which is where elpaca's builds dir is set;
+;; declaring it special keeps the `let' below dynamic, as the code reads it.
+(defvar elpaca-builds-directory)
+
 (describe "local-dev--derive-repo"
   (it "takes the last two path components as OWNER/REPO"
     (expect (local-dev--derive-repo "/home/x/GitHub/agzam/remoto.el")
@@ -29,7 +33,11 @@
   (it "honors a pinned :branch override"
     (expect (local-dev-clone-spec 'reddigg "/h/GitHub/agzam/emacs-reddigg"
                                   '((reddigg :branch "next")))
-            :to-equal '("git@github.com:agzam/emacs-reddigg.git" . "next"))))
+            :to-equal '("git@github.com:agzam/emacs-reddigg.git" . "next")))
+  (it "follows the url format CI binds for its keyless https clones"
+    (let ((local-dev-clone-url-format "https://github.com/%s.git"))
+      (expect (local-dev-clone-spec 'prisma "/h/GitHub/agzam/prisma.el" nil)
+              :to-equal '("https://github.com/agzam/prisma.el.git")))))
 
 (describe "ensure-local-dev-checkouts"
   (let ((base nil))
@@ -96,5 +104,30 @@
                      1)))
           (ensure-local-dev-checkouts (list (cons 'partial dir)) nil #'ignore))
         (expect (file-directory-p dir) :to-be nil)))))
+
+(describe "drop-local-dev-builds"
+  (let ((builds nil))
+    (before-each
+      (setq builds (make-temp-file "local-dev-builds" t))
+      (dolist (name '("prisma" "occult"))
+        (let ((dir (expand-file-name name builds)))
+          (make-directory dir t)
+          (write-region "stale" nil (expand-file-name (concat name ".elc") dir)
+                        nil 'silent))))
+    (after-each (when (and builds (file-directory-p builds))
+                  (delete-directory builds t)))
+
+    (it "deletes the build of the named packages only"
+      (expect (drop-local-dev-builds '(prisma) builds #'ignore) :to-equal '(prisma))
+      (expect (file-directory-p (expand-file-name "prisma" builds)) :to-be nil)
+      (expect (file-directory-p (expand-file-name "occult" builds)) :to-be t))
+
+    (it "reports nothing for a package elpaca never built"
+      (expect (drop-local-dev-builds '(never-built) builds #'ignore) :to-be nil))
+
+    (it "deletes nothing when elpaca's builds dir is unknown"
+      (let ((elpaca-builds-directory nil))
+        (expect (drop-local-dev-builds '(prisma) nil #'ignore) :to-be nil))
+      (expect (file-directory-p (expand-file-name "prisma" builds)) :to-be t))))
 
 ;;; tests/lisp/local-dev-tests.el ends here
