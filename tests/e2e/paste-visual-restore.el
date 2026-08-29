@@ -86,12 +86,19 @@
                  "alpha\nbeta\n"
                  (list (vconcat "yyjpgv~"))
                  "alpha\nbeta\nALPHA\n")
-            ;; s-v is the system paste key, and it runs plain `yank' -
-            ;; the path Evil's change markers know nothing about
-            (act "gv selects what the system paste key inserted"
-                 "alpha beta gamma\n"
-                 (list (vconcat "yiw" (kbd "s-v") "gv~"))
-                 "ALPHAalpha beta gamma\n")
+            ;; `yank' is the path Evil's change markers know nothing
+            ;; about - the system paste key runs it.  That key is s-v on
+            ;; macOS and nothing on the Linux CI runner, so the case
+            ;; borrows a key both have: the command matters, not the key.
+            (let ((key (kbd "C-c y")))
+              (unwind-protect
+                  (progn
+                    (define-key evil-normal-state-map key #'yank)
+                    (act "gv selects what a plain yank inserted"
+                         "alpha beta gamma\n"
+                         (list (vconcat "yiw" key "gv~"))
+                         "ALPHAalpha beta gamma\n"))
+                (define-key evil-normal-state-map key nil)))
             ;; ESC ends its own macro: a tty reads ESC and the key after
             ;; it as that key with Meta, so mid-sequence it never reaches
             ;; evil.  Two of them: the first closes expreg-transient, the
