@@ -75,6 +75,16 @@ window."
       (kill-buffer))))
 
 ;;;###autoload
+(defun yank-buffer-name ()
+  "Copy the current buffer's name to the kill ring.
+The bare name is what `get-buffer' and friends accept; the printed
+`#<buffer NAME>' form is unreadable syntax."
+  (interactive)
+  (let ((name (buffer-name)))
+    (kill-new name)
+    (message "Copied buffer name: %s" name)))
+
+;;;###autoload
 (defun diff-current-buffer-with-file ()
   (interactive)
   (let ((buf (current-buffer)))

@@ -28,3 +28,13 @@
           (expect (rudekill-matching-buffers "rudekill-internal-probe")
                   :to-equal 0)
         (when (buffer-live-p internal) (kill-buffer internal))))))
+
+(describe "yank-buffer-name"
+  (it "copies the bare buffer name, usable by get-buffer"
+    (let ((kill-ring nil)
+          (kill-ring-yank-pointer nil))
+      (with-temp-buffer
+        (rename-buffer "yank-name-spec" t)
+        (yank-buffer-name)
+        (expect (car kill-ring) :to-equal (buffer-name))
+        (expect (get-buffer (car kill-ring)) :to-be (current-buffer))))))

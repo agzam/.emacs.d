@@ -311,6 +311,7 @@
        :desc "kill with window" "k" #'kill-buffer-and-window
        :desc "diff with file" "D" #'diff-current-buffer-with-file
        :desc "kill some buffers" "s-d" #'kill-matching-buffers-rudely
+       :desc "copy buffer name" "Y" #'yank-buffer-name
        (:when (modulep! :custom web-browsing)
          :desc "browser history" "h" #'browser-hist-search
          :desc "browser tabs" "t" #'browser-goto-tab
