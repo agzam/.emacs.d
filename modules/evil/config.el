@@ -60,6 +60,37 @@ Leaves `evil-insert-vcount' alone, so visual-block I/A still works."
   :before #'evil-cleanup-insert-state
   (setq evil-insert-count nil))
 
+(defun remember-visual-selection (beg end)
+  "Store BEG..END as the region `evil-visual-restore' brings back.
+It reads these three variables and nothing else, so writing them is what
+makes a region reachable by `gv'."
+  (setq evil-visual-mark (copy-marker beg)
+        evil-visual-point (copy-marker end)
+        evil-visual-selection 'char))
+
+(defadvice! yank-sets-visual-selection-a (fn &rest args)
+  "Let `gv' select text any yank command inserted.
+Every paste path funnels through `insert-for-yank': `yank' behind the
+system paste key, `yank-pop', `yank-from-kill-ring', consult's yank
+commands, the mouse yanks, and Evil's own paste."
+  :around #'insert-for-yank
+  (let ((beg (point)))
+    (prog1 (apply fn args)
+      (when (< beg (point))
+        (remember-visual-selection beg (1- (point)))))))
+
+(defadvice! paste-sets-visual-selection-a (&rest _)
+  "Let `gv' select the text an Evil paste inserted.
+Evil keeps the bounds in the `[' and `]' markers, which
+`evil-visual-restore' never reads: it restores regions selected by hand,
+so right after a paste it has nothing to give back.  The markers span
+every copy of a counted paste, which the `insert-for-yank' advice, firing
+once per copy, cannot see."
+  :after '(evil-paste-before evil-paste-after)
+  (when-let* ((beg (evil-get-marker ?\[))
+              (end (evil-get-marker ?\])))
+    (remember-visual-selection beg end)))
+
 ;; vim's jump-forward; reachable in GUI frames only, where doom-defaults'
 ;; key-translation hack synthesizes [C-i] distinct from TAB.
 (map! :m [C-i] #'evil-jump-forward)
