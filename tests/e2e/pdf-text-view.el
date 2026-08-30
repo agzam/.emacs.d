@@ -436,6 +436,60 @@ single loud skip entry."
                          "current != text buffer, text buffer still live"
                          err)
                         results))
+                ;; the pair is one document to the reader: closing either
+                ;; half closes the other, per pdf-text-kill-together
+                (let ((kill-buffer-query-functions nil))
+                  (with-current-buffer pdf-buf (set-buffer-modified-p nil))
+                  (kill-buffer text-buf)
+                  (push (pdf-text-view--case
+                         "killing the companion takes the pdf-view buffer with it"
+                         (and (not (buffer-live-p text-buf))
+                              (not (buffer-live-p pdf-buf)))
+                         (format "text-live=%s pdf-live=%s"
+                                 (buffer-live-p text-buf) (buffer-live-p pdf-buf))
+                         "both halves gone")
+                        results))
+                ;; the same the other way round, over a pair opened afresh
+                (setq pdf-buf (find-file-noselect fixture))
+                (switch-to-buffer pdf-buf)
+                (delete-other-windows)
+                (let (err)
+                  (condition-case e
+                      (execute-kbd-macro (kbd (concat doom-localleader-key " x")))
+                    (error (setq err e)))
+                  (setq text-buf (current-buffer))
+                  (let ((kill-buffer-query-functions nil))
+                    (with-current-buffer pdf-buf (set-buffer-modified-p nil))
+                    (kill-buffer pdf-buf))
+                  (push (pdf-text-view--case
+                         "killing the pdf-view buffer takes the companion with it"
+                         (and (not (buffer-live-p pdf-buf))
+                              (not (buffer-live-p text-buf)))
+                         (format "pdf-live=%s text-live=%s"
+                                 (buffer-live-p pdf-buf) (buffer-live-p text-buf))
+                         "both halves gone"
+                         err)
+                        results))
+                ;; and the option is read at the kill, so nil keeps them apart
+                (setq pdf-buf (find-file-noselect fixture))
+                (switch-to-buffer pdf-buf)
+                (delete-other-windows)
+                (let ((pdf-text-kill-together nil) err)
+                  (condition-case e
+                      (execute-kbd-macro (kbd (concat doom-localleader-key " x")))
+                    (error (setq err e)))
+                  (setq text-buf (current-buffer))
+                  (let ((kill-buffer-query-functions nil))
+                    (kill-buffer text-buf))
+                  (push (pdf-text-view--case
+                         "pdf-text-kill-together nil leaves the pdf-view buffer alone"
+                         (and (not (buffer-live-p text-buf))
+                              (buffer-live-p pdf-buf))
+                         (format "text-live=%s pdf-live=%s"
+                                 (buffer-live-p text-buf) (buffer-live-p pdf-buf))
+                         "companion gone, PDF still live"
+                         err)
+                        results))
                 ;; a text-less (scanned) fixture must refuse, leaving nothing
                 (let ((scanfix (expand-file-name "pdf-text-scan.pdf" dir))
                       scan-buf err)
