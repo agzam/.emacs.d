@@ -101,6 +101,40 @@
       (init-bug-reference-mode-settings)
       (expect (bug-reference->github-url "just some words") :to-be nil))))
 
+;; NOTE the point of these two: they run in a buffer holding no reference
+;; and no overlay, with point nowhere near one.  That is the embark collect
+;; buffer's state, and what the earlier point-reading actions died on.
+
+(describe "bug-reference-visit-topic"
+  (it "visits the topic of the reference it is handed, ignoring point"
+    (let ((bug-reference-bug-regexp bug-reference-bug-regexp)
+          (bug-reference-url-format bug-reference-url-format)
+          visited)
+      (init-bug-reference-mode-settings)
+      (cl-letf (((symbol-function 'bug-reference-github-resolve-url) #'identity)
+                ((symbol-function 'forge-visit-topic-via-url)
+                 (lambda (url &rest _) (setq visited url))))
+        (with-temp-buffer
+          (insert "no reference anywhere in this buffer")
+          (bug-reference-visit-topic "agzam/foo#12")))
+      (expect visited :to-equal "https://github.com/agzam/foo/issues/12"))))
+
+(describe "bug-reference-browse"
+  (it "browses the reference it is handed, ignoring point"
+    (let ((bug-reference-bug-regexp bug-reference-bug-regexp)
+          (bug-reference-url-format bug-reference-url-format)
+          browsed)
+      (init-bug-reference-mode-settings)
+      (cl-letf (((symbol-function 'bug-reference-github-resolve-url) #'identity)
+                ((symbol-function 'browse-url-externally)
+                 (lambda (url &rest _) (setq browsed url))))
+        (with-temp-buffer
+          (insert "no reference anywhere in this buffer")
+          (bug-reference-browse "qlik-trial/stitch-agent-service#812")))
+      (expect browsed
+              :to-equal
+              "https://github.com/qlik-trial/stitch-agent-service/issues/812"))))
+
 (describe "bug-reference-button-action"
   (it "browses the reference url when its overlay-button is pushed"
     ;; Emacs 31 makes ref overlays actionless buttons; the wired action must

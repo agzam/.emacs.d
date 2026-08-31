@@ -56,6 +56,10 @@
   (it "errors on non-github urls"
     (expect (bisect-github-url "https://example.com/not/github")
             :to-throw 'error))
+  ;; a caller whose url-at-point lookup came back nil used to get
+  ;; `wrong-type-argument stringp nil' out of the regexp instead
+  (it "errors on a missing url"
+    (expect (bisect-github-url nil) :to-throw 'error))
   (it "handles dots, dashes and underscores in org and repo"
     (let ((parts (bisect-github-url "https://github.com/foo-bar.baz/qu_ux-1.2")))
       (expect (plist-get parts :org) :to-equal "foo-bar.baz")

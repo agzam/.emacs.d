@@ -238,11 +238,14 @@
           :desc "bug-reference" "b" #'link-org->link-bug-reference
           :desc "roam heading" "r" #'link-org->roam-heading))
 
+   ;; the visit/browse actions take the reference string embark hands them;
+   ;; point-based ones only work where `bug-reference-mode' left an overlay,
+   ;; which a collect or export buffer never has
    (:map embark-bug-reference-link-map
-         "v" #'forge-visit-topic-via-url
+         "v" #'bug-reference-visit-topic
          (:prefix ("b" . "browse")
-          :desc "browser" "o" #'bug-reference-push-button
-          :desc "forge-visit" "b" #'forge-visit-topic-via-url)
+          :desc "browser" "o" #'bug-reference-browse
+          :desc "forge-visit" "b" #'bug-reference-visit-topic)
          (:prefix
           ("c" . "convert")
           :desc "markdown link" "m" #'link-bug-reference->link-markdown

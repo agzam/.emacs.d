@@ -76,3 +76,21 @@ github.com redirect; offline it falls back to the /issues/ form."
      (bug-reference-github-issue-url (match-string-no-properties 2 ref)
                                      (match-string-no-properties 3 ref)
                                      (match-string-no-properties 4 ref)))))
+
+;;;###autoload
+(defun bug-reference-visit-topic (ref)
+  "Open a forge topic buffer for bug reference REF.
+Embark action for `bug-reference-link' targets.  Takes the reference as
+a string instead of reading point: `bug-reference-mode' fontifies only
+the buffers it is on, so anywhere else - an embark collect or export
+buffer, a plain text buffer - there is no overlay and no url at point
+for `forge-visit-topic-via-url' to find."
+  (forge-visit-topic-via-url (bug-reference->github-url ref)))
+
+;;;###autoload
+(defun bug-reference-browse (ref)
+  "Open bug reference REF in the external browser.
+String argument for the same reason as `bug-reference-visit-topic':
+`bug-reference-push-button' reads its url off an overlay, so it does
+nothing in buffers the mode never fontified."
+  (browse-url-externally (bug-reference->github-url ref)))

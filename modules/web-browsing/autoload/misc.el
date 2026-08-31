@@ -10,8 +10,7 @@ action, else the shared (nil-type) RET.  Plain ticket references
   (interactive (list (read-string "Enter URL: ")))
   (require 'embark) ; builds `embark-url-patterns' + type keymaps
   (if (string-match-p bug-reference-bug-regexp url)
-      (cl-letf (((symbol-function 'browse-url) #'forge-visit-topic-via-url))
-        (call-interactively #'bug-reference-push-button))
+      (bug-reference-visit-topic url)
     (let* ((type (cl-loop for (type pattern) in embark-url-patterns
                           when (if (functionp pattern)
                                    (funcall pattern url)

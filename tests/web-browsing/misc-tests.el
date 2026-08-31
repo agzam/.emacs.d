@@ -57,15 +57,15 @@
         (process-external-url "https://example.com/article")))
     (expect calls :to-equal '((eww "https://example.com/article"))))
 
-  (it "pushes bug-reference-style strings through bug-reference"
+  (it "routes bug-reference-style strings to the forge action"
     ;; pin the regexp: the lab installs an org/repo#N one at runtime
     (with-fake-feature 'embark
       (let ((bug-reference-bug-regexp
              "\\(\\b[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#\\([0-9]+\\)\\)"))
-        (cl-letf (((symbol-function 'bug-reference-push-button)
-                   (lambda () (interactive) (push '(bug-pushed) calls))))
+        (cl-letf (((symbol-function 'bug-reference-visit-topic)
+                   (lambda (ref) (push (list 'forge ref) calls))))
           (process-external-url "agzam/foo#12"))))
-    (expect calls :to-equal '((bug-pushed)))))
+    (expect calls :to-equal '((forge "agzam/foo#12")))))
 
 (describe "browse-url-externally"
   (it "forces the default external browser regardless of handler setup"

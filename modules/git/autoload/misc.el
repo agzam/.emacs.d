@@ -51,7 +51,7 @@ Signals an error if there is no current project."
                            "\\/" seg "\\/issues\\/\\([0-9]+\\)" ))
          (pr-rx (concat "\\(https\\:\\/\\/github.com\\)\\/" seg
                         "\\/" seg "\\/pull\\/\\([0-9]+\\)"))
-         (type (if (not (string-match-p bare-rx url))
+         (type (if (not (and (stringp url) (string-match-p bare-rx url)))
                    (error "Is that a GitHub url?\n%s" url)
                  (cond ((string-match file-rx url) 'file)
                        ((string-match issue-rx url) 'issue)
