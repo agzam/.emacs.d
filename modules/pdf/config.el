@@ -232,6 +232,7 @@ a GUI frame a bare RET binding is unreachable."
       (:localleader
        "p" #'pdf-text-show-in-pdf
        "s" #'pdf-text-sync-mode
+       "f" #'pdf-text-follow-mode
        "t" #'google-translate-posframe-at-point
        "T" #'translate-at-point-smart))
 
