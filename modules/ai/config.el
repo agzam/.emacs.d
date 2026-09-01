@@ -56,7 +56,13 @@
     ;; minibuffer switch takes "-m".  Both are located by command, since
     ;; halfway through the exchange one key names two suffixes.
     (transient-set-suffix-key 'gptel-menu 'transient:gptel-menu:m "-m")
-    (transient-set-suffix-key 'gptel-menu 'gptel--infix-provider "m"))
+    (transient-set-suffix-key 'gptel-menu 'gptel--infix-provider "m")
+
+    ;; The picker lists every backend's models as one flat "Backend:model"
+    ;; list.  Routed through consult for narrowing
+    (cl-defmethod transient-infix-read :around ((_obj gptel-provider-variable))
+      (call-with-prefix-narrowing ":" '((?a . "Claude-OAuth") (?g . "Copilot"))
+                                  (lambda () (cl-call-next-method)))))
 
   (setf (alist-get 'org-mode gptel-prompt-prefix-alist) "* ")
 

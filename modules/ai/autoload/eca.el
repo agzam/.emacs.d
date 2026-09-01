@@ -179,6 +179,13 @@ against re-adding a remap that would stack multiplicatively."
         (eca-workspaces-mode 1)))))
 
 ;;;###autoload
+(defadvice! eca-select-model-narrowing-a (fn &rest args)
+  "Let `consult-narrow-key' cut the model list down to one provider."
+  :around #'eca-chat-select-model
+  :around #'eca-chat-inline-select-model
+  (apply #'call-with-prefix-narrowing "/" nil fn args))
+
+;;;###autoload
 (defun eca-reauth ()
   "Re-trigger Anthropic Max OAuth login on the current session.
 Workaround for the OAuth refresh race condition (eca#462).

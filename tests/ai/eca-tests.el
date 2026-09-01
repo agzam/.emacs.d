@@ -10,6 +10,8 @@
 ;; Loading registers advice against not-yet-defined eca functions; that is
 ;; the boot-time behavior too (advice takes effect when eca loads).
 (load-module-file "modules/ai/autoload/eca.el")
+;; the model pickers route their read through the completion module's helper
+(load-module-file "modules/completion/autoload/consult.el")
 
 ;; eca is absent here; declare the per-chat selection the seeding advice
 ;; overrides, which eca-chat.el would otherwise provide.
@@ -584,3 +586,31 @@ the order given, oldest first, so recency is deterministic."
     (expect (advice-member-p 'eca-chat-seed-code-and-trust-a
                              'eca-chat--initialize-selection-state)
             :to-be-truthy)))
+
+(describe "eca-select-model-narrowing-a"
+  (it "wraps both model pickers"
+    (expect (advice-member-p 'eca-select-model-narrowing-a 'eca-chat-select-model)
+            :to-be-truthy)
+    (expect (advice-member-p 'eca-select-model-narrowing-a 'eca-chat-inline-select-model)
+            :to-be-truthy))
+
+  ;; consult is not installed here; what matters is which read the picker's
+  ;; completing-read turns into, and what narrowing it carries
+  (it "narrows the picker's read by the provider before the slash"
+    (let (captured)
+      (with-fake-feature 'consult
+        (cl-letf (((symbol-function 'consult--read)
+                   (lambda (table &rest options)
+                     (setq captured (cons table options))
+                     "github-copilot/gpt-5.4")))
+          (expect (eca-select-model-narrowing-a
+                   (lambda (prompt)
+                     (completing-read prompt
+                                      '("anthropic/claude-opus-5" "github-copilot/gpt-5.4"
+                                        "ollama/solar")
+                                      nil t))
+                   "Select a model: ")
+                  :to-equal "github-copilot/gpt-5.4")))
+      (expect (plist-get (cdr captured) :prompt) :to-equal "Select a model: ")
+      (expect (plist-get (plist-get (cdr captured) :narrow) :keys)
+              :to-equal '((?a . "anthropic") (?g . "github-copilot") (?o . "ollama"))))))
