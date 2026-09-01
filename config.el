@@ -36,7 +36,7 @@
 (custom-set-faces
  '(fixed-pitch ((t (:family "Fira Code" :width normal))))
  '(fixed-pitch-serif ((t (:family "Fira Code"))))
- '(variable-pitch ((t (:family "Noto Sans" :height 1.125)))))
+ '(variable-pitch ((t (:family "Menlo" :height 1.2)))))
 
 (setopt display-line-numbers-type t)
 (remove-hook! (prog-mode text-mode conf-mode) #'display-line-numbers-mode)
