@@ -185,8 +185,12 @@
     (string-match "^[^*].*" (buffer-name buf))))
 
 (after! avy
-  (setopt avy-all-windows t)
-  (setf (alist-get ?. avy-dispatch-alist) #'avy-action-embark))
+  ;; jumping straight to a lone candidate skips the read loop, and with it
+  ;; every dispatch action - one extra keypress buys yank/teleport/embark
+  (setopt avy-all-windows t
+          avy-single-candidate-jump nil)
+  (setf (alist-get ?. avy-dispatch-alist) #'avy-action-embark)
+  (advice-add #'avy--process-1 :around #'avy-dispatch-guide-a))
 
 ;; ensure that browsing in Helpful and Info modes doesn't create
 ;; additional window splits
