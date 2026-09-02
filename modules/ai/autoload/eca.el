@@ -201,20 +201,11 @@ a fresh token pair without losing the active chat."
     (eca-providers--do-login session "anthropic" "max")))
 
 
-;;;; Keeping a closed chat alive
+;;;; Guarding the server-side delete
 
-;; Killing the buffer is how a chat gets put away, and upstream turns that into a
-;; `chat/delete' prompt - a hard delete, no trash, no undo - on the same keystroke
-;; used to tidy up. Answer it wrong once and the conversation is gone from the
-;; server; the archived markdown that survives is a transcript, not the message
-;; history the model reads, so nothing can bring the chat back. Closing now only closes.
-
-;;;###autoload
-(defadvice! eca-chat-kill-keeps-server-copy-a ()
-  "Let the kill proceed without deleting the chat server-side."
-  :override #'eca-chat--kill-buffer-query
-  (setq-local eca-chat--kill-delete-server-side nil)
-  t)
+;; `chat/delete' is a hard delete - no trash, no undo.  The archived markdown
+;; that survives is a transcript, not the message history the model reads, so
+;; nothing can bring a deleted chat back.
 
 ;;;###autoload
 (defadvice! eca-chat-delete-confirm-a (&rest _)

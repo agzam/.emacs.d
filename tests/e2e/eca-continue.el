@@ -41,12 +41,8 @@
               ("SPC x g a" . eca-continue-from-file)))))
 
 (defun eca-continue-e2e--guards ()
-  "The close guards are attached to the commands they protect."
+  "The guards are attached to the commands they protect."
   (list
-   (eca-continue-e2e--result
-    "kill query is overridden, so closing cannot delete server-side"
-    (advice-member-p 'eca-chat-kill-keeps-server-copy-a 'eca-chat--kill-buffer-query)
-    'installed 'installed)
    (eca-continue-e2e--result
     "eca-chat-delete asks first"
     (advice-member-p 'eca-chat-delete-confirm-a 'eca-chat-delete)
@@ -71,7 +67,6 @@
                                eca--session-chats
                                eca--session-workspace-folders
                                eca--session-last-chat-buffer
-                               eca-chat--kill-buffer-query
                                eca-chat--apply-history-meta
                                eca-chat--kill-empty-welcome-buffer
                                eca-chat-delete

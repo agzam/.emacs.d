@@ -17,38 +17,11 @@
 ;; overrides, which eca-chat.el would otherwise provide.
 (defvar eca-chat--selected-agent nil)
 (defvar eca-chat--selected-trust nil)
-(defvar eca-chat--kill-delete-server-side nil)
 
 ;; config.el's defcustom; the module file only declares it, and a bodiless
 ;; `defvar' marks a variable special just inside its own file, so binding it
 ;; from here needs the global declaration.
 (defvar eca-archive-dir nil)
-
-(describe "closing a chat"
-  ;; `eca-chat--delete-chat' runs from `kill-buffer-hook', where the kill can
-  ;; no longer be aborted, and consults exactly one thing: the flag the query
-  ;; left behind.  Leaving it nil is what keeps the chat on the server.
-  (it "lets the kill proceed"
-    (with-temp-buffer
-      (expect (eca-chat-kill-keeps-server-copy-a) :to-be t)))
-
-  (it "never arms the server-side delete, even if something armed it first"
-    (with-temp-buffer
-      (setq-local eca-chat--kill-delete-server-side t)
-      (eca-chat-kill-keeps-server-copy-a)
-      (expect eca-chat--kill-delete-server-side :to-be nil)))
-
-  (it "keeps the flag buffer-local, so one kill cannot arm another chat"
-    (with-temp-buffer
-      (eca-chat-kill-keeps-server-copy-a)
-      (with-temp-buffer
-        (expect (local-variable-p 'eca-chat--kill-delete-server-side) :to-be nil))))
-
-  ;; an :override, so upstream's yes-or-no-p never gets to run at all
-  (it "overrides the query rather than answering it"
-    (expect (advice-member-p 'eca-chat-kill-keeps-server-copy-a
-                             'eca-chat--kill-buffer-query)
-            :to-be-truthy)))
 
 (describe "eca-chat-delete-confirm-a"
   (it "lets the delete through once confirmed"
