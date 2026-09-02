@@ -56,13 +56,7 @@
     ;; minibuffer switch takes "-m".  Both are located by command, since
     ;; halfway through the exchange one key names two suffixes.
     (transient-set-suffix-key 'gptel-menu 'transient:gptel-menu:m "-m")
-    (transient-set-suffix-key 'gptel-menu 'gptel--infix-provider "m")
-
-    ;; The picker lists every backend's models as one flat "Backend:model"
-    ;; list.  Routed through consult for narrowing
-    (cl-defmethod transient-infix-read :around ((_obj gptel-provider-variable))
-      (call-with-prefix-narrowing ":" '((?a . "Claude-OAuth") (?g . "Copilot"))
-                                  (lambda () (cl-call-next-method)))))
+    (transient-set-suffix-key 'gptel-menu 'gptel--infix-provider "m"))
 
   (setf (alist-get 'org-mode gptel-prompt-prefix-alist) "* ")
 
@@ -149,6 +143,11 @@
 ;; The whole inline lifecycle on one normal-state key (mode maps shadow
 ;; upstream's M-RET in dired and friends; an evil-level g-sequence wins).
 (map! :n "gi" #'gptel-inline-dwim)
+
+;; Provider headers and narrowing in the gptel and eca model pickers
+;; (model-picker.el).  Depth past vertico's setup, whose local map the
+;; narrowing keys compose onto.
+(add-hook 'minibuffer-setup-hook #'model-picker-setup-h 90)
 
 ;; mcp-tool-defs-from-source parses the MCP harness sources with parseedn;
 ;; doom.d gets it transitively from the clojure module - explicit here until
