@@ -53,13 +53,17 @@ jobs:
           path: |
             .local/elpaca
             .local/.cache/eln
+          # Checkouts never move once cached, so a version bump is how CI
+          # picks up upstream changes the config has come to depend on.
           # v2: v1 caches predate gptel-inline's standalone repo and hold a
           # build without its source dir, which fails every boot before a
-          # good cache can be saved
+          # good cache can be saved.
+          # v3: v2 caches predate eca-emacs's eca-chat-inline, which the
+          # model picker e2e loads.
           # yamllint disable-line rule:line-length
-          key: elpaca-v2-${{ runner.os }}-${{ hashFiles('init.el', 'modules/**/config.el', '.github/workflows/ci.yml') }}
+          key: elpaca-v3-${{ runner.os }}-${{ hashFiles('init.el', 'modules/**/config.el', '.github/workflows/ci.yml') }}
           restore-keys: |
-            elpaca-v2-${{ runner.os }}-
+            elpaca-v3-${{ runner.os }}-
       # Private package repos (khalendario.el) need credentials; the
       # fine-grained PAT has Contents:read on them.  The blanket rewrite
       # authenticates every github https clone - public ones included,
