@@ -103,6 +103,30 @@
     ;; blow up collecting logs for a report that has no packages anyway
     (expect (smoke-package-events 'anything) :to-be nil)))
 
+(describe "smoke-queue-snapshot"
+  (it "is nil when elpaca never loaded"
+    (expect (smoke-queue-snapshot) :to-be nil)))
+
+(describe "smoke-render-queue-state"
+  (it "says so when nothing is queued"
+    (expect (smoke-render-queue-state nil) :to-equal "no packages queued\n"))
+
+  ;; the orphaned-wait class: magit-gha-badge blocked on a ghub that had
+  ;; already failed; the marker has to show both, or the timeout says nothing
+  (it "prints a blocked package with what it waits on, and a failed one with its log"
+    (let ((text (smoke-render-queue-state
+                 '((:id magit-gha-badge :status blocked :step elpaca-queue-dependencies
+                    :conditions ((finished . ghub)))
+                   (:id ghub :status failed :step elpaca-check-version
+                    :events ("Outdated dependency. treepy version 0.1.3 installed, 1.0.0 required"))))))
+      (expect text :to-match "\\`2 packages not finished\n")
+      (expect text :to-match "  magit-gha-badge: blocked at elpaca-queue-dependencies waiting on ((finished \\. ghub))\n")
+      (expect text :to-match "  ghub: failed at elpaca-check-version\n      Outdated dependency\\. treepy version 0\\.1\\.3 installed, 1\\.0\\.0 required\n")))
+
+  (it "leaves step and conditions off a package that has neither"
+    (expect (smoke-render-queue-state '((:id evil :status queued)))
+            :to-equal "1 packages not finished\n  evil: queued\n")))
+
 (describe "smoke-should-report-now-p"
   (it "reports immediately once elpaca has settled"
     (expect (smoke-should-report-now-p t nil t) :to-be-truthy))

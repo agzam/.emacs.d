@@ -125,8 +125,45 @@ cannot fire - waiting only runs out the watchdog."
     (smoke-write-result)
   (add-hook 'elpaca-after-init-hook #'smoke-write-result 99))
 
+(defun smoke-queue-snapshot ()
+  "What elpaca's queue holds now: a plist per package not yet finished.
+Each carries :id, :status, :step (the build step under way or waited
+on) and :conditions (what a blocked package waits for); a failed one
+carries :events, its last log lines.  Nil when elpaca never loaded."
+  (when (fboundp 'elpaca--queued)
+    (cl-loop for (id . e) in (elpaca--queued)
+             for status = (elpaca<-status e)
+             unless (eq status 'finished)
+             collect (list :id id :status status
+                           :step (elpaca<-current-step e)
+                           :conditions (elpaca<-conditions e)
+                           :events (when (eq status 'failed)
+                                     (smoke-package-events id))))))
+
+(defun smoke-render-queue-state (snapshot)
+  "Text for the timeout marker describing SNAPSHOT, `smoke-queue-snapshot'.
+A blocked package prints with what it waits on, so an orphaned wait -
+a condition whose package already failed - is visible; a failed one with
+its log lines, since its failure is usually what the rest waits on."
+  (if (null snapshot)
+      "no packages queued\n"
+    (concat
+     (format "%d packages not finished\n" (length snapshot))
+     (mapconcat
+      (lambda (p)
+        (concat
+         (format "  %s: %s" (plist-get p :id) (plist-get p :status))
+         (when-let* ((step (plist-get p :step))) (format " at %s" step))
+         (when-let* ((conditions (plist-get p :conditions)))
+           (format " waiting on %S" conditions))
+         "\n"
+         (mapconcat (lambda (line) (format "      %s\n" line))
+                    (plist-get p :events) "")))
+      snapshot ""))))
+
 ;; Watchdog: if elpaca never settles (network hang, blocked queue), still
-;; produce a result instead of hanging the caller.
+;; produce a result instead of hanging the caller - one that says what the
+;; queue was waiting on.
 (defvar smoke-watchdog-seconds
   (string-to-number (or (getenv "SMOKE_WATCHDOG") "600")))
 
@@ -135,5 +172,6 @@ cannot fire - waiting only runs out the watchdog."
  (lambda ()
    (with-temp-file smoke-result-file
      (insert (format "SMOKE-TIMEOUT\nelpaca-after-init-hook never fired within %ss\n"
-                     smoke-watchdog-seconds)))
+                     smoke-watchdog-seconds)
+             (smoke-render-queue-state (smoke-queue-snapshot))))
    (kill-emacs 124)))

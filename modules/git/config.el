@@ -168,6 +168,13 @@
 ;; here (:ensure heads `use-package-keywords').
 (defvar forge-add-default-bindings nil)
 
+;; ghub 5.3.1 requires a treepy 1.0.0 that no repo or archive carries - treepy
+;; stands at 0.1.3 - so a fresh clone fails elpaca's version check and takes
+;; forge, magit-gha-badge and gh-notify down with it.  5.3.0 requires 0.1.3.
+;; Queued here, ahead of the dependents, so their dependency resolves to
+;; this order.
+(elpaca (ghub :ref "v5.3.0"))
+
 (use-package forge
   :ensure (forge :host github :repo "magit/forge")
   ;; forge-database-file lives in doom-compat.el's quarantine section;

@@ -79,6 +79,10 @@
 
 (add-to-list 'load-path (expand-file-name "lisp/" user-emacs-directory))
 
+;; A failed dependency must fail every package waiting on it, or the queue
+;; never completes (see the file).  Before the queues run.
+(require 'elpaca-failures)
+
 ;; Own packages declare plain GitHub recipes (portable across machines);
 ;; where a checkout below exists, `local-checkout-recipe' redirects the recipe
 ;; to it and elpaca builds in place - edits picked up on `elpaca-rebuild',

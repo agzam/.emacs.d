@@ -346,6 +346,10 @@
          :i "r"  #'cider-repl-history-search-backward
          :i "U"  #'cider-repl-history-undo-other-window)))
 
+;; paredit arrives as clj-refactor's dependency from paredit.org, a host that
+;; drops off DNS; emacsmirror tracks the exact same history on a reliable one.
+(elpaca (paredit :host github :repo "emacsmirror/paredit"))
+
 (use-package clj-refactor
   :after clojure-mode
   :hook (clojure-mode . clj-refactor-mode)
