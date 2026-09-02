@@ -176,6 +176,22 @@ absorbs pop and wait both.  Best-effort: a config without jinx runs on."
         (delete-directory e2e-work-dir t))
       (e2e-write-result results))))
 
+(defvar e2e-watchdog-seconds
+  (string-to-number (or (getenv "E2E_WATCHDOG") "600")))
+
+;; Armed before the run is dispatched: on a warm cache `e2e-run' executes
+;; right here during load and never returns (it kills Emacs), so anything
+;; placed after the dispatch would not evaluate.  The timer fires from
+;; inside a stalled minibuffer read too - that is what bounds a scenario
+;; whose keys never exit the read.
+(run-at-time
+ e2e-watchdog-seconds nil
+ (lambda ()
+   (with-temp-file e2e-result-file
+     (insert (format "E2E-TIMEOUT\nno verdict within %ss (boot never settled or a scenario stalled)\n"
+                     e2e-watchdog-seconds)))
+   (kill-emacs 124)))
+
 ;; -l files load after `after-init-hook', so on a warm cache elpaca may
 ;; already be done by the time this runs.  An init.el error that aborted
 ;; before the queue was armed means `elpaca-after-init-hook' can never
@@ -186,14 +202,3 @@ absorbs pop and wait both.  Best-effort: a config without jinx runs on."
              (not (memq 'elpaca-process-queues after-init-hook))))
     (e2e-run)
   (add-hook 'elpaca-after-init-hook #'e2e-run 99))
-
-(defvar e2e-watchdog-seconds
-  (string-to-number (or (getenv "E2E_WATCHDOG") "600")))
-
-(run-at-time
- e2e-watchdog-seconds nil
- (lambda ()
-   (with-temp-file e2e-result-file
-     (insert (format "E2E-TIMEOUT\nelpaca-after-init-hook never fired within %ss\n"
-                     e2e-watchdog-seconds)))
-   (kill-emacs 124)))
