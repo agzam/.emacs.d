@@ -18,6 +18,13 @@
 ;; into a freeze.  Read before elpaca loads, so `defcustom' keeps this value.
 (setq elpaca-queue-limit 8)
 
+;; A snapshot build's core packages date from its build, not from the release
+;; whose version prefix it shares; left to guess, elpaca assumes the release
+;; date and warns about it.
+(when (< 2 (length (version-to-list emacs-version)))
+  (defvar elpaca-core-date
+    (list (string-to-number (format-time-string "%Y%m%d" emacs-build-time)))))
+
 (defvar elpaca-installer-version 0.12)
 ;; Deviation from the stock installer: repos/builds live outside the config
 ;; dir (see early-init.el quarantine).
@@ -135,7 +142,6 @@ build-in-place to clone."
   (ensure-local-dev-checkouts))
 
 ;; Import the shell PATH; a compositor-launched Emacs inherits a minimal one.
-(elpaca (exec-path-from-shell :wait t))
 (require 'shell-env)
 (import-shell-environment)
 

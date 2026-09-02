@@ -160,6 +160,14 @@
   (transient-append-suffix 'magit-dispatch '(0 -1 -1)
     '("*" "Worktree" magit-worktree)))
 
+;; evil-collection-forge owns forge's magit bindings (Forge on "@", the
+;; fetch/pull/branch/worktree/jump/merge suffixes) and forces this nil, with a
+;; message, whenever it finds it set.  Forge's autoloads define it t and act on
+;; it as soon as magit-mode loads, so it has to be bound before elpaca activates
+;; forge - and every use-package keyword, :preface included, runs after that
+;; here (:ensure heads `use-package-keywords').
+(defvar forge-add-default-bindings nil)
+
 (use-package forge
   :ensure (forge :host github :repo "magit/forge")
   ;; forge-database-file lives in doom-compat.el's quarantine section;
@@ -168,14 +176,21 @@
   :after-call magit-status
   :commands (forge-create-pullreq forge-create-issue)
   :config
-  ;; evil-collection-magit moves magit-dispatch's "o" (submodule) to "'",
-  ;; so forge's own ("N" "Forge") insertion at anchor "o" fails - the very
-  ;; breakage doom.d's dummy-"o" shim papered over. Insert directly instead
-  ;; (before Submodule when the remap is in effect, else next to Run).
-  (unless (ignore-errors (transient-get-suffix 'magit-dispatch "N"))
-    (transient-insert-suffix 'magit-dispatch
-        (if (ignore-errors (transient-get-suffix 'magit-dispatch "'")) "'" "!")
-      '("N" "Forge" forge-dispatch)))
+  ;; The forge defaults evil-collection-forge leaves out.  Forge's own
+  ;; magit-dispatch anchor "o" is gone (evil-collection-magit moves Submodule
+  ;; to "'"), so "N" goes ahead of Submodule, or next to Run without that remap.
+  (transient-insert-suffix 'magit-dispatch
+      (if (ignore-errors (transient-get-suffix 'magit-dispatch "'")) "'" "!")
+    '("N" "Forge" forge-dispatch))
+  (transient-insert-suffix 'magit-push "p" '("N" forge-push-to-unnamed-pullreq))
+  (transient-append-suffix 'magit-remote "a" '("f" "Fork" forge-fork))
+  (transient-insert-suffix 'magit-remote "d u"
+    '("d s" "Set default branch" forge-set-default-branch))
+  (transient-append-suffix 'magit-remote "d u"
+    '("d r" "Rename default branch" forge-rename-default-branch))
+  (keymap-set magit-mode-map "<remap> <magit-browse-thing>" #'forge-browse)
+  (keymap-set magit-mode-map "<remap> <magit-copy-thing>"
+              #'forge-copy-url-at-point-as-kill)
 
   ;; All forge list modes are derived from `forge-topic-list-mode'
   (map! :map forge-topic-list-mode-map :n "q" #'kill-current-buffer)
