@@ -29,6 +29,7 @@
 
   (add-hook! 'eww-mode-hook
     #'visual-line-mode
+    #'variable-pitch-mode
     (defun eww-set-local-keys-h ()
       (map! :map shr-map
             "z" nil
@@ -55,6 +56,7 @@
              :desc "external browser" "e" #'eww-browse-with-external-browser
              :desc "buffers" "b" #'eww-switch-to-buffer
              :desc "reload" "r" #'eww-reload
+             :desc "HN discussion" "h" #'eww-hn-discussion
              (:prefix ("t" . "toggle")
               :desc "readable" "r" #'eww-readable
               :desc "colors" "c" #'eww-toggle-colors
@@ -125,7 +127,8 @@
 (use-package hnreader
   :ensure (hnreader :host github :repo "agzam/emacs-hnreader")
   :defer t
-  :hook (hnreader-mode . reddigg-hnreader-show-all-h)
+  :hook ((hnreader-mode . reddigg-hnreader-show-all-h)
+         (hnreader-mode . variable-pitch-mode))
   :config
   ;; HN hands an anonymous client a small request budget and answers 429
   ;; once it is spent, which is a handful of items; fetching through the
@@ -154,7 +157,8 @@
 (use-package reddigg
   :ensure (reddigg :host github :repo "agzam/emacs-reddigg")
   :defer t
-  :hook (reddigg-mode . reddigg-hnreader-show-all-h)
+  :hook ((reddigg-mode . reddigg-hnreader-show-all-h)
+         (reddigg-mode . variable-pitch-mode))
   :config
   ;; reddit 403-blocks Emacs's TLS fingerprint; fetch through the live
   ;; browser on macOS, headless chromium elsewhere (needs one-time

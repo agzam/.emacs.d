@@ -102,6 +102,18 @@ consider whole buffer."
     (kill-new url)
     (message url)))
 
+(declare-function consult-hn "consult-hn")
+
+;;;###autoload
+(defun eww-hn-discussion ()
+  "Search Hacker News for the page EWW shows.
+`:url-match' keeps the search on the url attribute, so the results are
+the threads submitting this page, not the ones mentioning its address."
+  (interactive)
+  (if-let* ((url (eww-current-url)))
+      (consult-hn url :url-match t)
+    (user-error "No URL in this buffer")))
+
 ;;;###autoload
 (defun eww-increase-font-size ()
   (interactive)

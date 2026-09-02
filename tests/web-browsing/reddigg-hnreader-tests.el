@@ -93,6 +93,32 @@
                 (expect unfolded :to-be nil))
             (kill-buffer buf)))))))
 
+(defun reddigg-hnreader-tests--hooks (package)
+  "Hook pairs `use-package' PACKAGE declares in web-browsing/config.el."
+  (with-temp-buffer
+    (insert-file-contents
+     (expand-file-name "modules/web-browsing/config.el" test-config-root))
+    (let (form)
+      (while (and (setq form (ignore-errors (read (current-buffer))))
+                  (not (and (eq (car-safe form) 'use-package)
+                            (eq (cadr form) package)))))
+      (expect form :to-be-truthy)
+      (let ((spec (car (use-package-body-forms (cddr form) :hook))))
+        (if (consp (car spec)) spec (list spec))))))
+
+(describe "the hnreader and reddigg reading buffers"
+  (it "render prose in a variable-pitch face"
+    (expect (reddigg-hnreader-tests--hooks 'hnreader)
+            :to-contain '(hnreader-mode . variable-pitch-mode))
+    (expect (reddigg-hnreader-tests--hooks 'reddigg)
+            :to-contain '(reddigg-mode . variable-pitch-mode)))
+
+  (it "still unfold themselves on arrival"
+    (expect (reddigg-hnreader-tests--hooks 'hnreader)
+            :to-contain '(hnreader-mode . reddigg-hnreader-show-all-h))
+    (expect (reddigg-hnreader-tests--hooks 'reddigg)
+            :to-contain '(reddigg-mode . reddigg-hnreader-show-all-h))))
+
 (describe "hnreader-frontpage-item-no-rank-a"
   (it "strips ranking numbers and non-breaking spaces"
     (with-temp-buffer
