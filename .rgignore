@@ -1,0 +1,3 @@
+# The tests/ tree mirrors the module sources, so every project search returns each hit twice.
+# Only ripgrep reads this file; `rg --no-ignore-dot` and `git grep` still see the suites.
+/tests/

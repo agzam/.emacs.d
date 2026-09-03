@@ -115,6 +115,7 @@ into code or prose.
   Suites load `tests/helper.el` (located via `locate-dominating-file`),
   which sandboxes the XDG dirs before doom-compat derives its paths - tests
   never touch the real cache/state.
+- The root `.rgignore` hides `tests/` from ripgrep, so a plain `rg`, an agent's grep tool, and `consult-ripgrep` all skip the suites. Absence of test hits in such a search proves nothing about coverage. Search the suites with `rg --no-ignore-dot` (keeps `.gitignore` in force), with `git grep`, or by pointing the search at a path inside `tests/`.
 - A `with-temp-buffer` spec runs in a replica of a buffer, not in one: no
   major mode was turned on, nothing is fontified, and no keymap was
   consulted. Behaviour that depends on any of those - thingatpt providers,
