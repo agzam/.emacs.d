@@ -24,6 +24,7 @@
 (declare-function vulpea-note-title "vulpea-note")
 (declare-function vulpea-visit "vulpea")
 (declare-function citar-get-value "citar")
+(declare-function bibtex-author-family "import")
 
 ;;;###autoload
 (defun citekeys-in-roam-refs (refs)
@@ -79,9 +80,13 @@ so the table is built here rather than per key."
 (defun paper-note-create (key entry)
   "Create a paper note for citekey KEY described by bib ENTRY.
 The note carries KEY in ROAM_REFS so citar finds it again, and the PDF
-path in NOTER_DOCUMENT so `org-noter' starts from the note itself."
+path in NOTER_DOCUMENT so `org-noter' starts from the note itself.
+Only the first author's family name reaches the title: a bib author
+field holds every author, so the whole of it titles a note
+\"van de Meent, Jan-Willem and Paige, Brooks and Yang, Hongseok and
+Wood, Frank (2018) ...\"."
   (let* ((title (or (citar-get-value "title" entry) key))
-         (author (citar-get-value "author" entry))
+         (author (bibtex-author-family (citar-get-value "author" entry)))
          (year (or (citar-get-value "year" entry)
                    (citar-get-value "date" entry)))
          (file (citar-get-value "file" entry))

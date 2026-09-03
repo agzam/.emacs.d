@@ -100,49 +100,104 @@ Logic and Computation\" to \"Physics\"."
         (_ (when (string-match "\\([^,}\n]+\\)" entry start)
              (string-trim (match-string 1 entry))))))))
 
-;;;###autoload
-(defun bibliography-dois ()
-  "Return the DOIs already recorded in `papers-bibliography', downcased."
-  (when (file-exists-p papers-bibliography)
+(defun bibliography-matches (bib regexp)
+  "Return the first group of every REGEXP match over the file BIB.
+Matching is case-folded, because Crossref writes `DOI' where the older
+hand-written entries write `doi'."
+  (when (and bib (file-exists-p bib))
     (with-temp-buffer
-      (insert-file-contents papers-bibliography)
+      (insert-file-contents bib)
       (goto-char (point-min))
-      (let (dois)
-        (while (re-search-forward "^[ \t]*doi[ \t]*=[ \t]*[{\"]?\\([^},\"\n]+\\)" nil t)
-          (push (downcase (string-trim (match-string 1))) dois))
-        dois))))
+      (let (matches)
+        (while (re-search-forward regexp nil t)
+          (push (string-trim (match-string 1)) matches))
+        matches))))
 
-(defun bibliography-has-entry-p (file entry)
-  "Return non-nil when FILE or ENTRY's DOI is already in the bibliography.
+;;;###autoload
+(defun bibliography-dois (&optional bib)
+  "Return the DOIs recorded in BIB, downcased.
+BIB defaults to `papers-bibliography'."
+  (mapcar #'downcase
+          (bibliography-matches (or bib papers-bibliography)
+                                "^[ \t]*doi[ \t]*=[ \t]*[{\"]?\\([^},\"\n]+\\)")))
+
+;;;###autoload
+(defun bibtex-author-family (author)
+  "Return the family name of the first author in AUTHOR, or nil.
+AUTHOR is a raw BibTeX author field, where authors are joined by ` and '
+and each may be written family-first with a comma.  A family name may
+itself be several words: \"van de Meent, Jan-Willem and Paige, Brooks\"
+is two authors, the first of whom is named van de Meent."
+  (when-let* ((first-author (car (split-string (or author "")
+                                               "[ \t\n]+and[ \t\n]+" t)))
+              (name (string-trim (replace-regexp-in-string "[{}]" "" first-author))))
+    (unless (string-empty-p name)
+      (if (string-match "\\`\\([^,]+\\)," name)
+          (string-trim (match-string 1 name))
+        (car (last (split-string name "[ \t\n]+" t)))))))
+
+(defun bibtex-entry-key (entry)
+  "Return the citekey written in ENTRY's header, or nil."
+  (when (string-match "\\`\\s-*@[A-Za-z]+{\\([^,]*\\)," entry)
+    (let ((key (string-trim (match-string 1 entry))))
+      (unless (string-empty-p key) key))))
+
+(defun bibtex-citekey (entry)
+  "Return the citekey for ENTRY, rebuilt as `family_year'.
+Every generated key follows that one scheme because the answering
+services do not: Crossref hands back `McPherson_2021' while DataCite
+hands back the DOI URL, which BibTeX rejects outright, so a bibliography
+taking both verbatim ends up in two styles."
+  (let* ((family (when-let* ((name (bibtex-author-family
+                                    (bibtex-entry-field entry "author"))))
+                   (downcase (replace-regexp-in-string "[^a-zA-Z0-9]" "" name))))
+         (year (or (bibtex-entry-field entry "year")
+                   (when-let* ((d (bibtex-entry-field entry "date")))
+                     (substring d 0 (min 4 (length d)))))))
+    (cond ((and family (not (string-empty-p family)) year)
+           (concat family "_" year))
+          ((and family (not (string-empty-p family))) family)
+          (t (replace-regexp-in-string
+              "[^a-zA-Z0-9]" "_"
+              (or (bibtex-entry-field entry "doi") "paper"))))))
+
+;;;###autoload
+(defun bibliography-index (&optional bib)
+  "Return what BIB holds, as a plist; BIB defaults to `papers-bibliography'.
+`:files' are absolute document paths, `:dois' are downcased and `:keys'
+are citekeys.  An import run reads this once and extends it per entry
+appended, because re-reading the bib per work is quadratic - invisible
+over 63 papers, not over the several hundred works in the book corpus."
+  (list :files (bibliography-files bib)
+        :dois (bibliography-dois bib)
+        :keys (bibliography-keys bib)))
+
+(defun bibliography-index-holds-p (index file entry)
+  "Return non-nil when INDEX already records FILE or ENTRY's DOI.
 Matching on the DOI as well as the path matters twice: the oldest entry
 here records no `file' at all, and a paper printing a cited work's DOI
 resolves to an entry the bibliography already holds."
-  (or (member (expand-file-name file) (bibliography-files))
+  (or (member (expand-file-name file) (plist-get index :files))
       (when-let* ((doi (and entry (bibtex-entry-field entry "doi"))))
-        (member (downcase doi) (bibliography-dois)))))
+        (member (downcase doi) (plist-get index :dois)))))
 
-(defun bibtex-citekey (entry)
-  "Return a usable citekey for ENTRY.
-DataCite answers with the DOI URL as the key, which is not a legal
-BibTeX key; such keys are rebuilt from author and year instead."
-  (let ((key (when (string-match "\\`\\s-*@[A-Za-z]+{\\([^,]+\\)," entry)
-               (string-trim (match-string 1 entry)))))
-    (if (and key (not (string-match-p "[ /:\\\\{}]" key)))
-        key
-      (let* ((author (bibtex-entry-field entry "author"))
-             (family (when author
-                       (downcase (replace-regexp-in-string
-                                  "[^a-zA-Z]" ""
-                                  (car (split-string author "[, ]" t))))))
-             (year (or (bibtex-entry-field entry "year")
-                       (when-let* ((d (bibtex-entry-field entry "date")))
-                         (substring d 0 (min 4 (length d)))))))
-        (cond ((and family year (not (string-empty-p family)))
-               (concat family "_" year))
-              ((and family (not (string-empty-p family))) family)
-              (t (replace-regexp-in-string
-                  "[^a-zA-Z0-9]" "_"
-                  (or (bibtex-entry-field entry "doi") "paper"))))))))
+;;;###autoload
+(defun bibliography-index-add (index entry)
+  "Return INDEX extended with the prepared ENTRY about to be appended.
+ENTRY is read back rather than recomputed, so the index records the
+unique key it actually carries."
+  (let ((file (bibtex-entry-field entry "file"))
+        (doi (bibtex-entry-field entry "doi"))
+        (key (bibtex-entry-key entry)))
+    (list :files (if file
+                     (cons (expand-file-name file) (plist-get index :files))
+                   (plist-get index :files))
+          :dois (if doi
+                    (cons (downcase doi) (plist-get index :dois))
+                  (plist-get index :dois))
+          :keys (if key
+                    (cons key (plist-get index :keys))
+                  (plist-get index :keys)))))
 
 ;;;###autoload
 (defun bibtex-entry-with-key (entry key)
@@ -151,6 +206,7 @@ BibTeX key; such keys are rebuilt from author and year instead."
       (replace-match key t t entry 2)
     entry))
 
+;;;###autoload
 (defun unique-citekey (key existing)
   "Return KEY, suffixed with a letter when EXISTING already holds it."
   (if (not (member key existing))
@@ -163,16 +219,10 @@ BibTeX key; such keys are rebuilt from author and year instead."
       (or found (concat key (format-time-string "%s"))))))
 
 ;;;###autoload
-(defun bibliography-keys ()
-  "Return the citekeys already recorded in `papers-bibliography'."
-  (when (file-exists-p papers-bibliography)
-    (with-temp-buffer
-      (insert-file-contents papers-bibliography)
-      (goto-char (point-min))
-      (let (keys)
-        (while (re-search-forward "^\\s-*@[A-Za-z]+{\\([^,]+\\)," nil t)
-          (push (string-trim (match-string 1)) keys))
-        keys))))
+(defun bibliography-keys (&optional bib)
+  "Return the citekeys recorded in BIB, which defaults to `papers-bibliography'."
+  (bibliography-matches (or bib papers-bibliography)
+                        "^\\s-*@[A-Za-z]+{\\([^,]+\\),"))
 
 ;;;###autoload
 (defun bibtex-entry-with-file (entry path)
@@ -184,31 +234,37 @@ The field is what lets citar find the PDF, so nothing on disk is renamed."
     (error "Not a parseable BibTeX entry: %s" (truncate-string-to-width entry 60))))
 
 ;;;###autoload
-(defun bibliography-files ()
-  "Return the PDF paths already recorded in `papers-bibliography'."
-  (when (file-exists-p papers-bibliography)
-    (with-temp-buffer
-      (insert-file-contents papers-bibliography)
-      (goto-char (point-min))
-      (let (files)
-        (while (re-search-forward "^\\s-*file\\s-*=\\s-*{\\([^}]+\\)}" nil t)
-          (push (expand-file-name (match-string 1)) files))
-        files))))
+(defun bibliography-files (&optional bib)
+  "Return the document paths recorded in BIB, default `papers-bibliography'.
+The value is read to the last brace on its line, not the first: two book
+filenames carry a release tag in braces, and a path truncated at `{PRG'
+matches nothing, so its work was re-imported on every run."
+  (mapcar #'expand-file-name
+          (bibliography-matches (or bib papers-bibliography)
+                                "^\\s-*file\\s-*=\\s-*{\\(.+\\)}\\s-*$")))
 
-(defun prepared-bibliography-entry (entry path)
-  "Return ENTRY ready to append: unique citekey, plus a `file' field for PATH."
+(defun prepared-bibliography-entry (entry path index)
+  "Return ENTRY ready to append: a citekey free in INDEX, plus PATH as `file'."
   (bibtex-entry-with-file
    (bibtex-entry-with-key entry (unique-citekey (bibtex-citekey entry)
-                                                (bibliography-keys)))
+                                                (plist-get index :keys)))
    path))
 
-(defun append-bibliography-entry (entry)
-  "Append ENTRY to `papers-bibliography' and save it."
-  (with-current-buffer (find-file-noselect papers-bibliography)
-    (goto-char (point-max))
-    (unless (bolp) (insert "\n"))
-    (insert "\n" entry "\n")
-    (save-buffer)))
+;;;###autoload
+(defun append-bibliography-entries (entries &optional bib)
+  "Append ENTRIES to BIB in one visit and save once.
+BIB defaults to `papers-bibliography'.  One visit rather than one per
+entry: the book import writes several hundred in a run."
+  (when entries
+    (with-current-buffer (find-file-noselect (or bib papers-bibliography))
+      (goto-char (point-max))
+      (unless (bolp) (insert "\n"))
+      (dolist (entry entries) (insert "\n" entry "\n"))
+      (save-buffer))))
+
+(defun append-bibliography-entry (entry &optional bib)
+  "Append ENTRY to BIB and save it; BIB defaults to `papers-bibliography'."
+  (append-bibliography-entries (list entry) bib))
 
 (defun confirm-bibliography-entry (entry file)
   "Show ENTRY for FILE and return non-nil when it is accepted.
@@ -236,20 +292,22 @@ identification pass."
    (list (read-file-name "PDF: " papers-directory nil t nil
                          (lambda (f) (or (directory-name-p f)
                                          (string-suffix-p ".pdf" f t))))))
-  (when (bibliography-has-entry-p file nil)
-    (user-error "%s already has an entry" (file-name-nondirectory file)))
-  (let* ((identifier (or (paper-identifier (paper-text file))
-                         (user-error "No DOI or arXiv id in %s"
-                                     (file-name-nondirectory file))))
-         (entry (or (bibtex-entry-for-identifier identifier)
-                    (user-error "%s did not resolve" (cdr identifier)))))
-    (when (bibliography-has-entry-p file entry)
-      (user-error "%s resolves to %s, which the bibliography already holds"
-                  (file-name-nondirectory file) (cdr identifier)))
-    (if (confirm-bibliography-entry entry file)
-        (progn (append-bibliography-entry (prepared-bibliography-entry entry file))
-               (message "Added %s" (cdr identifier)))
-      (message "Skipped %s" (file-name-nondirectory file)))))
+  (let ((index (bibliography-index)))
+    (when (bibliography-index-holds-p index file nil)
+      (user-error "%s already has an entry" (file-name-nondirectory file)))
+    (let* ((identifier (or (paper-identifier (paper-text file))
+                           (user-error "No DOI or arXiv id in %s"
+                                       (file-name-nondirectory file))))
+           (entry (or (bibtex-entry-for-identifier identifier)
+                      (user-error "%s did not resolve" (cdr identifier)))))
+      (when (bibliography-index-holds-p index file entry)
+        (user-error "%s resolves to %s, which the bibliography already holds"
+                    (file-name-nondirectory file) (cdr identifier)))
+      (if (confirm-bibliography-entry entry file)
+          (progn (append-bibliography-entry
+                  (prepared-bibliography-entry entry file index))
+                 (message "Added %s" (cdr identifier)))
+        (message "Skipped %s" (file-name-nondirectory file))))))
 
 ;;;###autoload
 (defun import-papers-in-folder (&optional directory)
@@ -257,19 +315,22 @@ identification pass."
 DIRECTORY defaults to `papers-directory'.  Papers with no printed
 identifier are reported at the end rather than interrupting the run."
   (interactive)
-  (let ((pdfs (seq-remove (lambda (f) (bibliography-has-entry-p f nil))
-                          (directory-files (or directory papers-directory) t "\\.pdf\\'")))
-        added skipped duplicate unidentified)
+  (let* ((index (bibliography-index))
+         (pdfs (seq-remove (lambda (f) (bibliography-index-holds-p index f nil))
+                           (directory-files (or directory papers-directory) t "\\.pdf\\'")))
+         added skipped duplicate unidentified)
     (dolist (pdf pdfs)
       (let* ((identifier (ignore-errors (paper-identifier (paper-text pdf))))
              (entry (and identifier
                          (ignore-errors (bibtex-entry-for-identifier identifier)))))
         (cond
          ((null entry) (push pdf unidentified))
-         ;; Re-read per paper, so an entry added earlier in this run counts.
-         ((bibliography-has-entry-p pdf entry) (push pdf duplicate))
+         ;; The index carries what earlier papers in this run added.
+         ((bibliography-index-holds-p index pdf entry) (push pdf duplicate))
          ((confirm-bibliography-entry entry pdf)
-          (append-bibliography-entry (prepared-bibliography-entry entry pdf))
+          (let ((prepared (prepared-bibliography-entry entry pdf index)))
+            (append-bibliography-entry prepared)
+            (setq index (bibliography-index-add index prepared)))
           (push pdf added))
          (t (push pdf skipped)))))
     (message "Imported %d, declined %d, already held %d, no identifier %d, of %d"

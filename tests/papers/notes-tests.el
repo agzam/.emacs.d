@@ -8,6 +8,9 @@
 (require 'buttercup)
 
 (load-module-file "modules/papers/autoload/notes.el")
+;; The note title needs `bibtex-author-family', which import.el owns; at
+;; runtime the module's loaddefs supply it.
+(load-module-file "modules/papers/autoload/import.el")
 
 ;; vulpea is absent in the batch tier; the bridge only reaches it at runtime.
 ;; A note here is a plist standing in for a `vulpea-note' struct.
@@ -107,28 +110,57 @@
       (expect (paper-note-title "id-missing") :to-equal "id-missing"))))
 
 (describe "paper-note-create"
+  ;; Every author fixture here is copied out of references.bib.  The
+  ;; original spec invented `"Hoare"' as the whole author field, which no
+  ;; BibTeX entry looks like, so titling a note with the field looked right.
+  (defmacro with-captured-note (fields &rest body)
+    "Run BODY with citar answering from FIELDS and `vulpea-create' captured."
+    (declare (indent 1))
+    `(let (captured)
+       (cl-letf (((symbol-function 'citar-get-value)
+                  (lambda (field _entry) (cdr (assoc field ,fields))))
+                 ((symbol-function 'vulpea-create)
+                  (lambda (title &optional _file-name &rest args)
+                    (setq captured (cons title args))
+                    '(:id "new")))
+                 ((symbol-function 'vulpea-note-id) (lambda (_) "new"))
+                 ((symbol-function 'vulpea-visit) #'ignore))
+         ,@body)))
+
   (it "records the citekey in ROAM_REFS and the PDF in NOTER_DOCUMENT"
-    (let (captured)
-      (cl-letf (((symbol-function 'citar-get-value)
-                 (lambda (field _entry)
-                   (cdr (assoc field '(("title" . "Communicating Sequential Processes")
-                                       ("author" . "Hoare")
-                                       ("year" . "1978")
-                                       ("file" . "/tmp/papers/Hoare78.pdf"))))))
-                ((symbol-function 'vulpea-create)
-                 (lambda (title &optional _file-name &rest args)
-                   (setq captured (cons title args))
-                   '(:id "new")))
-                ((symbol-function 'vulpea-note-id) (lambda (_) "new"))
-                ((symbol-function 'vulpea-visit) #'ignore))
-        (paper-note-create "hoare_1978" nil)
-        (let ((properties (plist-get (cdr captured) :properties)))
-          (expect (car captured) :to-equal
-                  "Hoare (1978) Communicating Sequential Processes")
-          (expect (cdr (assoc "ROAM_REFS" properties)) :to-equal "@hoare_1978")
-          (expect (cdr (assoc "NOTER_DOCUMENT" properties))
-                  :to-equal "/tmp/papers/Hoare78.pdf")
-          (expect (plist-get (cdr captured) :tags) :to-equal '("paper"))))))
+    (with-captured-note
+        '(("title" . "Seven Sketches in Compositionality")
+          ("author" . "Fong, Brendan and Spivak, David I")
+          ("year" . "2018")
+          ("file" . "/tmp/papers/seven-sketches.pdf"))
+      (paper-note-create "fong_2018" nil)
+      (let ((properties (plist-get (cdr captured) :properties)))
+        (expect (car captured) :to-equal
+                "Fong (2018) Seven Sketches in Compositionality")
+        (expect (cdr (assoc "ROAM_REFS" properties)) :to-equal "@fong_2018")
+        (expect (cdr (assoc "NOTER_DOCUMENT" properties))
+                :to-equal "/tmp/papers/seven-sketches.pdf")
+        (expect (plist-get (cdr captured) :tags) :to-equal '("paper")))))
+
+  (it "titles the note with the first author, not the whole author field"
+    ;; The four-author field titled this note "van de Meent, Jan-Willem and
+    ;; Paige, Brooks and Yang, Hongseok and Wood, Frank (2018) ..."
+    (with-captured-note
+        '(("title" . "An Introduction to Probabilistic Programming")
+          ("author" . "van de Meent, Jan-Willem and Paige, Brooks and Yang, Hongseok and Wood, Frank")
+          ("year" . "2018"))
+      (paper-note-create "van_2018" nil)
+      (expect (car captured) :to-equal
+              "van de Meent (2018) An Introduction to Probabilistic Programming")))
+
+  (it "handles an author field written given-name first"
+    (with-captured-note
+        '(("title" . "Bringing the web up to speed with WebAssembly")
+          ("author" . "Andreas Haas and Andreas Rossberg and Derek L. Schuff and Ben Titzer")
+          ("year" . "2017"))
+      (paper-note-create "haas17_bring_webas" nil)
+      (expect (car captured) :to-equal
+              "Haas (2017) Bringing the web up to speed with WebAssembly")))
 
   (it "omits NOTER_DOCUMENT when the entry records no file"
     (let (captured)

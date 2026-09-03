@@ -39,6 +39,14 @@ where neither `use-package' nor general (behind `map!') exists."
         (expect (memq 'papers-directory paths) :to-be-truthy)
         (expect (memq 'books-directory paths) :to-be nil)))))
 
+(describe "org-cite bibliography"
+  (it "lists the same bibs as citar, so a book citation resolves"
+    ;; org-cite resolves a key against this list alone; while it held only
+    ;; the paper bib, every book citation was unresolvable
+    (let ((oc (flatten-tree (papers-tests--read-form "(after! oc"))))
+      (expect (memq 'papers-bibliography oc) :to-be-truthy)
+      (expect (memq 'books-bibliography oc) :to-be-truthy))))
+
 (describe "papers module variables"
   (it "puts each bib beside the corpus it describes"
     ;; Both corpora sync through Resilio, so the metadata reaches the phone

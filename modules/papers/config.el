@@ -70,9 +70,12 @@ disturb the other; citar reads both and searches them as one.")
   (citar-embark-mode))
 
 ;; org-cite is near-worthless here (reading, not publishing), but wiring the
-;; processors costs nothing and makes a stray cite: link followable.
+;; processors costs nothing and makes a stray cite: link followable.  The
+;; bibliography has to match `citar-bibliography': org-cite resolves a key
+;; against this list alone, so listing only the paper bib leaves every book
+;; citation unresolvable.
 (after! oc
-  (setopt org-cite-global-bibliography (list papers-bibliography)
+  (setopt org-cite-global-bibliography (list papers-bibliography books-bibliography)
           org-cite-insert-processor 'citar
           org-cite-follow-processor 'citar
           org-cite-activate-processor 'citar))
@@ -89,6 +92,8 @@ disturb the other; citar reads both and searches them as one.")
         :desc "Open note"      "n" #'citar-open-notes
         :desc "Import paper"   "i" #'import-paper
         :desc "Import folder"  "I" #'import-papers-in-folder
-        :desc "Visit bib file" "b" (cmd! (find-file papers-bibliography)))))
+        :desc "Import books"   "k" #'import-books
+        :desc "Visit bib file" "b" (cmd! (find-file papers-bibliography))
+        :desc "Visit book bib" "B" (cmd! (find-file books-bibliography)))))
 
 ;;; config.el ends here
