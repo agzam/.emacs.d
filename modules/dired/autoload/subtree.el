@@ -57,18 +57,17 @@
        (goto-char (point))
        (dired-goto-next-file)
        (while (< (point) end)
-         (if (dired-move-to-filename nil)
-             (let* ((file (dired-get-filename nil t))
-                    (icon (if (file-directory-p file)
-                              treemacs-icon-dir-closed
-                            (treemacs-icon-for-file file)))
-                    ;; skip lines that already carry an icon
-                    (icon? (save-excursion
-                             (goto-char (line-end-position))
-                             (re-search-backward "  \\s-*" (line-beginning-position) t)
-                             (get-text-property (point) 'display))))
-               (unless icon? (insert icon)))
-           (treemacs-return nil))
+         (when (dired-move-to-filename nil)
+           (let* ((file (dired-get-filename nil t))
+                  (icon (if (file-directory-p file)
+                            treemacs-icon-dir-closed
+                          (treemacs-icon-for-file file)))
+                  ;; skip lines that already carry an icon
+                  (icon? (save-excursion
+                           (goto-char (line-end-position))
+                           (re-search-backward "  \\s-*" (line-beginning-position) t)
+                           (get-text-property (point) 'display))))
+             (unless icon? (insert icon))))
          (forward-line 1))
        (set-buffer-modified-p nil)))))
 

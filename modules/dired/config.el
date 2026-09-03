@@ -66,17 +66,21 @@
 (use-package dired-subtree
   :after dired
   :init
-  (setopt dired-subtree-cycle-depth 5))
+  (setopt dired-subtree-cycle-depth 5)
+  :config
+  (advice-add 'dired-subtree--readin :filter-return #'dired-subtree-drop-dot-entries-a))
 
 (after! dired
   (setopt dired-use-ls-dired t
-          dired-listing-switches "-aBhl --group-directories-first"
+          dired-listing-switches "-aBhlt --group-directories-first"
           dired-dwim-target t
           dired-do-revert-buffer t
           remote-file-name-inhibit-delete-by-moving-to-trash t
           dired-vc-rename-file t)
 
   (put 'dired-find-alternate-file 'disabled nil)
+
+  (add-hook 'dired-after-readin-hook #'dired-dot-entries-first-h)
 
   (add-to-list 'dired-guess-shell-alist-user '("\\.pdf\\'" "open -a Preview"))
 
