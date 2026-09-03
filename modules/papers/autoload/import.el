@@ -100,6 +100,27 @@ Logic and Computation\" to \"Physics\"."
         (_ (when (string-match "\\([^,}\n]+\\)" entry start)
              (string-trim (match-string 1 entry))))))))
 
+;;;###autoload
+(defun bibtex-safe-value (value)
+  "Return VALUE with the characters that would unbalance an entry removed."
+  (string-trim (replace-regexp-in-string "[{}\\\\]" "" value)))
+
+;;;###autoload
+(defun bibtex-title-key (title)
+  "Return TITLE as a citekey: ASCII words joined by underscores, or nil.
+Non-ASCII titles shrink to whatever ASCII they carry, and to nil when
+they carry none; the key only has to be legal, stable and unique."
+  (let* ((raw (replace-regexp-in-string
+               "\\`_+\\|_+\\'" ""
+               (replace-regexp-in-string
+                "_\\{2,\\}" "_"
+                (downcase (replace-regexp-in-string "[^a-zA-Z0-9]" "_"
+                                                    (or title ""))))))
+         (slug (if (< 40 (length raw))
+                   (replace-regexp-in-string "_[^_]*\\'" "" (substring raw 0 40))
+                 raw)))
+    (unless (string-empty-p slug) slug)))
+
 (defun bibliography-matches (bib regexp)
   "Return the first group of every REGEXP match over the file BIB.
 Matching is case-folded, because Crossref writes `DOI' where the older
@@ -157,9 +178,11 @@ taking both verbatim ends up in two styles."
     (cond ((and family (not (string-empty-p family)) year)
            (concat family "_" year))
           ((and family (not (string-empty-p family))) family)
-          (t (replace-regexp-in-string
-              "[^a-zA-Z0-9]" "_"
-              (or (bibtex-entry-field entry "doi") "paper"))))))
+          ((bibtex-entry-field entry "doi")
+           (replace-regexp-in-string
+            "[^a-zA-Z0-9]" "_" (bibtex-entry-field entry "doi")))
+          (t (or (bibtex-title-key (bibtex-entry-field entry "title"))
+                 "paper")))))
 
 ;;;###autoload
 (defun bibliography-index (&optional bib)
@@ -243,6 +266,7 @@ matches nothing, so its work was re-imported on every run."
           (bibliography-matches (or bib papers-bibliography)
                                 "^\\s-*file\\s-*=\\s-*{\\(.+\\)}\\s-*$")))
 
+;;;###autoload
 (defun prepared-bibliography-entry (entry path index)
   "Return ENTRY ready to append: a citekey free in INDEX, plus PATH as `file'."
   (bibtex-entry-with-file

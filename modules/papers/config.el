@@ -87,13 +87,14 @@ disturb the other; citar reads both and searches them as one.")
       (:prefix-map ("n" . "notes")
        :desc "Bibliographic notes" "b" #'citar-open-notes
        (:prefix ("p" . "papers")
-        :desc "Open paper"     "p" #'citar-open
-        :desc "Open PDF"       "f" #'citar-open-files
-        :desc "Open note"      "n" #'citar-open-notes
-        :desc "Import paper"   "i" #'import-paper
-        :desc "Import folder"  "I" #'import-papers-in-folder
-        :desc "Import books"   "k" #'import-books
-        :desc "Visit bib file" "b" (cmd! (find-file papers-bibliography))
-        :desc "Visit book bib" "B" (cmd! (find-file books-bibliography)))))
+        :desc "Open paper"      "p" #'citar-open
+        :desc "Open PDF"        "f" #'citar-open-files
+        :desc "Open note"       "n" #'citar-open-notes
+        :desc "Import paper"    "i" #'import-paper
+        :desc "Import folder"   "I" #'import-papers-in-folder
+        :desc "Import books"    "k" #'import-books
+        :desc "Identify papers" "g" #'identify-papers
+        :desc "Visit bib file"  "b" (cmd! (find-file papers-bibliography))
+        :desc "Visit book bib"  "B" (cmd! (find-file books-bibliography)))))
 
 ;;; config.el ends here

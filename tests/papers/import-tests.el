@@ -106,7 +106,36 @@
 
   (it "falls back to the DOI when there is no author either"
     (expect (bibtex-citekey "@misc{https://x/y, doi = {10.5/ab}}")
-            :to-equal "10_5_ab")))
+            :to-equal "10_5_ab"))
+
+  (it "falls back to the title when there is no DOI either"
+    ;; The identification pass writes entries with neither: a model that
+    ;; reads a title off page one but credits nobody would otherwise key
+    ;; every one of them `paper'
+    (expect (bibtex-citekey "@misc{paper, title = {Out of the Tar Pit}}")
+            :to-equal "out_of_the_tar_pit")))
+
+(describe "bibtex-title-key"
+  (it "joins the words of a title"
+    (expect (bibtex-title-key "Out of the Tar Pit") :to-equal "out_of_the_tar_pit"))
+
+  (it "cuts a long title at a word, keeping the key bounded"
+    (let ((key (bibtex-title-key
+                "Physics, Topology, Logic and Computation: A Rosetta Stone")))
+      (expect key :to-equal "physics_topology_logic_and_computation")
+      (expect (length key) :to-be-less-than 41)))
+
+  (it "shrinks a title to whatever ASCII it carries"
+    (expect (bibtex-title-key "Clojure_на_производстве") :to-equal "clojure"))
+
+  (it "returns nil when it carries none, leaving the caller its own default"
+    (expect (bibtex-title-key "на производстве") :to-be nil)
+    (expect (bibtex-title-key nil) :to-be nil)))
+
+(describe "bibtex-safe-value"
+  (it "removes what would unbalance an entry"
+    (expect (bibtex-safe-value "Fast and Loose Reasoning is {Morally} Correct")
+            :to-equal "Fast and Loose Reasoning is Morally Correct")))
 
 (describe "bibtex-entry-key"
   (it "reads the key as written, without rebuilding it"

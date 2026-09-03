@@ -23,6 +23,8 @@
 (declare-function bibliography-index-add "import")
 (declare-function append-bibliography-entries "import")
 (declare-function unique-citekey "import")
+(declare-function bibtex-safe-value "import")
+(declare-function bibtex-title-key "import")
 
 (defconst book-document-extensions '("pdf" "epub" "mobi" "fb2" "djvu")
   "Document extensions that count as a work, in order of preference.
@@ -191,20 +193,6 @@ without one the last word does."
       (let ((stem (downcase (replace-regexp-in-string "[^a-zA-Z0-9]" "" family))))
         (unless (string-empty-p stem) stem)))))
 
-(defun book-slug (title)
-  "Return TITLE as a citekey: ASCII words joined by underscores.
-Non-ASCII titles shrink to whatever ASCII they carry, and to `book' when
-they carry none; the key only has to be legal, stable and unique."
-  (let* ((raw (replace-regexp-in-string
-               "\\`_+\\|_+\\'" ""
-               (replace-regexp-in-string
-                "_\\{2,\\}" "_"
-                (downcase (replace-regexp-in-string "[^a-zA-Z0-9]" "_" title)))))
-         (slug (if (< 40 (length raw))
-                   (replace-regexp-in-string "_[^_]*\\'" "" (substring raw 0 40))
-                 raw)))
-    (if (string-empty-p slug) "book" slug)))
-
 ;;;###autoload
 (defun book-citekey (metadata)
   "Return the citekey for METADATA: `family_year', else a slug of the title."
@@ -213,11 +201,7 @@ they carry none; the key only has to be legal, stable and unique."
          (family (when author (book-author-family author))))
     (cond ((and family year) (concat family "_" year))
           (family family)
-          (t (book-slug (plist-get metadata :title))))))
-
-(defun book-bibtex-safe (value)
-  "Return VALUE with the characters that would unbalance an entry removed."
-  (string-trim (replace-regexp-in-string "[{}\\\\]" "" value)))
+          (t (or (bibtex-title-key (plist-get metadata :title)) "book")))))
 
 ;;;###autoload
 (defun book-bibtex-entry (work key)
@@ -226,8 +210,8 @@ they carry none; the key only has to be legal, stable and unique."
          (author (plist-get metadata :author))
          (year (plist-get metadata :year)))
     (concat (format "@book{%s,\n  title = {%s}" key
-                    (book-bibtex-safe (plist-get metadata :title)))
-            (when author (format ",\n  author = {%s}" (book-bibtex-safe author)))
+                    (bibtex-safe-value (plist-get metadata :title)))
+            (when author (format ",\n  author = {%s}" (bibtex-safe-value author)))
             (when year (format ",\n  year = {%s}" year))
             (format ",\n  file = {%s}\n}" (expand-file-name (plist-get work :file))))))
 
