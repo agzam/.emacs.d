@@ -412,6 +412,12 @@ GraphQL `errors' alist, which otherwise dies with `listp, http'."
   :config
   (setopt github-topics-default-orgs '(qlik-trial stitchdata singer-io))
 
+  ;; the package browses on a bare "b"; the browse keys are uniform here
+  (map! :map github-topics-pr-map
+        (:prefix ("b" . "browse")
+         :desc "forge" "b" #'github-topics-visit-pr
+         :desc "browser" "o" #'github-topics-browse-pr))
+
   (add-to-list
    'display-buffer-alist
    '("\\*Searching GitHub.*"
@@ -438,7 +444,28 @@ GraphQL `errors' alist, which otherwise dies with `listp, http'."
   (unless (rassq #'remoto-bootstrap-file-handler file-name-handler-alist)
     (push (cons (rx bos "/" (or "github" "gh") ":")
                 #'remoto-bootstrap-file-handler)
-          file-name-handler-alist)))
+          file-name-handler-alist))
+  :config
+  ;; the package browses on a bare "b"; the browse keys are uniform here.
+  ;; Every target is a /github: path, so opening one in Emacs is `find-file'
+  ;; through remoto's file handler - an owner page has no Emacs view.
+  (map! (:map (remoto-embark-repo-map
+               remoto-embark-dir-map
+               remoto-embark-file-map)
+              (:prefix ("b" . "browse")
+               :desc "remoto" "b" #'find-file
+               :desc "browser" "o" #'remoto-embark-browse-url))
+        (:map remoto-embark-branch-map
+              (:prefix ("b" . "browse")
+               :desc "remoto" "b" #'find-file
+               :desc "browser" "o" #'remoto-embark-browse-branch))
+        (:map remoto-embark-issue-map
+              (:prefix ("b" . "browse")
+               :desc "remoto" "b" #'remoto-embark-open-issue
+               :desc "browser" "o" #'remoto-embark-browse-issue))
+        (:map remoto-embark-owner-map
+              (:prefix ("b" . "browse")
+               :desc "browser" "o" #'remoto-embark-browse-owner))))
 
 (use-package browse-at-remote
   :ensure t

@@ -316,6 +316,35 @@
           (browse-rfc-number-at-point)))
       (expect searched :to-be nil))))
 
+(describe "search-rfc-number-online"
+  ;; the embark action runs from the reference it was invoked on, and "b o"
+  ;; means the external browser everywhere
+  (it "opens the number at point in the external browser"
+    (let (browsed)
+      (cl-letf (((symbol-function 'browse-url-externally)
+                 (lambda (url &rest _) (setq browsed url))))
+        (with-temp-buffer
+          (insert "see rfc-822 now")
+          (search-backward "822")
+          (call-interactively #'search-rfc-number-online)))
+      (expect browsed
+              :to-equal
+              (concat "https://www.rfc-editor.org/search/"
+                      "rfc_search_detail.php?rfc=822"))))
+
+  (it "searches without a number when there is none at point"
+    (let (browsed)
+      (cl-letf (((symbol-function 'browse-url-externally)
+                 (lambda (url &rest _) (setq browsed url))))
+        (with-temp-buffer
+          (insert "nothing here")
+          (goto-char (point-min))
+          (call-interactively #'search-rfc-number-online)))
+      (expect browsed
+              :to-equal
+              (concat "https://www.rfc-editor.org/search/"
+                      "rfc_search_detail.php?rfc=")))))
+
 (describe "embark-project-search"
   (it "hands the target to consult-ripgrep as the initial query"
     (let (args)
@@ -445,7 +474,45 @@
                        (cl-some (lambda (a) (eq (cdr a) 'mpv-open))
                                 (plist-get (cdr entry) :actions)))
                      value)
-            :to-be nil)))
+            :to-be nil))
+
+  (it "keys every browse action under b, with b b mirroring the default action"
+    (dolist (entry value)
+      (let ((actions (plist-get (cdr entry) :actions)))
+        (dolist (action actions)
+          (when (string-prefix-p "b" (car action))
+            (expect (car action) :to-match "\\`b [a-z]\\'")))
+        (when-let* ((emacs-side (cdr (assoc "b b" actions))))
+          (expect emacs-side :to-be (cdr (assoc "RET" actions))))))))
+
+(describe "browse actions in the module keymaps"
+  :var* ((map-form (embark-tests--find-subform
+                    (lambda (f)
+                      (and (eq (car-safe f) 'map!)
+                           (memq 'embark-url-map (flatten-tree f))))
+                    (cons 'progn embark-tests--config-forms))))
+
+  (it "keeps b b, b o and b e on the url map every url type inherits"
+    (let ((layout (map-form-prefix-keys map-form 'embark-url-map "b")))
+      (expect (car layout) :to-be nil)
+      (expect (cdr layout) :to-have-same-items-as '("b" "o" "e"))))
+
+  (dolist (map '(embark-markdown-link-map
+                 embark-bug-reference-link-map
+                 embark-rfc-number-map
+                 embark-region-map))
+    (it (format "opens %s in Emacs on b b and in the browser on b o" map)
+      (let ((layout (map-form-prefix-keys map-form map "b")))
+        (expect (car layout) :to-be nil)
+        (expect (cdr layout) :to-contain "b")
+        (expect (cdr layout) :to-contain "o"))))
+
+  ;; org url links compose this map with `embark-url-map', so a bare "b"
+  ;; here would shadow that map's whole browse prefix
+  (it "leaves the org link map's b a prefix, carrying b b alone"
+    (let ((layout (map-form-prefix-keys map-form 'embark-org-link-map "b")))
+      (expect (car layout) :to-be nil)
+      (expect (cdr layout) :to-equal '("b")))))
 
 (describe "embark--ephemeral-cleanup"
   (it "unhooks itself and schedules a single minibuffer exit"

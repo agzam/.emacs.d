@@ -49,28 +49,33 @@ https://karthinks.com/software/avy-can-do-anything/#avy-plus-embark-any-action-a
     (outline-cycle))
   (evil-beginning-of-line))
 
+(defun rfc-number-at-point ()
+  "Number of the RFC reference at point, nil when there is none.
+Matches the shapes `embark-target-RFC-number-at-point' targets: RFC 123,
+rfc-123, RFC123."
+  (require 'org)
+  (when-let* ((bounds (org-in-regexp "\\b[rR][fF][cC][- ]?[0-9]+\\b" 1)))
+    (string-to-number
+     (replace-regexp-in-string
+      "[^0-9]" ""
+      (buffer-substring-no-properties (car bounds) (cdr bounds))))))
+
 ;;;###autoload
 (defun search-rfc-number-online (&optional rfc-num)
-  "Search for RFC of RFC-NUM."
-  (interactive)
-  (browse-url
+  "Open the RFC editor page for RFC-NUM in the external browser.
+Reads the number at point, so the embark action lands on the reference
+it was invoked from."
+  (interactive (list (rfc-number-at-point)))
+  (browse-url-externally
    (format
     "https://www.rfc-editor.org/search/rfc_search_detail.php?rfc=%s"
-    rfc-num)))
+    (or rfc-num ""))))
 
 ;;;###autoload
 (defun browse-rfc-number-at-point ()
   "Read RFC number at point in rfc-mode when available, online otherwise."
   (interactive)
-  (require 'org)
-  (if-let* ((rfc-pattern "\\b[rR][fF][cC][- ]?[0-9]+\\b")
-            (bounds (org-in-regexp rfc-pattern 1))
-            (rfc-num (string-to-number
-                      (replace-regexp-in-string
-                       "[^0-9]" ""
-                       (buffer-substring-no-properties
-                        (car bounds)
-                        (cdr bounds))))))
+  (if-let* ((rfc-num (rfc-number-at-point)))
       (if (featurep 'rfc-mode)
           (switch-to-buffer-other-window
            (rfc-mode--document-buffer rfc-num))

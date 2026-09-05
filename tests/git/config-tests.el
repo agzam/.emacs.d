@@ -39,4 +39,38 @@
       (expect package :not :to-be nil)
       (expect declaration :to-be-less-than package))))
 
+(describe "embark browse keys"
+  ;; both packages browse on a bare "b"; the config's convention is "b b"
+  ;; for the Emacs view and "b o" for the external browser
+  :var* ((forms (git-config-tests--top-level-forms))
+         (package-form
+          (lambda (name)
+            (cl-find-if (lambda (f)
+                          (and (eq (car-safe f) 'use-package)
+                               (eq (cadr f) name)))
+                        forms))))
+
+  (it "opens a github-topics PR in forge on b b, in the browser on b o"
+    (let ((layout (map-form-prefix-keys (funcall package-form 'github-topics)
+                                        'github-topics-pr-map "b")))
+      (expect (car layout) :to-be nil)
+      (expect (cdr layout) :to-have-same-items-as '("b" "o"))))
+
+  (dolist (map '(remoto-embark-repo-map
+                 remoto-embark-dir-map
+                 remoto-embark-file-map
+                 remoto-embark-branch-map
+                 remoto-embark-issue-map))
+    (it (format "opens %s in Emacs on b b, in the browser on b o" map)
+      (let ((layout (map-form-prefix-keys (funcall package-form 'remoto) map "b")))
+        (expect (car layout) :to-be nil)
+        (expect (cdr layout) :to-have-same-items-as '("b" "o")))))
+
+  ;; an owner page is a forge page only - remoto has no Emacs view for it
+  (it "gives a remoto owner the browser half alone"
+    (let ((layout (map-form-prefix-keys (funcall package-form 'remoto)
+                                        'remoto-embark-owner-map "b")))
+      (expect (car layout) :to-be nil)
+      (expect (cdr layout) :to-equal '("o")))))
+
 ;;; tests/git/config-tests.el ends here

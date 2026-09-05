@@ -177,6 +177,41 @@ enabled before the settings so auto-setup cannot outvote the regexp."
 
 ;;; parsers
 
+(describe "markdown-link-url-at-point"
+  (it "reads the url out of an inline link"
+    (with-markdown-stub
+      (with-live-buffer #'markdown-mode "pre [x](https://example.com/a) post"
+        (search-forward "example")
+        (expect (markdown-link-url-at-point) :to-equal "https://example.com/a"))))
+
+  (it "reads the url out of an autolink"
+    (with-live-buffer #'markdown-mode "pre <https://example.com/b> post"
+      (search-forward "example")
+      (expect (markdown-link-url-at-point) :to-equal "https://example.com/b")))
+
+  (it "returns nil off-link"
+    (with-live-buffer #'markdown-mode "no link here"
+      (expect (markdown-link-url-at-point) :to-be nil))))
+
+(describe "open-org-link-in-emacs"
+  (it "routes a web link through the url handler table"
+    (let (handled)
+      (cl-letf (((symbol-function 'process-external-url)
+                 (lambda (url) (setq handled url)))
+                ((symbol-function 'org-open-at-point)
+                 (lambda (&rest _) (error "org must not open a web link"))))
+        (open-org-link-in-emacs "https://github.com/agzam/foo/pull/12"))
+      (expect handled :to-equal "https://github.com/agzam/foo/pull/12")))
+
+  (it "lets org open every other link type"
+    (let (opened)
+      (cl-letf (((symbol-function 'org-open-at-point)
+                 (lambda (&rest _) (setq opened t)))
+                ((symbol-function 'process-external-url)
+                 (lambda (&rest _) (error "the url table must not see an id link"))))
+        (open-org-link-in-emacs "[[id:abc-123][a note]]"))
+      (expect opened :to-be t))))
+
 (describe "parse-org-link-at-point"
   (it "extracts url, label and bounds without the trailing blank"
     (with-live-buffer #'org-mode "pre [[https://example.com][Ex ample]] post"

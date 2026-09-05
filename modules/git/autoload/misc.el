@@ -1,5 +1,7 @@
 ;;; modules/git/autoload/misc.el -*- lexical-binding: t; -*-
 
+(declare-function github-topics--candidate-url "github-topics")
+
 ;; Shared by eleven_cupfuls on Reddit
 ;; https://www.reddit.com/r/emacs/comments/w9p2oo/resetting_dirlocalsel/ii2kn47/
 
@@ -272,6 +274,15 @@ For a github URL ending with /pulls or /issues."
             ("issues" (forge-list-issues))))
       (error "Repository not found locally. Expected at: %s"
              (car possible-paths)))))
+
+;;;###autoload
+(defun github-topics-visit-pr (cand)
+  "Open the forge topic buffer for the pull request CAND designates.
+The `b b' half of the `github-topics-pr' browse actions, next to the
+package's own `github-topics-browse-pr'."
+  (interactive "sPR (org/repo#number): ")
+  (require 'github-topics)
+  (forge-visit-topic-via-url (github-topics--candidate-url cand)))
 
 ;;;###autoload
 (defun transient-export-content ()

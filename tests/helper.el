@@ -86,4 +86,43 @@ Lets a stubbed `use-package' run just the :init/:config side effects in tests."
        (nreverse forms)))
    keywords))
 
+(defun map-form-key-pairs (body)
+  "Collect (KEY . DEFINITION) pairs bound at one level of a `map!' BODY.
+Skips the keyword arguments (`:desc' and the state keywords) and the
+nested groups, so only the keys bound right here come back."
+  (let (pairs)
+    (while body
+      (let ((item (pop body)))
+        (cond ((keywordp item) (pop body))
+              ((stringp item) (push (cons item (pop body)) pairs)))))
+    (nreverse pairs)))
+
+(defun map-form-groups (form map)
+  "Bodies of every `map!' group in FORM that binds keys on MAP.
+Covers both shapes: a nested (:map MAP ...) group and the flat
+`:map MAP ...' argument list of a `map!' form."
+  (let (bodies)
+    (letrec ((walk
+              (lambda (f)
+                (when (proper-list-p f)
+                  (when-let* ((tail (memq :map f))
+                              ((memq map (ensure-list (cadr tail)))))
+                    (push (cddr tail) bodies))
+                  (mapc walk f)))))
+      (funcall walk form))
+    (nreverse bodies)))
+
+(defun map-form-prefix-keys (form map prefix)
+  "Keys bound under PREFIX for MAP in a `map!' FORM.
+The car of the result is the definition of a bare PREFIX binding, which
+shadows the prefix; the cdr is the list of keys bound under it."
+  (let (direct keys)
+    (dolist (body (map-form-groups form map))
+      (setq direct (or direct (cdr (assoc prefix (map-form-key-pairs body)))))
+      (dolist (sub body)
+        (when (and (eq (car-safe sub) :prefix)
+                   (equal (car-safe (cadr sub)) prefix))
+          (setq keys (append keys (mapcar #'car (map-form-key-pairs (cddr sub))))))))
+    (cons direct keys)))
+
 (provide 'test-helper)

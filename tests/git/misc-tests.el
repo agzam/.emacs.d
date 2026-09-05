@@ -82,3 +82,17 @@
 (describe "make-path"
   (it "joins and expands parts"
     (expect (make-path "/tmp" "a" "b") :to-equal "/tmp/a/b")))
+
+(describe "github-topics-visit-pr"
+  (it "hands the candidate's url to forge"
+    (let (asked visited)
+      (with-fake-feature 'github-topics
+        (cl-letf (((symbol-function 'github-topics--candidate-url)
+                   (lambda (cand)
+                     (setq asked cand)
+                     "https://github.com/agzam/foo/pull/12"))
+                  ((symbol-function 'forge-visit-topic-via-url)
+                   (lambda (url) (setq visited url))))
+          (github-topics-visit-pr "agzam/foo#12")))
+      (expect asked :to-equal "agzam/foo#12")
+      (expect visited :to-equal "https://github.com/agzam/foo/pull/12"))))

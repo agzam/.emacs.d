@@ -155,6 +155,9 @@
   (add-to-list 'embark-keymap-alist '(rfc-number embark-rfc-number-map))
 
   (map!
+   ;; every browseable target answers the same two keys: "b b" opens it
+   ;; inside Emacs (its own view where there is one, eww otherwise), "b o"
+   ;; in the external browser, and "b e" forces eww where "b b" is neither
    (:map embark-general-map
          "C-<return>" #'embark-dwim
          "m" #'embark-select
@@ -208,7 +211,8 @@
     "RET" #'eww-open-in-other-window
     (:prefix
      ("b" . "browse")
-     :desc "browser" "o" #'browse-url
+     :desc "default" "b" #'process-external-url
+     :desc "browser" "o" #'browse-url-externally
      :desc "eww" "e" #'eww-open-in-other-window)
     (:prefix
      ("c" . "convert")
@@ -217,7 +221,11 @@
      :desc "bug-reference" "b" #'link-plain->link-bug-reference))
 
    (:map embark-markdown-link-map
-         "b" (cmd! (browse-url-externally (markdown-link-url)))
+         (:prefix
+          ("b" . "browse")
+          :desc "default" "b" (cmd! (process-external-url (markdown-link-url-at-point)))
+          :desc "browser" "o" (cmd! (browse-url-externally (markdown-link-url-at-point)))
+          :desc "eww" "e" (cmd! (eww-open-in-other-window (markdown-link-url-at-point))))
          "v" #'forge-visit-topic-via-url
          (:prefix
           ("c" . "convert")
@@ -227,7 +235,11 @@
           :desc "bug-reference" "b" #'link-markdown->link-bug-reference))
 
    (:map embark-org-link-map
-         "b" #'org-open-at-point
+         ;; the url types compose this map with `embark-url-map', which
+         ;; supplies "b o" and "b e" - a plain "b" here would shadow them
+         (:prefix
+          ("b" . "browse")
+          :desc "default" "b" #'open-org-link-in-emacs)
          "V" #'open-link-in-vlc
          "v" #'forge-visit-topic-via-url
          (:prefix
@@ -244,8 +256,8 @@
    (:map embark-bug-reference-link-map
          "v" #'bug-reference-visit-topic
          (:prefix ("b" . "browse")
-          :desc "browser" "o" #'bug-reference-browse
-          :desc "forge-visit" "b" #'bug-reference-visit-topic)
+          :desc "forge" "b" #'bug-reference-visit-topic
+          :desc "browser" "o" #'bug-reference-browse)
          (:prefix
           ("c" . "convert")
           :desc "markdown link" "m" #'link-bug-reference->link-markdown
@@ -253,7 +265,9 @@
           :desc "plain" "p" #'link-bug-reference->link-plain))
 
    (:map embark-rfc-number-map
-    :desc "browse" "b" #'browse-rfc-number-at-point)
+         (:prefix ("b" . "browse")
+          :desc "rfc-mode" "b" #'browse-rfc-number-at-point
+          :desc "browser" "o" #'search-rfc-number-online))
 
    (:map
     embark-collect-mode-map
@@ -270,8 +284,14 @@
                      "F" #'edebug-remove-instrumentation)))
 
    (:map embark-region-map
-         ;; otherwise, this shit opens another instance of Emacs
-         "b" (cmd! (browse-url (buffer-substring-no-properties (region-beginning) (region-end)))))
+         ;; plain `browse-url' on a region opens another instance of Emacs
+         (:prefix ("b" . "browse")
+          :desc "default" "b" (cmd! (process-external-url
+                                     (buffer-substring-no-properties
+                                      (region-beginning) (region-end))))
+          :desc "browser" "o" (cmd! (browse-url-externally
+                                     (buffer-substring-no-properties
+                                      (region-beginning) (region-end))))))
 
    (:map
     (embark-identifier-map

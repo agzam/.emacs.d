@@ -118,6 +118,13 @@ which does not understand them."
     (list :url (car url+bounds) :label nil
           :beg (cadr url+bounds) :end (cddr url+bounds))))
 
+;;;###autoload
+(defun markdown-link-url-at-point ()
+  "Url of the markdown link at point, nil when there is none.
+The embark actions on `markdown-link' targets need the url, and the
+target string is the whole link."
+  (plist-get (parse-markdown-link-at-point) :url))
+
 (defun parse-bug-reference-at-point ()
   "Bug reference at point as a (:url :label :beg :end) plist, nil when absent.
 The url comes from `bug-reference->github-url', already resolved to the
@@ -260,6 +267,21 @@ markdown parser would silently decline it."
     ('markdown (link-markdown->link-bug-reference))
     ('bug-reference (user-error "Already a bug reference"))
     (_ (link-plain->link-bug-reference))))
+
+;;; openers (embark's `b b' - open inside Emacs)
+
+(declare-function process-external-url "misc")
+
+;;;###autoload
+(defun open-org-link-in-emacs (link)
+  "Open org LINK inside Emacs.
+A web link goes to the handler `embark-url-config' prescribes for its
+kind - a forge buffer for a pull request, eww for anything unclaimed;
+every other link type org opens itself."
+  (interactive "sLink: ")
+  (if (string-match-p "\\`https?://" link)
+      (process-external-url link)
+    (org-open-at-point)))
 
 ;;; the odd ones out
 
