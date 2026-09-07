@@ -1,6 +1,47 @@
 ;;; modules/web-browsing/autoload/subed.el -*- lexical-binding: t; -*-
+(defvar subed-mpv--server-proc)
+(defvar subed-mpv--retry-delays)
+(defvar subed-mpv-media-file)
+(defvar subed-mpv-is-playing)
+(defvar mpv--process)
+
 (defvar-local subed--subtitle-metadata-hidden nil
   "Whether subtitle metadata is currently hidden.")
+
+;;;###autoload
+(defun subed-mpv-attach (file)
+  "Sync this subtitle buffer with the player mpv.el already runs.
+No second mpv: that player loads FILE unless it plays it already, and
+subed's own client joins its socket.  subed derives its socket path
+from the buffer file name, so a link at that path lets subed's connect
+and cleanup code run unchanged; the cleanup removes only the link."
+  (subed-mpv-kill)
+  (let ((file (expand-file-name file)))
+    (unless (equal (file-truename file)
+                   (ignore-errors (file-truename (mpv-get-property "path"))))
+      (mpv-play file))
+    (setq subed-mpv-media-file file)
+    (subed-clear-file-duration-ms-cache)
+    (make-symbolic-link (mpv-ipc-socket mpv--process) (subed-mpv--socket) t)
+    (subed-mpv--client-connect subed-mpv--retry-delays)
+    (subed-mpv-add-subtitles (buffer-file-name))
+    (subed-mpv--client-send '(observe_property 1 time-pos))
+    (setq subed-mpv-is-playing (eq (mpv-get-property "pause") :json-false))))
+
+;; subed runs `subed-mpv-play-from-file-hook' by value, so the hook signals
+;; as soon as a function sits on it; advice is the seam that works
+(defadvice! subed-mpv-share-player-a (orig file)
+  "One player for subed and mpv.el.
+While mpv.el runs a player that is not this buffer's own, subed joins
+it; otherwise subed starts one and mpv.el adopts it.  Either way
+`media-transient' drives the video from any buffer and subed keeps its
+point/player sync."
+  :around #'subed-mpv-play-from-file
+  (if (and (featurep 'mpv) (mpv-live-p)
+           (not (eq mpv--process subed-mpv--server-proc)))
+      (subed-mpv-attach file)
+    (funcall orig file)
+    (mpv-connect subed-mpv--server-proc)))
 
 ;;;###autoload
 (defun subed-toggle-srt-metadata ()
@@ -67,16 +108,22 @@ Works with both .srt and .vtt files."
       (goto-char (point-min)))
     (switch-to-buffer-other-window buf)))
 
+(defun subed--sibling-mp3 ()
+  "Return the mp3 next to this srt file, or nil.
+An mp3 extracted from the video is the lighter thing to play along."
+  (when-let* ((current-file (buffer-file-name))
+              ((equal (file-name-extension current-file) "srt"))
+              (mp3 (concat (file-name-sans-extension current-file) ".mp3"))
+              ((file-exists-p mp3)))
+    mp3))
+
 ;;;###autoload
 (defun subed-mpv-play-media (&optional file)
+  "Play FILE in subed's mpv, or the media that belongs to this subtitle file.
+Without FILE: the sibling mp3 of an srt, then the media subed guesses
+from the base name, then a prompt."
   (interactive)
-  (let* ((current-file (buffer-file-name))
-         (directory (file-name-directory current-file))
-         (base-name (file-name-base current-file))
-         (mp3-file (concat directory base-name ".mp3")))
-    (if (and current-file
-             (string= (file-name-extension current-file) "srt")
-             (file-exists-p mp3-file))
-        (subed-mpv-play-from-file mp3-file)
-      (subed-mpv-play-from-file file))
-    (subed-mpv-unpause)))
+  (if-let* ((file (or file (subed--sibling-mp3) (subed-guess-media-file))))
+      (subed-mpv-play-from-file file)
+    (call-interactively #'subed-mpv-play-from-file))
+  (subed-mpv-unpause))

@@ -97,6 +97,10 @@
 (use-package subed
   :ensure (subed :host github :repo "sachac/subed" :files ("subed/*.el"))
   :defer t
+  :init
+  ;; a transcript is thousands of short lines: the line-count rule of
+  ;; `doom-so-long-p' would trim the buffer's minor modes for nothing
+  (add-to-list 'doom-file-lines-threshold-alist '("\\.\\(?:srt\\|vtt\\|ass\\)\\'"))
   :config
   (add-hook! 'subed-mode-hook
              #'subed-enable-pause-while-typing

@@ -149,7 +149,9 @@ not block on a credential prompt)."
   ;; layout formats, which drift between the versions Emacs bundles
   ;; (30.1 ships 0.7, 32 a 0.13 snapshot).  Installing it pins both CI
   ;; and local batch runs to the same version - the one runtime gets.
-  deps {:doc "Install test deps (buttercup, parseedn, transient) into .local/.cache/test-elpa"
+  ;; mpv and subed are test deps because the player-sharing specs drive
+  ;; their real IPC clients against a fake mpv socket.
+  deps {:doc "Install test deps (buttercup, parseedn, transient, mpv, subed) into .local/.cache/test-elpa"
         :task (apply p/shell
                      (concat emacs-batch
                              ["--eval" (format "(setq package-user-dir %s)" (pr-str test-elpa))
@@ -158,7 +160,7 @@ not block on a credential prompt)."
                               "-f" "package-initialize"
                               ;; install by archive desc, not by name: name-based install
                               ;; treats the built-in transient as already satisfied
-                              "--eval" "(dolist (p '(buttercup parseedn transient)) (unless (assq p package-alist) (unless package-archive-contents (package-refresh-contents)) (package-install (cadr (assq p package-archive-contents)))))"]))}
+                              "--eval" "(dolist (p '(buttercup parseedn transient mpv subed)) (unless (assq p package-alist) (unless package-archive-contents (package-refresh-contents)) (package-install (cadr (assq p package-archive-contents)))))"]))}
 
   lint {:doc "check-parens over every tracked .el file"
         :task (let [files (->> (p/shell {:out :string :dir root}

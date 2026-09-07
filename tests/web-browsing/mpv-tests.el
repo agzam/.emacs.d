@@ -24,6 +24,90 @@
     (expect (fboundp 'mpv-fullscreen-toggle) :to-be-truthy)
     (expect (fboundp 'mpv-speed-reset) :to-be-truthy)))
 
+(defun mpv-tests--fake-player (socket)
+  "A live process whose command line names SOCKET, like an mpv would."
+  (make-process :name "fake-mpv" :noquery t
+                :command (list "sh" "-c" "sleep 30" "sh"
+                               (concat "--input-ipc-server=" socket))))
+
+(defmacro mpv-tests--with-ipc-server (socket received &rest body)
+  "Run BODY with a local socket server at SOCKET collecting input in RECEIVED."
+  (declare (indent 2))
+  `(let ((server (make-network-process
+                  :name "fake-mpv-ipc" :server t :family 'local :service ,socket
+                  :noquery t
+                  :filter (lambda (_ s) (setq ,received (concat ,received s))))))
+     (unwind-protect (progn ,@body)
+       (delete-process server)
+       (ignore-errors (delete-file ,socket)))))
+
+(describe "mpv-connect"
+  :var (socket received exits)
+
+  (before-all (require 'mpv))
+  (before-each
+    (setq socket (expand-file-name "mpv-connect.sock" test-sandbox-dir)
+          received ""
+          exits 0)
+    (ignore-errors (delete-file socket)))
+  (after-each
+    (ignore-errors (mpv-kill))
+    (dolist (p (process-list))
+      (when (string-prefix-p "fake-mpv" (process-name p))
+        (delete-process p))))
+
+  (it "reads the ipc socket off the player's command line"
+    (let ((player (mpv-tests--fake-player "/tmp/some.sock"))
+          (plain (make-process :name "fake-mpv-plain" :command '("sleep" "30") :noquery t)))
+      (expect (mpv-ipc-socket player) :to-equal "/tmp/some.sock")
+      (expect (mpv-ipc-socket plain) :to-be nil)
+      (expect (mpv-connect plain) :to-throw 'error)))
+
+  (it "adopts the player: its commands reach the socket, and it counts as live"
+    (mpv-tests--with-ipc-server socket received
+      (let ((player (mpv-tests--fake-player socket))
+            (mpv-on-start-hook (list (lambda (_) (setq exits 'started)))))
+        (expect (mpv-connect player) :to-be-truthy)
+        (expect mpv--process :to-be player)
+        (expect (mpv-live-p) :to-be-truthy)
+        (expect exits :to-be 'started)
+        (mpv-pause)
+        (accept-process-output nil 0.3)
+        (expect received :to-match "\"cycle\",\"pause\""))))
+
+  (it "leaves the socket to the starter and waits for it to appear"
+    (let ((player (mpv-tests--fake-player socket))
+          (mpv-start-timeout 0.2))
+      ;; no server yet: nothing to connect to, and mpv.el stays detached
+      (expect (mpv-connect player) :to-throw 'error)
+      (expect mpv--process :to-be nil)
+      (expect (process-live-p player) :to-be-truthy)))
+
+  (it "kills the player mpv.el started itself, once"
+    (mpv-tests--with-ipc-server socket received
+      (let ((own (make-process :name "fake-mpv-own" :command '("sleep" "30") :noquery t))
+            (player (mpv-tests--fake-player socket)))
+        (setq mpv--process own)
+        (mpv-connect player)
+        (expect (process-live-p own) :to-be nil)
+        (expect mpv--process :to-be player)
+        ;; a second connect to the same player is a no-op
+        (let ((queue mpv--queue))
+          (expect (mpv-connect player) :to-be nil)
+          (expect mpv--queue :to-be queue)))))
+
+  (it "detaches when the player exits, running the exit hook"
+    (mpv-tests--with-ipc-server socket received
+      (let ((player (mpv-tests--fake-player socket))
+            (mpv-on-exit-hook (list (lambda () (cl-incf exits)))))
+        (mpv-connect player)
+        (kill-process player)
+        (with-timeout (2 (error "player did not exit"))
+          (while mpv--process (accept-process-output nil 0.05)))
+        (expect mpv--process :to-be nil)
+        (expect mpv--queue :to-be nil)
+        (expect exits :to-equal 1)))))
+
 (describe "mpv-open"
   :var (calls)
 
