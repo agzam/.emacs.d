@@ -888,7 +888,9 @@ files, so this replaces calls to `pp' with the much faster `prin1'."
 
 If a file is opened and discovered to have more lines than this,
 `so-long-minor-mode' is enabled to prevent Emacs from hanging, crashing or
-becoming unusably slow.  Used by `doom-so-long-p'.")
+becoming unusably slow.  Used by `doom-so-long-p'.  The first matching
+entry wins; an entry with a nil threshold exempts its files from the
+line count.")
 
 (when (fboundp 'buffer-line-statistics)
   (add-hook 'doom-first-file-hook #'global-so-long-mode)
@@ -920,9 +922,11 @@ and whether the line count of the buffer exceeds that matching entry in
                                 (assoc-default buffer-file-name doom-file-lines-threshold-alist
                                                #'string-match-p)))
                      (> (car stats) maxlines)))))))
+    ;; `so-long-function' and `so-long-revert-function' are buffer-local,
+    ;; a setq here reaches only the buffer that loaded so-long;
+    ;; `so-long-action' is the global knob they are derived from.
     (setq so-long-predicate #'doom-so-long-p
-          so-long-function #'turn-on-so-long-minor-mode
-          so-long-revert-function #'turn-off-so-long-minor-mode)
+          so-long-action 'so-long-minor-mode)
 
     (add-to-list 'so-long-target-modes 'conf-mode)
     (add-to-list 'so-long-target-modes 'text-mode)

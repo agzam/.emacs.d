@@ -140,6 +140,22 @@
   (before-all (require 'so-long))
   (it "is installed as the so-long predicate"
     (expect so-long-predicate :to-be #'doom-so-long-p))
+  (it "acts through so-long-minor-mode, so the major mode survives"
+    ;; so-long-function is buffer-local: only so-long-action reaches every buffer
+    (expect so-long-action :to-be 'so-long-minor-mode)
+    (expect (default-value 'so-long-function) :to-be nil))
+  (it "flags files over their line threshold and exempts nil-threshold entries"
+    (let ((doom-file-lines-threshold-alist '(("\\.srt\\'") ("." . 5)))
+          (buf (get-buffer-create "doom-defaults-so-long-lines-probe")))
+      (unwind-protect
+          (with-current-buffer buf
+            (insert (make-string 10 ?\n))
+            (setq buffer-file-name "/tmp/probe.txt")
+            (expect (doom-so-long-p) :to-be-truthy)
+            (setq buffer-file-name "/tmp/probe.srt")
+            (expect (doom-so-long-p) :to-be nil))
+        (with-current-buffer buf (setq buffer-file-name nil))
+        (kill-buffer buf))))
   (it "flags buffers with overlong lines, leaves short ones alone"
     (let ((buf (get-buffer-create "doom-defaults-so-long-probe.js")))
       (unwind-protect
