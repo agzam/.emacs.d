@@ -267,6 +267,55 @@ while the first-run build, which settles steadily but emits nothing, does not."
               (round (- now last-emit)) (length pending)
               (elpaca-update-report-format-pending pending)))))
 
+;;; Failure reasons: say why a package failed, in git's own words
+
+;; Elpaca fails a package with a note that only points elsewhere -
+;; "Subprocess error (see previous log entries)", "Merge failed" - and keeps
+;; the subprocess's stderr as separate events in its log.  A bare `failed:
+;; NAME' line leaves the reader to open the log buffer; these pull the telling
+;; line out of the event log so the progress stream carries it.  The collector
+;; needs a live Elpaca, the picker and the line formatter are pure.
+
+(defun elpaca-update-report-package-events (id)
+  "Return package ID's elpaca events as (TYPE . TEXT) conses, newest first.
+TYPE is `output' for a subprocess line, `info' for an elpaca note; TEXT is
+trimmed.  Nil when elpaca's event log is unavailable."
+  (when (and (fboundp 'elpaca-event-log) (fboundp 'elpaca-event<-payload))
+    (cl-loop for ev in (elpaca-event-log id)
+             for payload = (elpaca-event<-payload ev)
+             for output = (plist-get payload :output)
+             for info = (plist-get payload :info)
+             when (or output info)
+             collect (cons (if output 'output 'info)
+                           (string-trim (or output info))))))
+
+(defun elpaca-update-report-failure-reason (events)
+  "Pick the line that explains a failure from EVENTS, newest first.
+EVENTS is the (TYPE . TEXT) list `elpaca-update-report-package-events'
+returns.  A subprocess line flagged fatal or error wins, then any newest
+subprocess line, then the newest elpaca note; nil when EVENTS is empty."
+  (let ((outputs (cl-loop for (type . text) in events
+                          when (eq type 'output) collect text)))
+    (or (cl-find-if (lambda (line)
+                      (let ((case-fold-search t))
+                        (string-match-p "\\(?:^\\|[[:space:]]\\)\\(?:fatal\\|error\\)\\b"
+                                        line)))
+                    outputs)
+        (car outputs)
+        (cdr (cl-find 'info events :key #'car)))))
+
+(defun elpaca-update-report-failed-line (e)
+  "The `failed:' progress line for elpaca E, painted red.
+Names the step E failed in when elpaca recorded one, and the reason
+picked from its event log."
+  (let* ((step (elpaca<-current-step e))
+         (reason (elpaca-update-report-failure-reason
+                  (elpaca-update-report-package-events (elpaca<-id e)))))
+    (elpaca-update-report--paint
+     "31" (concat "failed: " (symbol-name (elpaca<-id e))
+                  (and (symbolp step) step (format " at %s" step))
+                  (and reason (concat ": " reason))))))
+
 ;;; Persistent append-log: every session teed to one growing, trimmed file
 
 ;; Beyond the per-run streaming, keep a durable record: every session appended

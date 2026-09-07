@@ -37,6 +37,7 @@
         elpaca-live-update--log nil
         elpaca-live-update--persist nil
         elpaca-live-update--batcher nil
+        elpaca-live-update--failed nil
         elpaca-live-update--saved-log-fns 'unset
         elpaca-live-update--last-emit nil))
 
@@ -93,6 +94,46 @@
           (expect (elpaca-live-update--emit "hello %s" "world")
                   :not :to-throw))
       (elpaca-live-update-tests--reset))))
+
+(describe "elpaca-live-update failed set"
+  (it "reports the reason and drops the package once a later phase finishes it"
+    (let ((logfile (make-temp-file "elpaca-live-update-tests")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'elpaca<-id) (lambda (e) e))
+                    ((symbol-function 'elpaca<-current-step) (lambda (_e) 'elpaca-git--merge))
+                    ((symbol-function 'elpaca-update-report-package-events)
+                     (lambda (_id) '((output . "fatal: Not possible to fast-forward, aborting.")))))
+            (setq elpaca-live-update--log logfile
+                  elpaca-live-update--persist nil
+                  elpaca-live-update--batcher (elpaca-update-report-batcher)
+                  elpaca-update-report-color nil)
+            (elpaca-live-update--on-failed 'expreg)
+            (expect elpaca-live-update--failed :to-equal '(expreg))
+            (expect (elpaca-live-update-tests--slurp logfile)
+                    :to-match "^failed: expreg at elpaca-git--merge: fatal: Not possible to fast-forward")
+            (elpaca-live-update--on-finished 'expreg)
+            (expect elpaca-live-update--failed :to-be nil))
+        (elpaca-live-update-tests--reset)
+        (delete-file logfile))))
+
+  (it "lands UPDATE-DONE once every failure was healed, UPDATE-FAILED while one stands"
+    (let ((logfile (make-temp-file "elpaca-live-update-tests")))
+      (unwind-protect
+          (with-elpaca-stubs
+            (cl-letf (((symbol-function 'broken-elpaca-builds) (lambda () nil)))
+              (dolist (case '((nil . "^UPDATE-DONE 3 package(s) processed, 0 updated, 0 failed")
+                              ((paredit) . "^UPDATE-FAILED 3 package(s) processed, 0 updated, 1 failed")))
+                (write-region "" nil logfile nil 'silent)
+                (setq elpaca-live-update--log logfile
+                      elpaca-live-update--persist nil
+                      elpaca-live-update--failed (car case)
+                      elpaca-live-update--total 3
+                      elpaca-live-update--reported (make-hash-table :test 'equal)
+                      elpaca-live-update--batcher (elpaca-update-report-batcher))
+                (elpaca-live-update--finish)
+                (expect (elpaca-live-update-tests--slurp logfile) :to-match (cdr case)))))
+        (elpaca-live-update-tests--reset)
+        (delete-file logfile)))))
 
 (describe "elpaca-live-update--advance"
   (it "lands the terminal UPDATE-ERROR marker and stops the poll on a tick error"

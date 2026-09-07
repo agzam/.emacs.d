@@ -25,6 +25,9 @@
 (load (expand-file-name "elpaca-local"
                         (file-name-directory (or load-file-name buffer-file-name)))
       nil 'nomessage)
+(load (expand-file-name "elpaca-remote"
+                        (file-name-directory (or load-file-name buffer-file-name)))
+      nil 'nomessage)
 
 (defvar elpaca-update--snapshot nil
   "Pre-update map of source dir -> HEAD sha, captured before merging.")
@@ -70,7 +73,11 @@ failed/blocked statuses."
      (format "\nupdate: %d processed, %d updated, %d failed/blocked%s\n"
              (length statuses) updated (length failed)
              (if healed (format ", %d healed" (length healed)) "")))
-    (dolist (f failed) (elpaca-update--out (format "  %s: %s\n" (car f) (cdr f))))
+    (dolist (f failed)
+      (let ((reason (elpaca-update-report-failure-reason
+                     (elpaca-update-report-package-events (car f)))))
+        (elpaca-update--out (format "  %s: %s%s\n" (car f) (cdr f)
+                                    (if reason (concat " - " reason) "")))))
     (dolist (h healed) (elpaca-update--out (format "  healed %s (%s)\n" (car h) (cdr h))))
     (dolist (r remaining)
       (elpaca-update--out
@@ -105,10 +112,9 @@ before `kill-emacs', which flushes."
                              (symbol-name (elpaca<-id e))))
 
 (defun elpaca-update--on-failed (e)
-  "Break out E as `failed:', flushing any pending `pulled:' names first."
+  "Break out E as `failed:' with its reason, flushing pending `pulled:' names first."
   (elpaca-update-report-flush elpaca-update--batcher #'elpaca-update--emit)
-  (elpaca-update--emit "%s" (elpaca-update-report--paint
-                             "31" (concat "failed: " (symbol-name (elpaca<-id e))))))
+  (elpaca-update--emit "%s" (elpaca-update-report-failed-line e)))
 
 ;; Heartbeat: `elpaca-wait' pumps the queue by spinning in `sit-for', dead
 ;; silent through a slow compile or a wedged package.  A repeating timer fires
@@ -163,9 +169,19 @@ that is genuinely empty."
       ;; multi-minute silent hang with no clue which package is in flight.
       (elpaca-subscribe 'finished #'elpaca-update--on-finished)
       (elpaca-subscribe 'failed #'elpaca-update--on-failed)
+      ;; A recipe that moved to another host steers fresh clones only; point
+      ;; the existing clones there before they fetch from the old one.
+      (elpaca-remote-sync-origins nil #'elpaca-update--emit)
       ;; queue fetch+merge+rebuild for every package elpaca clones
       (elpaca-local-update-remotes nil nil #'elpaca-update--emit)
       (elpaca-wait)                ; settle the update queue (streamed as it goes)
+      ;; An upstream that rewrote its history refuses the ff-only merge; the
+      ;; clone is a cache of it, so reset onto upstream and merge again.
+      (when (elpaca-remote-reset-diverged
+             (lambda (fmt &rest args)
+               (elpaca-update-report-flush elpaca-update--batcher #'elpaca-update--emit)
+               (apply #'elpaca-update--emit fmt args)))
+        (elpaca-wait))
       ;; A git update only rebuilds a package when its merge moved HEAD; a
       ;; build-in-place local checkout edited on disk (new files, edits) won't
       ;; have been.  Catch those and rebuild them before reporting - kept under

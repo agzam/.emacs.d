@@ -16,6 +16,8 @@
 ;; function cell).
 (unless (fboundp 'elpaca<-source-dir) (defun elpaca<-source-dir (_e) nil))
 (unless (fboundp 'elpaca--url) (defun elpaca--url (_e) nil))
+(unless (fboundp 'elpaca<-id) (defun elpaca<-id (_e) nil))
+(unless (fboundp 'elpaca<-current-step) (defun elpaca<-current-step (_e) nil))
 
 (defun elpaca-update-report-tests--git (dir &rest args)
   "Run git ARGS in DIR, discarding output."
@@ -320,6 +322,77 @@ Return a plist (:dir DIR :revs (SHA...)) with revs oldest-first."
             :to-equal "still working (12s, 2 pending): a=building, b=cloning"))
   (it "returns nil when nothing is pending, however long the silence"
     (expect (elpaca-update-report-heartbeat-line nil 100.0 10 9999.0) :to-be nil)))
+
+(describe "elpaca-update-report-failure-reason"
+  ;; Events arrive newest first, the way elpaca keeps its log.
+  (it "prefers git's fatal line over the notes that only point at it"
+    (expect (elpaca-update-report-failure-reason
+             '((info . "Subprocess error (see previous log entries)")
+               (output . "fatal: unable to access 'https://x/': Could not resolve host: x")
+               (info . "$git fetch --all -v")
+               (info . "Fetching remotes")))
+            :to-equal "fatal: unable to access 'https://x/': Could not resolve host: x"))
+  (it "skips the hint lines that follow a fatal one"
+    (expect (elpaca-update-report-failure-reason
+             '((info . "Merge failed")
+               (output . "fatal: Not possible to fast-forward, aborting.")
+               (output . "hint: git rebase")
+               (output . "hint: Diverging branches can't be fast-forwarded")))
+            :to-equal "fatal: Not possible to fast-forward, aborting."))
+  (it "matches a byte-compiler error line, whatever its case and prefix"
+    (expect (elpaca-update-report-failure-reason
+             '((info . "Subprocess error (see previous log entries)")
+               (output . "Done compiling")
+               (output . "foo.el:12:3: Error: Symbol's value as variable is void: bar")
+               (output . "Compiling foo.el")))
+            :to-equal "foo.el:12:3: Error: Symbol's value as variable is void: bar"))
+  (it "falls back to the newest subprocess line without a flagged one"
+    (expect (elpaca-update-report-failure-reason
+             '((info . "Subprocess error (see previous log entries)")
+               (output . "Permission denied (publickey).")
+               (output . "Cloning into 'x'...")))
+            :to-equal "Permission denied (publickey)."))
+  (it "falls back to the newest note when nothing was output"
+    (expect (elpaca-update-report-failure-reason
+             '((info . "failed dependency: cider") (info . "Queued")))
+            :to-equal "failed dependency: cider"))
+  (it "is nil for an empty log"
+    (expect (elpaca-update-report-failure-reason nil) :to-be nil)))
+
+(describe "elpaca-update-report-failed-line"
+  (it "names the package, its failing step and the reason"
+    (cl-letf (((symbol-function 'elpaca<-id) (lambda (_e) 'paredit))
+              ((symbol-function 'elpaca<-current-step) (lambda (_e) 'elpaca-git--fetch))
+              ((symbol-function 'elpaca-update-report-package-events)
+               (lambda (_id) '((output . "fatal: Could not resolve host: paredit.org")))))
+      (let ((elpaca-update-report-color nil))
+        (expect (elpaca-update-report-failed-line 'e)
+                :to-equal "failed: paredit at elpaca-git--fetch: fatal: Could not resolve host: paredit.org"))))
+  (it "omits the step and reason it does not have"
+    ;; a step that is a closure (elpaca's initial-fetch lambdas) has no name
+    (cl-letf (((symbol-function 'elpaca<-id) (lambda (_e) 'foo))
+              ((symbol-function 'elpaca<-current-step) (lambda (_e) (lambda (_e) nil)))
+              ((symbol-function 'elpaca-update-report-package-events) (lambda (_id) nil)))
+      (let ((elpaca-update-report-color nil))
+        (expect (elpaca-update-report-failed-line 'e) :to-equal "failed: foo"))))
+  (it "paints the whole line red when color is on"
+    (cl-letf (((symbol-function 'elpaca<-id) (lambda (_e) 'foo))
+              ((symbol-function 'elpaca<-current-step) (lambda (_e) nil))
+              ((symbol-function 'elpaca-update-report-package-events) (lambda (_id) nil)))
+      (let ((elpaca-update-report-color t))
+        (expect (elpaca-update-report-failed-line 'e)
+                :to-equal (concat (string 27) "[31mfailed: foo" (string 27) "[0m"))))))
+
+(describe "elpaca-update-report-package-events"
+  (it "is nil when elpaca's event log is not around"
+    (expect (fboundp 'elpaca-event-log) :to-be nil)
+    (expect (elpaca-update-report-package-events 'foo) :to-be nil))
+  (it "reads output and info payloads newest first, trimmed"
+    (cl-letf (((symbol-function 'elpaca-event-log)
+               (lambda (_id) '((:output "  fatal: boom") (:info "Merging updates") (:tick t))))
+              ((symbol-function 'elpaca-event<-payload) #'identity))
+      (expect (elpaca-update-report-package-events 'foo)
+              :to-equal '((output . "fatal: boom") (info . "Merging updates"))))))
 
 (describe "elpaca-update-report-progress"
   (it "streams to stderr, bypassing the block-buffered stdout"

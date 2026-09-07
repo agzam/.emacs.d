@@ -21,17 +21,18 @@
 ;; Defined in lisp/functions.el, which init loads before this driver can run.
 (declare-function broken-elpaca-builds "functions")
 (declare-function rebuild-broken-elpaca-builds "functions")
-;; The changelog and local-rebuild helpers sit next to this file.  The live
-;; driver is `load'ed by `bb update' via emacsclient, so resolve them relative
-;; to this file, loading each only if the running session lacks it.
-(dolist (lib '("elpaca-update-report" "elpaca-local"))
+;; The changelog, local-rebuild and clone-heal helpers sit next to this file.
+;; The live driver is `load'ed by `bb update' via emacsclient, so resolve them
+;; relative to this file, loading each only if the running session lacks it.
+(dolist (lib '("elpaca-update-report" "elpaca-local" "elpaca-remote"))
   (unless (featurep (intern lib))
     (load (expand-file-name lib (file-name-directory (or load-file-name buffer-file-name)))
           nil 'nomessage)))
 
 (defvar elpaca-live-update--log nil "File the caller tails for progress.")
 (defvar elpaca-live-update--total 0 "Packages expected to reach a terminal status.")
-(defvar elpaca-live-update--failed 0 "Packages failed so far.")
+(defvar elpaca-live-update--failed nil
+  "Ids of the packages failed so far; a package healed later leaves the list.")
 (defvar elpaca-live-update--saved-log-fns 'unset "Saved `elpaca-log-functions'.")
 (defvar elpaca-live-update--saved-jit 'unset "Saved `native-comp-jit-compilation'.")
 (defvar elpaca-live-update--poll nil "Completion poll timer.")
@@ -42,6 +43,8 @@
   "Hash of source dirs whose changelog block has already been emitted.")
 (defvar elpaca-live-update--batcher nil
   "Shared `pulled:'-line batcher (see `elpaca-update-report-batcher').")
+(defvar elpaca-live-update--diverged-reset nil
+  "Non-nil once the post-update rewritten-upstream reset phase has run.")
 (defvar elpaca-live-update--locals-rebuilt nil
   "Non-nil once the post-update local-package rebuild phase has run.")
 (defvar elpaca-live-update--integrity-rebuilt nil
@@ -70,7 +73,10 @@ is covered on the caller's side by its pid liveness check and deadline."
       (elpaca-update-report-tee elpaca-live-update--persist line))))
 
 (defun elpaca-live-update--on-finished (e)
-  "Batch E into the running `pulled:' line, or break out its commit block."
+  "Batch E into the running `pulled:' line, or break out its commit block.
+A package that failed earlier in this run and finishes now was healed by
+a later phase, so it leaves the failed set."
+  (setq elpaca-live-update--failed (delq (elpaca<-id e) elpaca-live-update--failed))
   (if-let* ((changes (elpaca-update-report-block-once
                       e elpaca-live-update--snapshot elpaca-live-update--reported)))
       (progn
@@ -83,12 +89,10 @@ is covered on the caller's side by its pid liveness check and deadline."
                                (symbol-name (elpaca<-id e)))))
 
 (defun elpaca-live-update--on-failed (e)
-  "Report E failing, after flushing any pending `pulled:' names."
-  (cl-incf elpaca-live-update--failed)
+  "Report E failing, with its reason, after flushing any pending `pulled:' names."
+  (cl-pushnew (elpaca<-id e) elpaca-live-update--failed)
   (elpaca-update-report-flush elpaca-live-update--batcher #'elpaca-live-update--emit)
-  (elpaca-live-update--emit
-   "%s" (elpaca-update-report--paint
-         "31" (concat "failed: " (symbol-name (elpaca<-id e))))))
+  (elpaca-live-update--emit "%s" (elpaca-update-report-failed-line e)))
 
 (defun elpaca-live-update--cleanup ()
   "Cancel timers, drop subscribers, restore what the run rebound."
@@ -121,10 +125,24 @@ progress regex still anchors."
       (elpaca-live-update--emit
        "STILL BROKEN %s (%s) - run bb repair, then restart Emacs" id reason))
     (elpaca-live-update--emit "%s %d package(s) processed, %d updated, %d failed"
-                              (if (or (< 0 elpaca-live-update--failed) broken)
+                              (if (or elpaca-live-update--failed broken)
                                   "UPDATE-FAILED" "UPDATE-DONE")
                               elpaca-live-update--total updated
-                              elpaca-live-update--failed)))
+                              (length elpaca-live-update--failed))))
+
+(defun elpaca-live-update--run-diverged-resets ()
+  "Reset merge-failed clones whose upstream rewrote history, and merge them again.
+Queuing the merges makes the queue non-terminal again, so the poll keeps
+ticking until they settle; each package then reaches `finished' through
+the usual subscriber and leaves the failed set."
+  (when-let* ((reset (elpaca-remote-reset-diverged
+                      (lambda (fmt &rest args)
+                        (elpaca-update-report-flush elpaca-live-update--batcher
+                                                    #'elpaca-live-update--emit)
+                        (apply #'elpaca-live-update--emit fmt args)))))
+    (elpaca-live-update--emit "waiting for %d re-merge(s): %s"
+                              (length reset)
+                              (mapconcat #'symbol-name reset ", "))))
 
 (defun elpaca-live-update--run-local-rebuilds ()
   "Rebuild on-disk-changed build-in-place locals, if any.
@@ -162,10 +180,11 @@ Heartbeats keep the run from ever going silent: whenever nothing has been
 emitted for `elpaca-live-update--heartbeat-interval' - a slow compile, or a
 genuinely wedged package - a line says exactly what is still pending, via the
 same silence-keyed helper the headless driver uses.  Once the queue settles
-two more phases run before the terminal marker, each re-arming the poll when
-it queues work: on-disk-changed locals (a git update skips a build-in-place
-checkout whose merge moved no HEAD), then broken-build healing (half-built or
-stale builds a plain update also skips).
+three more phases run before the terminal marker, each re-arming the poll
+when it queues work: clones whose merge failed on a rewritten upstream (reset
+onto upstream, merged again), on-disk-changed locals (a git update skips a
+build-in-place checkout whose merge moved no HEAD), then broken-build healing
+\(half-built or stale builds a plain update also skips).
 
 The whole tick is guarded: the poll timer stays armed through a signaling
 function, so an unguarded error in a heal helper would repeat once a second
@@ -188,6 +207,9 @@ and dismantles the run."
                                elpaca-live-update--heartbeat-interval)))
               (elpaca-live-update--emit "%s" line))
           (cond
+           ((not elpaca-live-update--diverged-reset)
+            (setq elpaca-live-update--diverged-reset t)
+            (elpaca-live-update--run-diverged-resets))
            ((not elpaca-live-update--locals-rebuilt)
             (setq elpaca-live-update--locals-rebuilt t)
             (elpaca-live-update--run-local-rebuilds))
@@ -227,8 +249,9 @@ UPDATE-ERROR line."
           (setq elpaca-live-update--log logfile
                 elpaca-live-update--total (if packages (length packages)
                                             (length (elpaca--queued)))
-                elpaca-live-update--failed 0
+                elpaca-live-update--failed nil
                 elpaca-live-update--batcher (elpaca-update-report-batcher)
+                elpaca-live-update--diverged-reset nil
                 elpaca-live-update--locals-rebuilt nil
                 elpaca-live-update--integrity-rebuilt nil
                 elpaca-live-update--persist (elpaca-update-report-open-session "live")
@@ -265,6 +288,9 @@ UPDATE-ERROR line."
           (elpaca-live-update--emit
            "update: fetching + merging + rebuilding %d package(s)..."
            elpaca-live-update--total)
+          ;; A recipe that moved to another host steers fresh clones only;
+          ;; point the existing clones there before they fetch from the old one.
+          (elpaca-remote-sync-origins packages #'elpaca-live-update--emit)
           ;; interactive=t => elpaca processes the queue (async), returns at once.
           (elpaca-local-update-remotes packages t #'elpaca-live-update--emit)
           (setq elpaca-live-update--poll
