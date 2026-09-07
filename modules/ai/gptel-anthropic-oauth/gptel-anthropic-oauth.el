@@ -283,7 +283,9 @@
 (defun gptel-anthropic-oauth--model-specs (response)
   "Convert a model-list RESPONSE into gptel model specifications."
   (let ((known (mapcar (lambda (model)
-                         (cons (symbol-name (car model)) (cdr model)))
+                         (if (symbolp model)
+                             (cons (symbol-name model) (symbol-plist model))
+                           (cons (symbol-name (car model)) (cdr model))))
                        gptel--anthropic-models))
         models)
     (dolist (model (append (gptel-anthropic-oauth--json-value 'data response)

@@ -16,8 +16,10 @@
 (cl-defgeneric gptel--request-data (backend prompts))
 (defvar gptel--known-backends nil)
 (defconst gptel--anthropic-models
-  '((claude-opus-4-8
-     :description "Most capable model for complex reasoning and advanced coding")))
+  (let ((model 'claude-sonnet-5))
+    (setf (symbol-plist model)
+          '(:description "The best combination of speed and intelligence"))
+    (list model)))
 (defun gptel--process-models (models)
   (mapcar (lambda (model)
             (if (consp model) (car model) model))
@@ -30,16 +32,25 @@
   (it "converts API models and preserves known metadata"
     (let ((models
            (gptel-anthropic-oauth--model-specs
-            '((data . [((id . "claude-opus-4-8")
-                        (display_name . "Claude Opus 4.8"))
+            '((data . [((id . "claude-sonnet-5")
+                        (display_name . "Claude Sonnet 5"))
                        ((id . "claude-new-20260807")
                         (display_name . "Claude New"))])))))
       (expect (mapcar #'car models)
-              :to-equal '(claude-opus-4-8 claude-new-20260807))
+              :to-equal '(claude-sonnet-5 claude-new-20260807))
       (expect (plist-get (cdr (car models)) :description)
-              :to-equal "Most capable model for complex reasoning and advanced coding")
+              :to-equal "The best combination of speed and intelligence")
       (expect (plist-get (cdr (cadr models)) :description)
               :to-equal "Claude New")))
+
+  (it "accepts unprocessed bundled model metadata"
+    (let* ((gptel--anthropic-models
+            '((claude-opus-4-8 :description "Most capable model")))
+           (models
+            (gptel-anthropic-oauth--model-specs
+             '((data . [((id . "claude-opus-4-8"))])))))
+      (expect (plist-get (cdr (car models)) :description)
+              :to-equal "Most capable model")))
 
   (it "updates every registered OAuth backend"
     (let ((backend (gptel-make-anthropic-oauth
