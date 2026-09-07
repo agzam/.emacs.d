@@ -1,4 +1,4 @@
-;;; modules/web-browsing/autoload/subed.el -*- lexical-binding: t; -*-
+;;; modules/multimedia/autoload/subed.el -*- lexical-binding: t; -*-
 (defvar subed-mpv--server-proc)
 (defvar subed-mpv--retry-delays)
 (defvar subed-mpv-media-file)

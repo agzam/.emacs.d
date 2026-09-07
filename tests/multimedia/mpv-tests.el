@@ -1,4 +1,4 @@
-;;; tests/web-browsing/mpv-tests.el --- web-browsing/autoload/mpv.el specs -*- lexical-binding: t; -*-
+;;; tests/multimedia/mpv-tests.el --- multimedia/autoload/mpv.el specs -*- lexical-binding: t; -*-
 
 (require 'test-helper
          (expand-file-name
@@ -10,7 +10,7 @@
 
 ;; Loading registers advice against not-yet-defined mpv functions; that is
 ;; the boot-time behavior too (advice takes effect when mpv loads).
-(load-module-file "modules/web-browsing/autoload/mpv.el")
+(load-module-file "modules/multimedia/autoload/mpv.el")
 
 (describe "mpv.el after the transient moved to media.el"
   (it "no longer defines mpv-transient"

@@ -252,14 +252,6 @@
         :i "[[" #'markdown-insert-stored-link
         :i "[ SPC" #'insert-bracket-pair))
 
-(use-package youtube-sub-extractor
-  :commands (youtube-sub-extractor-extract-subs)
-  :config
-  (map! :map youtube-sub-extractor-subtitles-mode-map
-        :desc "copy timestamp URL" :n "RET" #'youtube-sub-extractor-copy-ts-link
-        :desc "browse at timestamp" :n "C-c C-o" #'youtube-sub-extractor-browse-ts-link
-        :n "q" #'kill-buffer-and-window))
-
 (use-package wiktionary-bro
   :ensure (wiktionary-bro :host github :repo "agzam/wiktionary-bro.el")
   :commands (wiktionary-bro-dwim)

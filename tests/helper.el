@@ -86,14 +86,21 @@ Lets a stubbed `use-package' run just the :init/:config side effects in tests."
        (nreverse forms)))
    keywords))
 
+(defconst map-form-valued-keywords
+  '(:after :desc :map :mode :prefix :prefix-map :when :unless)
+  "`map!' keywords that consume the element after them.
+The state keywords (`:n', `:i', ...) and `:leader'/`:localleader'
+consume nothing, so they must not swallow the key that follows.")
+
 (defun map-form-key-pairs (body)
   "Collect (KEY . DEFINITION) pairs bound at one level of a `map!' BODY.
-Skips the keyword arguments (`:desc' and the state keywords) and the
-nested groups, so only the keys bound right here come back."
+Drops the keyword arguments and the nested groups, so only the keys
+bound right here come back."
   (let (pairs)
     (while body
       (let ((item (pop body)))
-        (cond ((keywordp item) (pop body))
+        (cond ((memq item map-form-valued-keywords) (pop body))
+              ((keywordp item))
               ((stringp item) (push (cons item (pop body)) pairs)))))
     (nreverse pairs)))
 
@@ -112,17 +119,23 @@ Covers both shapes: a nested (:map MAP ...) group and the flat
       (funcall walk form))
     (nreverse bodies)))
 
+(defun map-form-prefix-pairs (form map prefix)
+  "Collect (KEY . DEFINITION) pairs bound under PREFIX for MAP in a `map!' FORM."
+  (let (pairs)
+    (dolist (body (map-form-groups form map))
+      (dolist (sub body)
+        (when (and (eq (car-safe sub) :prefix)
+                   (equal (car-safe (cadr sub)) prefix))
+          (setq pairs (append pairs (map-form-key-pairs (cddr sub)))))))
+    pairs))
+
 (defun map-form-prefix-keys (form map prefix)
   "Keys bound under PREFIX for MAP in a `map!' FORM.
 The car of the result is the definition of a bare PREFIX binding, which
 shadows the prefix; the cdr is the list of keys bound under it."
-  (let (direct keys)
+  (let (direct)
     (dolist (body (map-form-groups form map))
-      (setq direct (or direct (cdr (assoc prefix (map-form-key-pairs body)))))
-      (dolist (sub body)
-        (when (and (eq (car-safe sub) :prefix)
-                   (equal (car-safe (cadr sub)) prefix))
-          (setq keys (append keys (mapcar #'car (map-form-key-pairs (cddr sub))))))))
-    (cons direct keys)))
+      (setq direct (or direct (cdr (assoc prefix (map-form-key-pairs body))))))
+    (cons direct (mapcar #'car (map-form-prefix-pairs form map prefix)))))
 
 (provide 'test-helper)

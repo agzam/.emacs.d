@@ -1,4 +1,4 @@
-;;; tests/web-browsing/subed-tests.el --- web-browsing/autoload/subed.el specs -*- lexical-binding: t; -*-
+;;; tests/multimedia/subed-tests.el --- multimedia/autoload/subed.el specs -*- lexical-binding: t; -*-
 
 (require 'test-helper
          (expand-file-name
@@ -7,8 +7,8 @@
                                   "helper.el")))
 (require 'buttercup)
 
-(load-module-file "modules/web-browsing/autoload/mpv.el")
-(load-module-file "modules/web-browsing/autoload/subed.el")
+(load-module-file "modules/multimedia/autoload/mpv.el")
+(load-module-file "modules/multimedia/autoload/subed.el")
 
 (defvar subed-tests--srt
   "1\n00:00:01,000 --> 00:00:02,000\nHello world\n\n2\n00:00:03,000 --> 00:00:04,000\nSecond line\n\n")
@@ -20,7 +20,14 @@
   (seq-filter (lambda (ov) (overlay-get ov 'subtitle-metadata))
               (overlays-in (point-min) (point-max))))
 
+(defun subed-tests--here ()
+  "Point's line, and whether point sits on hidden text."
+  (list (buffer-substring-no-properties
+         (line-beginning-position) (line-end-position))
+        (and (invisible-p (point)) t)))
+
 (describe "subed-toggle-srt-metadata"
+  (before-all (require 'subed-srt))
   (it "hides SRT metadata behind invisible overlays and toggles back"
     (with-temp-buffer
       (insert subed-tests--srt)
@@ -44,7 +51,23 @@
         ;; header must not be hidden
         (expect (seq-every-p (lambda (ov) (> (overlay-start ov) (length "WEBVTT")))
                              ovs)
-                :to-be-truthy)))))
+                :to-be-truthy))))
+
+  ;; ]] and [[ run subed's own motions, so hidden metadata must not strand
+  ;; point on an invisible line
+  (it "leaves subed's subtitle motions landing on visible text"
+    (with-temp-buffer
+      (insert subed-tests--srt)
+      (let ((subed-auto-play-media nil) subed-mode-hook)
+        (subed-srt-mode))
+      (subed-toggle-srt-metadata)
+      (goto-char (point-min))
+      (subed-jump-to-subtitle-text)
+      (expect (subed-tests--here) :to-equal '("Hello world" nil))
+      (expect (subed-forward-subtitle-text) :to-be-truthy)
+      (expect (subed-tests--here) :to-equal '("Second line" nil))
+      (expect (subed-backward-subtitle-text) :to-be-truthy)
+      (expect (subed-tests--here) :to-equal '("Hello world" nil)))))
 
 (describe "subed-view-plain-text"
   :var (shown)
@@ -255,10 +278,10 @@ Everything the server receives lands in RECEIVED."
     (expect (reverse calls) :to-equal '((start "/tmp/talk.mkv") (adopt own-player)))))
 
 (defun subed-tests--use-package-forms (keyword)
-  "The KEYWORD forms of the `use-package subed' block in web-browsing/config.el."
+  "The KEYWORD forms of the `use-package subed' block in multimedia/config.el."
   (with-temp-buffer
     (insert-file-contents
-     (expand-file-name "modules/web-browsing/config.el" test-config-root))
+     (expand-file-name "modules/multimedia/config.el" test-config-root))
     (goto-char (point-min))
     (let (form)
       (while (and (setq form (ignore-errors (read (current-buffer))))
@@ -266,6 +289,25 @@ Everything the server receives lands in RECEIVED."
                             (eq (cadr form) 'subed)))))
       (expect form :to-be-truthy)
       (use-package-body-forms (cddr form) keyword))))
+
+(describe "subed bindings"
+  :var* ((config (subed-tests--use-package-forms :config)))
+
+  (it "walks subtitle to subtitle on ]] and [[ in normal state"
+    (let ((pairs (mapcan #'map-form-key-pairs
+                         (map-form-groups config 'subed-mode-map))))
+      (expect (cdr (assoc "]]" pairs))
+              :to-equal '(function subed-forward-subtitle-text))
+      (expect (cdr (assoc "[[" pairs))
+              :to-equal '(function subed-backward-subtitle-text))))
+
+  (it "toggles the metadata and both player syncs under the localleader t prefix"
+    (expect (car (map-form-prefix-keys config 'subed-mode-map "t")) :to-be nil)
+    (expect (map-form-prefix-pairs config 'subed-mode-map "t")
+            :to-have-same-items-as
+            '(("t" function subed-toggle-srt-metadata)
+              ("s" function subed-toggle-sync-player-to-point)
+              ("f" function subed-toggle-sync-point-to-player)))))
 
 (describe "subed :init"
   (before-all (require 'doom-defaults) (require 'so-long))

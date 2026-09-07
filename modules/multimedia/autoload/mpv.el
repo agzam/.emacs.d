@@ -1,4 +1,4 @@
-;;; modules/web-browsing/autoload/mpv.el -*- lexical-binding: t; -*-
+;;; modules/multimedia/autoload/mpv.el -*- lexical-binding: t; -*-
 
 ;;;###autoload
 (defun mpv-speed-reset ()

@@ -2,8 +2,8 @@
 
 ;; Ported from doom.d modules/custom/web-browsing.  Dropped: elfeed (SohumB
 ;; fork) + elfeed-org/elfeed-tube/elfeed-tube-mpv, yeetube (unused;
-;; git-resurrectable).  mpv promoted to an explicit package - it was a
-;; transitive elfeed-tube-mpv dep.
+;; git-resurrectable).  Playback, subtitles and the yt-dlp download live in
+;; the multimedia module; navegosa stays here, media-transient calls it.
 ;; NOTE Own packages (browser-hist, consult-hn, reddigg, navegosa) declare
 ;; GitHub recipes; `local-checkout-recipe' (init.el) redirects them to
 ;; ~/GitHub/agzam checkouts on machines that have them.
@@ -86,32 +86,8 @@
   (setq browser-hist-default-browser 'brave)
   :commands (browser-hist-search))
 
-(use-package mpv
-  :defer t
-  :config
-  (setopt mpv-volume-step 1.1))
-
 (use-package rfc-mode
   :after org)
-
-(use-package subed
-  :ensure (subed :host github :repo "sachac/subed" :files ("subed/*.el"))
-  :defer t
-  :init
-  ;; a transcript is thousands of short lines: the line-count rule of
-  ;; `doom-so-long-p' would trim the buffer's minor modes for nothing
-  (add-to-list 'doom-file-lines-threshold-alist '("\\.\\(?:srt\\|vtt\\|ass\\)\\'"))
-  :config
-  (add-hook! 'subed-mode-hook
-             #'subed-enable-pause-while-typing
-             #'subed-enable-sync-player-to-point
-             #'subed-enable-sync-point-to-player)
-  (map! :map subed-mode-map
-        :localleader
-        (:prefix ("t" . "toggle")
-                 "t" #'subed-toggle-srt-metadata)
-        "v" #'subed-view-plain-text
-        "p" #'subed-mpv-play-media))
 
 (use-package consult-hn
   :ensure (consult-hn :host github :repo "agzam/consult-hn")

@@ -1,4 +1,4 @@
-;;; modules/web-browsing/autoload/media.el -*- lexical-binding: t; -*-
+;;; modules/multimedia/autoload/media.el -*- lexical-binding: t; -*-
 
 ;; The transient's bypass section needs the shared engine at layout-build
 ;; time; requiring it here keeps the prefix self-contained (the engine

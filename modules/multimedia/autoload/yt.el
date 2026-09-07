@@ -1,4 +1,4 @@
-;;; modules/web-browsing/autoload/yt.el -*- lexical-binding: t; -*-
+;;; modules/multimedia/autoload/yt.el -*- lexical-binding: t; -*-
 (defvar yt-extracted-vids ()
   "The list of extracted videos,
 where each item is a k/v pair of the url and filepath.")

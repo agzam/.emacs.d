@@ -54,7 +54,7 @@
        :pattern "\\(youtube\\.com/watch\\|youtu\\.be/\\)"
        :actions (("b b" . media-open)
                  ("RET" . media-open)
-                 ("b t" . youtube-sub-extractor-extract-subs)))
+                 ("b t" . transcripto-embark-transcribe)))
       (github-repo
        :pattern "github\\.com/[^/]+/[^/]+/?$"
        :actions (("b b" . remoto-browse)

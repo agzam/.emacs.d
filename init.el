@@ -107,6 +107,7 @@
     (prisma . "~/GitHub/agzam/prisma.el")
     (wiktionary-bro . "~/GitHub/agzam/wiktionary-bro.el")
     (slacko . "~/GitHub/agzam/slacko.el")
+    (transcripto . "~/GitHub/agzam/transcripto.el")
     (go-jira . "~/GitHub/agzam/go-jira.el")
     (khalendario . "~/GitHub/agzam/khalendario.el")
     ;; the hammerspoon config IS the spacehammer checkout (doom.d symlinked it)
@@ -171,7 +172,7 @@ build-in-place to clone."
          ;; :custom entries appear here as their modules get ported.
          (:custom git) (:custom general) (:custom completion) (:custom embark) (:custom colors)
          (:custom modeline) (:custom tab-bar) (:custom elisp) (:custom search) (:custom dired) (:custom ai)
-         (:custom web-browsing) (:custom tree-sitter) (:custom lsp) (:custom clojure)
+         (:custom web-browsing) (:custom multimedia) (:custom tree-sitter) (:custom lsp) (:custom clojure)
          (:custom python) (:custom lua) (:custom java) (:custom rust)
          (:custom org) (:custom shell)
          (:custom writing) (:custom chat) (:custom yaml) (:custom pdf) (:custom papers))
@@ -220,7 +221,7 @@ build-in-place to clone."
 ;; Mac and Linux), then config.el; config.el may `load!' extra +files.
 ;; The module list itself is explicit, in this exact order.
 (defvar active-modules
-  `(evil bindings lookup git general multiple-cursors completion embark colors modeline tab-bar elisp search dired ai web-browsing tree-sitter lsp clojure python lua java rust org shell writing chat yaml pdf papers
+  `(evil bindings lookup git general multiple-cursors completion embark colors modeline tab-bar elisp search dired ai web-browsing multimedia tree-sitter lsp clojure python lua java rust org shell writing chat yaml pdf papers
     ;; darwin-only tail - Doom's (:if (featurep :system 'macos) ...)
     ;; hammerspoon: monroe glue for the spacehammer fennel nREPL.
     ;; jira after osx: its browse autoload rides the web-browsing + git
@@ -233,6 +234,9 @@ python/lua/java/rust < org keeps the doom! :custom order (python/lua/java/rust
 ride behind lsp and clojure - they call lsp! and the lsp lookup handlers;
 java/rust need no extra deps beyond lsp; fennel's monroe glue now lives in
 the darwin-tail hammerspoon module, autoloaded so order-independent).
+multimedia sits behind web-browsing by affinity, not by need: its
+`media-transient' drives navegosa's media lane at runtime, and both
+sides are deferred, so the position is free.
 pdf trails org and writing: org-noter defers on org, and the
 nov (epub) config rides writing's translate + jinx autoloads.
 papers trails pdf: its citar notes source queries the vulpea db org owns,

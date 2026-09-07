@@ -1,4 +1,4 @@
-;;; tests/web-browsing/media-tests.el --- web-browsing/autoload/media.el specs -*- lexical-binding: t; -*-
+;;; tests/multimedia/media-tests.el --- multimedia/autoload/media.el specs -*- lexical-binding: t; -*-
 
 (require 'test-helper
          (expand-file-name
@@ -9,7 +9,7 @@
 (require 'transient)
 (require 'cl-lib)
 
-(load-module-file "modules/web-browsing/autoload/media.el")
+(load-module-file "modules/multimedia/autoload/media.el")
 
 (defun media-tests--group-plist (node description)
   "Find the group plist carrying DESCRIPTION anywhere in layout NODE.

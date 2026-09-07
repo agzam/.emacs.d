@@ -467,7 +467,7 @@
     (expect (cdr (assoc "b b" yt-actions)) :to-be 'media-open)
     (expect (cdr (assoc "RET" yt-actions)) :to-be 'media-open)
     (expect (cdr (assoc "b t" yt-actions))
-            :to-be 'youtube-sub-extractor-extract-subs))
+            :to-be 'transcripto-embark-transcribe))
 
   (it "binds mpv-open directly nowhere (media-open owns the dispatch)"
     (expect (cl-some (lambda (entry)

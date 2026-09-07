@@ -1621,6 +1621,7 @@ these. Each restores the parked leader rows when its foundation lands.
   237 packages 0 failed/blocked.
 - [2026-08] Elpaca treeless clones broken on macOS too - the :depth 1 override in init.el is now unconditional (was Linux-only). Root cause: with newer Git (Homebrew 2.55.0 here; Linux hit the same bug first, hence the old guard) a `--filter=tree:0` clone exits 0 but never materializes the worktree - index populated, zero files on disk. Elpaca then fails the order with "Unable to find main elisp file" and dependents cascade (cider/dap-mode/vui took down clj-refactor, cider-storm, lsp-java, vulpea-ui, vulpea-journal). bb repair cannot heal this state: the repo is present and fully cloned, just empty - it only re-clones missing repos and rebuilds broken builds. Diagnosis fingerprint: `.local/elpaca/sources/<pkg>` holds only `.git`, `git status --porcelain` there lists every file as `D`, `git config remote.origin.partialclonefilter` prints `tree:0`, and the reflog holds a single `clone:` entry. Recovery: delete `sources/<pkg>` and `builds/<pkg>`, run `bb repair` - it re-clones shallow under the new default. Residual risk: ~200 sources predate the fix and are still tree:0 clones; they load and build fine, but if `bb update` ever fails inside their on-demand tree fetch during merge, the wholesale fix is deleting `.local/elpaca/sources/` and letting `bb repair` re-clone everything at :depth 1.
 - [2026-08] pdf-text added to the pdf module (no Doom counterpart): pdf-view-as-text renders the PDF as reflowed plain text in a pdf-text-mode companion buffer - per-page pdf-info-gettext through the running epdfinfo, elisp unfill (paragraph join, wrap-hyphen absorption, preformatted skip via tunable defvars), form-feed page delimiters drawn as rules, two-way page sync (launcher localleader x lands the text buffer on the viewed page; RET / localleader p jump pdf-view back to the page at point), nov's reading UX as model (visual-line, jinx off, translate keys, q buries). 18 specs in tests/pdf/pdf-text-tests.el cover the pure transforms; case-fold-search is bound nil around the lower-case de-hyphenation guard (batch default t had the character class matching uppercase - the suite caught it). Developed under confinement as a standalone pdf-text module while the global refactor was in flight, merged in once it landed; spec at llm-specs/pdf-text-reflowed-view.md.
+- [2026-09] multimedia module split out of web-browsing and writing (no Doom counterpart): mpv + `media-transient` (autoload/media.el, autoload/mpv.el), subed, and the yt-dlp downloader telega attaches with (autoload/yt.el) now live in modules/multimedia/, suites in tests/multimedia/. web-browsing keeps the browser stack; navegosa stays there and media-transient keeps driving its media lane across the module boundary, the way embark already calls `media-open'. youtube-sub-extractor retired: transcripto.el (~/GitHub/agzam/transcripto.el, local-dev checkout, whisper.cpp behind a backend protocol) replaces it, and its own autoload cookie binds T on embark's file and url maps, so the yt-video "b t" action routes `transcripto-embark-transcribe'. Its build stays in .local/elpaca/builds until pruned by hand - nothing removes a dropped package. subed also gained normal-state =]] / [[= on the text-landing motions (their target stays visible while `subed-toggle-srt-metadata' hides the timestamps) and localleader , t s / , t f for the two player syncs, driven over a real .srt in tests/e2e/subed-sections.el - which caught that subed disables point-to-player sync for `subed-point-sync-delay-after-motion' after every motion, so a toggle spec can only assert the flip, never an absolute state. Also in tests/helper.el: `map-form-key-pairs' treated every keyword as value-taking and so swallowed the key after a state keyword (`:n "]]" #'cmd' parsed as nothing); it now consumes an argument only for the keywords that take one, and `map-form-prefix-pairs' exposes the (KEY . DEFINITION) pairs under a prefix. Verdicts: 1538 specs 0 failed, lint 299/0, smoke 245 packages 0 failed/blocked, e2e 126 cases 0 failed.
 
 * Key clusters
 RETIRED at conclusion (2026-07).  The key audit killed the "binding X
@@ -1929,10 +1930,20 @@ Both reddigg and hnreader re-enabled [2026-07]; the "broken forks" parking
 was defensive - the real CI blocker was a private-repo clone hang, not
 these packages.  reddigg builds in place from its ~/GitHub/agzam checkout;
 hnreader clones the pinned major-mode branch (no local checkout).
+Playback, subtitles and the yt-dlp downloader left for the multimedia
+module [2026-09]; navegosa stays here, media-transient calls it.
+** DONE multimedia
+Split out of web-browsing and writing [2026-09], not a Doom port: mpv,
+media-transient (the mpv/browser/mpris backend switch), subed, yt-dlp
+download, and transcripto (local-dev checkout) as youtube-sub-extractor's
+replacement.  Consumers reach in by autoload - embark ("b b"/"RET"/"b t"
+on youtube urls), org's yt: links, chat's telega attach-video, and
+=C-x m= for the transient.
 ** DONE writing
 Ported (see Decisions log).  jinx, sdcv, mw-thesaurus, google-translate
 (fork, :branch improvements, posframe UI rides the build), define-it,
-separedit, youtube-sub-extractor, occult, prisma (install-only),
+separedit, youtube-sub-extractor (retired 2026-09, transcripto replaces
+it in the multimedia module), occult, prisma (install-only),
 wiktionary-bro (extracted to ~/GitHub/agzam), spacehammer (local-dev via
 ~/.hammerspoon).  abbrev_defs tracked in-module and written in place
 (sanctioned exception #2).  SPC x l / SPC x t trees closed; insert-dash +

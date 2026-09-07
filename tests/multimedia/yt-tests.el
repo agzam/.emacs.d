@@ -1,4 +1,4 @@
-;;; tests/web-browsing/yt-tests.el --- web-browsing/autoload/yt.el specs -*- lexical-binding: t; -*-
+;;; tests/multimedia/yt-tests.el --- multimedia/autoload/yt.el specs -*- lexical-binding: t; -*-
 
 (require 'test-helper
          (expand-file-name
@@ -7,7 +7,7 @@
                                   "helper.el")))
 (require 'buttercup)
 
-(load-module-file "modules/web-browsing/autoload/yt.el")
+(load-module-file "modules/multimedia/autoload/yt.el")
 
 (describe "yt-dlp-command"
   (it "names the gnome keyring and impersonates a browser on Linux"
