@@ -5,63 +5,103 @@
 (defvar ensure-mcp-server--pending-callbacks (make-hash-table :test 'equal)
   "Callbacks waiting for lazy MCP servers to start.")
 
+(defvar mcp-tool-call-timeout 120
+  "Seconds a gptel MCP tool call waits for its server before giving up.
+Also the jsonrpc request timeout each server connection carries, in place
+of `jsonrpc-default-request-timeout'.  Browser, cluster and log-search
+tools routinely work for longer than that default 10 seconds.  A
+connection copies the value when it starts and the guard reads it at each
+call, so a change reaches both only when made before the servers start.")
+
 (defun ensure-mcp-server (server-name callback)
   "Ensure MCP server SERVER-NAME is connected, then call CALLBACK.
-If already connected, CALLBACK fires immediately.  Queues concurrent requests.
-A cached connection whose process died (server crash) is purged and
-restarted instead of being treated as connected."
+CALLBACK receives the live connection, or nil when the start it waited on
+failed - a caller that never hears back leaves whatever waits on the tool
+call stuck forever.  An initialized server answers at once; a start in
+flight queues the callback behind it.  mcp-hub reports a start only when
+it succeeds or throws at once, and a process that dies or fails
+`initialize' reaches neither, so such a start shows up here as a
+connection in error state: the next call answers its waiters nil, purges
+it and starts over."
   (require 'mcp-hub)
-  (cond
-   ;; connected and the process is actually alive
-   ((when-let* ((conn (gethash server-name mcp-server-connections)))
-      (jsonrpc-running-p conn))
-    (funcall callback))
-   ;; currently starting - queue
-   ((gethash server-name ensure-mcp-server--pending-callbacks)
-    (push callback (gethash server-name ensure-mcp-server--pending-callbacks)))
-   ;; start it, purging any dead cached connection first
-   (t
-    (when (gethash server-name mcp-server-connections)
-      (ignore-errors (mcp-stop-server server-name))
-      (remhash server-name mcp-server-connections))
-    (puthash server-name (list callback) ensure-mcp-server--pending-callbacks)
-    (message "Starting MCP server %s..." server-name)
-    (mcp-hub-start-all-server
-     (lambda ()
-       (let ((cbs (gethash server-name ensure-mcp-server--pending-callbacks)))
-         (remhash server-name ensure-mcp-server--pending-callbacks)
-         (if (gethash server-name mcp-server-connections)
-             (progn
-               (message "MCP server %s ready" server-name)
-               (dolist (cb cbs) (funcall cb)))
-           (message "MCP server %s failed to start" server-name))))
-     (list server-name)))))
+  (let ((conn (gethash server-name mcp-server-connections)))
+    (cond
+     ;; initialized and the process is actually alive
+     ((and conn (eq (mcp--status conn) 'connected) (jsonrpc-running-p conn))
+      (funcall callback conn))
+     ;; a start is in flight - queue behind it
+     ((and (gethash server-name ensure-mcp-server--pending-callbacks)
+           (mcp--server-running-p server-name))
+      (push callback (gethash server-name ensure-mcp-server--pending-callbacks)))
+     ;; start it, answering the waiters of a failed start and purging its
+     ;; connection first
+     (t
+      (dolist (cb (gethash server-name ensure-mcp-server--pending-callbacks))
+        (funcall cb nil))
+      (when conn
+        (ignore-errors (mcp-stop-server server-name))
+        (remhash server-name mcp-server-connections))
+      (puthash server-name (list callback) ensure-mcp-server--pending-callbacks)
+      (message "Starting MCP server %s..." server-name)
+      (mcp-hub-start-all-server
+       (lambda ()
+         (let ((cbs (gethash server-name ensure-mcp-server--pending-callbacks))
+               (started (gethash server-name mcp-server-connections)))
+           (remhash server-name ensure-mcp-server--pending-callbacks)
+           (message (if started "MCP server %s ready"
+                      "MCP server %s failed to start")
+                    server-name)
+           (dolist (cb cbs) (funcall cb started))))
+       (list server-name))))))
 
 (defun lazy-mcp-tool-fn (server-name tool-name arg-names)
   "Create an async tool function that lazily starts SERVER-NAME for TOOL-NAME.
-ARG-NAMES is a list of argument name strings for reconstructing the MCP plist."
+ARG-NAMES is a list of argument name strings for reconstructing the MCP plist.
+The returned function answers gptel exactly once - with the result, the
+server's error, or a timeout report.  `mcp-async-call-tool' hands jsonrpc
+a timeout but no timeout function, and an expired jsonrpc request drops
+its continuation silently, so a slow server would otherwise leave the
+tool call pending and the whole gptel request with it."
   (lambda (callback &rest args)
-    (ensure-mcp-server
-     server-name
-     (lambda ()
-       ;; Omitted optional args arrive as nil; elisp nil serializes to {}
-       ;; in JSON-RPC, which servers reject. Drop them like other MCP
-       ;; clients do. Explicit false is :json-false, so it survives.
-       (let ((mcp-args (cl-mapcan
-                        (lambda (name val)
-                          (when val
-                            (list (intern (concat ":" name)) val)))
-                        arg-names args)))
-         (mcp-async-call-tool
-          (gethash server-name mcp-server-connections)
-          tool-name
-          mcp-args
-          (lambda (res)
-            (funcall callback (mcp--parse-tool-call-result res)))
-          (lambda (code message)
-            (funcall callback
-                     (format "MCP tool %s error: [%s] %s"
-                             tool-name code message)))))))))
+    (let* ((answered nil)
+           (timer nil)
+           (timeout mcp-tool-call-timeout)
+           (answer (lambda (result)
+                     (unless answered
+                       (setq answered t)
+                       (when timer (cancel-timer timer))
+                       (funcall callback result)))))
+      (setq timer
+            (run-at-time
+             timeout nil
+             (lambda ()
+               (funcall answer
+                        (format "MCP tool %s error: %s did not answer in %s seconds"
+                                tool-name server-name timeout)))))
+      (ensure-mcp-server
+       server-name
+       (lambda (conn)
+         (if (not conn)
+             (funcall answer (format "MCP tool %s error: server %s did not start"
+                                     tool-name server-name))
+           ;; Omitted optional args arrive as nil; elisp nil serializes to {}
+           ;; in JSON-RPC, which servers reject. Drop them like other MCP
+           ;; clients do. Explicit false is :json-false, so it survives.
+           (let ((mcp-args (cl-mapcan
+                            (lambda (name val)
+                              (when val
+                                (list (intern (concat ":" name)) val)))
+                            arg-names args)))
+             (mcp-async-call-tool
+              conn
+              tool-name
+              mcp-args
+              (lambda (res)
+                (funcall answer (mcp--parse-tool-call-result res)))
+              (lambda (code message)
+                (funcall answer
+                         (format "MCP tool %s error: [%s] %s"
+                                 tool-name code message)))))))))))
 
 (defconst mcp-tool-def-re
   (let ((meta "\\(?:\\^[^][ \t\n(){}]+[ \t]+\\)*"))
@@ -307,7 +347,8 @@ unguarded error would drop every server behind the offending one."
   "Read MCP servers from ECA config.json, return `mcp-hub-servers' alist.
 Parses CONFIG-FILE, by default ~/.config/eca/config.json (shared with ECA
 and Claude Code CLI), and converts mcpServers entries to the format
-expected by `mcp-hub-servers'."
+expected by `mcp-hub-servers'.  Every server carries
+`mcp-tool-call-timeout' as its jsonrpc request timeout."
   (require 'json)
   (when-let* ((config-file (expand-file-name
                             (or config-file "~/.config/eca/config.json")))
@@ -322,7 +363,8 @@ expected by `mcp-hub-servers'."
      (let* ((name (symbol-name (car entry)))
             (command (alist-get 'command props))
             (env-alist (alist-get 'env props))
-            (result (list name :command command)))
+            (result (list name :command command
+                          :timeout mcp-tool-call-timeout)))
        (when env-alist
          (nconc result
                 (list :env

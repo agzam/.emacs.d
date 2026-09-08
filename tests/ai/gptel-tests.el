@@ -13,9 +13,12 @@
 (load-module-file "modules/ai/autoload/gptel.el")
 
 ;; Owned by mcp-hub and gptel, neither installed here; declared so the specs
-;; can bind them dynamically for the functions that read them.
+;; can bind them dynamically for the functions that read them.  The feature
+;; is provided so `ensure-mcp-server' does not try to load it.
 (defvar mcp-hub-servers)
+(defvar mcp-server-connections)
 (defvar gptel-tools)
+(provide 'mcp-hub)
 
 (describe "mcp-servers-from-eca-config"
   :var (config-file)
@@ -30,10 +33,11 @@
     (delete-file config-file))
 
   (it "converts enabled servers to the mcp-hub-servers shape"
-    (let ((servers (mcp-servers-from-eca-config config-file)))
+    (let* ((mcp-tool-call-timeout 90)
+           (servers (mcp-servers-from-eca-config config-file)))
       (expect (length servers) :to-equal 2)
       (expect (assoc "slack" servers)
-              :to-equal '("slack" :command "/x/slack.bb"))))
+              :to-equal '("slack" :command "/x/slack.bb" :timeout 90))))
 
   (it "skips disabled servers"
     (expect (assoc "dead" (mcp-servers-from-eca-config config-file))
@@ -334,6 +338,135 @@
   (it "returns nil for unreadable or non-string commands"
     (expect (mcp-tool-defs-from-source "/nonexistent/server.bb") :to-be nil)
     (expect (mcp-tool-defs-from-source nil) :to-be nil)))
+
+(describe "ensure-mcp-server"
+  :var (got)
+  (before-each
+    (setq got 'unset
+          mcp-server-connections (make-hash-table :test 'equal))
+    (clrhash ensure-mcp-server--pending-callbacks)
+    (spy-on 'message))
+
+  (it "hands the callback a live connection"
+    (puthash "srv" 'conn mcp-server-connections)
+    (spy-on 'mcp--status :and-return-value 'connected)
+    (spy-on 'jsonrpc-running-p :and-return-value t)
+    (ensure-mcp-server "srv" (lambda (conn) (setq got conn)))
+    (expect got :to-be 'conn))
+
+  ;; mcp.el registers the connection before `initialize' completes; a call
+  ;; sent in that window reaches the server before its handshake ends
+  (it "queues behind a start that is still initializing"
+    (puthash "srv" 'conn mcp-server-connections)
+    (puthash "srv" (list #'ignore) ensure-mcp-server--pending-callbacks)
+    (spy-on 'mcp--status :and-return-value 'init)
+    (spy-on 'mcp--server-running-p :and-return-value t)
+    (spy-on 'mcp-hub-start-all-server)
+    (ensure-mcp-server "srv" (lambda (conn) (setq got conn)))
+    (expect got :to-be 'unset)
+    (expect (length (gethash "srv" ensure-mcp-server--pending-callbacks))
+            :to-equal 2)
+    (expect 'mcp-hub-start-all-server :not :to-have-been-called))
+
+  ;; mcp-hub never reports a process that started and then died or failed
+  ;; `initialize'; its waiters would otherwise queue for the whole session
+  (it "answers the waiters of a failed start nil and starts over"
+    (puthash "srv" 'dead mcp-server-connections)
+    (puthash "srv" (list (lambda (conn) (setq got conn)))
+             ensure-mcp-server--pending-callbacks)
+    (spy-on 'mcp--status :and-return-value 'error)
+    (spy-on 'mcp--server-running-p :and-return-value nil)
+    (spy-on 'mcp-stop-server)
+    (spy-on 'mcp-hub-start-all-server)
+    (ensure-mcp-server "srv" #'ignore)
+    (expect got :to-be nil)
+    (expect (gethash "srv" mcp-server-connections) :to-be nil)
+    (expect (gethash "srv" ensure-mcp-server--pending-callbacks)
+            :to-equal (list #'ignore))
+    (expect 'mcp-hub-start-all-server :to-have-been-called))
+
+  ;; a callback that never fires leaves the tool call, and the request
+  ;; waiting on it, pending forever
+  (it "hands the callback nil when the server does not start"
+    (spy-on 'mcp-hub-start-all-server :and-call-fake
+            (lambda (callback _names) (funcall callback)))
+    (ensure-mcp-server "srv" (lambda (conn) (setq got conn)))
+    (expect got :to-be nil))
+
+  (it "hands every queued callback the connection the start produced"
+    (spy-on 'mcp-hub-start-all-server :and-call-fake
+            (lambda (callback _names)
+              (puthash "srv" 'conn mcp-server-connections)
+              (funcall callback)))
+    (let (seen)
+      (ensure-mcp-server "srv" (lambda (conn) (push conn seen)))
+      (expect seen :to-equal '(conn)))))
+
+(describe "lazy-mcp-tool-fn"
+  :var (answers call-args)
+  (before-each
+    (setq answers nil call-args nil)
+    ;; mcp.el is absent here; stand in for the pieces the tool fn drives
+    (spy-on 'mcp--parse-tool-call-result :and-call-fake #'identity)
+    (spy-on 'ensure-mcp-server :and-call-fake
+            (lambda (_name callback) (funcall callback 'conn)))
+    (spy-on 'mcp-async-call-tool :and-call-fake
+            (lambda (_conn _tool args success-fn _error-fn)
+              (setq call-args args)
+              (funcall success-fn "result"))))
+
+  (it "answers with the tool result"
+    (funcall (lazy-mcp-tool-fn "srv" "tool" '("query"))
+             (lambda (r) (push r answers)) "hi")
+    (expect answers :to-equal '("result"))
+    (expect call-args :to-equal '(:query "hi")))
+
+  ;; nil serializes to {} in JSON-RPC, which servers reject
+  (it "drops the arguments gptel left out"
+    (funcall (lazy-mcp-tool-fn "srv" "tool" '("query" "limit"))
+             #'ignore nil 20)
+    (expect call-args :to-equal '(:limit 20)))
+
+  (it "answers with the server's error"
+    (spy-on 'mcp-async-call-tool :and-call-fake
+            (lambda (_conn _tool _args _success-fn error-fn)
+              (funcall error-fn 42 "boom")))
+    (funcall (lazy-mcp-tool-fn "srv" "tool" nil) (lambda (r) (push r answers)))
+    (expect (car answers) :to-match "\\[42\\] boom"))
+
+  (it "answers when the server never starts"
+    (spy-on 'ensure-mcp-server :and-call-fake
+            (lambda (_name callback) (funcall callback nil)))
+    (funcall (lazy-mcp-tool-fn "srv" "tool" nil) (lambda (r) (push r answers)))
+    (expect (car answers) :to-match "did not start"))
+
+  ;; jsonrpc drops a timed-out request's continuation and calls nothing
+  ;; back, so an unanswered call would leave gptel waiting forever
+  (it "answers a call the server never responds to"
+    (spy-on 'mcp-async-call-tool)
+    (let ((mcp-tool-call-timeout 0.01))
+      (funcall (lazy-mcp-tool-fn "srv" "tool" nil) (lambda (r) (push r answers)))
+      (expect answers :to-be nil)
+      (sleep-for 0.1)
+      (expect (car answers) :to-match "did not answer")))
+
+  (it "answers once when the result lands after the timeout"
+    (let (late-success)
+      (spy-on 'mcp-async-call-tool :and-call-fake
+              (lambda (_conn _tool _args success-fn _error-fn)
+                (setq late-success success-fn)))
+      (let ((mcp-tool-call-timeout 0.01))
+        (funcall (lazy-mcp-tool-fn "srv" "tool" nil)
+                 (lambda (r) (push r answers))))
+      (sleep-for 0.1)
+      (funcall late-success "late")
+      (expect (length answers) :to-equal 1)
+      (expect (car answers) :to-match "did not answer")))
+
+  (it "leaves no timer behind once it answers"
+    (let ((before (length timer-list)))
+      (funcall (lazy-mcp-tool-fn "srv" "tool" nil) (lambda (r) (push r answers)))
+      (expect (length timer-list) :to-equal before))))
 
 (describe "register-mcp-tools-lazy"
   :var (dir registered descriptions server)
