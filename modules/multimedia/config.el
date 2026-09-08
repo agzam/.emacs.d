@@ -40,5 +40,6 @@
                  :desc "metadata" "t" #'subed-toggle-srt-metadata
                  :desc "seek player to point" "s" #'subed-toggle-sync-player-to-point
                  :desc "point follows player" "f" #'subed-toggle-sync-point-to-player)
+        "SPC" #'subed-mpv-toggle-pause
         "v" #'subed-view-plain-text
         "p" #'subed-mpv-play-media))
