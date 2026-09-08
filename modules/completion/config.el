@@ -199,6 +199,8 @@
        "  ")
      cand))
 
+  (minibuffer-depth-indicate-mode 1)
+
   (map! :map vertico-map
         (:prefix ";"
          "." #'evil-insert-state
@@ -221,7 +223,6 @@
          "a" #'marginalia-cycle
          :desc "insert ;" "SPC" (cmd! (insert ";")))
         "DEL" #'delete-backward-char
-        "C-h" #'vertico-directory-delete-word
         "M-h" #'vertico-grid-left
         "M-l" #'vertico-grid-right
         "M-j" #'vertico-next
