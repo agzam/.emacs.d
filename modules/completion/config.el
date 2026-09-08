@@ -334,7 +334,14 @@
    :preview-key 'any)
 
   (setopt consult-preview-key "C-SPC"
-          consult-narrow-key "<")
+          consult-narrow-key "<"
+          ;; Async delays dominate perceived search latency: rg fills a screenful in ~50ms
+          ;; and consult kills it on the next keystroke, so consult's 0.2/0.5/0.2 is mostly
+          ;; idle waiting. The debounce still absorbs mid-word keystrokes, and the refresh
+          ;; delay stays above zero: at zero consult redisplays on every arriving chunk.
+          consult-async-input-debounce 0.1
+          consult-async-input-throttle 0.15
+          consult-async-refresh-delay 0.05)
   (consult-customize
    search-buffer
    :preview-key (list "C-SPC" :debounce 0.5 'any))
