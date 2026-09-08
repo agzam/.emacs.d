@@ -18,11 +18,13 @@ call, so a change reaches both only when made before the servers start.")
 CALLBACK receives the live connection, or nil when the start it waited on
 failed - a caller that never hears back leaves whatever waits on the tool
 call stuck forever.  An initialized server answers at once; a start in
-flight queues the callback behind it.  mcp-hub reports a start only when
-it succeeds or throws at once, and a process that dies or fails
-`initialize' reaches neither, so such a start shows up here as a
-connection in error state: the next call answers its waiters nil, purges
-it and starts over."
+flight queues the callback behind it.  The start goes through
+`mcp-connect-server' directly, with this function's own callbacks:
+`mcp-hub-start-all-server' reports only a start that succeeds or throws at
+once, and hands a process that dies or fails `initialize' to a callback
+that refreshes the hub buffer and nothing else.  A start that still ends
+without a report shows up here as a connection in error state: the next
+call answers its waiters nil, purges it and starts over."
   (require 'mcp-hub)
   (let ((conn (gethash server-name mcp-server-connections)))
     (cond
@@ -43,16 +45,27 @@ it and starts over."
         (remhash server-name mcp-server-connections))
       (puthash server-name (list callback) ensure-mcp-server--pending-callbacks)
       (message "Starting MCP server %s..." server-name)
-      (mcp-hub-start-all-server
-       (lambda ()
-         (let ((cbs (gethash server-name ensure-mcp-server--pending-callbacks))
-               (started (gethash server-name mcp-server-connections)))
-           (remhash server-name ensure-mcp-server--pending-callbacks)
-           (message (if started "MCP server %s ready"
-                      "MCP server %s failed to start")
-                    server-name)
-           (dolist (cb cbs) (funcall cb started))))
-       (list server-name))))))
+      ;; the first report settles the start; mcp.el can report one
+      ;; failure twice
+      (let ((settle (lambda (started)
+                      (when-let* ((cbs (gethash server-name
+                                                ensure-mcp-server--pending-callbacks)))
+                        (remhash server-name ensure-mcp-server--pending-callbacks)
+                        (message (if started "MCP server %s ready"
+                                   "MCP server %s failed to start")
+                                 server-name)
+                        (dolist (cb cbs) (funcall cb started))))))
+        (condition-case err
+            (apply #'mcp-connect-server server-name
+                   :initial-callback settle
+                   :error-callback (lambda (_code _message) (funcall settle nil))
+                   (cdr (assoc server-name mcp-hub-servers)))
+          (error (message "MCP server %s: %s"
+                          server-name (error-message-string err))))
+        ;; mcp-connect-server registers the connection before anything
+        ;; asynchronous happens; no entry means nothing was started
+        (unless (gethash server-name mcp-server-connections)
+          (funcall settle nil)))))))
 
 (defun lazy-mcp-tool-fn (server-name tool-name arg-names)
   "Create an async tool function that lazily starts SERVER-NAME for TOOL-NAME.

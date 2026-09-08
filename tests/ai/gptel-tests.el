@@ -343,9 +343,18 @@
   :var (got)
   (before-each
     (setq got 'unset
-          mcp-server-connections (make-hash-table :test 'equal))
+          mcp-server-connections (make-hash-table :test 'equal)
+          mcp-hub-servers '(("srv" :command "/x/srv.bb" :timeout 90)))
     (clrhash ensure-mcp-server--pending-callbacks)
     (spy-on 'message))
+
+  ;; a fake mcp-connect-server: registers the connection like the real one,
+  ;; then hands the plist to REPORT so a spec can fire the callback it wants
+  (cl-defun stub-mcp-connect-server (&optional (report #'ignore))
+    (spy-on 'mcp-connect-server :and-call-fake
+            (lambda (name &rest plist)
+              (puthash name 'conn mcp-server-connections)
+              (funcall report plist))))
 
   (it "hands the callback a live connection"
     (puthash "srv" 'conn mcp-server-connections)
@@ -361,46 +370,95 @@
     (puthash "srv" (list #'ignore) ensure-mcp-server--pending-callbacks)
     (spy-on 'mcp--status :and-return-value 'init)
     (spy-on 'mcp--server-running-p :and-return-value t)
-    (spy-on 'mcp-hub-start-all-server)
+    (stub-mcp-connect-server)
     (ensure-mcp-server "srv" (lambda (conn) (setq got conn)))
     (expect got :to-be 'unset)
     (expect (length (gethash "srv" ensure-mcp-server--pending-callbacks))
             :to-equal 2)
-    (expect 'mcp-hub-start-all-server :not :to-have-been-called))
+    (expect 'mcp-connect-server :not :to-have-been-called))
 
-  ;; mcp-hub never reports a process that started and then died or failed
-  ;; `initialize'; its waiters would otherwise queue for the whole session
-  (it "answers the waiters of a failed start nil and starts over"
+  (it "starts the server from its configured spec with its own callbacks"
+    (stub-mcp-connect-server)
+    (ensure-mcp-server "srv" #'ignore)
+    (let ((args (spy-calls-args-for 'mcp-connect-server 0)))
+      (expect (car args) :to-equal "srv")
+      (expect (plist-get (cdr args) :command) :to-equal "/x/srv.bb")
+      (expect (plist-get (cdr args) :timeout) :to-equal 90)
+      (expect (functionp (plist-get (cdr args) :initial-callback)) :to-be-truthy)
+      (expect (functionp (plist-get (cdr args) :error-callback)) :to-be-truthy)))
+
+  (it "hands the callback the connection once initialize completes"
+    (stub-mcp-connect-server
+     (lambda (plist) (funcall (plist-get plist :initial-callback) 'conn)))
+    (ensure-mcp-server "srv" (lambda (conn) (setq got conn)))
+    (expect got :to-be 'conn)
+    (expect (gethash "srv" ensure-mcp-server--pending-callbacks) :to-be nil))
+
+  ;; mcp.el reports a process that dies, or fails initialize, through the
+  ;; error callback within seconds; a waiter that never hears leaves the
+  ;; tool call, and the request behind it, pending for the whole timeout
+  (it "hands the callback nil as soon as the start fails"
+    (stub-mcp-connect-server
+     (lambda (plist)
+       (funcall (plist-get plist :error-callback) -1 "Process start error")))
+    (ensure-mcp-server "srv" (lambda (conn) (setq got conn)))
+    (expect got :to-be nil)
+    (expect (gethash "srv" ensure-mcp-server--pending-callbacks) :to-be nil))
+
+  (it "hands the callback nil when the process cannot be created"
+    (spy-on 'mcp-connect-server :and-call-fake
+            (lambda (&rest _)
+              (signal 'file-missing '("Searching for program" "No such file or directory"))))
+    (ensure-mcp-server "srv" (lambda (conn) (setq got conn)))
+    (expect got :to-be nil))
+
+  ;; mcp-connect-server returns without registering anything for a server
+  ;; it cannot describe - no command, an unparsable url
+  (it "hands the callback nil when nothing was started"
+    (setq mcp-hub-servers nil)
+    (spy-on 'mcp-connect-server)
+    (ensure-mcp-server "srv" (lambda (conn) (setq got conn)))
+    (expect got :to-be nil))
+
+  (it "settles a start once when it is reported twice"
+    (stub-mcp-connect-server
+     (lambda (plist)
+       (funcall (plist-get plist :error-callback) -1 "first")
+       (funcall (plist-get plist :error-callback) -1 "second")))
+    (let ((reports 0))
+      (ensure-mcp-server "srv" (lambda (_) (cl-incf reports)))
+      (expect reports :to-equal 1)))
+
+  (it "hands every queued callback the connection the start produced"
+    (let (ready seen)
+      (stub-mcp-connect-server
+       (lambda (plist) (setq ready (plist-get plist :initial-callback))))
+      (ensure-mcp-server "srv" (lambda (conn) (push (list 1 conn) seen)))
+      ;; second call while initialize is in flight
+      (spy-on 'mcp--status :and-return-value 'init)
+      (spy-on 'mcp--server-running-p :and-return-value t)
+      (ensure-mcp-server "srv" (lambda (conn) (push (list 2 conn) seen)))
+      (expect seen :to-be nil)
+      (funcall ready 'conn)
+      (expect seen :to-have-same-items-as '((1 conn) (2 conn)))))
+
+  ;; a start that ends without any report - mcp.el stops a server whose
+  ;; protocol version it rejects and tells nobody - leaves the connection
+  ;; in error state; the next call must not queue behind it forever
+  (it "answers the waiters of an unreported failed start nil and starts over"
     (puthash "srv" 'dead mcp-server-connections)
     (puthash "srv" (list (lambda (conn) (setq got conn)))
              ensure-mcp-server--pending-callbacks)
     (spy-on 'mcp--status :and-return-value 'error)
     (spy-on 'mcp--server-running-p :and-return-value nil)
     (spy-on 'mcp-stop-server)
-    (spy-on 'mcp-hub-start-all-server)
+    (stub-mcp-connect-server)
     (ensure-mcp-server "srv" #'ignore)
     (expect got :to-be nil)
-    (expect (gethash "srv" mcp-server-connections) :to-be nil)
+    (expect 'mcp-stop-server :to-have-been-called-with "srv")
+    (expect 'mcp-connect-server :to-have-been-called)
     (expect (gethash "srv" ensure-mcp-server--pending-callbacks)
-            :to-equal (list #'ignore))
-    (expect 'mcp-hub-start-all-server :to-have-been-called))
-
-  ;; a callback that never fires leaves the tool call, and the request
-  ;; waiting on it, pending forever
-  (it "hands the callback nil when the server does not start"
-    (spy-on 'mcp-hub-start-all-server :and-call-fake
-            (lambda (callback _names) (funcall callback)))
-    (ensure-mcp-server "srv" (lambda (conn) (setq got conn)))
-    (expect got :to-be nil))
-
-  (it "hands every queued callback the connection the start produced"
-    (spy-on 'mcp-hub-start-all-server :and-call-fake
-            (lambda (callback _names)
-              (puthash "srv" 'conn mcp-server-connections)
-              (funcall callback)))
-    (let (seen)
-      (ensure-mcp-server "srv" (lambda (conn) (push conn seen)))
-      (expect seen :to-equal '(conn)))))
+            :to-equal (list #'ignore))))
 
 (describe "lazy-mcp-tool-fn"
   :var (answers call-args)
