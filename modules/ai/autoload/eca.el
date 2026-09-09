@@ -162,21 +162,13 @@ against re-adding a remap that would stack multiplicatively."
           (setq latest b))))))
 
 ;;;###autoload
-(define-minor-mode eca-workspaces-mode
-  "Minor mode for keybindings in the eca-workspaces buffer."
-  :keymap (make-sparse-keymap))
-
-;;;###autoload
 (defun eca-toggle-workspaces ()
   "Toggle the eca-workspaces side window."
   (interactive)
   (if-let* ((buf (get-buffer eca-workspaces-buffer-name))
             (win (get-buffer-window buf t)))
       (delete-window win)
-    (eca-workspaces)
-    (when-let* ((buf (get-buffer eca-workspaces-buffer-name)))
-      (with-current-buffer buf
-        (eca-workspaces-mode 1)))))
+    (eca-workspaces)))
 
 ;;;###autoload
 (defun eca-reauth ()
