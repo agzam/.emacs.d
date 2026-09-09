@@ -384,10 +384,17 @@
         (apply fn args)))
 
     (defadvice! occult-evil-open-folds-a (fn &rest args)
-      "Also reveal all occult folds."
+      "Also reveal all occult folds.
+`evil-fold-action' refuses with a `user-error' in a buffer where no
+folding minor mode is on, and that refusal must not leave occult folds
+hidden."
       :around #'(evil-open-folds org-open-all-folds)
-      (apply fn args)
-      (occult-reveal-all))
+      (if (cl-find-if (lambda (o) (overlay-get o 'occult))
+                      (overlays-in (point-min) (point-max)))
+          (progn
+            (occult-reveal-all)
+            (condition-case nil (apply fn args) (user-error nil)))
+        (apply fn args)))
 
     (defadvice! occult-evil-toggle-fold-a (fn &rest args)
       "Delegate to occult-toggle when applicable."
