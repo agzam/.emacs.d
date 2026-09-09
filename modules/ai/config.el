@@ -191,6 +191,9 @@
   ;; Save a readable copy of each chat after every finished turn.
   (add-hook 'eca-chat-finished-hook #'eca-archive-chat)
 
+  ;; Fold the history above the newest turn as the chat grows.
+  (add-hook 'eca-chat-finished-hook #'eca-chat-fold-h)
+
   ;; Let later capfs (cape-file, etc.) run when eca has no candidates.
   (defadvice! eca-chat-capf-non-exclusive-a (result)
     :filter-return #'eca-chat-completion-at-point
@@ -223,6 +226,9 @@
             :n "M-n" #'eca-chat-go-to-next-expandable-block
             :n "<tab>"  #'eca-chat-toggle-expandable-block
             :n "TAB" #'eca-chat-toggle-expandable-block
+            ;; The counterpart is `zr', which occult already advises into
+            ;; `occult-reveal-all'.
+            :n "zm" #'eca-chat-fold
             :n ",," #'eca-transient-menu
             (:localleader
              "n" #'tab-line-switch-to-next-tab
