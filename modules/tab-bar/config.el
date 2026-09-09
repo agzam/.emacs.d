@@ -15,7 +15,8 @@
           tab-bar-auto-width-max '((150) 10)
           ;; ring capacity for window-undo/window-redo; stock default of 10
           ;; is too shallow for a day of window juggling
-          tab-bar-history-limit 100)
+          tab-bar-history-limit 100
+          tab-bar-select-restore-windows nil)
 
   (add-hook! 'tab-bar-tab-name-format-functions
              #'tab-bar-fmt-show-index-fn)
