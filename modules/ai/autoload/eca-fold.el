@@ -75,8 +75,16 @@ is a plain occult fold: its first line stays visible, point can rest
 on it, and occult's keymap and `occult-edit-region' work on it.  Safe
 to run again: occult absorbs the folds already there.  `occult-reveal-all'
 opens them all, and evil's \\<evil-normal-state-map>\\[evil-open-folds] is
-advised to do so."
+advised to do so.
+
+A fold summary stops before the status symbol of the tool call it
+starts with, so the checkmark and the time after it stay on the line
+but out of the fold.  The setting is buffer-local because the folds
+`eca-chat-refold-after-protect-a' rebuilds are made outside this
+command."
   (interactive)
+  (setq-local occult-summary-end-regexp
+              (concat " " (regexp-quote eca-chat-mcp-tool-call-success-symbol)))
   (let ((folded 0))
     (dolist (run (eca-chat--fold-runs))
       (when (occult-hide-region (car run) (cdr run))

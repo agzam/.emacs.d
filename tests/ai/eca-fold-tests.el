@@ -12,6 +12,10 @@
 (with-fake-feature 'occult
   (load-module-file "modules/ai/autoload/eca-fold.el"))
 
+;; eca is absent too, and the fold command reads the symbol eca puts after
+;; a finished tool call's label.
+(defvar eca-chat-mcp-tool-call-success-symbol "✅")
+
 ;; eca's geometry: the label overlay is empty and created before the label
 ;; is inserted, so it sits on the label's first character; the content
 ;; overlay starts at the line after the label and ends at the start of the
@@ -161,7 +165,25 @@ deactivates the mark and returns t."
       (push-mark (point-min) t t)
       (fold-test-hiding hidden
         (eca-chat-fold)
-        (expect mark-active :to-be-truthy)))))
+        (expect mark-active :to-be-truthy))))
+
+  (it "ends the fold summaries before a tool call's status symbol"
+    (with-temp-buffer
+      (fold-test-chat)
+      (fold-test-hiding hidden
+        (eca-chat-fold))
+      (expect (local-variable-p 'occult-summary-end-regexp) :to-be-truthy)
+      (let ((label "Reading spec.md ✅ 0s"))
+        (expect (substring label 0 (string-match occult-summary-end-regexp label))
+                :to-equal "Reading spec.md"))))
+
+  (it "follows eca's own success symbol"
+    (with-temp-buffer
+      (fold-test-chat)
+      (let ((eca-chat-mcp-tool-call-success-symbol "OK"))
+        (fold-test-hiding hidden
+          (eca-chat-fold)))
+      (expect occult-summary-end-regexp :to-equal " OK"))))
 
 (describe "eca-chat-fold-h"
   (it "does nothing when automatic folding is off"
