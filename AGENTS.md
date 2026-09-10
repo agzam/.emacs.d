@@ -10,9 +10,16 @@ The daily-driver config: Elpaca + vendored Doom macro layer. Lives at `~/.emacs.
 ## Naming: plain names, no invented prefixes
 
 - Never name functions/variables with Doom's `+prefix` or `+module/fn` conventions (`+corfu-quit`, `+default/search-project`). That style marks "user config vs package" for novices; it is noise here.
+  - Exception for the -a and -h suffixes in the names of advising and hook functions. 
 - No made-up namespace prefixes either (`lab-`, `my-`, project names). This is a personal config; the global namespace is fine.
-- Plain descriptive names: `search-in-project`, `alternate-buffer`, `window-cleanup`. Never any `+` prefix or suffix on symbols; when a name would shadow the package function it wraps, pick a distinct descriptive name (`dired-remove-subtree` wrapping `dired-subtree-remove`). Hook functions keep the `-h` suffix, advice `-a`.
+- Plain descriptive names: `search-in-project`, `alternate-buffer`, `window-cleanup`. Never any `+` prefix or suffix on symbols; when a name would shadow the package function it wraps, pick a distinct descriptive name (`dired-remove-subtree` wrapping `dired-subtree-remove`). 
 - When porting Doom-named functions, rename them and update every reference (bindings tree, `consult-customize` lists, hooks, advice). Files vendored from Doom itself (see below) are exempt until their planned rename sweep.
+
+## Comments and docstrings
+
+- Do not complicate docstrings, strive to keep them one-line explainers.
+- Docstrings should be checkdoc compliant.
+- Do not write complicated comments unnecessarily - elisp code is self-documenting and introspectable, in most cases deep-dive explanations are just noise.
 
 ## Nothing writes into the tracked tree
 
