@@ -35,10 +35,11 @@
             '(("C-x g c" . eca)
               ("C-x g r" . eca-chat-resume)
               ("C-x g a" . eca-continue-from-file)
-              ;; doom mirrors the C-x prefix onto the leader
-              ("SPC x g c" . eca)
-              ("SPC x g r" . eca-chat-resume)
-              ("SPC x g a" . eca-continue-from-file)))))
+              ;; the leader keys eca apart from gptel, under its own prefix
+              ("SPC x e n" . eca)
+              ("SPC x e r" . eca-chat-resume)
+              ("SPC x e a" . eca-continue-from-file)
+              ("SPC x e e" . eca-toggle-workspaces)))))
 
 (defun eca-continue-e2e--guards ()
   "The guards are attached to the commands they protect."
