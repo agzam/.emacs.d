@@ -403,7 +403,10 @@ hidden."
               (cl-find-if (lambda (o) (overlay-get o 'occult))
                           (overlays-at (point))))
           (occult-toggle)
-        (apply fn args)))))
+        (apply fn args))))
+
+  :config
+  (setopt occult-indicator "⧟ "))
 
 (use-package prisma
   :ensure (prisma :host github :repo "agzam/prisma.el")
