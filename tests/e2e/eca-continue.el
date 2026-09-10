@@ -52,6 +52,21 @@
     (advice-member-p 'eca-chat-resume-in-columns-a 'eca-chat-resume)
     'installed 'installed)))
 
+;; Folding a chat is the reader's call, never the chat's.  A batch suite
+;; cannot see this: config.el runs only in a booted config, and the hook is
+;; where an eager fold would hide.
+(defun eca-continue-e2e--folding-is-manual ()
+  "Nothing folds a chat on its own."
+  (list
+   (eca-continue-e2e--equal
+    "eca-chat-finished-hook does not fold"
+    (seq-filter (lambda (fn)
+                  (string-match-p "fold" (format "%s" fn)))
+                eca-chat-finished-hook)
+    nil)
+   (eca-continue-e2e--equal "eca-chat-fold is a command"
+                            (commandp 'eca-chat-fold) t)))
+
 ;; Each of these is faked in tests/ai/eca-tests.el.  Asserting they exist,
 ;; here, is what stops those fakes from drifting into fiction.
 (defun eca-continue-e2e--api ()
@@ -127,6 +142,7 @@
   (append (eca-continue-e2e--bindings)
           (eca-continue-e2e--autoload)
           (eca-continue-e2e--guards)
+          (eca-continue-e2e--folding-is-manual)
           (eca-continue-e2e--api)
           (eca-continue-e2e--picker)))
 

@@ -40,6 +40,14 @@ With CONTENT the block is expanded and shows it."
 
 (defun fold-test-prompt (label) (fold-test-block label t))
 
+(defun fold-test-injected ()
+  "Insert the user message a finished background job arrives as.
+eca gives it the same overlay properties as a typed prompt."
+  (fold-test-block "Background job job-3 (`bb test`) completed with exit code 0.
+Last 20 lines of output:
+Ran 1609 specs, 0 failed."
+                   t))
+
 (defun fold-test-lines (region)
   "Turn REGION into (FIRST-LINE . LAST-LINE), which reads better."
   (cons (line-number-at-pos (car region))
@@ -138,7 +146,41 @@ deactivates the mark and returns t."
   (it "is empty without blocks"
     (with-temp-buffer
       (insert "welcome\n")
-      (expect (eca-chat--fold-runs) :to-be nil))))
+      (expect (eca-chat--fold-runs) :to-be nil)))
+
+  ;; A background job reports through the chat as a user message.  It is
+  ;; not the reader talking, so it folds like any other noise.
+  (it "folds a job report and joins it to the stretch beside it"
+    (with-temp-buffer
+      (fold-test-block "Thought 1s")                    ; 1
+      (insert "\n")                                     ; 2
+      (fold-test-injected)                              ; 3-5
+      (insert "\n")                                     ; 6
+      (fold-test-block "$ ls ✅ 0s")                    ; 7
+      (insert "The reply.\n")
+      (expect (mapcar #'fold-test-lines (eca-chat--fold-runs))
+              :to-equal '((1 . 7)))))
+
+  (it "keeps a typed prompt out of the fold"
+    (with-temp-buffer
+      (fold-test-block "Thought 1s")
+      (insert "\n")
+      (fold-test-prompt "Background jobs are noisy, fold them")
+      (insert "\n")
+      (fold-test-block "$ ls ✅ 0s")
+      (expect (mapcar #'fold-test-lines (eca-chat--fold-runs))
+              :to-equal '((1 . 1) (5 . 5)))))
+
+  (it "treats every user message as the reader's when the pattern is nil"
+    (with-temp-buffer
+      (fold-test-block "Thought 1s")
+      (insert "\n")
+      (fold-test-injected)
+      (insert "\n")
+      (fold-test-block "$ ls ✅ 0s")
+      (let ((eca-chat-fold-injected-prompt-regexp nil))
+        (expect (mapcar #'fold-test-lines (eca-chat--fold-runs))
+                :to-equal '((1 . 1) (7 . 7)))))))
 
 (describe "eca-chat-fold"
   (it "folds every stretch into one occult fold and counts them"
@@ -185,14 +227,14 @@ deactivates the mark and returns t."
           (eca-chat-fold)))
       (expect occult-summary-end-regexp :to-equal " OK"))))
 
-(describe "eca-chat-fold-h"
-  (it "does nothing when automatic folding is off"
-    (with-temp-buffer
-      (fold-test-chat)
-      (let ((eca-chat-fold-automatically nil))
-        (fold-test-hiding hidden
-          (eca-chat-fold-h)
-          (expect hidden :to-be nil))))))
+(describe "folding is manual"
+  (it "is reachable as a command"
+    (expect (commandp 'eca-chat-fold) :to-be-truthy))
+
+  ;; A hook needs something to call.  The config hooks nothing either, which
+  ;; only a booted config can show - tests/e2e/eca-continue.el checks that.
+  (it "has no hook function to fold with"
+    (expect (fboundp 'eca-chat-fold-h) :to-be nil)))
 
 (describe "eca-chat-refold-after-protect-a"
   (it "guards the re-protect that wipes the folds"

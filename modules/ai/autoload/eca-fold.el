@@ -5,9 +5,14 @@
 (require 'occult)
 
 ;;;###autoload
-(defcustom eca-chat-fold-automatically t
-  "Whether the chat folds on its own when a turn finishes."
-  :type 'boolean
+(defcustom eca-chat-fold-injected-prompt-regexp "\\`Background job job-[0-9]+ "
+  "First line of a user message eca was handed, not one the reader typed.
+A background job reports itself through the chat as a user message and
+arrives with the same face and overlay properties a typed prompt gets,
+so only its text tells the two apart.  Nil treats every user message as
+the reader's."
+  :type '(choice (const :tag "Every user message is the reader's" nil)
+                 regexp)
   :group 'eca)
 
 (defun eca-chat--fold-blocks ()
@@ -30,15 +35,25 @@ is the one before that."
     (cons (save-excursion (goto-char (overlay-start ov)) (line-beginning-position))
           (save-excursion (goto-char tail) (line-end-position)))))
 
+(defun eca-chat--fold-prompt-p (ov)
+  "Non-nil when block OV holds a message the reader typed."
+  (and (overlay-get ov 'eca-chat--user-message-id)
+       (not (and eca-chat-fold-injected-prompt-regexp
+                 (string-match-p eca-chat-fold-injected-prompt-regexp
+                                 (save-excursion
+                                   (goto-char (overlay-start ov))
+                                   (buffer-substring-no-properties
+                                    (point) (line-end-position))))))))
+
 (defun eca-chat--fold-runs ()
-  "Regions covering each stretch of blocks that are not prompts.
+  "Regions covering each stretch of blocks that are not the reader's prompts.
 Blank text between two blocks keeps a stretch going.  A prompt or any
 other text ends it, since that text is the reply itself."
   (let (runs run)
     (dolist (ov (eca-chat--fold-blocks))
       (let ((region (eca-chat--fold-block-region ov)))
         (cond
-         ((overlay-get ov 'eca-chat--user-message-id)
+         ((eca-chat--fold-prompt-p ov)
           (when run
             (push run runs)
             (setq run nil)))
@@ -70,12 +85,12 @@ selecting text."
 ;;;###autoload
 (defun eca-chat-fold ()
   "Fold every stretch of tool calls, thoughts and other blocks into one occult fold.
-Prompts and the replies between the stretches stay visible.  Each fold
-is a plain occult fold: its first line stays visible, point can rest
-on it, and occult's keymap and `occult-edit-region' work on it.  Safe
-to run again: occult absorbs the folds already there.  `occult-reveal-all'
-opens them all, and evil's \\<evil-normal-state-map>\\[evil-open-folds] is
-advised to do so.
+The reader's prompts and the replies between the stretches stay
+visible.  Each fold is a plain occult fold: its first line stays
+visible, point can rest on it, and occult's keymap and
+`occult-edit-region' work on it.  Safe to run again: occult absorbs the
+folds already there.  `occult-reveal-all' opens them all, and evil's
+\\<evil-normal-state-map>\\[evil-open-folds] is advised to do so.
 
 A fold summary stops before the status symbol of the tool call it
 starts with, so the checkmark and the time after it stay on the line
@@ -93,21 +108,16 @@ command."
       (message "Folded %d stretch%s" folded (if (= folded 1) "" "es")))
     folded))
 
-;;;###autoload
-(defun eca-chat-fold-h ()
-  "Fold the chat once a turn finishes, unless the reader turned that off."
-  (when eca-chat-fold-automatically
-    (eca-chat-fold)))
-
 (defadvice! eca-chat-refold-after-protect-a (fn &rest args)
   "Rebuild the occult folds a history re-protect wiped out.
 `put-text-property' fires the modification hook of every overlay in
 the range it is handed as soon as one character in that range changes,
 and `occult--modification-hook' deletes its fold.  eca re-protects the
-history after every streamed chunk, after the finish that follows
-`eca-chat-finished-hook', after a block toggle, a history page and a
-resume.  Only the folds the re-protect deleted come back, at the bounds
-they had, so a fold the reader opened stays open."
+history after every streamed chunk, at the end of a turn, and after a
+block toggle, a history page or a resume, so without this a fold
+survives only until the next chunk arrives.  Only the folds the
+re-protect deleted come back, at the bounds they had, so a fold the
+reader opened stays open."
   :around #'eca-chat--protect-non-prompt
   (let ((folds (eca-chat--fold-snapshot)))
     (prog1 (apply fn args)
