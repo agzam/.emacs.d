@@ -163,11 +163,13 @@ against re-adding a remap that would stack multiplicatively."
 
 ;;;###autoload
 (defun eca-toggle-workspaces ()
-  "Toggle the eca-workspaces side window."
+  "Show, focus, or dismiss the eca-workspaces side window."
   (interactive)
   (if-let* ((buf (get-buffer eca-workspaces-buffer-name))
             (win (get-buffer-window buf t)))
-      (delete-window win)
+      (if (eq win (selected-window))
+          (delete-window win)
+        (select-window win))
     (eca-workspaces)))
 
 ;;;###autoload

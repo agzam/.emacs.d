@@ -557,3 +557,42 @@ the order given, oldest first, so recency is deterministic."
     (expect (advice-member-p 'eca-chat-seed-code-and-trust-a
                              'eca-chat--initialize-selection-state)
             :to-be-truthy)))
+
+
+;; The side window and the command that pops it up both come from eca.
+(defvar eca-workspaces-buffer-name "*eca-workspaces*")
+(defun eca-workspaces ())
+
+(describe "eca-toggle-workspaces"
+  ;; Real windows here, not a `with-temp-buffer' replica: which window holds
+  ;; the point is the whole decision.
+  (before-each
+    (spy-on 'eca-workspaces))
+
+  (after-each
+    (when-let* ((buf (get-buffer eca-workspaces-buffer-name)))
+      (kill-buffer buf)))
+
+  (it "pops up the side window when it is not shown"
+    (eca-toggle-workspaces)
+    (expect 'eca-workspaces :to-have-been-called))
+
+  (it "focuses the window when the point is elsewhere"
+    (save-window-excursion
+      (let* ((other (selected-window))
+             (win (split-window other)))
+        (set-window-buffer win (get-buffer-create eca-workspaces-buffer-name))
+        (select-window other)
+        (eca-toggle-workspaces)
+        (expect (selected-window) :to-be win)
+        (expect (window-live-p win) :to-be t)
+        (expect 'eca-workspaces :not :to-have-been-called))))
+
+  (it "dismisses the window when the point is in it"
+    (save-window-excursion
+      (let* ((win (split-window)))
+        (set-window-buffer win (get-buffer-create eca-workspaces-buffer-name))
+        (select-window win)
+        (eca-toggle-workspaces)
+        (expect (window-live-p win) :to-be nil)
+        (expect 'eca-workspaces :not :to-have-been-called)))))

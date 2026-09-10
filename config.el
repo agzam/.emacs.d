@@ -243,35 +243,34 @@
       :i "TAB" #'completion-at-point
       "C-x m" #'media-transient
       "C-;"  #'embark-act
-      (:when (featurep :system 'linux)
+      ( :when (featurep :system 'linux)
         :i "C-M-S-s-y" #'nerd-dictation-toggle)
-      (:when (modulep! :custom ai)
-        (:prefix ("C-x g" . "gptel")
-         :desc "gptel-menu" "g" #'gptel-menu
-         :desc "new gptel" "n" #'open-gptel
-         :desc "check text" "e" #'gptel-improve-text-transient
-         :desc "quick" "q" #'gptel-quick-question-buffer
-         "m" #'gptel-mode
-         "s" #'gptel-send
-         "c" #'eca
-         :desc "resume eca chat" "r" #'eca-chat-resume
-         :desc "continue archived eca chat" "a" #'eca-continue-from-file)))
+      ( :when (modulep! :custom ai)
+        ( :prefix ("C-x g" . "gptel")
+          :desc "gptel-menu" "g" #'gptel-menu
+          :desc "new gptel" "n" #'open-gptel
+          :desc "check text" "e" #'gptel-improve-text-transient
+          :desc "quick" "q" #'gptel-quick-question-buffer
+          "m" #'gptel-mode
+          "s" #'gptel-send
+          "c" #'eca
+          :desc "resume eca chat" "r" #'eca-chat-resume
+          :desc "continue archived eca chat" "a" #'eca-continue-from-file)))
 
-(map! (:map (prog-mode-map text-mode-map markdown-mode-map)
-       :desc "external browser" "C-c C-o"
-       (cmd!
-        (let ((git-link-extensions-rendered-plain nil))
-          (git-link-kill :browse)))))
+(map! ( :map (prog-mode-map text-mode-map markdown-mode-map)
+        :desc "external browser" "C-c C-o"
+        (cmd!
+         (let ((git-link-extensions-rendered-plain nil))
+           (git-link-kill :browse)))))
 
-(map! (:map minibuffer-mode-map
-            "M-l" #'sp-forward-slurp-sexp
-            "M-h" #'sp-forward-barf-sexp)
-      (:map minibuffer-local-map
-            "C-c C-s" #'embark-collect
-            (:prefix
-             ";"
-             "." #'evil-insert-state
-             :desc "insert ;" "SPC" (cmd! (insert ";")))))
+(map! ( :map minibuffer-mode-map
+        "M-l" #'sp-forward-slurp-sexp
+        "M-h" #'sp-forward-barf-sexp)
+      ( :map minibuffer-local-map
+        "C-c C-s" #'embark-collect
+        ( :prefix (";" . "")
+          "." #'evil-insert-state
+          :desc "insert ;" "SPC" (cmd! (insert ";")))))
 
 (map! :after rfc-mode
       :map rfc-mode-map
@@ -296,220 +295,220 @@
                      (if (evil-visual-state-p)
                          #'comment-or-uncomment-region
                        #'comment-line)))
-      (:when (modulep! :custom embark)
+      ( :when (modulep! :custom embark)
         :desc "Actions" "a" #'embark-act)
-      (:when (modulep! :custom shell)
+      ( :when (modulep! :custom shell)
         :desc "pop shell" "'" #'shell-pop
         :desc "choose shell" "\"" #'shell-pop-choose)
 
-      (:prefix ("b" . "buffers/browser")
-       :desc "proj. buffers" "b" #'consult-project-buffer
-       :desc "all buffers" "B" #'consult-buffer
-       :desc "scratch" "s" #'switch-to-scratch-buffer
-       :desc "Messages" "m" #'switch-to-messages-buffer
-       :desc "kill" "d" #'kill-current-buffer
-       :desc "kill with window" "k" #'kill-buffer-and-window
-       :desc "diff with file" "D" #'diff-current-buffer-with-file
-       :desc "kill some buffers" "s-d" #'kill-matching-buffers-rudely
-       :desc "copy buffer name" "Y" #'yank-buffer-name
-       (:when (modulep! :custom web-browsing)
-         :desc "browser history" "h" #'browser-hist-search
-         :desc "browser tabs" "t" #'browser-goto-tab
-         :desc "browser copy link" "l" #'browser-copy-tab-link
-         :desc "insert url" "y" #'navegosa-insert-link
-         :desc "act on url" "a" #'browser-tab-act
-         :desc "in eww" "e" #'browser-active-tab->eww))
+      ( :prefix ("b" . "buffers/browser")
+        :desc "proj. buffers" "b" #'consult-project-buffer
+        :desc "all buffers" "B" #'consult-buffer
+        :desc "scratch" "s" #'switch-to-scratch-buffer
+        :desc "Messages" "m" #'switch-to-messages-buffer
+        :desc "kill" "d" #'kill-current-buffer
+        :desc "kill with window" "k" #'kill-buffer-and-window
+        :desc "diff with file" "D" #'diff-current-buffer-with-file
+        :desc "kill some buffers" "s-d" #'kill-matching-buffers-rudely
+        :desc "copy buffer name" "Y" #'yank-buffer-name
+        ( :when (modulep! :custom web-browsing)
+          :desc "browser history" "h" #'browser-hist-search
+          :desc "browser tabs" "t" #'browser-goto-tab
+          :desc "browser copy link" "l" #'browser-copy-tab-link
+          :desc "insert url" "y" #'navegosa-insert-link
+          :desc "act on url" "a" #'browser-tab-act
+          :desc "in eww" "e" #'browser-active-tab->eww))
 
-      (:prefix ("e" . "edit")
-       :desc "edit indirect" "i" #'edit-indirect-region)
+      ( :prefix ("e" . "edit")
+        :desc "edit indirect" "i" #'edit-indirect-region)
 
-      (:prefix ("f" . "files")
-               (:when (modulep! :custom search)
-                 :desc "zoxide dir" "d" #'consult-zoxide)
-               :desc "dired" "j" #'dired-jump
-               (:when (featurep :system 'macos)
-                 :desc "open in app" "O" #'macos-open-in-default-program)
-               "e" nil
-               (:prefix ("e" . "doom/emacs")
-                :desc "config dir" "d" #'find-in-config-dir
-                :desc "elpaca sources" "i" (cmd! (dired elpaca-sources-directory))
-                (:when (featurep :system 'linux)
-                  :desc "awesomewm config" "a" (cmd! (dired "~/.config/awesome/")))))
+      ( :prefix ("f" . "files")
+        ( :when (modulep! :custom search)
+          :desc "zoxide dir" "d" #'consult-zoxide)
+        :desc "dired" "j" #'dired-jump
+        ( :when (featurep :system 'macos)
+          :desc "open in app" "O" #'macos-open-in-default-program)
+        "e" nil
+        ( :prefix ("e" . "doom/emacs")
+          :desc "config dir" "d" #'find-in-config-dir
+          :desc "elpaca sources" "i" (cmd! (dired elpaca-sources-directory))
+          ( :when (featurep :system 'linux)
+            :desc "awesomewm config" "a" (cmd! (dired "~/.config/awesome/")))))
 
-      (:prefix ("g" . "goto/git")
-       :desc "magit file" "f" #'magit-file-dispatch
-       :desc "jump list" "j" #'evil-show-jumps
-       :desc "git status" "s" #'magit-status
-       :desc "blame" "b" #'magit-blame-addition
-       :desc "clone" "C" #'git-clone
-       (:prefix ("c" . "consult-gh")
-                "o" #'consult-gh-orgs
-                "r" #'consult-gh-search-repos
-                "f" #'consult-gh-find-file
-                "i" #'consult-gh-issue-list
-                "p" #'consult-gh-pr-list)
-       (:prefix ("l" . "git link")
-        :desc "blame link" "b" #'git-link-blame
-        :desc "copy link" "l" #'git-link-kill
-        :desc "main branch" "m" #'git-link-main-branch))
+      ( :prefix ("g" . "goto/git")
+        :desc "magit file" "f" #'magit-file-dispatch
+        :desc "jump list" "j" #'evil-show-jumps
+        :desc "git status" "s" #'magit-status
+        :desc "blame" "b" #'magit-blame-addition
+        :desc "clone" "C" #'git-clone
+        ( :prefix ("c" . "consult-gh")
+          "o" #'consult-gh-orgs
+          "r" #'consult-gh-search-repos
+          "f" #'consult-gh-find-file
+          "i" #'consult-gh-issue-list
+          "p" #'consult-gh-pr-list)
+        ( :prefix ("l" . "git link")
+          :desc "blame link" "b" #'git-link-blame
+          :desc "copy link" "l" #'git-link-kill
+          :desc "main branch" "m" #'git-link-main-branch))
 
-      (:prefix ("h" . "help")
-               "a" #'helpful-at-point
-               "f" #'helpful-function
-               "h" #'consult-symbol
-               "c" #'consult-info
-               "C" #'describe-key-briefly
-               "p" nil
-               (:prefix ("p" . "packages")
-                        "l" #'list-packages
-                        "f" #'find-library-other-window
-                        "d" #'describe-package)
-               "s" #'find-function-other-window
-               "v" #'helpful-variable
-               "j" #'info-display-manual
-               ;; "r" nil: SPC h inherits help-map, where r is a command
-               ;; (info-emacs-manual) - unbind it so the prefix can exist
-               "r" nil
-               (:prefix ("r" . "reload")
-                :desc "reload config" "r" #'reload-config))
+      ( :prefix ("h" . "help")
+        "a" #'helpful-at-point
+        "f" #'helpful-function
+        "h" #'consult-symbol
+        "c" #'consult-info
+        "C" #'describe-key-briefly
+        "p" nil
+        ( :prefix ("p" . "packages")
+          "l" #'list-packages
+          "f" #'find-library-other-window
+          "d" #'describe-package)
+        "s" #'find-function-other-window
+        "v" #'helpful-variable
+        "j" #'info-display-manual
+        ;; "r" nil: SPC h inherits help-map, where r is a command
+        ;; (info-emacs-manual) - unbind it so the prefix can exist
+        "r" nil
+        ( :prefix ("r" . "reload")
+          :desc "reload config" "r" #'reload-config))
 
-      (:prefix ("i" . "insert")
-       :desc "snippet" "s" #'consult-yasnippet
-       :desc "file path" "f" #'insert-file-path)
+      ( :prefix ("i" . "insert")
+        :desc "snippet" "s" #'consult-yasnippet
+        :desc "file path" "f" #'insert-file-path)
 
-      (:prefix ("j" . "jump")
-       "j" #'avy-goto-char-timer
-       :desc "xwidget" "x" #'xwidget-webkit-url-get-create)
+      ( :prefix ("j" . "jump")
+        "j" #'avy-goto-char-timer
+        :desc "xwidget" "x" #'xwidget-webkit-url-get-create)
 
-      (:when (modulep! :custom tab-bar)
+      ( :when (modulep! :custom tab-bar)
         :desc "tab-bar" "l" #'tab-bar-transient)
 
-      (:prefix ("n" . "narrow")
-       "F" #'narrow-to-defun-indirect-buffer
-       "R" #'narrow-to-region-indirect-buffer
-       "f" #'narrow-to-defun
-       "r" #'narrow-to-region
-       "l" #'consult-focus-lines
-       :desc "widen" "w" (cmd! () (consult-focus-lines nil :show) (widen)))
+      ( :prefix ("n" . "narrow")
+        "F" #'narrow-to-defun-indirect-buffer
+        "R" #'narrow-to-region-indirect-buffer
+        "f" #'narrow-to-defun
+        "r" #'narrow-to-region
+        "l" #'consult-focus-lines
+        :desc "widen" "w" (cmd! () (consult-focus-lines nil :show) (widen)))
 
-      (:prefix ("o" . "open/Org")
-       :desc "store link" "l" #'org-store-link
-       :desc "link without id" "L" #'org-store-link-id-optional
-       (:when (modulep! :custom notmuch)
-         :desc "notmuch" "m" #'notmuch)
-       (:when (modulep! :custom git)
-         (:prefix ("g" . "git")
-                  "h" #'gh-notify))
-       (:prefix ("c" . "chat")
-                "t" #'telega
-                (:when (modulep! :custom ai)
-                  :desc "gptel" "g" #'open-gptel))
-       "r" nil
-       (:prefix ("r" . "roam")
+      ( :prefix ("o" . "open/Org")
+        :desc "store link" "l" #'org-store-link
+        :desc "link without id" "L" #'org-store-link-id-optional
+        ( :when (modulep! :custom notmuch)
+          :desc "notmuch" "m" #'notmuch)
+        ( :when (modulep! :custom git)
+          (:prefix ("g" . "git")
+                   "h" #'gh-notify))
+        ( :prefix ("c" . "chat")
+          "t" #'telega
+          ( :when (modulep! :custom ai)
+            :desc "gptel" "g" #'open-gptel))
+        "r" nil
+        ( :prefix ("r" . "roam")
+          "r" #'vulpea-find
+          "b" #'vulpea-backlinks
+          :desc "work today" "t" (cmd! (open-journal 'work))
+          :desc "personal today" "T" (cmd! (open-journal 'personal))
+          :desc "work note" "n" (cmd! (open-journal 'work (org-read-date nil t)))
+          :desc "personal note" "N" (cmd! (open-journal 'personal (org-read-date nil t)))
+          :desc "org-roam-ui in xwidget" "w" #'org-roam-toggle-ui-xwidget
+          :desc "org-roam-ui in browser" "W" #'org-roam-ui-in-browser
+          ( :when (modulep! :custom web-browsing)
+            "C-b" #'browser-create-roam-node-for-active-tab)))
+
+      ( :prefix ("p" . "projects")
+        "b" #'consult-project-buffer
+        "f" #'project-find-file
+        "k" #'project-kill-buffers
+        :desc "project buffers list" "i" #'project-list-buffers
+        :desc "find dir" "d" #'project-find-dir
+        ( :when (modulep! :custom dired)
+          :desc "treemacs" "T" #'treemacs-project-toggle
+          :desc "dired locate" "t" #'dired-jump-find-in-project)
+        ( :when (modulep! :custom shell)
+          :desc "project shell" "'" #'shell-pop-in-project-root))
+
+      ( :prefix ("r" . "reset/resume/ring/roam")
+        "d" (cmd! (call-interactively #'redraw-display))
         "r" #'vulpea-find
-        "b" #'vulpea-backlinks
-        :desc "work today" "t" (cmd! (open-journal 'work))
-        :desc "personal today" "T" (cmd! (open-journal 'personal))
-        :desc "work note" "n" (cmd! (open-journal 'work (org-read-date nil t)))
-        :desc "personal note" "N" (cmd! (open-journal 'personal (org-read-date nil t)))
-        :desc "org-roam-ui in xwidget" "w" #'org-roam-toggle-ui-xwidget
-        :desc "org-roam-ui in browser" "W" #'org-roam-ui-in-browser
-        (:when (modulep! :custom web-browsing)
-          "C-b" #'browser-create-roam-node-for-active-tab)))
+        :desc "yank from kill-ring" "y" #'consult-yank-from-kill-ring
+        ( :after vertico
+          :desc "vertico repeat" "l" #'vertico-repeat-or-unsuspend
+          :desc "vertico history" "L" #'vertico-repeat-select))
 
-      (:prefix ("p" . "projects")
-               "b" #'consult-project-buffer
-               "f" #'project-find-file
-               "k" #'project-kill-buffers
-               :desc "project buffers list" "i" #'project-list-buffers
-               :desc "find dir" "d" #'project-find-dir
-               (:when (modulep! :custom dired)
-                 :desc "treemacs" "T" #'treemacs-project-toggle
-                 :desc "dired locate" "t" #'dired-jump-find-in-project)
-               (:when (modulep! :custom shell)
-                 :desc "project shell" "'" #'shell-pop-in-project-root))
+      ( :prefix ("s" . "search/symbol")
+        :desc "in buffer"  "s" #'consult-line
+        :desc "search" "/" #'consult-omni-transient
+        :desc "eww search" "e" #'eww-search-words
+        :desc "find-name-dired" "f" #'find-name-dired
+        :desc "GitHub" "g" #'search-github-with-lang
+        :desc "imenu" "j" #'imenu
+        :desc "dir" "d" (cmd! (consult-ripgrep default-directory)))
 
-      (:prefix ("r" . "reset/resume/ring/roam")
-       "d" (cmd! (call-interactively #'redraw-display))
-       "r" #'vulpea-find
-       :desc "yank from kill-ring" "y" #'consult-yank-from-kill-ring
-       (:after vertico
-        :desc "vertico repeat" "l" #'vertico-repeat-or-unsuspend
-        :desc "vertico history" "L" #'vertico-repeat-select))
+      ( :prefix ("t" . "toggle yo")
+        :desc "v-line nav" "w" #'toggle-visual-line-navigation
+        :desc "prefix wrap" ">" #'visual-wrap-prefix-mode
+        :desc "minor modes" "m" #'consult-minor-mode-menu
+        :desc "buffer font" "f" #'set-buffer-font
+        :desc "iBuffer side" "i" #'ibuffer-sidebar-toggle-sidebar
+        :desc "Dired side" "d" #'dired-sidebar-toggle-sidebar
+        :desc "line numbers" "l" #'display-line-numbers-mode)
 
-      (:prefix ("s" . "search/symbol")
-       :desc "in buffer"  "s" #'consult-line
-       :desc "search" "/" #'consult-omni-transient
-       :desc "eww search" "e" #'eww-search-words
-       :desc "find-name-dired" "f" #'find-name-dired
-       :desc "GitHub" "g" #'search-github-with-lang
-       :desc "imenu" "j" #'imenu
-       :desc "dir" "d" (cmd! (consult-ripgrep default-directory)))
+      ( :prefix ("T" . "toggle global")
+        :desc "numbers" "N" #'global-display-line-numbers-mode
+        :desc "variable-pitch" "f" #'variable-pitch-mode
+        :desc "prefix wrap" ">" #'global-visual-wrap-prefix-mode
+        ( :when (modulep! :custom colors)
+          :desc "next color theme" "n" #'cycle-themes-down
+          :desc "prev color theme" "p" #'cycle-themes-up))
 
-      (:prefix ("t" . "toggle yo")
-       :desc "v-line nav" "w" #'toggle-visual-line-navigation
-       :desc "prefix wrap" ">" #'visual-wrap-prefix-mode
-       :desc "minor modes" "m" #'consult-minor-mode-menu
-       :desc "buffer font" "f" #'set-buffer-font
-       :desc "iBuffer side" "i" #'ibuffer-sidebar-toggle-sidebar
-       :desc "Dired side" "d" #'dired-sidebar-toggle-sidebar
-       :desc "line numbers" "l" #'display-line-numbers-mode)
-
-      (:prefix ("T" . "toggle global")
-       :desc "numbers" "N" #'global-display-line-numbers-mode
-       :desc "variable-pitch" "f" #'variable-pitch-mode
-       :desc "prefix wrap" ">" #'global-visual-wrap-prefix-mode
-       (:when (modulep! :custom colors)
-         :desc "next color theme" "n" #'cycle-themes-down
-         :desc "prev color theme" "p" #'cycle-themes-up))
-
-      (:prefix ("w" . "windows")
-               "TAB" #'evil-window-prev
-               "." #'window-transient
-               "c" #'window-cleanup
-               "g" #'golden-ratio
-               "D" #'ace-delete-window
-               "M" #'ace-swap-window
-               "W" #'ace-window
-               "_" #'delete-other-windows-horizontally
-               "m" #'toggle-maximize-buffer
-               "|" #'delete-other-windows-vertically
-               "=" #'balance-windows-area
-               "u" #'window-undo
-               "r" #'window-redo)
+      ( :prefix ("w" . "windows")
+        "TAB" #'evil-window-prev
+        "." #'window-transient
+        "c" #'window-cleanup
+        "g" #'golden-ratio
+        "D" #'ace-delete-window
+        "M" #'ace-swap-window
+        "W" #'ace-window
+        "_" #'delete-other-windows-horizontally
+        "m" #'toggle-maximize-buffer
+        "|" #'delete-other-windows-vertically
+        "=" #'balance-windows-area
+        "u" #'window-undo
+        "r" #'window-redo)
       "x" nil
-      (:prefix ("x" ."text")
-               "x" #'jinx-correct-word
-               (:when (modulep! :custom writing)
-                 (:prefix ("l" . "language")
-                  :desc "define" "d" #'define-it-at-point
-                  :desc "sdcv" "l" #'sdcv-search-pointer
-                  :desc "Merriam Webster" "m" #'mw-thesaurus-lookup-dwim
-                  :desc "wiktionary" "w" #'wiktionary-bro-dwim)
-                 (:prefix ("t" . "translate")
-                  :desc "en->ru" "e" #'google-translate-query-translate-reverse
-                  :desc "ru->en" "r" #'google-translate-query-translate
-                  :desc "es->en" "s" #'google-translate-es->en
-                  :desc "en->es" "S" #'google-translate-en->es
-                  :desc "translate" "t" #'translate-transient
-                  :desc "popup" "p" #'google-translate-posframe-at-point))
-               (:when (modulep! :custom ai)
-                 (:prefix ("g" . "gptel")
-                  :desc "gptel-menu" "g" #'gptel-menu
-                  :desc "inline at point" "i" #'gptel-inline-dwim
-                  :desc "visit inline session" "v" #'gptel-inline-visit-last-chat
-                  :desc "new gptel" "n" #'open-gptel
-                  :desc "check text" "e" #'gptel-improve-text-transient
-                  :desc "quick" "q" #'gptel-quick-question-buffer
-                  :desc "search" "/" #'gptel-log-find
-                  "m" #'gptel-mode
-                  "s" #'gptel-send
-                  "c" #'eca
-                  :desc "resume eca chat" "r" #'eca-chat-resume
-                  :desc "continue archived eca chat" "a" #'eca-continue-from-file)))
-
-      (:prefix ("z" . "zoom")
-       :desc "frame" "f" #'frame-zoom-transient))
+      ( :prefix ("x" ."text")
+        "x" #'jinx-correct-word
+        ( :when (modulep! :custom writing)
+          ( :prefix ("l" . "language")
+            :desc "define" "d" #'define-it-at-point
+            :desc "sdcv" "l" #'sdcv-search-pointer
+            :desc "Merriam Webster" "m" #'mw-thesaurus-lookup-dwim
+            :desc "wiktionary" "w" #'wiktionary-bro-dwim)
+          ( :prefix ("t" . "translate")
+            :desc "en->ru" "e" #'google-translate-query-translate-reverse
+            :desc "ru->en" "r" #'google-translate-query-translate
+            :desc "es->en" "s" #'google-translate-es->en
+            :desc "en->es" "S" #'google-translate-en->es
+            :desc "translate" "t" #'translate-transient
+            :desc "popup" "p" #'google-translate-posframe-at-point))
+        ( :when (modulep! :custom ai)
+          ( :prefix ("g" . "gptel")
+            :desc "gptel-menu" "g" #'gptel-menu
+            :desc "inline at point" "i" #'gptel-inline-dwim
+            :desc "visit inline session" "v" #'gptel-inline-visit-last-chat
+            :desc "check text" "e" #'gptel-improve-text-transient
+            :desc "quick" "q" #'gptel-quick-question-buffer
+            :desc "search" "/" #'gptel-log-find
+            "m" #'gptel-mode
+            "s" #'gptel-send)
+          ( :prefix ("e" . "eca")
+            "e" #'eca-toggle-workspaces
+            "n" #'eca
+            "r" #'eca-chat-resume
+            :desc "continue archived eca chat" "a" #'eca-continue-from-file)))
+      ( :prefix ("z" . "zoom")
+        :desc "frame" "f" #'frame-zoom-transient))
 
 (map! :map special-mode-map
       "SPC" nil
@@ -543,35 +542,35 @@
       :n "s*" #'ibuffer-filter-by-non-special-buffers
       ;; "," is ibuffer-toggle-sorting-mode by default; the localleader prefix
       ;; shadows it in normal state, so it lives under ",st" below.
-      (:localleader
-       :desc "refresh"         "r" #'ibuffer-update
-       :desc "save marked"     "S" #'ibuffer-do-save
-       :desc "delete marked"   "D" #'ibuffer-do-delete
-       (:prefix ("f" . "filter")
-        :desc "unsaved"        "u" #'ibuffer-filter-by-unsaved-file-buffers
-        :desc "file buffers"   "f" #'ibuffer-filter-by-file-buffers
-        :desc "non-special"    "*" #'ibuffer-filter-by-non-special-buffers
-        :desc "by mode"        "m" #'ibuffer-filter-by-used-mode
-        :desc "by name"        "n" #'ibuffer-filter-by-name
-        :desc "by content"     "c" #'ibuffer-filter-by-content
-        :desc "pop"            "p" #'ibuffer-pop-filter
-        :desc "disable all"    "d" #'ibuffer-filter-disable)
-       (:prefix ("g" . "group")
-        :desc "by VC root"     "v" #'ibuffer-vc-set-filter-groups-by-vc-root
-        :desc "by mode"        "m" #'ibuffer-set-filter-groups-by-mode
-        :desc "clear"          "x" #'ibuffer-clear-filter-groups)
-       (:prefix ("s" . "sort")
-        :desc "recency"        "r" #'ibuffer-do-sort-by-recency
-        :desc "alphabetic"     "a" #'ibuffer-do-sort-by-alphabetic
-        :desc "size"           "s" #'ibuffer-do-sort-by-size
-        :desc "major mode"     "m" #'ibuffer-do-sort-by-major-mode
-        :desc "invert"         "i" #'ibuffer-invert-sorting
-        :desc "cycle mode"     "t" #'ibuffer-toggle-sorting-mode)
-       (:prefix ("m" . "mark")
-        :desc "by mode"        "m" #'ibuffer-mark-by-mode
-        :desc "modified"       "*" #'ibuffer-mark-modified-buffers
-        :desc "by name regexp" "n" #'ibuffer-mark-by-name-regexp
-        :desc "unmark all"     "u" #'ibuffer-unmark-all-marks)))
+      ( :localleader
+        :desc "refresh"         "r" #'ibuffer-update
+        :desc "save marked"     "S" #'ibuffer-do-save
+        :desc "delete marked"   "D" #'ibuffer-do-delete
+        ( :prefix ("f" . "filter")
+          :desc "unsaved"        "u" #'ibuffer-filter-by-unsaved-file-buffers
+          :desc "file buffers"   "f" #'ibuffer-filter-by-file-buffers
+          :desc "non-special"    "*" #'ibuffer-filter-by-non-special-buffers
+          :desc "by mode"        "m" #'ibuffer-filter-by-used-mode
+          :desc "by name"        "n" #'ibuffer-filter-by-name
+          :desc "by content"     "c" #'ibuffer-filter-by-content
+          :desc "pop"            "p" #'ibuffer-pop-filter
+          :desc "disable all"    "d" #'ibuffer-filter-disable)
+        ( :prefix ("g" . "group")
+          :desc "by VC root"     "v" #'ibuffer-vc-set-filter-groups-by-vc-root
+          :desc "by mode"        "m" #'ibuffer-set-filter-groups-by-mode
+          :desc "clear"          "x" #'ibuffer-clear-filter-groups)
+        ( :prefix ("s" . "sort")
+          :desc "recency"        "r" #'ibuffer-do-sort-by-recency
+          :desc "alphabetic"     "a" #'ibuffer-do-sort-by-alphabetic
+          :desc "size"           "s" #'ibuffer-do-sort-by-size
+          :desc "major mode"     "m" #'ibuffer-do-sort-by-major-mode
+          :desc "invert"         "i" #'ibuffer-invert-sorting
+          :desc "cycle mode"     "t" #'ibuffer-toggle-sorting-mode)
+        ( :prefix ("m" . "mark")
+          :desc "by mode"        "m" #'ibuffer-mark-by-mode
+          :desc "modified"       "*" #'ibuffer-mark-modified-buffers
+          :desc "by name regexp" "n" #'ibuffer-mark-by-name-regexp
+          :desc "unmark all"     "u" #'ibuffer-unmark-all-marks)))
 
 (map! :map occur-mode-map
       :n "f" #'occur-mode-display-occurrence)
