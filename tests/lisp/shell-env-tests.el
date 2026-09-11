@@ -74,7 +74,10 @@ The test Emacs's own environment and `exec-path' survive untouched."
       (expect exec-path
               :to-equal (list "/usr/bin/" "/bin/" "/usr/sbin/" "/sbin/" exec-directory))
       (expect (getenv "MANPATH") :to-equal "")
-      (expect (get-process "shell-env") :to-be nil)))
+      ;; The wait loop guarantees the shell is dead, not that Emacs has
+      ;; already dropped the exited process from its list: that happens in
+      ;; `status_notify', which need not have run when the loop exits.
+      (expect (process-live-p (get-process "shell-env")) :to-be nil)))
 
   (it "applies the cache at once, then whatever the shell rewrites in the background"
     (shell-env-tests--sandboxed
