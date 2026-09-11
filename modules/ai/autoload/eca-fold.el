@@ -75,6 +75,19 @@ selecting text."
   (let ((mark-active nil))
     (occult-hide-region beg end)))
 
+(defun eca-chat--fold-summary-setup ()
+  "Keep eca's own decorations out of the summary line of a fold.
+The status symbol, the time beside it and the diff button stay in the
+buffer text and out of the line the fold shows.  The block marker is a
+`line-prefix', with no text to match, so the prefix is overridden
+instead."
+  (setq-local occult-summary-line-prefix ""
+              occult-summary-replace-alist
+              `((,(concat " " (regexp-quote eca-chat-mcp-tool-call-success-symbol)
+                          " [0-9]+[ms]\\(?: [0-9]+s\\)?")
+                 . "")
+                (" view diff" . ""))))
+
 (defun eca-chat--fold-snapshot ()
   "Every occult fold in the buffer with its bounds."
   (mapcar (lambda (ov)
@@ -92,14 +105,13 @@ visible, point can rest on it, and occult's keymap and
 folds already there.  `occult-reveal-all' opens them all, and evil's
 \\<evil-normal-state-map>\\[evil-open-folds] is advised to do so.
 
-A fold summary stops before the status symbol of the tool call it
-starts with, so the checkmark and the time after it stay on the line
-but out of the fold.  The setting is buffer-local because the folds
-`eca-chat-refold-after-protect-a' rebuilds are made outside this
+A fold summary shows the label of the block it starts with and none of
+eca's decorations around it: no status symbol, no elapsed time, no diff
+button, no block marker.  The settings are buffer-local because the
+folds `eca-chat-refold-after-protect-a' rebuilds are made outside this
 command."
   (interactive)
-  (setq-local occult-summary-end-regexp
-              (concat " " (regexp-quote eca-chat-mcp-tool-call-success-symbol)))
+  (eca-chat--fold-summary-setup)
   (let ((folded 0))
     (dolist (run (eca-chat--fold-runs))
       (when (occult-hide-region (car run) (cdr run))

@@ -48,6 +48,16 @@ Last 20 lines of output:
 Ran 1609 specs, 0 failed."
                    t))
 
+(defun fold-test-summary (label)
+  "Return LABEL as the buffer's replacement rules would show it.
+occult replaces what a match displays rather than the text itself; the
+rules are the same either way, and occult's own suite covers the
+rendering."
+  (let ((text label))
+    (pcase-dolist (`(,regexp . ,replacement) occult-summary-replace-alist)
+      (setq text (replace-regexp-in-string regexp replacement text t)))
+    text))
+
 (defun fold-test-lines (region)
   "Turn REGION into (FIRST-LINE . LAST-LINE), which reads better."
   (cons (line-number-at-pos (car region))
@@ -209,23 +219,42 @@ deactivates the mark and returns t."
         (eca-chat-fold)
         (expect mark-active :to-be-truthy))))
 
-  (it "ends the fold summaries before a tool call's status symbol"
+  (it "takes the status, the time and the diff button out of the summaries"
     (with-temp-buffer
       (fold-test-chat)
       (fold-test-hiding hidden
         (eca-chat-fold))
-      (expect (local-variable-p 'occult-summary-end-regexp) :to-be-truthy)
-      (let ((label "Reading spec.md ✅ 0s"))
-        (expect (substring label 0 (string-match occult-summary-end-regexp label))
-                :to-equal "Reading spec.md"))))
+      (expect (local-variable-p 'occult-summary-replace-alist) :to-be-truthy)
+      (expect (fold-test-summary "Reading spec.md ✅ 0s")
+              :to-equal "Reading spec.md")
+      (expect (fold-test-summary "Editing eca-chat.el +8 -5 ✅ 0s view diff")
+              :to-equal "Editing eca-chat.el +8 -5")
+      (expect (fold-test-summary "Called tool: grep ✅ 2m 30s")
+              :to-equal "Called tool: grep")))
+
+  (it "leaves a failed call marked as failed"
+    (with-temp-buffer
+      (fold-test-chat)
+      (fold-test-hiding hidden
+        (eca-chat-fold))
+      (expect (fold-test-summary "$ ls ❌ 1s") :to-equal "$ ls ❌ 1s")))
+
+  (it "drops the block marker eca draws as a line prefix"
+    (with-temp-buffer
+      (fold-test-chat)
+      (fold-test-hiding hidden
+        (eca-chat-fold))
+      (expect (local-variable-p 'occult-summary-line-prefix) :to-be-truthy)
+      (expect occult-summary-line-prefix :to-equal "")))
 
   (it "follows eca's own success symbol"
     (with-temp-buffer
       (fold-test-chat)
       (let ((eca-chat-mcp-tool-call-success-symbol "OK"))
         (fold-test-hiding hidden
-          (eca-chat-fold)))
-      (expect occult-summary-end-regexp :to-equal " OK"))))
+          (eca-chat-fold))
+        (expect (fold-test-summary "Reading spec.md OK 0s")
+                :to-equal "Reading spec.md")))))
 
 (describe "folding is manual"
   (it "is reachable as a command"
