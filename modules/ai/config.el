@@ -227,19 +227,21 @@
             ;; `occult-reveal-all'.
             :n "zm" #'eca-chat-fold
             :n ",," #'eca-transient-menu
-            (:localleader
-             "n" #'tab-line-switch-to-next-tab
-             "p" #'tab-line-switch-to-prev-tab
-             "b" #'eca-chat-cycle-agent
-             "t" #'eca-chat-toggle-trust
-             "f" #'eca-chat-flag-and-fork
-             (:prefix ("w" . "workspace")
-              "a" #'eca-chat-add-workspace-root
-              "r" #'eca-chat-remove-workspace-root
-              "w" #'eca-toggle-workspaces)))
+            ( :localleader
+              "n" #'tab-line-switch-to-next-tab
+              "p" #'tab-line-switch-to-prev-tab
+              "b" #'eca-chat-cycle-agent
+              "t" #'eca-chat-toggle-trust
+              "f" #'eca-chat-flag-and-fork
+              ( :prefix ("w" . "workspace")
+                "a" #'eca-chat-add-workspace-root
+                "r" #'eca-chat-remove-workspace-root
+                "w" #'eca-toggle-workspaces)))
       (map! :map eca-workspaces-mode-map
-            (:localleader
-             "w w" #'eca-toggle-workspaces)))
+            "n" #'eca-workspaces-new-chat
+            "q" #'eca-toggle-workspaces
+            ( :localleader
+              "w w" #'eca-toggle-workspaces)))
     (defun eca-chat-mode-markup-no-hiding-h ()
       (markdown-toggle-markup-hiding -1))
     (defun eca-chat-mode-scroll-margin-h ()
