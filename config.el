@@ -448,7 +448,7 @@
       ( :prefix ("t" . "toggle yo")
         :desc "v-line nav" "w" #'toggle-visual-line-navigation
         :desc "prefix wrap" ">" #'visual-wrap-prefix-mode
-        :desc "minor modes" "m" #'consult-minor-mode-menu
+        :desc "minor modes" "M" #'consult-minor-mode-menu
         :desc "buffer font" "f" #'set-buffer-font
         :desc "iBuffer side" "i" #'ibuffer-sidebar-toggle-sidebar
         :desc "Dired side" "d" #'dired-sidebar-toggle-sidebar
@@ -456,6 +456,7 @@
 
       ( :prefix ("T" . "toggle global")
         :desc "numbers" "N" #'global-display-line-numbers-mode
+        :desc "fill column" "|" #'global-display-fill-column-indicator-mode
         :desc "variable-pitch" "f" #'variable-pitch-mode
         :desc "prefix wrap" ">" #'global-visual-wrap-prefix-mode
         ( :when (modulep! :custom colors)

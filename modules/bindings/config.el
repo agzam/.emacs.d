@@ -760,7 +760,6 @@
 
       ;;; <leader> t --- toggle
       (:prefix-map ("t" . "toggle")
-       :desc "Fill Column Indicator"        "c" #'global-display-fill-column-indicator-mode
        :desc "Diff Highlights (Git Gutter)" "d" #'diff-hl-mode
        (:when (modulep! :ui indent-guides)
         :desc "Indent guides"              "i" #'indent-bars-mode)
