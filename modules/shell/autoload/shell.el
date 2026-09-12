@@ -19,11 +19,10 @@
 (defun shell-pop-choose (&optional arg)
   "Pick a shell implementation, rewire `shell-pop-shell-type', then pop."
   (interactive "P")
-  (let* ((shell-type (completing-read "Shell: " '(eshell ghostel shell)))
+  (let* ((shell-type (completing-read "Shell: " '(ghostel eshell)))
          (shell-fn (pcase shell-type
-                     ("eshell" #'eshell)
                      ("ghostel" #'ghostel)
-                     ("shell" #'shell))))
+                     ("eshell" #'eshell))))
     (shell-pop--set-shell-type
      'shell-pop-shell-type
      `(,shell-type

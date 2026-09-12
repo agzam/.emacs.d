@@ -74,7 +74,7 @@
   :ensure t
   :defer t
   :init
-  (setq shell-pop-shell-type '("ghostel" "*ghostel*" (lambda () (ghostel))))
+  (setq shell-pop-shell-type '("eshell" "*eshell*" (lambda () (eshell))))
   :config
   (setopt shell-pop-window-position "bottom"))
 
@@ -107,6 +107,14 @@
                         :files ("extensions/evil-ghostel/*.el"))
   :after (ghostel evil)
   :hook (ghostel-mode . evil-ghostel-mode))
+
+(use-package ghostel-eshell
+  :ensure nil  ; ships inside ghostel
+  :hook (eshell-load . ghostel-eshell-visual-command-mode))
+
+(use-package ghostel-comint
+  :ensure nil  ; ships inside ghostel
+  :hook (doom-after-init . ghostel-comint-global-mode))
 
 (use-package eshell-atuin
   :ensure t
