@@ -108,7 +108,14 @@
   :ensure (evil-ghostel :host github :repo "dakra/ghostel"
                         :files ("extensions/evil-ghostel/*.el"))
   :after (ghostel evil)
-  :hook (ghostel-mode . evil-ghostel-mode))
+  :hook (ghostel-mode . evil-ghostel-mode)
+  :config
+  ;; Upstream drives zle's cursor from `current-column', which the renderer's
+  ;; claimed cells skew by one; see autoload/ghostel.el.
+  (advice-add #'evil-ghostel-goto-input-position :override
+              #'evil-ghostel-goto-input-position-a)
+  (advice-add #'evil-ghostel--reset-cursor-point :around
+              #'evil-ghostel-reset-cursor-point-a))
 
 (use-package ghostel-eshell
   :ensure nil  ; ships inside ghostel
