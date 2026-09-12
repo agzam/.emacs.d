@@ -212,6 +212,7 @@
             :i "RET" nil
             :n "<return>" #'eca-chat--key-pressed-return
             :n "RET" #'eca-chat--key-pressed-return
+            :n "0" #'evil-beginning-of-line
             :i "s-<return>"  #'eca-chat--key-pressed-return
             "C-c C-y" #'eca-chat-tool-call-accept-all
             "C-c !" #'eca-chat-tool-call-accept-all-and-remember
