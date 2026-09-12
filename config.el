@@ -50,6 +50,7 @@
  fill-column 70)
 
 (setopt
+ use-package-enable-imenu-support t
  scroll-margin 1
  default-input-method "russian-computer"
  tab-width 4
