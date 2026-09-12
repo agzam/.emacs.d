@@ -83,7 +83,9 @@
   :mode "\\.vim\\(rc\\)?\\'")
 
 (use-package ghostel
-  :ensure (ghostel :host github :repo "dakra/ghostel" :files ("lisp/*.el"))
+  ;; etc/ carries the terminfo and the shell-integration bootstrap; without
+  ;; it every shell runs as plain xterm-256color with no OSC 133 marks.
+  :ensure (ghostel :host github :repo "dakra/ghostel" :files ("lisp/*.el" "etc"))
   :defer t
   :init
   ;; Read at load time, so it must be set before ghostel loads. Keep the
