@@ -67,33 +67,19 @@ other text ends it, since that text is the reply itself."
     (when run (push run runs))
     (nreverse runs)))
 
-(defun eca-chat--fold-region (beg end)
-  "Fold BEG to END without disturbing the mark.
-`occult-hide-region' deactivates the mark for its interactive callers;
-here it also runs while the chat streams, when the reader may be
-selecting text."
-  (let ((mark-active nil))
-    (occult-hide-region beg end)))
-
-(defun eca-chat--fold-summary-setup ()
-  "Keep eca's own decorations out of the summary line of a fold.
-The status symbol, the time beside it and the diff button stay in the
-buffer text and out of the line the fold shows.  The block marker is a
-`line-prefix', with no text to match, so the prefix is overridden
-instead."
-  (setq-local occult-summary-line-prefix ""
+(defun eca-chat--fold-setup ()
+  "Tell occult what the noise of a chat is and how a fold summary reads.
+The block stretches are the noise.  The status symbol, the time beside
+it and the diff button stay in the buffer text and out of the line the
+fold shows.  The block marker is a `line-prefix', with no text to
+match, so the prefix is overridden instead."
+  (setq-local occult-noise-regions-function #'eca-chat--fold-runs
+              occult-summary-line-prefix ""
               occult-summary-replace-alist
               `((,(concat " " (regexp-quote eca-chat-mcp-tool-call-success-symbol)
                           " [0-9]+[ms]\\(?: [0-9]+s\\)?")
                  . "")
                 (" view diff" . ""))))
-
-(defun eca-chat--fold-snapshot ()
-  "Every occult fold in the buffer with its bounds."
-  (mapcar (lambda (ov)
-            (list ov (overlay-start ov) (overlay-end ov)))
-          (seq-filter (lambda (ov) (overlay-get ov 'occult))
-                      (overlays-in (point-min) (point-max)))))
 
 ;;;###autoload
 (defun eca-chat-fold ()
@@ -101,38 +87,52 @@ instead."
 The reader's prompts and the replies between the stretches stay
 visible.  Each fold is a plain occult fold: its first line stays
 visible, point can rest on it, and occult's keymap and
-`occult-edit-region' work on it.  Safe to run again: occult absorbs the
-folds already there.  `occult-reveal-all' opens them all, and evil's
-\\<evil-normal-state-map>\\[evil-open-folds] is advised to do so.
+`occult-edit-region' work on it.  Safe to run again: a stretch a fold
+already hides is left as it is, so only what the reader opened folds
+back.  Also arms `eca-chat-auto-fold-mode', so each turn folds as it
+ends from here on; `eca-chat-reveal' opens everything and disarms it.
 
 A fold summary shows the label of the block it starts with and none of
 eca's decorations around it: no status symbol, no elapsed time, no diff
-button, no block marker.  The settings are buffer-local because the
-folds `eca-chat-refold-after-protect-a' rebuilds are made outside this
-command."
+button, no block marker.  The folds outlive eca's re-protect of the
+history after every streamed chunk: that is a property change, and
+occult keeps a fold through those."
   (interactive)
-  (eca-chat--fold-summary-setup)
-  (let ((folded 0))
-    (dolist (run (eca-chat--fold-runs))
-      (when (occult-hide-region (car run) (cdr run))
-        (cl-incf folded)))
+  (eca-chat--fold-setup)
+  (let ((folded (occult-fold-noise)))
+    (eca-chat-auto-fold-mode 1)
     (when (called-interactively-p 'interactive)
-      (message "Folded %d stretch%s" folded (if (= folded 1) "" "es")))
+      (message "Folded %d stretch%s, auto-fold on" folded (if (= folded 1) "" "es")))
     folded))
 
-(defadvice! eca-chat-refold-after-protect-a (fn &rest args)
-  "Rebuild the occult folds a history re-protect wiped out.
-`put-text-property' fires the modification hook of every overlay in
-the range it is handed as soon as one character in that range changes,
-and `occult--modification-hook' deletes its fold.  eca re-protects the
-history after every streamed chunk, at the end of a turn, and after a
-block toggle, a history page or a resume, so without this a fold
-survives only until the next chunk arrives.  Only the folds the
-re-protect deleted come back, at the bounds they had, so a fold the
-reader opened stays open."
-  :around #'eca-chat--protect-non-prompt
-  (let ((folds (eca-chat--fold-snapshot)))
-    (prog1 (apply fn args)
-      (pcase-dolist (`(,ov ,beg ,end) folds)
-        (unless (overlay-buffer ov)
-          (eca-chat--fold-region beg end))))))
+;;;###autoload
+(defun eca-chat-reveal ()
+  "Open every fold in the chat and stop folding turns as they end.
+The counterpart of `eca-chat-fold'."
+  (interactive)
+  (eca-chat-auto-fold-mode -1)
+  (occult-reveal-all))
+
+(defvar eca-chat--last-user-message-pos)
+
+(defun eca-chat-auto-fold-h ()
+  "Fold the block stretches of the newest answer.
+`eca-chat--last-user-message-pos' is where that answer starts, right
+after the prompt that asked for it, so folds the reader opened in
+earlier turns stay open."
+  (eca-chat--fold-setup)
+  (occult-fold-noise (or eca-chat--last-user-message-pos (point-min))
+                     (point-max)))
+
+;;;###autoload
+(define-minor-mode eca-chat-auto-fold-mode
+  "Fold the blocks of a turn as soon as eca reports it finished.
+Every block is complete by then; a fold over a block still running
+dies when eca appends its status to the label.  Only the newest answer
+folds, so folds the reader opened in earlier turns stay open.  A chat
+starts with this off: `eca-chat-fold' arms it and `eca-chat-reveal'
+disarms it."
+  :group 'eca
+  (if eca-chat-auto-fold-mode
+      (add-hook 'eca-chat-finished-hook #'eca-chat-auto-fold-h nil t)
+    (remove-hook 'eca-chat-finished-hook #'eca-chat-auto-fold-h t)))

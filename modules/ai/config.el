@@ -224,9 +224,11 @@
             :n "M-n" #'eca-chat-go-to-next-expandable-block
             :n "<tab>"  #'eca-chat-toggle-expandable-block
             :n "TAB" #'eca-chat-toggle-expandable-block
-            ;; The counterpart is `zr', which occult already advises into
-            ;; `occult-reveal-all'.
+            ;; `zm' folds everything and arms `eca-chat-auto-fold-mode';
+            ;; `zr' reveals everything and disarms it.  A chat starts
+            ;; with the mode off.
             :n "zm" #'eca-chat-fold
+            :n "zr" #'eca-chat-reveal
             :n ",," #'eca-transient-menu
             ( :localleader
               "n" #'tab-line-switch-to-next-tab

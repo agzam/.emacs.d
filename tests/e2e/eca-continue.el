@@ -53,20 +53,27 @@
     (advice-member-p 'eca-chat-resume-in-columns-a 'eca-chat-resume)
     'installed 'installed)))
 
-;; Folding a chat is the reader's call, never the chat's.  A batch suite
-;; cannot see this: config.el runs only in a booted config, and the hook is
-;; where an eager fold would hide.
-(defun eca-continue-e2e--folding-is-manual ()
-  "Nothing folds a chat on its own."
-  (list
-   (eca-continue-e2e--equal
-    "eca-chat-finished-hook does not fold"
-    (seq-filter (lambda (fn)
-                  (string-match-p "fold" (format "%s" fn)))
-                eca-chat-finished-hook)
-    nil)
-   (eca-continue-e2e--equal "eca-chat-fold is a command"
-                            (commandp 'eca-chat-fold) t)))
+;; A chat folds nothing until the reader runs `eca-chat-fold', which folds
+;; everything and arms `eca-chat-auto-fold-mode' on the chat's buffer-local
+;; finished hook; `eca-chat-reveal' opens everything and disarms it.  A
+;; batch suite cannot see the first half: config.el runs only in a booted
+;; config, and its hooks are where an eager fold would hide.
+(defun eca-continue-e2e--folding ()
+  "Nothing folds a chat before the reader asks, and both commands exist."
+  (let ((folds-p (lambda (fn) (string-match-p "fold" (format "%s" fn)))))
+    (list
+     (eca-continue-e2e--equal
+      "eca-chat-finished-hook folds nothing globally"
+      (seq-filter folds-p (default-value 'eca-chat-finished-hook))
+      nil)
+     (eca-continue-e2e--equal
+      "eca-chat-mode-hook turns nothing on that folds"
+      (seq-filter folds-p eca-chat-mode-hook)
+      nil)
+     (eca-continue-e2e--equal "eca-chat-fold and eca-chat-reveal are commands"
+                              (and (commandp 'eca-chat-fold)
+                                   (commandp 'eca-chat-reveal))
+                              t))))
 
 ;; Each of these is faked in tests/ai/eca-tests.el.  Asserting they exist,
 ;; here, is what stops those fakes from drifting into fiction.
@@ -143,7 +150,7 @@
   (append (eca-continue-e2e--bindings)
           (eca-continue-e2e--autoload)
           (eca-continue-e2e--guards)
-          (eca-continue-e2e--folding-is-manual)
+          (eca-continue-e2e--folding)
           (eca-continue-e2e--api)
           (eca-continue-e2e--picker)))
 
