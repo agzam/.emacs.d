@@ -28,6 +28,8 @@
 ;; thing `e2e-prewarm' branches on.
 (defun global-jinx-mode (&optional _arg) nil)
 
+(defun jinx-mode (&optional _arg) nil)
+
 (defun with-jinx-present (mode-fn body)
   "Call BODY with jinx requirable, `jinx-mode' bound to MODE-FN, the mode spied."
   (cl-letf* ((real-require (symbol-function 'require))
@@ -36,7 +38,8 @@
                 (if (eq feature 'jinx) 'jinx (apply real-require feature args))))
              ((symbol-function 'jinx-mode) mode-fn))
     (spy-on 'global-jinx-mode)
-    (funcall body)))
+    (unwind-protect (funcall body)
+      (advice-remove 'jinx-mode #'ignore))))
 
 (describe "e2e-prewarm"
   ;; the sandbox has no jinx on the load-path: the require must fail
@@ -51,14 +54,18 @@
      (lambda (&rest _) (error "Jinx: Compilation of jinx-mod.so failed"))
      (lambda ()
        (expect (e2e-prewarm) :not :to-throw)
-       (expect 'global-jinx-mode :to-have-been-called-with -1))))
+       (expect 'global-jinx-mode :to-have-been-called-with -1)
+       ;; doom-first-buffer switches the global mode back on later, so the
+       ;; mode itself has to stop signalling
+       (expect (jinx-mode 1) :not :to-throw))))
 
   (it "leaves jinx alone once the module compiles"
     (with-jinx-present
      #'ignore
      (lambda ()
        (e2e-prewarm)
-       (expect 'global-jinx-mode :not :to-have-been-called)))))
+       (expect 'global-jinx-mode :not :to-have-been-called)
+       (expect (advice-member-p #'ignore 'jinx-mode) :to-be nil)))))
 
 (describe "e2e-report"
   ;; the whole point of the tier is that nothing passes quietly; a run that

@@ -153,8 +153,10 @@ absorbs pop and wait both.  Best-effort: a config without jinx runs on.
 
 A machine without enchant cannot build the module at all, and then
 `global-jinx-mode' signals in every buffer a scenario opens - the
-failure surfaces as whichever scenario touched a buffer first.  Turn it
-off for the run instead."
+failure surfaces as whichever scenario touched a buffer first.  Make
+the mode inert for the run instead.  Switching the global mode off is
+not enough on its own: this runs before `doom-first-buffer', whose hook
+switches it back on as soon as a scenario opens its first file."
   (when (require 'jinx nil t)
     (unless (ignore-errors
               (with-temp-buffer
@@ -162,6 +164,7 @@ off for the run instead."
                 (jinx-mode 1)
                 (jinx-mode -1))
               t)
+      (advice-add 'jinx-mode :override #'ignore)
       (global-jinx-mode -1)))
   ;; The Linux pty leaves stray events queued from terminal init (a
   ;; switch-frame event and a NUL byte that runs `set-mark-command');
