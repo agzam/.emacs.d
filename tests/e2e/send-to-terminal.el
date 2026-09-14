@@ -68,7 +68,13 @@
     (:label "a live eshell ends in insert state with RET on its own submit"
      :ext "org" :real-eshell t :text "run ~ls -la~ now\n"
      :search "ls -" :type code-snippet :want "ls -la"
-     :want-ret eshell-send-input :want-landed :terminal))
+     :want-ret eshell-send-input :want-landed :terminal)
+    ;; point is on the url, not on the snippet wrapping it, so the url is the
+    ;; default and cycling once past it lands the send on the snippet
+    (:label "cycling past a url inside a snippet still sends the snippet"
+     :ext "md" :text "see `https://example.com/x` now\n"
+     :search "example" :type url :cmd-type code-snippet
+     :keys "C-; T" :want "https://example.com/x"))
   "One case per syntax, per terminal count and per placement.
 :search puts point inside the snippet, :mode forces a major mode on the
 fixture, :region selects the line instead, :show displays the terminal
@@ -79,9 +85,11 @@ other must stay empty, :want-prompts is how many minibuffer reads the
 act is allowed, :want-shown-before is whether a window already held the
 terminal when the act started, :want-landed names the buffer focus must
 end in, :real-eshell runs a live shell instead of a buffer carrying the
-mode, and :want-ret is the command RET must reach afterwards.  Every
-case starts its terminals in normal state and every one must end in
-insert state.")
+mode, :want-ret is the command RET must reach afterwards, :want-types
+is the leading run of embark's target list in cycling order, and
+:cmd-type names the target the keys act on when they cycle first.
+Every case starts its terminals in normal state and every one must end
+in insert state.")
 
 (defun send-to-terminal-e2e--act (case)
   "Press CASE's keys through a real `embark-act', report what arrived."
@@ -97,7 +105,7 @@ insert state.")
          (keys (or (plist-get case :keys) "T"))
          (prompts 0)
          (tally (lambda () (cl-incf prompts)))
-         type cmd mode pasted got others landed shown-before state ret err)
+         type types cmd mode pasted got others landed shown-before state ret err)
     (dolist (term terminals)
       (with-current-buffer term
         (unless (plist-get case :real-eshell)
@@ -130,9 +138,16 @@ insert state.")
             ;; no window here before the act is what makes the pop-up case
             ;; mean anything
             (setq shown-before (and (get-buffer-window target t) t))
-            (setq type (plist-get (car (embark--targets)) :type))
+            (setq types (mapcar (lambda (tg) (plist-get tg :type))
+                                (embark--targets)))
+            (setq type (car types))
+            ;; the keys may cycle before acting, so the map that has to carry
+            ;; "T" is the one of the target they land on
             (setq cmd (ignore-errors
-                        (lookup-key (embark--action-keymap type nil) (kbd "T"))))
+                        (lookup-key
+                         (embark--action-keymap
+                          (or (plist-get case :cmd-type) type) nil)
+                         (kbd "T"))))
             (condition-case e
                 (let ((unread-command-events (listify-key-sequence (kbd keys))))
                   (embark-act))
@@ -151,6 +166,9 @@ insert state.")
                              ((eq (window-buffer (selected-window)) buf) :document)
                              (t (buffer-name (window-buffer (selected-window)))))))
       (remove-hook 'minibuffer-setup-hook tally)
+      ;; a case whose keys did not all get consumed would feed the rest into
+      ;; whichever scenario runs next
+      (discard-input)
       (with-current-buffer buf (set-buffer-modified-p nil))
       (kill-buffer buf)
       (let ((kill-buffer-query-functions nil))
@@ -161,8 +179,8 @@ insert state.")
     (list :label (plist-get case :label)
           :mode mode
           :keys keys :cmd cmd :type type :want-type (plist-get case :type)
-          :probe (format "landed=%s state=%s RET=%s shown-before=%s prompts=%s others=%S pasted=%S"
-                         landed state ret shown-before prompts others pasted)
+          :probe (format "types=%S landed=%s state=%s RET=%s shown-before=%s prompts=%s others=%S pasted=%S"
+                         types landed state ret shown-before prompts others pasted)
           :got got :want (plist-get case :want) :err err
           :ok (and (null err)
                    (eq type (plist-get case :type))
@@ -183,6 +201,60 @@ insert state.")
                    (or (null (plist-get case :want-ret))
                        (eq ret (plist-get case :want-ret)))))))
 
+(defvar send-to-terminal-e2e-order-cases
+  '((:label "a bug reference inside markdown code"
+     :ext "md" :text "see `stitchdata/cloudcutter#1384` now\n"
+     :search "cloudcut" :first bug-reference-link)
+    (:label "a bug reference inside org code"
+     :ext "org" :text "see ~stitchdata/cloudcutter#1384~ now\n"
+     :search "cloudcut" :first bug-reference-link)
+    (:label "a url inside markdown code"
+     :ext "md" :text "see `https://example.com/x` now\n"
+     :search "example" :first url)
+    (:label "an RFC number inside org code"
+     :ext "org" :text "see ~RFC 1234~ now\n"
+     :search "1234" :first rfc-number)
+    (:label "a snippet holding nothing narrower"
+     :ext "md" :text "run `ls -la` now\n"
+     :search "ls -" :first code-snippet)
+    (:label "a fenced block holding nothing narrower"
+     :ext "md" :text "a\n\n```sh\nls -la\n```\n\nb\n"
+     :search "ls -" :first code-snippet))
+  "Where point sits inside a snippet, and the target that must answer for it.
+:first is the default target embark offers; unless it is the snippet
+itself, the snippet has to come later in the list so a cycle reaches it.
+The count of targets between them is embark's business and no case
+pins it.")
+
+(defun send-to-terminal-e2e--order (case)
+  "Report the target order embark offers at CASE's point.
+A snippet contains other targets and is contained by none, so it is the
+default only when nothing narrower sits under point."
+  (let* ((file (expand-file-name (format "order.%s" (plist-get case :ext))
+                                 e2e-work-dir))
+         (buf (find-file-noselect file))
+         (first (plist-get case :first))
+         types)
+    (unwind-protect
+        (with-current-buffer buf
+          (erase-buffer)
+          (insert (plist-get case :text))
+          (font-lock-ensure)
+          (goto-char (point-min))
+          (search-forward (plist-get case :search))
+          (setq types (mapcar (lambda (tg) (plist-get tg :type))
+                              (embark--targets))))
+      (with-current-buffer buf (set-buffer-modified-p nil))
+      (kill-buffer buf))
+    (list :label (format "target order: %s" (plist-get case :label))
+          :got types
+          :want (if (eq first 'code-snippet)
+                    first
+                  (format "%s first, code-snippet later" first))
+          :ok (and (eq (car types) first)
+                   (or (eq first 'code-snippet)
+                       (and (memq 'code-snippet (cdr types)) t))))))
+
 (defun send-to-terminal-e2e ()
   "Drive \"T\" over every snippet syntax, a region, and every terminal count."
   (require 'embark)
@@ -193,11 +265,17 @@ insert state.")
   (dolist (fn '(send-to-terminal code-snippet-at-point))
     (when (autoloadp (symbol-function fn))
       (autoload-do-load (symbol-function fn) fn)))
-  ;; one case blowing up must cost that case, not the eleven beside it
-  (mapcar (lambda (case)
-            (condition-case e
-                (send-to-terminal-e2e--act case)
-              (error (list :label (plist-get case :label) :err e :ok nil))))
-          send-to-terminal-e2e-cases))
+  ;; one case blowing up must cost that case, not the ones beside it
+  (let ((guarded (lambda (fn)
+                   (lambda (case)
+                     (condition-case e
+                         (funcall fn case)
+                       (error (list :label (plist-get case :label)
+                                    :err e :ok nil)))))))
+    (append
+     (mapcar (funcall guarded #'send-to-terminal-e2e--order)
+             send-to-terminal-e2e-order-cases)
+     (mapcar (funcall guarded #'send-to-terminal-e2e--act)
+             send-to-terminal-e2e-cases))))
 
 (add-to-list 'e2e-scenarios #'send-to-terminal-e2e)

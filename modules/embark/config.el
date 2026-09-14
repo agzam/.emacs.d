@@ -133,9 +133,19 @@
                     embark-target-bug-reference-link-at-point
                     embark-target-RFC-number-at-point))
     (add-to-list 'embark-target-finders finder))
-  ;; ahead of the link finders: a url or a bug reference written inside a
-  ;; snippet belongs to the snippet
-  (add-to-list 'embark-target-finders 'embark-target-code-snippet)
+  ;; Inside-out: what point sits on wins, and the snippet around it is the
+  ;; next target to cycle to.  A snippet contains other targets and is
+  ;; contained by none, so its finder goes behind every narrower one - the
+  ;; link finders above and the url catch-all `embark-setup-url-types'
+  ;; splices just ahead of the file finder.  Same slot, spliced the same way
+  ;; and after it, so a rerun of either keeps the pair in order; still ahead
+  ;; of embark's own identifier and sentence finders.
+  (setq embark-target-finders
+        (remq 'embark-target-code-snippet embark-target-finders))
+  (cl-callf2 cons 'embark-target-code-snippet
+    (nthcdr (or (cl-position 'embark-target-file-at-point embark-target-finders)
+                (length embark-target-finders))
+            embark-target-finders))
 
   (defvar-keymap embark-org-block-map
     :doc "Embark actions for org blocks"
