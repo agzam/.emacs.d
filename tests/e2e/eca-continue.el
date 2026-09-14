@@ -32,10 +32,7 @@
                (format "%s -> %s" keys command)
                (key-binding (kbd keys))
                command))
-            '(("C-x g c" . eca)
-              ("C-x g r" . eca-chat-resume)
-              ("C-x g a" . eca-continue-from-file)
-              ;; the leader keys eca apart from gptel, under its own prefix
+            '(;; the leader keys eca apart from gptel, under its own prefix
               ("SPC x e n" . eca)
               ("SPC x e r" . eca-chat-resume)
               ("SPC x e a" . eca-continue-from-file)
