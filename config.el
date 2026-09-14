@@ -245,18 +245,7 @@
       "C-x m" #'media-transient
       "C-;"  #'embark-act
       ( :when (featurep :system 'linux)
-        :i "C-M-S-s-y" #'nerd-dictation-toggle)
-      ( :when (modulep! :custom ai)
-        ( :prefix ("C-x g" . "gptel")
-          :desc "gptel-menu" "g" #'gptel-menu
-          :desc "new gptel" "n" #'open-gptel
-          :desc "check text" "e" #'gptel-improve-text-transient
-          :desc "quick" "q" #'gptel-quick-question-buffer
-          "m" #'gptel-mode
-          "s" #'gptel-send
-          "c" #'eca
-          :desc "resume eca chat" "r" #'eca-chat-resume
-          :desc "continue archived eca chat" "a" #'eca-continue-from-file)))
+        :i "C-M-S-s-y" #'nerd-dictation-toggle))
 
 (map! ( :map (prog-mode-map text-mode-map markdown-mode-map)
         :desc "external browser" "C-c C-o"
@@ -496,14 +485,15 @@
             :desc "popup" "p" #'google-translate-posframe-at-point))
         ( :when (modulep! :custom ai)
           ( :prefix ("g" . "gptel")
-            :desc "gptel-menu" "g" #'gptel-menu
-            :desc "inline at point" "i" #'gptel-inline-dwim
-            :desc "visit inline session" "v" #'gptel-inline-visit-last-chat
             :desc "check text" "e" #'gptel-improve-text-transient
-            :desc "quick" "q" #'gptel-quick-question-buffer
-            :desc "search" "/" #'gptel-log-find
+            "i" #'gptel-inline-dwim
+            "g" #'gptel-menu
             "m" #'gptel-mode
-            "s" #'gptel-send)
+            "n" #'open-gptel
+            :desc "quick" "q" #'gptel-quick-question-buffer
+            "s" #'gptel-send
+            "v" #'gptel-inline-visit-last-chat
+            :desc "search" "/" #'gptel-log-find)
           ( :prefix ("e" . "eca")
             "e" #'eca-toggle-workspaces
             "n" #'eca
