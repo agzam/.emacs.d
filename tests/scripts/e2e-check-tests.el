@@ -23,11 +23,42 @@
         (insert (cdr file))))
     root))
 
+;; jinx is absent from the sandbox.  `with-fake-feature' cannot stand in
+;; here: its `require' answers nil for the faked feature, which is the very
+;; thing `e2e-prewarm' branches on.
+(defun global-jinx-mode (&optional _arg) nil)
+
+(defun with-jinx-present (mode-fn body)
+  "Call BODY with jinx requirable, `jinx-mode' bound to MODE-FN, the mode spied."
+  (cl-letf* ((real-require (symbol-function 'require))
+             ((symbol-function 'require)
+              (lambda (feature &rest args)
+                (if (eq feature 'jinx) 'jinx (apply real-require feature args))))
+             ((symbol-function 'jinx-mode) mode-fn))
+    (spy-on 'global-jinx-mode)
+    (funcall body)))
+
 (describe "e2e-prewarm"
   ;; the sandbox has no jinx on the load-path: the require must fail
   ;; softly and the run proceed, same as a config without the package
   (it "tolerates an environment without jinx"
-    (expect (e2e-prewarm) :not :to-throw)))
+    (expect (e2e-prewarm) :not :to-throw))
+
+  ;; a machine without enchant cannot build jinx-mod.so, and then
+  ;; global-jinx-mode signals in every buffer a scenario opens
+  (it "turns global-jinx-mode off when the module will not build"
+    (with-jinx-present
+     (lambda (&rest _) (error "Jinx: Compilation of jinx-mod.so failed"))
+     (lambda ()
+       (expect (e2e-prewarm) :not :to-throw)
+       (expect 'global-jinx-mode :to-have-been-called-with -1))))
+
+  (it "leaves jinx alone once the module compiles"
+    (with-jinx-present
+     #'ignore
+     (lambda ()
+       (e2e-prewarm)
+       (expect 'global-jinx-mode :not :to-have-been-called)))))
 
 (describe "e2e-report"
   ;; the whole point of the tier is that nothing passes quietly; a run that

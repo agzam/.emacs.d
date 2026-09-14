@@ -149,13 +149,20 @@ On a fresh machine the first text-mode buffer makes jinx compile its
 native module: the compilation buffer pops up mid-scenario and the
 window it steals eats the keys of whichever act is running.  The
 compile is synchronous (jinx.el `call-process'), so triggering it here
-absorbs pop and wait both.  Best-effort: a config without jinx runs on."
-  (ignore-errors
-    (when (require 'jinx nil t)
-      (with-temp-buffer
-        (text-mode)
-        (jinx-mode 1)
-        (jinx-mode -1))))
+absorbs pop and wait both.  Best-effort: a config without jinx runs on.
+
+A machine without enchant cannot build the module at all, and then
+`global-jinx-mode' signals in every buffer a scenario opens - the
+failure surfaces as whichever scenario touched a buffer first.  Turn it
+off for the run instead."
+  (when (require 'jinx nil t)
+    (unless (ignore-errors
+              (with-temp-buffer
+                (text-mode)
+                (jinx-mode 1)
+                (jinx-mode -1))
+              t)
+      (global-jinx-mode -1)))
   ;; The Linux pty leaves stray events queued from terminal init (a
   ;; switch-frame event and a NUL byte that runs `set-mark-command');
   ;; the first scenario that reads input would drain them into its own

@@ -193,6 +193,11 @@ insert state.")
   (dolist (fn '(send-to-terminal code-snippet-at-point))
     (when (autoloadp (symbol-function fn))
       (autoload-do-load (symbol-function fn) fn)))
-  (mapcar #'send-to-terminal-e2e--act send-to-terminal-e2e-cases))
+  ;; one case blowing up must cost that case, not the eleven beside it
+  (mapcar (lambda (case)
+            (condition-case e
+                (send-to-terminal-e2e--act case)
+              (error (list :label (plist-get case :label) :err e :ok nil))))
+          send-to-terminal-e2e-cases))
 
 (add-to-list 'e2e-scenarios #'send-to-terminal-e2e)
