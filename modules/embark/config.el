@@ -133,11 +133,23 @@
                     embark-target-bug-reference-link-at-point
                     embark-target-RFC-number-at-point))
     (add-to-list 'embark-target-finders finder))
+  ;; ahead of the link finders: a url or a bug reference written inside a
+  ;; snippet belongs to the snippet
+  (add-to-list 'embark-target-finders 'embark-target-code-snippet)
 
   (defvar-keymap embark-org-block-map
     :doc "Embark actions for org blocks"
     :parent embark-general-map)
   (add-to-list 'embark-keymap-alist '(org-block . embark-org-block-map))
+
+  (defvar-keymap embark-code-snippet-map
+    :doc "Embark actions for inline code and fenced code blocks"
+    :parent embark-general-map)
+  (add-to-list 'embark-keymap-alist '(code-snippet . embark-code-snippet-map))
+  ;; the terminal picker prompts for something that is not the target; left
+  ;; alone, embark types the snippet into it and exits the read on its own
+  (setf (alist-get 'send-to-terminal embark-target-injection-hooks)
+        '(embark--ignore-target))
 
   (defvar-keymap embark-markdown-link-map
     :doc "Keymap for Embark markdown link actions."
@@ -282,6 +294,11 @@
             (:prefix ("D" . "debug")
                      "f" #'edebug-instrument-symbol
                      "F" #'edebug-remove-instrumentation)))
+
+   ;; one key for "put this code at a shell prompt", whether it came from a
+   ;; snippet or from a selection; "t" would shadow embark's transpose-regions
+   (:map (embark-code-snippet-map embark-region-map)
+         :desc "send to terminal" "T" #'send-to-terminal)
 
    (:map embark-region-map
          ;; plain `browse-url' on a region opens another instance of Emacs
