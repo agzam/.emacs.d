@@ -6,9 +6,11 @@
 ;; The package's own suite covers the clip, the engines and the menu's
 ;; readers with the transient never drawn.  What only shows up here: the
 ;; leader reaching a command elpaca autoloads from a local checkout, the
-;; prefix actually setting up, and RET inside it landing on the suffix
-;; rather than on evil's normal-state map.  The clipboard and the engine
-;; are stubbed - a headless run has neither.
+;; prefix actually setting up, RET inside it landing on the suffix rather
+;; than on evil's normal-state map, the columns actually rendering, and an
+;; infix set by real keys reaching the action that reads it.  The
+;; clipboard, the engine and the network are stubbed - a headless run has
+;; none of them, and no suite should upload anything.
 
 (require 'cl-lib)
 
@@ -77,4 +79,61 @@
       (delete-other-windows))
     (nreverse results)))
 
+(defun clipboard-image-upload-e2e ()
+  "Upload from the menu with real keys, with the network stubbed out."
+  (require 'clipimg-menu)
+  (let* ((file (expand-file-name "clipimg-upload-case.txt" e2e-work-dir))
+         (buf (find-file-noselect file))
+         (clip (clipimg-clip-create :data clipboard-image-menu-png :type 'png))
+         ;; The upload action reaches the system clipboard on purpose, and
+         ;; a suite has no business replacing what the user copied.
+         (select-enable-clipboard nil)
+         (kill-ring nil)
+         posted results opened drawn)
+    (unwind-protect
+        (progn
+          (with-current-buffer buf
+            (switch-to-buffer buf)
+            (delete-other-windows)
+            (erase-buffer)
+            (insert "case\n")
+            (evil-force-normal-state)
+            (goto-char (point-min)))
+          (discard-input)
+          (cl-letf (((symbol-function 'clipimg-clipboard-clip) (lambda () clip))
+                    ((symbol-function 'y-or-n-p) (lambda (&rest _) t))
+                    ((symbol-function 'clipimg-upload--post)
+                     (lambda (url &rest _)
+                       (setq posted url)
+                       "https://example.test/e2e.png\n")))
+            (execute-kbd-macro (kbd "SPC i i"))
+            (setq opened (and (bound-and-true-p transient--prefix)
+                              (oref transient--prefix command)))
+            (setq drawn (when-let* ((buffer (get-buffer transient--buffer-name)))
+                          (with-current-buffer buffer
+                            (substring-no-properties (buffer-string)))))
+            (push (clipboard-image-menu--result
+                   "the Upload column is drawn"
+                   (mapcar (lambda (want) (and drawn (string-search want drawn) t))
+                           '("Upload" "service: " "insert URL at point"))
+                   '(t t t))
+                  results)
+            (when (eq opened 'clipimg)
+              (execute-kbd-macro (kbd "-s 0x0 RET"))
+              (execute-kbd-macro (kbd "u"))))
+          (push (clipboard-image-menu--result
+                 "u posts to the host -s named, and the URL lands on the kill ring"
+                 (list posted (car kill-ring))
+                 (list "https://0x0.st" "https://example.test/e2e.png"))
+                results))
+      (discard-input)
+      (when (bound-and-true-p transient--prefix)
+        (ignore-errors (transient--emergency-exit)))
+      (when (buffer-live-p buf)
+        (with-current-buffer buf (set-buffer-modified-p nil))
+        (kill-buffer buf))
+      (delete-other-windows))
+    (nreverse results)))
+
 (add-to-list 'e2e-scenarios #'clipboard-image-menu-e2e)
+(add-to-list 'e2e-scenarios #'clipboard-image-upload-e2e)
