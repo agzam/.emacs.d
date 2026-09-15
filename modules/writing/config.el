@@ -420,4 +420,4 @@ hidden."
 (use-package clipimg
   :ensure (clipimg :host github :repo "agzam/clipimg.el")
   :defer t
-  :commands (clipimg clipimg-ocr))
+  :commands (clipimg clipimg-ocr clipimg-save))
