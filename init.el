@@ -110,6 +110,7 @@
     (transcripto . "~/GitHub/agzam/transcripto.el")
     (go-jira . "~/GitHub/agzam/go-jira.el")
     (khalendario . "~/GitHub/agzam/khalendario.el")
+    (clipimg . "~/GitHub/agzam/clipimg.el")
     ;; the hammerspoon config IS the spacehammer checkout (doom.d symlinked it)
     (spacehammer . "~/.hammerspoon"))
   "Alist of own packages -> local checkout preferred over the GitHub recipe.")

@@ -413,3 +413,11 @@ hidden."
   ;; kills remember their origin format and convert md<->org at paste
   ;; time; bare C-u pastes verbatim
   :hook (doom-first-input . prisma-yank-mode))
+
+;; The menu over the image on the clipboard; Hammerspoon's Flameshot
+;; watcher opens it after every capture.  Vision reads the text on this
+;; machine, so tesseract is a fallback rather than a dependency.
+(use-package clipimg
+  :ensure (clipimg :host github :repo "agzam/clipimg.el")
+  :defer t
+  :commands (clipimg clipimg-ocr))
