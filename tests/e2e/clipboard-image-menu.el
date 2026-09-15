@@ -119,12 +119,12 @@
                    '(t t t))
                   results)
             (when (eq opened 'clipimg)
-              (execute-kbd-macro (kbd "-s 0x0 RET"))
+              (execute-kbd-macro (kbd "-s catbox RET"))
               (execute-kbd-macro (kbd "u"))))
           (push (clipboard-image-menu--result
                  "u posts to the host -s named, and the URL lands on the kill ring"
                  (list posted (car kill-ring))
-                 (list "https://0x0.st" "https://example.test/e2e.png"))
+                 (list "https://catbox.moe/user/api.php" "https://example.test/e2e.png"))
                 results))
       (discard-input)
       (when (bound-and-true-p transient--prefix)
