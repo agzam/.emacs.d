@@ -177,7 +177,6 @@
                          args)))
 
   (add-hook 'minibuffer-setup-hook #'vertico-repeat-save)
-  (map! :map vertico-map "DEL" #'vertico-directory-delete-char)
 
   ;; These commands are problematic and automatically show the *Completions* buffer
   (advice-add #'tmm-add-prompt :after #'minibuffer-hide-completions)

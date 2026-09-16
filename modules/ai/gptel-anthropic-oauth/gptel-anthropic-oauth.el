@@ -74,6 +74,18 @@
   "You are Claude Code, Anthropic's official CLI for Claude."
   "Required system prompt for OAuth token validation.")
 
+(defconst gptel-anthropic-oauth--adaptive-thinking-params
+  '(:thinking (:type "adaptive" :display "summarized"))
+  "Request parameters that make a model stream its reasoning text.
+
+Without them the newer models open a thinking block, sign it, and leave
+the text empty, so the reasoning drawer renders blank.  Models older
+than 4.6 reject the adaptive type outright, hence the version gate in
+`gptel-anthropic-oauth--adaptive-thinking-p'.")
+
+(defconst gptel-anthropic-oauth--adaptive-thinking-floor '(4 . 6)
+  "Oldest (MAJOR . MINOR) model version accepting adaptive thinking.")
+
 ;;; Token Storage
 
 (defvar gptel-anthropic-oauth--token-cache nil
@@ -195,6 +207,48 @@
                      (time-add (current-time) (seconds-to-time expires-in)))
                     t)))))
         (error nil)))))
+
+;;; Adaptive thinking
+
+(defun gptel-anthropic-oauth--model-version (model)
+  "Return MODEL's version as a (MAJOR . MINOR) pair, or nil.
+
+MINOR defaults to 0.  A trailing release date is not part of the
+version: `claude-opus-4-5-20251101' is 4.5, not 4.5.20251101."
+  (let ((name (if (symbolp model) (symbol-name model) model)))
+    (when (string-match
+           "\\`claude-[a-z]+-\\([0-9]+\\)\\(?:-\\([0-9]\\{1,2\\}\\)\\)?\\(?:-\\|\\'\\)"
+           name)
+      (cons (string-to-number (match-string 1 name))
+            (string-to-number (or (match-string 2 name) "0"))))))
+
+(defun gptel-anthropic-oauth--adaptive-thinking-p (model)
+  "Return non-nil if MODEL accepts adaptive thinking.
+
+Older models answer the adaptive type with an `invalid_request_error',
+so an unrecognized name is treated as too old."
+  (when-let* ((version (gptel-anthropic-oauth--model-version model))
+              (floor gptel-anthropic-oauth--adaptive-thinking-floor))
+    (or (< (car floor) (car version))
+        (and (= (car floor) (car version))
+             (not (< (cdr version) (cdr floor)))))))
+
+(defun gptel-anthropic-oauth--annotate-thinking (models)
+  "Attach adaptive thinking request params to eligible MODELS.
+
+MODELS holds symbols or (NAME . PLIST) pairs, as `gptel--process-models'
+accepts.  That function overwrites a model's whole symbol plist, so an
+annotated entry carries the existing properties along."
+  (mapcar
+   (lambda (model)
+     (let ((name (if (consp model) (car model) model)))
+       (if (gptel-anthropic-oauth--adaptive-thinking-p name)
+           (cons name
+                 (plist-put
+                  (copy-sequence (if (consp model) (cdr model) (symbol-plist name)))
+                  :request-params gptel-anthropic-oauth--adaptive-thinking-params))
+         model)))
+   models))
 
 ;;; Parsing
 (cl-defmethod gptel--request-data :around ((backend gptel-anthropic-oauth) prompts)
@@ -352,10 +406,11 @@
 
 (defun gptel-anthropic-oauth--refresh-backends (models)
   "Set OAuth backend model lists to MODELS."
-  (dolist (entry gptel--known-backends)
-    (when (gptel-anthropic-oauth-p (cdr entry))
-      (setf (gptel-backend-models (cdr entry))
-            (gptel--process-models models)))))
+  (let ((models (gptel-anthropic-oauth--annotate-thinking models)))
+    (dolist (entry gptel--known-backends)
+      (when (gptel-anthropic-oauth-p (cdr entry))
+        (setf (gptel-backend-models (cdr entry))
+              (gptel--process-models models))))))
 
 (defun gptel-anthropic-oauth-refresh-models ()
   "Refresh Claude OAuth models from Anthropic."
@@ -378,11 +433,12 @@ NAME is the backend name.
 STREAM enables streaming responses.
 MODELS is the list of available models."
   (declare (indent 1))
-  (let* ((models (or models
-                     (gptel-anthropic-oauth--fetch-models)
-                     (progn
-                       (message "Claude OAuth: using bundled model metadata")
-                       gptel--anthropic-models)))
+  (let* ((models (gptel-anthropic-oauth--annotate-thinking
+                  (or models
+                      (gptel-anthropic-oauth--fetch-models)
+                      (progn
+                        (message "Claude OAuth: using bundled model metadata")
+                        gptel--anthropic-models))))
          (backend
          (gptel--make-anthropic-oauth
           :name name
