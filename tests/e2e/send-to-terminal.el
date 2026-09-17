@@ -63,6 +63,12 @@
     (:label "one terminal asks nothing"
      :ext "org" :text "run ~ls -la~ now\n"
      :search "ls -" :type code-snippet :want "ls -la" :want-prompts 0)
+    ;; the first "T" of a session: nothing to send to, so the action runs the
+    ;; shell chooser, waits for what it pops, and sends into that
+    (:label "no terminal: the chooser starts one and the snippet lands in it"
+     :ext "org" :text "run ~ls -la~ now\n"
+     :search "ls -" :type code-snippet :want "ls -la"
+     :start t :keys "T e s h e l l RET" :want-prompts 1 :want-landed :terminal)
     ;; a real process, because RET reaching the shell is the point of the
     ;; state switch and no mode-carrying buffer can show that
     (:label "a live eshell ends in insert state with RET on its own submit"
@@ -84,8 +90,9 @@ to run, :keys is the whole key sequence typed once embark is up,
 other must stay empty, :want-prompts is how many minibuffer reads the
 act is allowed, :want-shown-before is whether a window already held the
 terminal when the act started, :want-landed names the buffer focus must
-end in, :real-eshell runs a live shell instead of a buffer carrying the
-mode, :want-ret is the command RET must reach afterwards, :want-types
+end in, :start leaves the case with no terminal at all so the keys have
+to drive the shell chooser, :real-eshell runs a live shell instead of a
+buffer carrying the mode, :want-ret is the command RET must reach afterwards, :want-types
 is the leading run of embark's target list in cycling order, and
 :cmd-type names the target the keys act on when they cycle first.
 Every case starts its terminals in normal state and every one must end
@@ -97,14 +104,23 @@ in insert state.")
                                  e2e-work-dir))
          (buf (find-file-noselect file))
          (count (or (plist-get case :terminals) 1))
-         (terminals (if (plist-get case :real-eshell)
-                        (list (save-window-excursion (eshell t)))
-                      (cl-loop repeat count
-                               collect (generate-new-buffer " *e2e-terminal*"))))
+         (terminals (cond
+                     ;; the case has to start its own, so it owns none yet
+                     ((plist-get case :start) nil)
+                     ((plist-get case :real-eshell)
+                      (list (save-window-excursion (eshell t))))
+                     (t (cl-loop repeat count
+                                 collect (generate-new-buffer " *e2e-terminal*")))))
          (target (nth (1- (or (plist-get case :want-terminal) 1)) terminals))
          (keys (or (plist-get case :keys) "T"))
          (prompts 0)
          (tally (lambda () (cl-incf prompts)))
+         started
+         ;; whatever `shell-pop' pops mid-act joins the terminals the case
+         ;; can be sent to, in the normal state every other one starts in
+         (record (lambda ()
+                   (evil-normal-state)
+                   (push (current-buffer) started)))
          type types cmd mode pasted got others landed shown-before state ret err)
     (dolist (term terminals)
       (with-current-buffer term
@@ -114,12 +130,14 @@ in insert state.")
         ;; evil's motion rather than the shell's submit
         (evil-normal-state)))
     (unwind-protect
-        (cl-letf (((symbol-function 'terminal-buffers) (lambda () terminals))
+        (cl-letf (((symbol-function 'terminal-buffers)
+                   (lambda () (append started terminals)))
                   ;; the real one talks to a pty; echo into the buffer so the
                   ;; case can check the text the same way as for eshell
                   ((symbol-function 'ghostel-paste-string)
                    (lambda (s) (setq pasted s) (insert s))))
           (add-hook 'minibuffer-setup-hook tally)
+          (add-hook 'shell-pop-in-after-hook record)
           (with-current-buffer buf
             (switch-to-buffer buf)
             (delete-other-windows)
@@ -137,7 +155,7 @@ in insert state.")
             (setq mode major-mode)
             ;; no window here before the act is what makes the pop-up case
             ;; mean anything
-            (setq shown-before (and (get-buffer-window target t) t))
+            (setq shown-before (and target (get-buffer-window target t) t))
             (setq types (mapcar (lambda (tg) (plist-get tg :type))
                                 (embark--targets)))
             (setq type (car types))
@@ -152,11 +170,12 @@ in insert state.")
                 (let ((unread-command-events (listify-key-sequence (kbd keys))))
                   (embark-act))
               (error (setq err e))))
+          (setq terminals (append started terminals)
+                target (or target (car terminals)))
           (setq got (with-current-buffer target
-                      (if (plist-get case :real-eshell)
+                      (if-let* ((out (bound-and-true-p eshell-last-output-end)))
                           ;; a live eshell holds its banner and prompt too
-                          (buffer-substring-no-properties
-                           eshell-last-output-end (point-max))
+                          (buffer-substring-no-properties out (point-max))
                         (buffer-string)))
                 state (buffer-local-value 'evil-state target)
                 ret (with-current-buffer target (key-binding (kbd "RET")))
@@ -166,6 +185,8 @@ in insert state.")
                              ((eq (window-buffer (selected-window)) buf) :document)
                              (t (buffer-name (window-buffer (selected-window)))))))
       (remove-hook 'minibuffer-setup-hook tally)
+      (remove-hook 'shell-pop-in-after-hook record)
+      (setq terminals (delete-dups (append started terminals)))
       ;; a case whose keys did not all get consumed would feed the rest into
       ;; whichever scenario runs next
       (discard-input)
@@ -260,6 +281,8 @@ default only when nothing narrower sits under point."
   (require 'embark)
   (require 'which-key)
   (require 'markdown-mode)
+  ;; `shell-pop-in-after-hook' is where a case learns what the chooser popped
+  (require 'shell-pop)
   ;; resolve the autoload before the stubs go in: loading terminal.el from
   ;; inside a case would redefine the `terminal-buffers' each one fakes
   (dolist (fn '(send-to-terminal code-snippet-at-point))

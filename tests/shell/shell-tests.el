@@ -11,11 +11,19 @@
 
 (load-module-file "modules/shell/autoload/shell.el")
 
-;; shell-pop isn't installed in the batch tier; the functions under test
-;; only need these entry points to exist.
+;; shell-pop isn't installed in the batch tier.  `shell-pop' is autoloaded in
+;; a real session, so stub it here; `shell-pop--set-shell-type' only exists
+;; once the package body loads, so it ships in a stand-in file that `require'
+;; has to find - a caller that skips the require hits a void function.
 (defvar shell-pop-shell-type nil)
 (defun shell-pop (&optional _arg))
-(defun shell-pop--set-shell-type (sym val) (set sym val))
+
+(let ((dir (file-name-as-directory (make-temp-file "shell-pop-stand-in" t))))
+  (with-temp-file (expand-file-name "shell-pop.el" dir)
+    (insert ";;; shell-pop.el --- stand-in -*- lexical-binding: t; -*-\n"
+            "(defun shell-pop--set-shell-type (sym val) (set sym val))\n"
+            "(provide 'shell-pop)\n"))
+  (add-to-list 'load-path dir))
 
 (describe "shell-pop-in-project-root"
   :var (popped-in)

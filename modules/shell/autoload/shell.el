@@ -19,6 +19,8 @@
 (defun shell-pop-choose (&optional arg)
   "Pick a shell implementation, rewire `shell-pop-shell-type', then pop."
   (interactive "P")
+  ;; Only `shell-pop' is autoloaded; the setter below lives in the package body.
+  (require 'shell-pop)
   (let* ((shell-type (completing-read "Shell: " '(ghostel eshell)))
          (shell-fn (pcase shell-type
                      ("ghostel" #'ghostel)

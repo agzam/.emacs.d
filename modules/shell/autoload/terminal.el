@@ -5,6 +5,10 @@
 (declare-function ghostel-paste-string "ghostel" (string))
 (declare-function code-snippet-at-point "code-snippet" ())
 (declare-function evil-insert-state "evil-states" (&optional arg))
+(declare-function shell-pop-choose "shell" (&optional arg))
+
+(defvar terminal-start-timeout 2
+  "Seconds to wait for a freshly started terminal to show its first prompt.")
 
 (defun terminal-buffers ()
   "Live eshell and ghostel buffers, most recently used first."
@@ -23,10 +27,31 @@
                      (display-sort-function . identity))
         (complete-with-action action names string pred)))))
 
+(defun terminal-ready-p ()
+  "Non-nil when the current terminal buffer can take input.
+A ghostel shell spawns asynchronously, and text pasted before its line
+editor runs is read as literal escape sequences; its first OSC 133 prompt
+says the shell is listening.  An eshell prompt is there the moment the
+buffer is."
+  (or (not (derived-mode-p 'ghostel-mode))
+      (text-property-not-all (point-min) (point-max) 'ghostel-prompt nil)))
+
+(defun start-new-terminal ()
+  "Start a terminal with `shell-pop-choose' and return it once it takes input."
+  (shell-pop-choose)
+  (let ((buffer (car (terminal-buffers))))
+    (unless buffer
+      (user-error "No terminal started"))
+    (with-current-buffer buffer
+      (with-timeout (terminal-start-timeout nil)
+        (while (not (terminal-ready-p))
+          (accept-process-output nil 0.05))))
+    buffer))
+
 (defun read-terminal-buffer ()
-  "The terminal to send to: the only live one, or one the user picks."
+  "The terminal to send to: the only live one, one the user picks, or a new one."
   (pcase (terminal-buffers)
-    ('() (user-error "No live eshell or ghostel buffer"))
+    ('() (start-new-terminal))
     (`(,only) only)
     (buffers (get-buffer
               (completing-read "Terminal: " (terminal-buffer-table buffers)
