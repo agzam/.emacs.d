@@ -167,10 +167,14 @@
   ;; chat and leans on `display-buffer-in-direction' relative to whatever is
   ;; selected, so a new session lands unpredictably and hides the chat that
   ;; was there.  Force two rules instead: reuse only a window already showing
-  ;; this exact buffer, otherwise split a fresh window to the right of the
-  ;; current one - never covering another eca chat.
+  ;; this exact buffer, otherwise open a fresh window at the frame's right
+  ;; edge - never covering another eca chat.  Splitting the selected window
+  ;; crushes its left neighbor: a float `window-width' is a fraction of the
+  ;; frame, so the resize that follows the split takes the whole difference
+  ;; from the nearest sibling.  Splitting the root window spreads that cost
+  ;; over every window in the frame.
   (defadvice! eca-chat-display-buffer-right-a (buffer)
-    "Show each eca chat in its own window right of the current one."
+    "Show each eca chat in its own window at the frame's right edge."
     :override #'eca-chat--display-buffer
     (let ((window
            (or (get-buffer-window buffer)
@@ -178,6 +182,7 @@
                 buffer
                 `((display-buffer-in-direction)
                   (direction . right)
+                  (window . root)
                   (window-width . ,eca-chat-window-width))))))
       (when (and (window-live-p window) eca-chat-focus-on-open)
         (select-window window))
