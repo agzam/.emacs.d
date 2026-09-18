@@ -52,8 +52,7 @@ ago. With a prefix argument opens `jinx-correct-word' dialog."
                                 (point)))
                ;; pick the last overlay (last misspelling)
                (ov (car-safe
-                    (last (jinx--force-overlays
-                           zone-beg zone-end :visible t)))))
+                    (last (jinx--force-overlays zone-beg zone-end t)))))
           (if prompt
               ;; if called with argument, open the dialog
               (jinx--correct-guard

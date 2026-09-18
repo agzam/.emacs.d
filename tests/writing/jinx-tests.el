@@ -50,6 +50,43 @@
       (insert-dash)
       (expect (buffer-string) :to-equal "---"))))
 
+(describe "jinx-autocorrect-last"
+  :var (force-args)
+
+  (before-each
+    (setq force-args nil
+          jinx-autocorrect--ts nil
+          jinx-autocorrect--pos nil
+          jinx-autocorrect--suggestions nil))
+
+  (it "asks jinx--force-overlays for visible overlays positionally"
+    ;; The stub mirrors jinx's own arglist, so a keyword call fails here
+    ;; the same way it fails against the real function.
+    (with-temp-buffer
+      (insert "Fix the wrod.")
+      (let ((ov (make-overlay 9 13)))
+        (cl-letf (((symbol-function 'jinx--correct-guard)
+                   (cons 'macro (lambda (&rest body) (macroexp-progn body))))
+                  ((symbol-function 'jinx--force-overlays)
+                   (lambda (start end &optional visible)
+                     (setq force-args (list start end visible))
+                     (list ov)))
+                  ((symbol-function 'jinx--correct-suggestions)
+                   (lambda (_word) '("word" "ward")))
+                  ((symbol-function 'jinx--correct-replace)
+                   (lambda (o word)
+                     (goto-char (overlay-start o))
+                     (delete-region (overlay-start o) (overlay-end o))
+                     (insert word)
+                     (delete-overlay o)))
+                  ((symbol-function 'pulse-momentary-highlight-region) #'ignore)
+                  ((symbol-function 'message) #'ignore))
+          (jinx-autocorrect-last)))
+      (expect (length force-args) :to-equal 3)
+      (expect (nth 2 force-args) :to-be t)
+      (expect (buffer-string) :to-equal "Fix the word.")
+      (expect jinx-autocorrect--pos :to-equal 9))))
+
 (describe "jinx-mode-off-h"
   :var (calls)
 
