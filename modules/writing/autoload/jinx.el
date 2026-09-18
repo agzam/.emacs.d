@@ -6,11 +6,17 @@
 (defvar jinx-autocorrect--ts nil)
 (defvar jinx-autocorrect--pos nil)
 
+(defun jinx-autocorrect--last-overlay (beg end)
+  "Overlay of the last misspelling between BEG and END."
+  ;; `jinx--force-overlays' rotates its result around point, which sits
+  ;; outside the zone while this runs, so sort by position instead.
+  (car (last (sort (jinx--force-overlays beg end t)
+                   (lambda (a b) (< (overlay-start a) (overlay-start b)))))))
+
 ;;;###autoload
 (defun jinx-autocorrect-last (&optional prompt)
-  "Autocorrect previous misspelling. If called repeatedly, it cycles
-through word suggestions unless the last call happened a while
-ago. With a prefix argument opens `jinx-correct-word' dialog."
+  "Correct the last misspelling, cycling suggestions on repeated calls.
+With PROMPT, open the `jinx-correct-word' dialog instead."
   (interactive "P")
   (save-excursion
     (let* ((now (current-time))
@@ -50,9 +56,8 @@ ago. With a prefix argument opens `jinx-correct-word' dialog."
                ;; fix only within last N sentences
                (zone-beg (progn (backward-sentence 2)
                                 (point)))
-               ;; pick the last overlay (last misspelling)
-               (ov (car-safe
-                    (last (jinx--force-overlays zone-beg zone-end t)))))
+               ;; the check inside covers the word just typed, stale overlays or not
+               (ov (jinx-autocorrect--last-overlay zone-beg zone-end)))
           (if prompt
               ;; if called with argument, open the dialog
               (jinx--correct-guard
