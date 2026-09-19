@@ -161,7 +161,8 @@
   (setopt eca-chat-use-side-window nil
           eca-chat-parent-mode 'markdown-mode
           eca-chat-trust-enable t
-          eca-api-response-timeout 15)
+          eca-api-response-timeout 15
+          tab-line-switch-cycling nil)
 
   ;; Upstream reuses (replaces) the first visible eca window for every new
   ;; chat and leans on `display-buffer-in-direction' relative to whatever is
