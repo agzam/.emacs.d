@@ -124,6 +124,31 @@ targets."
     (apply fn args)))
 
 ;;;###autoload
+(defun embark-cycle-backward ()
+  "Cycle to the previous target at point."
+  (interactive)
+  (user-error "Not meant to be called directly"))
+
+(defvar embark--cycle-backward-prefix nil
+  "Non-nil while `prefix-arg' carries the backward step of a cycle.")
+
+;;;###autoload
+(defun embark-cycle-backward-a (fn &rest args)
+  "Answer `embark-cycle-backward' with `embark-cycle' and a -1 `prefix-arg'."
+  ;; `embark-act' rotates its targets by `prefix-arg' and leaves the value
+  ;; behind, so the action picked at the next prompt would receive it.
+  (when embark--cycle-backward-prefix
+    (setq prefix-arg nil
+          embark--cycle-backward-prefix nil))
+  (let ((cmd (apply fn args)))
+    (if (eq cmd 'embark-cycle-backward)
+        (progn
+          (setq prefix-arg -1
+                embark--cycle-backward-prefix t)
+          #'embark-cycle)
+      cmd)))
+
+;;;###autoload
 (defun embark-preview ()
   "Preview the target: forge for GitHub topics/files, eww for urls, else dwim."
   (interactive)

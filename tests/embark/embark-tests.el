@@ -362,6 +362,40 @@
          (lambda (&rest _) (setq seen embark-indicators))))
       (expect seen :to-equal '(other-indicator)))))
 
+(describe "embark-cycle-backward-a"
+  ;; `embark-act' only rotates its target list when the prompter answers
+  ;; `embark-cycle', and rotates by `prefix-arg' - a negative one walks the
+  ;; targets back.
+  (it "answers embark-cycle with a prefix argument of -1"
+    (let ((prefix-arg nil)
+          (embark--cycle-backward-prefix nil))
+      (expect (embark-cycle-backward-a (lambda (&rest _) 'embark-cycle-backward))
+              :to-be 'embark-cycle)
+      (expect prefix-arg :to-be -1)))
+
+  (it "passes every other answer through untouched"
+    (let ((prefix-arg nil)
+          (embark--cycle-backward-prefix nil))
+      (expect (embark-cycle-backward-a (lambda (&rest _) 'embark-insert))
+              :to-be 'embark-insert)
+      (expect prefix-arg :to-be nil)))
+
+  ;; embark consumes nothing after rotating, so the leftover would reach the
+  ;; next action as its prefix argument
+  (it "clears its own leftover argument at the next prompt"
+    (let ((prefix-arg nil)
+          (embark--cycle-backward-prefix nil))
+      (embark-cycle-backward-a (lambda (&rest _) 'embark-cycle-backward))
+      (expect (embark-cycle-backward-a (lambda (&rest _) 'embark-insert))
+              :to-be 'embark-insert)
+      (expect prefix-arg :to-be nil)))
+
+  (it "leaves an argument it did not set alone"
+    (let ((prefix-arg 3)
+          (embark--cycle-backward-prefix nil))
+      (embark-cycle-backward-a (lambda (&rest _) 'embark-cycle))
+      (expect prefix-arg :to-be 3))))
+
 ;; with-fake-feature keeps embark-preview's (require 'embark) inert; every
 ;; internal it touches is stubbed per spec
 (describe "embark-preview"
@@ -513,6 +547,20 @@
     (let ((layout (map-form-prefix-keys map-form 'embark-org-link-map "b")))
       (expect (car layout) :to-be nil)
       (expect (cdr layout) :to-equal '("b")))))
+
+(describe "backward cycling on the general map"
+  :var* ((pairs (mapcan #'map-form-key-pairs
+                        (map-form-groups (cons 'progn embark-tests--config-forms)
+                                         'embark-general-map)))
+         (bound (lambda (key) (cadr (cdr (assoc key pairs))))))
+
+  ;; every action map inherits this one, so DEL walks targets back whatever
+  ;; the target type is
+  (it "takes DEL for the backward step"
+    (expect (funcall bound "DEL") :to-be 'embark-cycle-backward))
+
+  (it "keeps embark's own DEL action reachable on another key"
+    (expect (funcall bound "C-d") :to-be 'delete-region)))
 
 (describe "embark--ephemeral-cleanup"
   (it "unhooks itself and schedules a single minibuffer exit"

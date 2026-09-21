@@ -37,6 +37,8 @@
   (advice-add #'embark-completing-read-prompter
               :around #'embark-hide-which-key-indicator)
 
+  (advice-add #'embark-keymap-prompter :around #'embark-cycle-backward-a)
+
   (defadvice! embark-select-next-line-a (orig-fn &rest args)
     "embark-select always moves to the next item upon selection."
     :around #'embark-select
@@ -183,7 +185,11 @@
    (:map embark-general-map
          "C-<return>" #'embark-dwim
          "m" #'embark-select
-         "/" #'embark-project-search)
+         "/" #'embark-project-search
+         ;; the cycle key walks targets forward, DEL walks them back;
+         ;; embark's own DEL action moves aside for it
+         "DEL" #'embark-cycle-backward
+         "C-d" #'delete-region)
    ;; doom.d also bound "x p" awesome-switch-to-prev-app-and-type on
    ;; embark-general-map - hammerspoon-era, void even there; dropped
 
