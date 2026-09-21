@@ -62,8 +62,33 @@
 
   (gptel-make-ollama "Ollama"
     :host "localhost:11434"
-    :stream nil
-    :models '("llama3:latest" "solar"))
+    :stream t
+    :models
+    '((qwen3.5:4b
+       :description "Local, fast: rewrites, commit messages, naming, quick lookups"
+       :capabilities (tool-use media json)
+       :mime-types ("image/jpeg" "image/png" "image/webp")
+       :context-window 256
+       ;; Qwen thinks by default, which buys nothing on a one-line rewrite
+       ;; and doubles the wait.  `gptel-ollama' never sends `think', so the
+       ;; model's own default stands unless a request overrides it.
+       :request-params (:think :json-false))
+      (qwen3.8:27b
+       :description "Local, capable: agentic coding, tool calls, longer reasoning"
+       :capabilities (tool-use media json reasoning)
+       :mime-types ("image/jpeg" "image/png" "image/webp")
+       :context-window 256)))
+
+  ;; Reachable as @local in a prompt, or from the preset key in `gptel-menu'.
+  (gptel-make-preset 'local
+    :description "Small tasks on the local Ollama model; nothing leaves the machine"
+    :backend "Ollama"
+    :model 'qwen3.5:4b)
+
+  (gptel-make-preset 'local-big
+    :description "Local Ollama model with room to reason and call tools"
+    :backend "Ollama"
+    :model 'qwen3.8:27b)
 
   (gptel-make-gh-copilot "Copilot")
 
