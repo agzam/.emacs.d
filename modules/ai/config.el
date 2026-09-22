@@ -262,8 +262,8 @@
             :n "zr" #'eca-chat-reveal
             :n ",," #'eca-transient-menu
             ( :localleader
-              "n" #'tab-line-switch-to-next-tab
-              "p" #'tab-line-switch-to-prev-tab
+              "l" #'tab-line-switch-to-next-tab
+              "h" #'tab-line-switch-to-prev-tab
               "b" #'eca-chat-cycle-agent
               "t" #'eca-chat-toggle-trust
               "f" #'eca-chat-flag-and-fork
