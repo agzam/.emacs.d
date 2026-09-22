@@ -196,18 +196,18 @@
    (:map embark-file-map
          "x" #'embark-open-externally
          "o" nil
-         (:prefix ("o" . "open")
-                  "j" (embark-split-action find-file window-split-and-follow)
-                  "l" (embark-split-action find-file window-vsplit-and-follow)
-                  "h" (embark-split-action find-file split-window-horizontally)
-                  "k" (embark-split-action find-file split-window-vertically)
-                  "a" (embark-ace-action find-file)))
+         ( :prefix ("o" . "open")
+           "j" (embark-split-action find-file window-split-and-follow)
+           "l" (embark-split-action find-file window-vsplit-and-follow)
+           "h" (embark-split-action find-file split-window-horizontally)
+           "k" (embark-split-action find-file split-window-vertically)
+           "a" (embark-ace-action find-file)))
 
    (:map embark-org-block-map
-         (:prefix ("c" . "convert")
-                  "c" #'embark-org-block-convert-to-src
-                  "e" #'embark-org-block-convert-to-example
-                  "q" #'embark-org-block-convert-to-quote))
+         ( :prefix ("c" . "convert")
+           "c" #'embark-org-block-convert-to-src
+           "e" #'embark-org-block-convert-to-example
+           "q" #'embark-org-block-convert-to-quote))
 
    (:map embark-command-map
          "h" #'helpful-command)
@@ -215,87 +215,87 @@
    (:map
     embark-buffer-map
     "o" nil
-    (:prefix ("o" . "open")
-             "j" (embark-split-action switch-to-buffer window-split-and-follow)
-             "a" (embark-ace-action switch-to-buffer)))
+    ( :prefix ("o" . "open")
+      "j" (embark-split-action switch-to-buffer window-split-and-follow)
+      "a" (embark-ace-action switch-to-buffer)))
 
    (:map
     embark-function-map
     "o" nil
-    (:prefix ("d" . "definition")
-             "j" (embark-split-action embark-find-definition window-split-and-follow)
-             "l" (embark-split-action embark-find-definition window-vsplit-and-follow)
-             "h" (embark-split-action embark-find-definition split-window-horizontally)
-             "k" (embark-split-action embark-find-definition split-window-vertically)
-             "a" (embark-ace-action embark-find-definition)))
+    ( :prefix ("d" . "definition")
+      "j" (embark-split-action embark-find-definition window-split-and-follow)
+      "l" (embark-split-action embark-find-definition window-vsplit-and-follow)
+      "h" (embark-split-action embark-find-definition split-window-horizontally)
+      "k" (embark-split-action embark-find-definition split-window-vertically)
+      "a" (embark-ace-action embark-find-definition)))
 
    (:map
     embark-org-heading-map
-    (:prefix ("r" . "roam")
-     :desc "add ref" "u" #'roam-ref-add-for-active-tab))
+    ( :prefix ("r" . "roam")
+      :desc "add ref" "u" #'roam-ref-add-for-active-tab))
 
    (:map
     embark-url-map
     "RET" #'eww-open-in-other-window
-    (:prefix
-     ("b" . "browse")
-     :desc "default" "b" #'process-external-url
-     :desc "browser" "o" #'browse-url-externally
-     :desc "eww" "e" #'eww-open-in-other-window)
-    (:prefix
-     ("c" . "convert")
-     :desc "markdown link" "m" #'link-plain->link-markdown
-     :desc "org-mode link" "o" #'link-plain->link-org-mode
-     :desc "bug-reference" "b" #'link-plain->link-bug-reference))
+    ( :prefix
+      ("b" . "browse")
+      :desc "default" "b" #'process-external-url
+      :desc "browser" "o" #'browse-url-externally
+      :desc "eww" "e" #'eww-open-in-other-window)
+    ( :prefix
+      ("c" . "convert")
+      :desc "markdown link" "m" #'link-plain->link-markdown
+      :desc "org-mode link" "o" #'link-plain->link-org-mode
+      :desc "bug-reference" "b" #'link-plain->link-bug-reference))
 
    (:map embark-markdown-link-map
-         (:prefix
-          ("b" . "browse")
-          :desc "default" "b" (cmd! (process-external-url (markdown-link-url-at-point)))
-          :desc "browser" "o" (cmd! (browse-url-externally (markdown-link-url-at-point)))
-          :desc "eww" "e" (cmd! (eww-open-in-other-window (markdown-link-url-at-point))))
+         ( :prefix
+           ("b" . "browse")
+           :desc "default" "b" (cmd! (process-external-url (markdown-link-url-at-point)))
+           :desc "browser" "o" (cmd! (browse-url-externally (markdown-link-url-at-point)))
+           :desc "eww" "e" (cmd! (eww-open-in-other-window (markdown-link-url-at-point))))
          "v" #'forge-visit-topic-via-url
-         (:prefix
-          ("c" . "convert")
-          :desc "org-mode link" "o" #'link-markdown->link-org-mode
-          :desc "plain" "p" #'link-markdown->link-plain
-          :desc "strip" "s" #'link-markdown->just-text
-          :desc "bug-reference" "b" #'link-markdown->link-bug-reference))
+         ( :prefix
+           ("c" . "convert")
+           :desc "org-mode link" "o" #'link-markdown->link-org-mode
+           :desc "plain" "p" #'link-markdown->link-plain
+           :desc "strip" "s" #'link-markdown->just-text
+           :desc "bug-reference" "b" #'link-markdown->link-bug-reference))
 
    (:map embark-org-link-map
          ;; the url types compose this map with `embark-url-map', which
          ;; supplies "b o" and "b e" - a plain "b" here would shadow them
-         (:prefix
-          ("b" . "browse")
-          :desc "default" "b" #'open-org-link-in-emacs)
+         ( :prefix
+           ("b" . "browse")
+           :desc "default" "b" #'open-org-link-in-emacs)
          "V" #'open-link-in-vlc
          "v" #'forge-visit-topic-via-url
-         (:prefix
-          ("c" . "convert")
-          :desc "markdown link" "m" #'link-org->link-markdown
-          :desc "plain" "p" #'link-org->link-plain
-          :desc "strip" "s" #'link-org->just-text
-          :desc "bug-reference" "b" #'link-org->link-bug-reference
-          :desc "roam heading" "r" #'link-org->roam-heading))
+         ( :prefix
+           ("c" . "convert")
+           :desc "markdown link" "m" #'link-org->link-markdown
+           :desc "plain" "p" #'link-org->link-plain
+           :desc "strip" "s" #'link-org->just-text
+           :desc "bug-reference" "b" #'link-org->link-bug-reference
+           :desc "roam heading" "r" #'link-org->roam-heading))
 
    ;; the visit/browse actions take the reference string embark hands them;
    ;; point-based ones only work where `bug-reference-mode' left an overlay,
    ;; which a collect or export buffer never has
    (:map embark-bug-reference-link-map
          "v" #'bug-reference-visit-topic
-         (:prefix ("b" . "browse")
-          :desc "forge" "b" #'bug-reference-visit-topic
-          :desc "browser" "o" #'bug-reference-browse)
-         (:prefix
-          ("c" . "convert")
-          :desc "markdown link" "m" #'link-bug-reference->link-markdown
-          :desc "org-mode link" "o" #'link-bug-reference->link-org-mode
-          :desc "plain" "p" #'link-bug-reference->link-plain))
+         ( :prefix ("b" . "browse")
+           "b" #'bug-reference-visit-topic
+           "o" #'bug-reference-browse)
+         ( :prefix
+           ("c" . "convert")
+           :desc "markdown link" "m" #'link-bug-reference->link-markdown
+           :desc "org-mode link" "o" #'link-bug-reference->link-org-mode
+           :desc "plain" "p" #'link-bug-reference->link-plain))
 
    (:map embark-rfc-number-map
-         (:prefix ("b" . "browse")
-          :desc "rfc-mode" "b" #'browse-rfc-number-at-point
-          :desc "browser" "o" #'search-rfc-number-online))
+         ( :prefix ("b" . "browse")
+           :desc "rfc-mode" "b" #'browse-rfc-number-at-point
+           :desc "browser" "o" #'search-rfc-number-online))
 
    (:map
     embark-collect-mode-map
@@ -306,10 +306,10 @@
 
    (:map
     (embark-command-map embark-symbol-map)
-    (:after edebug
-            (:prefix ("D" . "debug")
-                     "f" #'edebug-instrument-symbol
-                     "F" #'edebug-remove-instrumentation)))
+    ( :after edebug
+      ( :prefix ("D" . "debug")
+        "f" #'edebug-instrument-symbol
+        "F" #'edebug-remove-instrumentation)))
 
    ;; one key for "put this code at a shell prompt", whether it came from a
    ;; snippet or from a selection; "t" would shadow embark's transpose-regions
@@ -318,33 +318,33 @@
 
    (:map embark-region-map
          ;; plain `browse-url' on a region opens another instance of Emacs
-         (:prefix ("b" . "browse")
-          :desc "default" "b" (cmd! (process-external-url
-                                     (buffer-substring-no-properties
-                                      (region-beginning) (region-end))))
-          :desc "browser" "o" (cmd! (browse-url-externally
-                                     (buffer-substring-no-properties
-                                      (region-beginning) (region-end))))))
+         ( :prefix ("b" . "browse")
+           :desc "default" "b" (cmd! (process-external-url
+                                      (buffer-substring-no-properties
+                                       (region-beginning) (region-end))))
+           :desc "browser" "o" (cmd! (browse-url-externally
+                                      (buffer-substring-no-properties
+                                       (region-beginning) (region-end))))))
 
    (:map
     (embark-identifier-map
      embark-region-map
      embark-sentence-map
      embark-paragraph-map)
-    (:prefix
-     ("x" . "text")
-     (:when (modulep! :custom writing)
-       (:prefix ("l" . "language")
-        :desc "define" "d" #'define-it-at-point
-        :desc "sdcv" "l" #'sdcv-search-pointer
-        :desc "Merriam Webster" "m" #'mw-thesaurus-lookup-dwim
-        :desc "wiktionary" "w" #'wiktionary-bro-dwim)
-       (:prefix ("g" . "translate")
-        :desc "en->ru" "e" #'google-translate-query-translate-reverse
-        :desc "ru->en" "r" #'google-translate-query-translate
-        :desc "es->en" "s" #'google-translate-es->en
-        :desc "en->es" "S" #'google-translate-en->es
-        :desc "translate" "g" #'google-translate-at-point)))))
+    ( :prefix
+      ("x" . "text")
+      ( :when (modulep! :custom writing)
+        ( :prefix ("l" . "language")
+          :desc "define" "d" #'define-it-at-point
+          :desc "sdcv" "l" #'sdcv-search-pointer
+          :desc "Merriam Webster" "m" #'mw-thesaurus-lookup-dwim
+          :desc "wiktionary" "w" #'wiktionary-bro-dwim)
+        ( :prefix ("g" . "translate")
+          :desc "en->ru" "e" #'google-translate-query-translate-reverse
+          :desc "ru->en" "r" #'google-translate-query-translate
+          :desc "es->en" "s" #'google-translate-es->en
+          :desc "en->es" "S" #'google-translate-en->es
+          :desc "translate" "g" #'google-translate-at-point)))))
 
   (add-hook! 'embark-collect-mode-hook
     (defun visual-line-mode-off-h ()
