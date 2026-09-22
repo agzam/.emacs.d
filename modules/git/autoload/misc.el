@@ -193,8 +193,8 @@ If URL is a link to a file, extract its raw form and open it in a buffer."
     (cond
      (topic-num
       (let* ((repo-url (format "%s/%s/%s" (plist-get parts :forge) owner repo-name))
-             (repo (or (ignore-errors (forge-get-repository repo-url t t))
-                       (forge-get-repository repo-url nil 'create)))
+             ;; `:insert!' returns the known repo, else creates and stores one
+             (repo (forge-get-repository repo-url nil :insert!))
              ;; let's try getting the topic from the forge db
              (topic
               (or

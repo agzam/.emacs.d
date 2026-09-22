@@ -83,6 +83,28 @@
   (it "joins and expands parts"
     (expect (make-path "/tmp" "a" "b") :to-equal "/tmp/a/b")))
 
+(describe "forge-visit-topic-via-url"
+  ;; forge accepts only :tracked :tracked? :known? :insert! :valid? :stub
+  ;; :stub? as DEMAND and errors on anything else, so the keyword is the
+  ;; whole contract with it here
+  (it "asks forge for the repo with a DEMAND it accepts"
+    (defvar magit-display-buffer-function)
+    (let (demand set-up)
+      (with-fake-feature 'forge
+        (with-fake-feature 'deferred
+          (cl-letf (((symbol-function 'forge-get-repository)
+                     (lambda (_url _remote d) (setq demand d) 'repo))
+                    ((symbol-function 'forge-get-topic)
+                     (lambda (_repo num) (list 'topic num)))
+                    ((symbol-function 'magit-toplevel) #'ignore)
+                    ((symbol-function 'forge-topic-setup-buffer)
+                     (lambda (topic) (setq set-up topic)))
+                    (magit-display-buffer-function #'ignore))
+            (forge-visit-topic-via-url
+             "https://github.com/stitchdata/orchestrator/pull/436"))))
+      (expect demand :to-equal :insert!)
+      (expect set-up :to-equal '(topic 436)))))
+
 (describe "github-topics-visit-pr"
   (it "hands the candidate's url to forge"
     (let (asked visited)
