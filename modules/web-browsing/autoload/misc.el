@@ -25,8 +25,11 @@ action, else the shared (nil-type) RET.  Plain ticket references
 
 ;;;###autoload
 (defun browse-url-externally (url &rest args)
-  "Always use default (external) browser"
+  "Always use default (external) browser."
   (interactive (browse-url-interactive-arg "URL: "))
-  ;; eww resets browse-url-function, I don't want that
-  (let ((browse-url-browser-function 'browse-url-default-browser))
+  ;; eww resets browse-url-function, I don't want that; the handler lists
+  ;; win over it anyway, and code-review claims every github /pull/ url there
+  (let ((browse-url-browser-function 'browse-url-default-browser)
+        (browse-url-handlers nil)
+        (browse-url-default-handlers nil))
     (funcall-interactively #'browse-url url args)))

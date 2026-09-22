@@ -6,6 +6,7 @@
           (locate-dominating-file (or load-file-name buffer-file-name)
                                   "helper.el")))
 (require 'buttercup)
+(require 'browse-url)
 
 (load-module-file "modules/web-browsing/autoload/misc.el")
 
@@ -74,4 +75,19 @@
                  (lambda (&rest _) (setq seen-fn browse-url-browser-function))))
         (let ((browse-url-browser-function #'eww))
           (browse-url-externally "https://example.com")))
-      (expect seen-fn :to-equal 'browse-url-default-browser))))
+      (expect seen-fn :to-equal 'browse-url-default-browser)))
+
+  (it "outranks a handler that claims the url"
+    ;; real `browse-url': it picks a handler over
+    ;; `browse-url-browser-function', and code-review registers one for
+    ;; every github /pull/ url
+    (let (seen)
+      (cl-letf (((symbol-function 'browse-url-default-browser)
+                 (lambda (url &rest _) (push (cons 'external url) seen))))
+        (let ((browse-url-handlers nil)
+              (browse-url-default-handlers
+               `(("\\`https?://github\\.com/[^/?#]+/[^/?#]+/pull/[0-9]+"
+                  . ,(lambda (url &rest _) (push (cons 'handler url) seen))))))
+          (browse-url-externally "https://github.com/org/repo/pull/436")))
+      (expect seen :to-equal
+              '((external . "https://github.com/org/repo/pull/436"))))))
