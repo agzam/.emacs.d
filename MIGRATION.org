@@ -2024,9 +2024,16 @@ Ported (see Decisions log). cider/clj-refactor/clojars/neil/logview/
 datetime/cider-storm/monroe; lookup handlers via the vendored core,
 projectile -> project.el, spacehammer-monroe unblocked (darwin-only,
 fennel map! waits on lua), expreg Clojure section + org-cliplink restored.
-** TODO notmuch
-notmuch (gh), org-mime, ol-notmuch, consult-notmuch. modulep! conditionals
-inside packages need static resolution. doom-real-buffer-functions (shim).
+** DONE email (replaces notmuch)
+Not a port: the notmuch-over-lieer module is dropped for Gnus over an
+mbsync-synced Gmail maildir (labels = nnmaildir groups, notmuch only as
+the gnus-search index, gmane over NNTP for the lists, smtpmail as
+agzam.ibragimov with a Gcc copy into the synced sent folder).  Built-in
+packages only, so no elpaca recipe; Gnus and message state quarantined
+under .local/state/{gnus,mail}.  Kept from the old module: open in
+Gmail, open in list archive, on-demand sync, inbox entry point.  The
+system side (isync, notmuch, sync script, launchd job) lives outside
+this repo.  Decision record: llm-specs agzam/.emacs.d/email-gnus-module.
 ** DONE chat
 Ported (see Decisions log).  telega (Telegram tdlib client); the dead jinx
 :hook dropped; emojify made explicit + quarantined; telega-directory left at
