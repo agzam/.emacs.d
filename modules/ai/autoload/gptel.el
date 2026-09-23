@@ -498,6 +498,7 @@ follows its own precedent, so one such answer wedges the buffer."
 ;; defvar keeps the let below dynamic even before that load.
 (defvar gptel--rewrite-directive)
 (defvar gptel--rewrite-message)
+(defvar gptel--rewrite-overlays)
 (defvar gptel-rewrite-actions-map)
 (defvar smerge-mode-map)
 (declare-function gptel--suffix-rewrite "gptel-rewrite")
@@ -507,6 +508,7 @@ follows its own precedent, so one such answer wedges the buffer."
 
 (defun keymap-hint-segment (map cmd label face)
   "Render \"KEY LABEL\" for CMD in MAP, spacehammer-edit style.
+MAP is a keymap or a list of them, for an action reachable from several.
 Skips mouse bindings and non-normal evil state bindings; evil keymaps
 embed states as pseudo-keys, so a normal-state binding like
 \"<normal-state> ] ]\" is shown as \"]]\".  Prefers the shortest key."
@@ -534,10 +536,80 @@ embed states as pseudo-keys, so a normal-state binding like
             (propertize (concat " " label) 'face 'shadow))))
 
 (defun keymap-hint-line (map segments)
-  "Join SEGMENTS - (CMD LABEL FACE) lists - into a │-separated hint for MAP."
+  "Join SEGMENTS - (CMD LABEL FACE) lists - into a │-separated hint for MAP.
+MAP is a keymap or a list of them."
   (string-join
    (mapcar (lambda (seg) (apply #'keymap-hint-segment map seg)) segments)
    (propertize " │ " 'face 'shadow)))
+
+;;; Rewrite actions while a rewrite waits for a verdict
+
+(defvar gptel-rewrite-pending-mode-map (make-sparse-keymap)
+  "Keys answering while a rewrite waits for a verdict.")
+
+;;;###autoload
+(define-minor-mode gptel-rewrite-pending-mode
+  "Bind the rewrite actions across the buffer until the rewrite is resolved."
+  :lighter " rewrite?"
+  :keymap gptel-rewrite-pending-mode-map
+  ;; a rewrite also ends by the region going away under it
+  (if gptel-rewrite-pending-mode
+      (add-hook 'post-command-hook #'gptel-rewrite-sync-pending-mode nil t)
+    (remove-hook 'post-command-hook #'gptel-rewrite-sync-pending-mode t))
+  (when (fboundp 'evil-normalize-keymaps)
+    (evil-normalize-keymaps)))
+
+(defun gptel-rewrite-pending-key (cmd)
+  "Return a pressable key reaching CMD while a rewrite is pending, or nil."
+  ;; evil prefixes state bindings with a pseudo-key; drop it, and with it
+  ;; any state whose keys will not answer in normal
+  (let ((keys (mapcar (lambda (k)
+                        (if (eq (and (< 0 (length k)) (aref k 0)) 'normal-state)
+                            (seq-drop k 1)
+                          k))
+                      (where-is-internal cmd gptel-rewrite-pending-mode-map))))
+    (car (seq-sort-by
+          #'length #'<
+          (seq-remove (lambda (k) (and (< 0 (length k)) (symbolp (aref k 0))))
+                      keys)))))
+
+(defun gptel-rewrite-pending-overlays ()
+  "Return this buffer's rewrite overlays still holding an unresolved region."
+  (seq-filter (lambda (ov)
+                (and (overlay-buffer ov)
+                     (overlay-get ov 'gptel-rewrite)
+                     (< (overlay-start ov) (overlay-end ov))))
+              (bound-and-true-p gptel--rewrite-overlays)))
+
+(defun gptel-rewrite-sole-pending ()
+  "Return the sole unresolved rewrite here, or nil when there are several."
+  (let ((pending (gptel-rewrite-pending-overlays)))
+    (and (null (cdr pending)) (car pending))))
+
+;;;###autoload
+(defun gptel-rewrite-sync-pending-mode (&rest _)
+  "Keep `gptel-rewrite-pending-mode' on only while a rewrite is unresolved."
+  (let ((pending (and (gptel-rewrite-pending-overlays) t)))
+    (unless (eq pending gptel-rewrite-pending-mode)
+      (gptel-rewrite-pending-mode (if pending 1 -1)))))
+
+;;;###autoload
+(defun gptel-rewrite-overlay-anywhere-a (fn &optional pt)
+  "Call FN for the rewrite overlay at PT, else resolve the sole pending one."
+  (or (ignore-errors (funcall fn pt))
+      (gptel-rewrite-sole-pending)
+      (user-error
+       "%s" (let ((n (length (gptel-rewrite-pending-overlays))))
+              (if (< 1 n)
+                  (format "%d rewrites pending - move onto one with %s" n
+                          (mapconcat
+                           (lambda (cmd)
+                             (if-let* ((k (gptel-rewrite-pending-key cmd)))
+                                 (key-description k)
+                               "?"))
+                           '(gptel--rewrite-next gptel--rewrite-previous)
+                           " / "))
+                "No rewrite is waiting for a verdict")))))
 
 ;;;###autoload
 (defun gptel-rewrite-ready-banner (ov)
@@ -545,11 +617,14 @@ embed states as pseudo-keys, so a normal-state binding like
 For `gptel-rewrite-default-action': the rewrite overlay's keys are
 otherwise invisible - RET's dispatch menu is the only discoverable
 entry.  Rendered spacehammer-edit style: key, label, │ separators."
+  (gptel-rewrite-pending-mode 1)
   (gptel--rewrite-update-status
    ov (concat
        " "
        (keymap-hint-line
-        gptel-rewrite-actions-map
+        ;; named maps, not the active set: that one answers for whichever
+        ;; evil state point is in when the response lands
+        (list gptel-rewrite-pending-mode-map gptel-rewrite-actions-map)
         '((gptel--rewrite-accept "accept" success)
           (gptel-rewrite-merge-sentences "merge" font-lock-constant-face)
           (gptel--rewrite-diff "diff" font-lock-keyword-face)

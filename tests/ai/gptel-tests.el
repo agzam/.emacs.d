@@ -18,6 +18,9 @@
 (defvar mcp-hub-servers)
 (defvar mcp-server-connections)
 (defvar gptel-tools)
+;; valued, unlike the others: the rewrite specs `let'-bind it, and a
+;; value-less defvar marks a variable special only inside its own file
+(defvar gptel--rewrite-overlays nil)
 (provide 'mcp-hub)
 
 (describe "mcp-servers-from-eca-config"
@@ -833,6 +836,102 @@
         (goto-char (point-max))
         (expect (gptel-improve-text-pick-variant) :to-throw 'user-error)))))
 
+;; No evil here, so the comma keys are out of reach; they live in
+;; tests/e2e/rewrite-pending-keys.el.
+
+(defun gptel-tests--rewrite-overlay (beg end &optional text)
+  "A stand-in for the overlay gptel's rewrite callback leaves behind."
+  (let ((ov (make-overlay beg end)))
+    (overlay-put ov 'gptel-rewrite (or text "improved"))
+    (overlay-put ov 'status (list " Ready" "" "" ""))
+    ov))
+
+(describe "gptel-rewrite-pending-overlays"
+  (it "keeps only overlays still holding a region to resolve"
+    (with-temp-buffer
+      (insert "one two three four")
+      (let* ((live (gptel-tests--rewrite-overlay 1 4))
+             (accepted (gptel-tests--rewrite-overlay 5 5))  ;collapsed
+             (rejected (gptel-tests--rewrite-overlay 9 14))
+             (foreign (make-overlay 15 18))
+             (gptel--rewrite-overlays (list live accepted rejected foreign)))
+        (delete-overlay rejected)
+        (expect (gptel-rewrite-pending-overlays) :to-equal (list live))))))
+
+(describe "gptel-rewrite-overlay-anywhere-a"
+  (it "falls back to the only pending rewrite when point is outside it"
+    (with-temp-buffer
+      (insert "prefix REGION suffix")
+      (let* ((ov (gptel-tests--rewrite-overlay 8 14))
+             (gptel--rewrite-overlays (list ov)))
+        (goto-char (point-min))
+        (expect (gptel-rewrite-overlay-anywhere-a
+                 (lambda (&rest _) (user-error "not at point")))
+                :to-be ov))))
+
+  (it "refuses to guess between several, naming the count and the nav keys"
+    (with-temp-buffer
+      (insert "prefix ONE middle TWO suffix")
+      ;; whatever the config binds navigation to, the message must say it
+      (let* ((gptel-rewrite-pending-mode-map
+              (define-keymap "M-]" 'gptel--rewrite-next
+                             "M-[" 'gptel--rewrite-previous))
+             (gptel--rewrite-overlays
+              (list (gptel-tests--rewrite-overlay 8 11)
+                    (gptel-tests--rewrite-overlay 19 22))))
+        (goto-char (point-min))
+        (expect (gptel-rewrite-overlay-anywhere-a
+                 (lambda (&rest _) (user-error "not at point")))
+                :to-throw 'user-error
+                '("2 rewrites pending - move onto one with M-] / M-[")))))
+
+  (it "defers to the overlay at point even when several are pending"
+    (with-temp-buffer
+      (insert "prefix ONE middle TWO suffix")
+      (let* ((wanted (gptel-tests--rewrite-overlay 19 22))
+             (gptel--rewrite-overlays
+              (list (gptel-tests--rewrite-overlay 8 11) wanted)))
+        (expect (gptel-rewrite-overlay-anywhere-a (lambda (&rest _) wanted))
+                :to-be wanted))))
+
+  (it "reports unbound navigation rather than naming a key that is not there"
+    (with-temp-buffer
+      (insert "prefix ONE middle TWO suffix")
+      (let* ((gptel-rewrite-pending-mode-map (make-sparse-keymap))
+             (gptel--rewrite-overlays
+              (list (gptel-tests--rewrite-overlay 8 11)
+                    (gptel-tests--rewrite-overlay 19 22))))
+        (goto-char (point-min))
+        (expect (gptel-rewrite-overlay-anywhere-a
+                 (lambda (&rest _) (user-error "not at point")))
+                :to-throw 'user-error
+                '("2 rewrites pending - move onto one with ? / ?")))))
+
+  (it "says so when nothing is waiting"
+    (with-temp-buffer
+      (let ((gptel--rewrite-overlays nil))
+        (expect (gptel-rewrite-overlay-anywhere-a
+                 (lambda (&rest _) (user-error "not at point")))
+                :to-throw 'user-error
+                '("No rewrite is waiting for a verdict"))))))
+
+(describe "gptel-rewrite-sync-pending-mode"
+  (it "turns the mode off once the last rewrite is resolved"
+    (with-temp-buffer
+      (insert "prefix REGION suffix")
+      (let* ((ov (gptel-tests--rewrite-overlay 8 14))
+             (gptel--rewrite-overlays (list ov)))
+        (gptel-rewrite-sync-pending-mode)
+        (expect gptel-rewrite-pending-mode :to-be t)
+        (expect (memq #'gptel-rewrite-sync-pending-mode post-command-hook)
+                :to-be-truthy)
+        ;; a rewrite can also end by the region going away under it
+        (delete-overlay ov)
+        (gptel-rewrite-sync-pending-mode)
+        (expect gptel-rewrite-pending-mode :to-be nil)
+        (expect (memq #'gptel-rewrite-sync-pending-mode post-command-hook)
+                :to-be nil)))))
+
 (describe "gptel-rewrite-ready-banner"
   :var (captured)
   (before-each
@@ -845,25 +944,36 @@
             "C-c C-m" 'gptel-rewrite-merge-sentences
             "C-c C-d" 'gptel--rewrite-diff
             "C-c C-e" 'gptel--rewrite-ediff
-            "C-c C-r" 'gptel--rewrite-iterate
-            "C-c C-k" 'gptel--rewrite-reject)))
+            "C-c C-r" 'gptel--rewrite-iterate))
+    (setq gptel-rewrite-pending-mode-map
+          (define-keymap "C-c C-k" 'gptel--rewrite-reject)))
+  (after-each
+    (setq gptel-rewrite-pending-mode-map (make-sparse-keymap)))
 
   (it "renders every action with its key, skipping mouse bindings"
-    (cl-letf (((symbol-function 'gptel--rewrite-update-status)
-               (lambda (_ov msg &rest _) (setq captured msg))))
-      (gptel-rewrite-ready-banner 'fake-ov)
-      ;; C-c C-m canonicalizes to C-c RET (C-m = RET)
-      (dolist (chunk '("C-c C-a accept" "C-c RET merge" "C-c C-d diff"
-                       "C-c C-e ediff" "C-c C-r iterate" "C-c C-k reject"))
-        (expect captured :to-match (regexp-quote chunk)))
-      (expect captured :not :to-match "mouse")))
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'gptel--rewrite-update-status)
+                 (lambda (_ov msg &rest _) (setq captured msg))))
+        (gptel-rewrite-ready-banner 'fake-ov)
+        ;; C-c C-m canonicalizes to C-c RET (C-m = RET)
+        (dolist (chunk '("C-c C-a accept" "C-c RET merge" "C-c C-d diff"
+                         "C-c C-e ediff" "C-c C-r iterate" "C-c C-k reject"))
+          (expect captured :to-match (regexp-quote chunk)))
+        (expect captured :not :to-match "mouse"))))
+
+  (it "arms the pending mode so the keys answer across the buffer"
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'gptel--rewrite-update-status) #'ignore))
+        (gptel-rewrite-ready-banner 'fake-ov)
+        (expect gptel-rewrite-pending-mode :to-be t))))
 
   (it "falls back to ? for unbound actions"
-    (setq gptel-rewrite-actions-map (define-keymap))
-    (cl-letf (((symbol-function 'gptel--rewrite-update-status)
-               (lambda (_ov msg &rest _) (setq captured msg))))
-      (gptel-rewrite-ready-banner 'fake-ov)
-      (expect captured :to-match (regexp-quote "? accept")))))
+    (with-temp-buffer
+      (setq gptel-rewrite-actions-map (define-keymap))
+      (cl-letf (((symbol-function 'gptel--rewrite-update-status)
+                 (lambda (_ov msg &rest _) (setq captured msg))))
+        (gptel-rewrite-ready-banner 'fake-ov)
+        (expect captured :to-match (regexp-quote "? accept"))))))
 
 (describe "keymap-hint-segment"
   (it "prefers the shortest key, squeezing single-char evil sequences"
@@ -873,6 +983,14 @@
       (expect (substring-no-properties
                (keymap-hint-segment map 'fake-next "next" 'success))
               :to-equal "]] next")))
+
+  (it "searches every map it is handed, squeezing the winner"
+    (let ((overlay-map (define-keymap "C-c C-a" 'fake-accept))
+          (pending-map (define-keymap ", ," 'fake-accept)))
+      (expect (substring-no-properties
+               (keymap-hint-segment (list pending-map overlay-map)
+                                    'fake-accept "accept" 'success))
+              :to-equal ",, accept")))
 
   (it "keeps separator spaces between multi-char tokens"
     (let ((map (make-sparse-keymap)))

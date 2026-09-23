@@ -37,7 +37,25 @@
     ;; sentence-granular merge is the primary merge for prose; the stock
     ;; whole-region merge stays reachable from the RET dispatch menu
     (keymap-set gptel-rewrite-actions-map
-                "C-c C-m" #'gptel-rewrite-merge-sentences))
+                "C-c C-m" #'gptel-rewrite-merge-sentences)
+
+    ;; Not on the overlay keymap: it dies outside the overlay, where `, e'
+    ;; would reach the major mode's localleader instead.  The pending mode
+    ;; is buffer-wide, so the prefix has one meaning at a time.
+    (map! :map gptel-rewrite-pending-mode-map
+          "C-c C-k" #'gptel--rewrite-reject
+          :nvm ", ," #'gptel--rewrite-accept
+          :nvm ", m" #'gptel-rewrite-merge-sentences
+          :nvm ", d" #'gptel--rewrite-diff
+          :nvm ", e" #'gptel--rewrite-ediff
+          :nvm ", r" #'gptel--rewrite-iterate
+          :nvm ", n" #'gptel--rewrite-next
+          :nvm ", p" #'gptel--rewrite-previous
+          :nvm "q" #'gptel--rewrite-reject)
+
+    ;; buffer-wide keys need commands that resolve without point
+    (advice-add #'gptel--rewrite-overlay-at
+                :around #'gptel-rewrite-overlay-anywhere-a))
 
   (after! gptel-transient
     ;; RET stays a newline in the chat buffer; send/confirm move to
