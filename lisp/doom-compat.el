@@ -103,7 +103,21 @@
       ;; chat module: emojify downloads its emoji-image sets under
       ;; user-emacs-directory/emojis/ by default (Doom's :ui emoji relocates
       ;; the same way)
-      emojify-emojis-dir (concat doom-data-dir "emojis/"))
+      emojify-emojis-dir (concat doom-data-dir "emojis/")
+      ;; email module: gnus derives News/, .newsrc*, .gnus, its kill,
+      ;; cache, agent and duplicate files from gnus-home-directory at load
+      ;; time, so the home must be redirected before gnus loads; message,
+      ;; nndraft, nnmail and smtpmail default their drafts, queue and
+      ;; message-id cache into ~/Mail and ~/.nnmail-cache independently
+      gnus-home-directory (concat doom-state-dir "gnus/")
+      gnus-directory (concat doom-state-dir "gnus/news/")
+      gnus-startup-file (concat doom-state-dir "gnus/newsrc")
+      message-directory (concat doom-state-dir "mail/")
+      message-auto-save-directory (concat doom-state-dir "mail/drafts/")
+      nndraft-directory (concat doom-state-dir "mail/drafts/")
+      nnmail-message-id-cache-file (concat doom-state-dir "mail/message-id-cache")
+      mail-source-directory (concat doom-state-dir "mail/")
+      smtpmail-queue-dir (concat doom-state-dir "mail/queued-mail/"))
 
 (defvar doom-disabled-packages nil)
 
