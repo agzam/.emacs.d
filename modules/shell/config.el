@@ -97,6 +97,9 @@
   ;; URL/file detection and shell integration are already on by default.
   (setopt ghostel-enable-osc52 t)
 
+  ;; 100 MB holds roughly 80k rows at 150 columns.
+  (setopt ghostel-max-scrollback (* 100 1024 1024))
+
   (map! :map ghostel-mode-map
         "s-v" #'ghostel-yank)
 
