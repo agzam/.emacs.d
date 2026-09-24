@@ -13,7 +13,7 @@
 ;;; Sync
 
 (defun mail-sync-command (&optional full)
-  "Command line for `mail-sync-program'; FULL syncs the archive folder too."
+  "Command line for `mail-sync-program'; FULL runs every sync tier at once."
   (list mail-sync-program (if full "full" "sync")))
 
 (defun mail-sync-sentinel (proc event)
@@ -30,7 +30,7 @@
 
 ;;;###autoload
 (defun sync-mail (&optional full)
-  "Sync mail with Gmail in the background; with FULL, the archive folder too."
+  "Sync mail with Gmail in the background; with FULL, every tier at once."
   (interactive "P")
   (let ((buf (get-buffer-create " *mail-sync*")))
     (with-current-buffer buf
