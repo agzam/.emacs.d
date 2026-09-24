@@ -254,6 +254,19 @@ not block on a credential prompt)."
   tcc {:doc "Verify/repair the macOS TCC grants Emacs needs (screen capture, accessibility); idempotent, sudo only when rows drifted, no-op off macOS"
        :task (load-file (str (fs/path root "scripts" "tcc.bb")))}
 
+  mail-index {:doc "Build the nnmaildir overviews Gnus would otherwise build in-session, one per message under GROUP/.nnmaildir/nov: `bb mail-index [--rebuild] [GROUP ...]`, every group of ~/.mail/gmail when none is named; --rebuild discards a group's overviews and renumbers it, for a group whose fill-in never finishes"
+              :task (let [{rebuild true groups false}
+                          (group-by (fn [arg] (= "--rebuild" arg)) *command-line-args*)]
+                      (System/exit
+                       (:exit (apply p/shell {:continue true}
+                                     (concat emacs-batch
+                                             ["-l" (str (fs/path root "scripts" "mail-index.el"))
+                                              "--eval" (format "(mail-index-main %s %s%s)"
+                                                               (pr-str (str (fs/expand-home "~/.mail/gmail/")))
+                                                               (if (seq rebuild) "t" "nil")
+                                                               (apply str (map (fn [group] (str " " (pr-str group)))
+                                                                               groups)))])))))}
+
   check-root {:doc "Fail on anything at the config root that is neither tracked nor a sanctioned exception - a stray means some run wrote outside .local/"
               :task (System/exit
                      (:exit (apply p/shell {:continue true}
