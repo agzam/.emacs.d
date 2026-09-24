@@ -55,19 +55,56 @@ in this process, which the mail suite performs."
     (expect gnus-search-notmuch-remove-prefix :to-equal gmail-maildir)
     (expect gnus-refer-thread-use-search :to-be t)))
 
+(defmacro email-tests--with-empty-newsrc (&rest body)
+  "Run BODY over an empty newsrc, so lookups fall through to `gnus-parameters'."
+  (declare (indent 0))
+  `(let ((gnus-newsrc-hashtb (make-hash-table :test #'equal)))
+     ,@body))
+
 (describe "email module group parameters"
+  ;; assert what Gnus resolves, never the shape of the entry: a
+  ;; parameter written as a list instead of a dotted pair reads back as
+  ;; nil, and nnmaildir evaluates its own parameter values
+  (before-all
+    (require 'gnus)
+    (require 'nnmaildir))
   (it "never expires nnmaildir articles (mbsync would push the deletion)"
+    (email-tests--with-empty-newsrc
+      (expect (nnmaildir--param "nnmaildir+gmail:inbox" 'expire-age) :to-be 'never)
+      (expect (nnmaildir--param "nnmaildir+gmail:archive" 'expire-age) :to-be 'never)))
+  (it "shows read mail in every nnmaildir group"
+    (email-tests--with-empty-newsrc
+      (expect (gnus-group-find-parameter "nnmaildir+gmail:inbox" 'display) :to-be 'all)))
+  (it "threads with old headers in every nnmaildir group"
     (let ((general (assoc "\\`nnmaildir\\+gmail:" gnus-parameters)))
-      (expect (assq 'expire-age general) :to-equal '(expire-age never))
-      (expect (assq 'display general) :to-equal '(display all))))
+      ;; a two-element entry sets the variable buffer-locally and
+      ;; evaluates the value, so the value has to be quoted
+      (expect (eval (nth 1 (assq 'gnus-fetch-old-headers general)) t) :to-be 'some)))
   (it "shows the archive as a newest slice, overriding the general entry"
-    (let* ((names (mapcar #'car gnus-parameters))
-           (general (cl-position "\\`nnmaildir\\+gmail:" names :test #'equal))
-           (archive (cl-position "\\`nnmaildir\\+gmail:archive\\'" names :test #'equal)))
-      ;; gnus-group-fast-parameter keeps the last matching entry
-      (expect (< general archive) :to-be t)
-      (expect (assq 'display (assoc "\\`nnmaildir\\+gmail:archive\\'" gnus-parameters))
-              :to-equal '(display 200)))))
+    (email-tests--with-empty-newsrc
+      (expect (gnus-group-find-parameter "nnmaildir+gmail:archive" 'display) :to-equal 200)))
+  (it "scores gmane groups"
+    (let ((gmane (assoc "\\`nntp\\+news\\.gmane\\.io:" gnus-parameters)))
+      (expect (eval (nth 1 (assq 'gnus-use-scoring gmane)) t) :to-be t))))
+
+(describe "email module prompts"
+  (it "reads a leftover dribble instead of asking about it on startup"
+    (expect gnus-always-read-dribble-file :to-be t))
+  (it "enters the inbox without asking for an article count"
+    (expect (< 1002 gnus-large-newsgroup) :to-be t))
+  (it "answers a gmane thread by mail without a confirmation"
+    ;; gnus-confirm-mail-reply-to-news derives from this when gnus-msg loads
+    (expect gnus-novice-user :to-be nil)
+    (require 'gnus-msg)
+    (expect gnus-confirm-mail-reply-to-news :to-be nil))
+  (it "never opens the first article on group entry"
+    (expect gnus-auto-select-first :to-be nil)))
+
+(describe "email module subscriptions"
+  (it "subscribes the inbox and emacs-devel on startup"
+    (expect mail-groups :to-equal
+            '("nnmaildir+gmail:inbox" "nntp+news.gmane.io:gmane.emacs.devel"))
+    (expect (member mail-inbox-group mail-groups) :to-be-truthy)))
 
 (describe "email module quarantine"
   (before-all

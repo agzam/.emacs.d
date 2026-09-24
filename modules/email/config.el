@@ -24,6 +24,9 @@
 (defvar mail-inbox-group "nnmaildir+gmail:inbox"
   "Gnus group `open-mail-inbox' enters.")
 
+(defvar mail-groups (list mail-inbox-group "nntp+news.gmane.io:gmane.emacs.devel")
+  "Groups Gnus subscribes to on startup, on top of every maildir group.")
+
 (use-package gnus
   :ensure nil
   :defer t
@@ -39,6 +42,15 @@
         gnus-read-active-file 'some
         gnus-agent nil
         gnus-inhibit-startup-message t
+        ;; a dribble left by a session that never saved otherwise asks
+        ;; a yes-or-no question before the group buffer appears
+        gnus-always-read-dribble-file t
+        ;; the inbox alone holds a thousand articles; prompting for a
+        ;; count on every entry helps only for the mailing-list groups
+        gnus-large-newsgroup 5000
+        ;; set before gnus-msg loads, so gnus-confirm-mail-reply-to-news
+        ;; derives nil and answering a gmane thread takes no confirmation
+        gnus-novice-user nil
         gnus-use-full-window nil
         gnus-suppress-duplicates t
         gnus-refer-thread-use-search t
@@ -48,15 +60,20 @@
         gnus-message-archive-group "nnmaildir+gmail:sent"
         gnus-gcc-mark-as-read t
         gnus-posting-styles '((".*" (name user-full-name) (address mail-from-address)))
-        ;; the last matching entry wins for each parameter
+        ;; the last matching entry wins for each parameter.  A real
+        ;; parameter is a dotted pair - `gnus-group-find-parameter'
+        ;; drops an entry whose cdr is a list.  A two-element entry
+        ;; instead sets that variable buffer-locally and evaluates the
+        ;; value, hence the quote.  nnmaildir evaluates its own
+        ;; parameters too, so expire-age needs one as well.
         gnus-parameters
         '(;; nnmaildir deletes expired files, and mbsync would push that
           ;; to Gmail as an archive or an unlabel
-          ("\\`nnmaildir\\+gmail:" (expire-age never) (display all)
-           (gnus-fetch-old-headers some))
+          ("\\`nnmaildir\\+gmail:" (expire-age . 'never) (display . all)
+           (gnus-fetch-old-headers 'some))
           ;; the archive holds everything ever received; show the newest
           ;; slice instead of prompting for a count
-          ("\\`nnmaildir\\+gmail:archive\\'" (display 200))
+          ("\\`nnmaildir\\+gmail:archive\\'" (display . 200))
           ("\\`nntp\\+news\\.gmane\\.io:" (gnus-use-scoring t)))
         gnus-thread-sort-functions '((not gnus-thread-sort-by-most-recent-date))
         gnus-summary-thread-gathering-function #'gnus-gather-threads-by-references
@@ -70,6 +87,7 @@
         gnus-sum-thread-tree-single-leaf "└─▶ ")
   :config
   (add-hook 'gnus-group-mode-hook #'gnus-topic-mode)
+  (add-hook 'gnus-started-hook #'subscribe-mail-groups)
 
   (map! :map gnus-group-mode-map
         (:localleader

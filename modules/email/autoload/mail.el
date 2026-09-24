@@ -4,8 +4,10 @@
 (require 'gnus-sum)
 (require 'url-util)
 
+(defvar gmail-maildir)
 (defvar mail-sync-program)
 (defvar mail-inbox-group)
+(defvar mail-groups)
 
 ;;; Sync
 
@@ -40,6 +42,26 @@
 
 ;;; Navigation
 
+(defun subscribe-mail-group (group)
+  "Subscribe GROUP unless the newsrc already lists it."
+  (unless (gnus-group-entry group)
+    (with-current-buffer gnus-group-buffer
+      (gnus-subscribe-newsgroup group))))
+
+(defun maildir-groups ()
+  "Every nnmaildir group the mbsync store holds, one per Gmail label."
+  (when (file-directory-p gmail-maildir)
+    (mapcar (lambda (dir) (concat "nnmaildir+gmail:" (file-name-nondirectory dir)))
+            (seq-filter #'file-directory-p
+                        (directory-files gmail-maildir t "\\`[^.]")))))
+
+;;;###autoload
+(defun subscribe-mail-groups ()
+  "Subscribe every maildir group plus `mail-groups', skipping known ones.
+Subscribing activates, and gnus-search silently drops a hit whose group
+nnmaildir never opened - notmuch returns whichever duplicate it likes."
+  (mapc #'subscribe-mail-group (append (maildir-groups) mail-groups)))
+
 (defun refresh-mail-group (group)
   "Rescan GROUP's maildir and merge its flags, like `g' on the group line."
   (let ((method (gnus-find-method-for-group group)))
@@ -54,9 +76,7 @@
   (interactive)
   (unless (gnus-alive-p)
     (gnus))
-  (unless (gnus-group-entry mail-inbox-group)
-    (with-current-buffer gnus-group-buffer
-      (gnus-subscribe-newsgroup mail-inbox-group)))
+  (subscribe-mail-group mail-inbox-group)
   (refresh-mail-group mail-inbox-group)
   (gnus-summary-read-group mail-inbox-group t t))
 
@@ -66,6 +86,8 @@
   (interactive "sSearch mail: ")
   (unless (gnus-alive-p)
     (gnus))
+  ;; mbsync creates a group dir the moment a label appears
+  (subscribe-mail-groups)
   (gnus-group-read-ephemeral-search-group
    t `((search-query-spec . ((query . ,query) (raw . t)))
        (search-group-spec . (("nnmaildir:gmail"))))))
