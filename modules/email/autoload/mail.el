@@ -81,6 +81,15 @@ nnmaildir never opened - notmuch returns whichever duplicate it likes."
   (gnus-summary-read-group mail-inbox-group t t))
 
 ;;;###autoload
+(defun read-mail-article ()
+  "Show the article at point and put point in its buffer.
+The select call is what creates the article buffer, without which
+`gnus-summary-select-article-buffer' errors."
+  (interactive nil gnus-summary-mode)
+  (gnus-summary-select-article)
+  (gnus-summary-select-article-buffer))
+
+;;;###autoload
 (defun search-mail (query)
   "Read an ephemeral group of every Gmail message matching the notmuch QUERY."
   (interactive "sSearch mail: ")
