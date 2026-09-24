@@ -37,6 +37,21 @@ FROM, SUBJECT, ID, DATE, REFERENCES and XREF fill the headers."
    (seq-find (lambda (header) (equal (mail-header-subject header) subject))
              gnus-newsgroup-headers)))
 
+(defun email-e2e--idle (seconds &optional done)
+  "Sit idle for SECONDS, or until DONE returns non-nil; return DONE's value.
+Idle timers never run inside a `sit-for' called from a running command.
+An untimed `read-event' is idle, and a timer ends it."
+  (let ((poll (run-at-time 0.05 0.05
+                           (lambda ()
+                             (when (and done (funcall done))
+                               (throw 'email-e2e--idle t))))))
+    (unwind-protect
+        (catch 'email-e2e--idle
+          (with-timeout (seconds nil)
+            (while t (read-event))))
+      (cancel-timer poll))
+    (and done (funcall done))))
+
 (defun email-e2e ()
   "Gnus reads the fixture maildir, replies, and shows a thread in one buffer."
   (let* ((root (expand-file-name "mail/" e2e-work-dir))
@@ -88,6 +103,12 @@ FROM, SUBJECT, ID, DATE, REFERENCES and XREF fill the headers."
               (subject-at-point ()
                 (mail-header-subject
                  (mail-thread-message-header (mail-thread-message-at-point))))
+              (thread-text ()
+                (with-current-buffer mail-thread-buffer-name
+                  (buffer-substring-no-properties (point-min) (point-max))))
+              (unread-p (article)
+                (with-current-buffer "*Summary nnmaildir+gmail:inbox*"
+                  (and (memq article gnus-newsgroup-unreads) t)))
               (messages-in (dir)
                 (mapcan (lambda (sub)
                           (directory-files (expand-file-name sub dir) t "\\`[^.]"))
@@ -164,6 +185,7 @@ FROM, SUBJECT, ID, DATE, REFERENCES and XREF fill the headers."
                 ;; must not look the thread's Xref up in it
                 (gnus-summary-goto-subject (email-e2e--article "fresh"))
                 (gnus-summary-select-article)
+                (setq ann (email-e2e--article "Re: release plan (Ann)"))
                 ;; the thread view, entered from the middle message
                 (gnus-summary-goto-subject (email-e2e--article "Re: release plan (Bob)"))
                 (execute-kbd-macro (kbd "RET"))
@@ -175,24 +197,45 @@ FROM, SUBJECT, ID, DATE, REFERENCES and XREF fill the headers."
                 (record "the thread opens on the message the summary was on"
                         (equal (subject-at-point) "Re: release plan (Bob)")
                         :got (subject-at-point))
-                (record "it unfolds the entry message and the unread one only"
+                (record "RET renders the entry message and leaves the unread one to the fill"
+                        (and (equal (open-subjects) '("Re: release plan (Bob)"))
+                             (not (string-match-p "body of Re: release plan (Ann)"
+                                                  (thread-text))))
+                        :got (format "%S open" (open-subjects)))
+                (record "a folded message costs a line, not a render"
+                        (not (string-match-p "body of release plan" (thread-text)))
+                        :got (format "%d chars" (buffer-size)))
+                ;; q before Emacs goes idle, so the fill never gets a turn
+                (execute-kbd-macro "q")
+                (email-e2e--idle 0.5)
+                (record "q stops the fill: the unread message stays unrendered and unread"
+                        (and (not (string-match-p "body of Re: release plan (Ann)"
+                                                  (thread-text)))
+                             (unread-p ann))
+                        :got (format "unread %S, %d chars" (unread-p ann)
+                                     (length (thread-text))))
+                (switch-to-buffer "*Summary nnmaildir+gmail:inbox*")
+                (gnus-summary-goto-subject (email-e2e--article "Re: release plan (Bob)"))
+                (execute-kbd-macro (kbd "RET"))
+                (execute-kbd-macro (kbd "C-j"))
+                (record "C-j reaches the unread message before its body arrives"
+                        (and (equal (subject-at-point) "Re: release plan (Ann)")
+                             (not (string-match-p "body of Re: release plan (Ann)"
+                                                  (thread-text))))
+                        :got (subject-at-point))
+                (email-e2e--idle 5 (lambda ()
+                                     (string-match-p "body of Re: release plan (Ann)"
+                                                     (thread-text))))
+                (record "the unread message renders once Emacs is idle"
                         (equal (open-subjects)
                                '("Re: release plan (Bob)" "Re: release plan (Ann)"))
-                        :got (format "%S" (open-subjects)))
+                        :got (format "%S open" (open-subjects)))
                 (record "the message with an Xref header renders while another is shown"
-                        (string-match-p "body of Re: release plan (Ann)"
-                                        (buffer-substring-no-properties
-                                         (point-min) (point-max)))
-                        :got (format "%d chars" (buffer-size)))
-                (record "a folded message costs a line, not a render"
-                        (not (string-match-p "body of release plan"
-                                             (buffer-substring-no-properties
-                                              (point-min) (point-max))))
-                        :got (format "%d chars" (buffer-size)))
-                (execute-kbd-macro (kbd "C-j"))
-                (record "C-j moves to the next message"
-                        (equal (subject-at-point) "Re: release plan (Ann)")
-                        :got (subject-at-point))
+                        (string-match-p "body of Re: release plan (Ann)" (thread-text))
+                        :got (format "%d chars" (length (thread-text))))
+                (record "the fill marks the message it rendered read"
+                        (not (unread-p ann))
+                        :got (format "unread %S" (unread-p ann)))
                 (execute-kbd-macro (kbd "C-k"))
                 (execute-kbd-macro (kbd "C-k"))
                 (record "C-k moves back to the first message"

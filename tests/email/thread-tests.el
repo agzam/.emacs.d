@@ -45,7 +45,8 @@ SUBJECT, FROM, DATE, ID and REFERENCES are its fields."
 (defmacro thread-tests-with-buffer (entry unreads &rest body)
   "Run BODY in a thread buffer entered on ENTRY with UNREADS unread.
 Rendering and the summary are stubbed; what they were asked for lands in
-`thread-tests-rendered' and `thread-tests-marked'."
+`thread-tests-rendered' and `thread-tests-marked'.  BODY sees the stub
+summary buffer as `summary'."
   (declare (indent 2))
   `(let ((buffer (generate-new-buffer " *thread-tests*"))
          (summary (generate-new-buffer " *thread-tests summary*")))
@@ -71,6 +72,19 @@ Rendering and the summary are stubbed; what they were asked for lands in
   "Articles whose body is visible in the thread buffer."
   (mapcar #'mail-thread-message-article
           (seq-filter #'mail-thread-message-open-p mail-thread-messages)))
+
+(defun thread-tests-waiting ()
+  "Articles the fill has yet to render, in fill order."
+  (mapcar #'mail-thread-message-article mail-thread-waiting))
+
+(defun thread-tests-fill ()
+  "Start a fill in the thread buffer and run it the way its idle timer does."
+  (mail-thread-start-fill)
+  (mail-thread-fill (current-buffer) mail-thread-fill-timer))
+
+(defun thread-tests-timer-active-p (timer)
+  "Non-nil while TIMER is still scheduled."
+  (and (memq timer timer-idle-list) t))
 
 (defun thread-tests-message (article)
   "The message of ARTICLE in the thread buffer."
@@ -118,17 +132,24 @@ Rendering and the summary are stubbed; what they were asked for lands in
     (thread-tests-with-buffer 11 nil
       (expect (mapcar #'mail-thread-message-article mail-thread-messages)
               :to-equal '(10 11 12))))
-  (it "unfolds the message the summary was on and every unread one"
+  (it "renders only the message the summary was on"
+    ;; every unread gmane message is an NNTP round trip; the buffer must
+    ;; not wait for them
     (thread-tests-with-buffer 11 '(12)
-      (expect (thread-tests-open-articles) :to-equal '(11 12))))
+      (expect (thread-tests-open-articles) :to-equal '(11))
+      (expect thread-tests-rendered :to-equal '(11))))
+  (it "queues every other unread message for the fill"
+    (thread-tests-with-buffer 11 '(11 12)
+      (expect (thread-tests-waiting) :to-equal '(12))))
   (it "renders nothing for the messages it folds"
     ;; the store holds articles of tens of megabytes; a folded message
     ;; must cost a line, not a render
     (thread-tests-with-buffer 11 nil
-      (expect thread-tests-rendered :to-equal '(11))))
-  (it "marks every unfolded message read"
+      (expect thread-tests-rendered :to-equal '(11))
+      (expect (thread-tests-waiting) :to-equal nil)))
+  (it "marks only the message it rendered read"
     (thread-tests-with-buffer 11 '(12)
-      (expect (sort thread-tests-marked #'<) :to-equal '(11 12))))
+      (expect thread-tests-marked :to-equal '(11))))
   (it "names the thread and its size in the header line"
     (thread-tests-with-buffer 11 nil
       (expect header-line-format :to-equal "Plan   3 messages")))
@@ -166,6 +187,111 @@ Rendering and the summary are stubbed; what they were asked for lands in
       (mail-thread-toggle-message)
       (expect (mail-thread-message-article (mail-thread-message-at-point))
               :to-equal 10))))
+
+(describe "mail-thread-fill"
+  (it "takes the messages after the entry before the ones above it"
+    (thread-tests-with-buffer 11 '(10 12)
+      (expect (thread-tests-waiting) :to-equal '(12 10))))
+  (it "takes the messages above the entry nearest first"
+    (thread-tests-with-buffer 12 '(10 11)
+      (expect (thread-tests-waiting) :to-equal '(11 10))))
+  (it "renders every waiting message, marks each read, and stops"
+    (thread-tests-with-buffer 11 '(10 12)
+      (mail-thread-goto-message (thread-tests-message 11))
+      (thread-tests-fill)
+      (expect (thread-tests-open-articles) :to-equal '(10 11 12))
+      (expect (reverse thread-tests-rendered) :to-equal '(11 12 10))
+      (expect (reverse thread-tests-marked) :to-equal '(11 12 10))
+      (expect mail-thread-fill-timer :to-be nil)))
+  (it "renders the waiting message at point first"
+    (thread-tests-with-buffer 10 '(11 12)
+      (mail-thread-goto-message (thread-tests-message 12))
+      (thread-tests-fill)
+      (expect (reverse thread-tests-rendered) :to-equal '(10 12 11))))
+  (it "yields to pending input and resumes on the next idle period"
+    (thread-tests-with-buffer 11 '(12)
+      (mail-thread-start-fill)
+      (let ((timer mail-thread-fill-timer))
+        (cl-letf (((symbol-function 'input-pending-p) (lambda (&rest _) t)))
+          (mail-thread-fill (current-buffer) timer))
+        (expect (thread-tests-open-articles) :to-equal '(11))
+        (expect (thread-tests-timer-active-p timer) :to-be t)
+        (mail-thread-fill (current-buffer) timer)
+        (expect (thread-tests-open-articles) :to-equal '(11 12))
+        (expect (thread-tests-timer-active-p timer) :to-be nil))))
+  (it "leaves alone a message the reader unfolded and folded again"
+    (thread-tests-with-buffer 10 '(11 12)
+      (mail-thread-goto-message (thread-tests-message 12))
+      (mail-thread-toggle-message)
+      (mail-thread-toggle-message)
+      (thread-tests-fill)
+      (expect (thread-tests-open-articles) :to-equal '(10 11))
+      (expect (seq-count (lambda (article) (eql article 12)) thread-tests-rendered)
+              :to-equal 1)))
+  (it "keeps point on the message after a body that lands above it"
+    ;; with point on 12's line, 11's body goes in right at point
+    (thread-tests-with-buffer 12 '(10 11)
+      (let ((marker (mail-thread-message-marker (thread-tests-message 12))))
+        (goto-char marker)
+        (thread-tests-fill)
+        (expect (thread-tests-open-articles) :to-equal '(10 11 12))
+        (expect (point) :to-equal (marker-position marker)))))
+  (it "keeps a window whose top line is the next message where it was"
+    (thread-tests-with-buffer 12 '(10 11)
+      (save-window-excursion
+        (let ((marker (mail-thread-message-marker (thread-tests-message 12))))
+          (set-window-buffer (selected-window) (current-buffer))
+          (set-window-start (selected-window) marker)
+          (thread-tests-fill)
+          (expect (window-start) :to-equal (marker-position marker)))))))
+
+(describe "a cancelled fill"
+  (it "stops when the reader quits, leaving the rest unread"
+    (thread-tests-with-buffer 11 '(12)
+      (mail-thread-start-fill)
+      (let ((timer mail-thread-fill-timer))
+        (mail-thread-quit)
+        (expect (thread-tests-timer-active-p timer) :to-be nil)
+        (mail-thread-fill (current-buffer) timer)
+        (expect (thread-tests-open-articles) :to-equal '(11))
+        (expect thread-tests-marked :to-equal '(11)))))
+  (it "stops when another thread takes the buffer"
+    (thread-tests-with-buffer 11 '(12)
+      (mail-thread-start-fill)
+      (let ((timer mail-thread-fill-timer)
+            (inhibit-read-only t))
+        (erase-buffer)
+        (mail-thread-mode)
+        (expect (thread-tests-timer-active-p timer) :to-be nil)
+        (mail-thread-fill (current-buffer) timer)
+        (expect (buffer-size) :to-equal 0)
+        (expect thread-tests-rendered :to-equal '(11)))))
+  (it "stops when the thread buffer is killed"
+    (thread-tests-with-buffer 11 '(12)
+      (mail-thread-start-fill)
+      (let ((timer mail-thread-fill-timer))
+        (kill-buffer buffer)
+        (expect (thread-tests-timer-active-p timer) :to-be nil))))
+  (it "stops once the summary is gone"
+    (thread-tests-with-buffer 11 '(12)
+      (mail-thread-start-fill)
+      (let ((timer mail-thread-fill-timer))
+        (kill-buffer summary)
+        (mail-thread-fill (current-buffer) timer)
+        (expect (thread-tests-open-articles) :to-equal '(11))
+        (expect (thread-tests-timer-active-p timer) :to-be nil))))
+  (it "stops on a quit during a fetch and passes the quit on"
+    (thread-tests-with-buffer 11 '(12)
+      (mail-thread-start-fill)
+      (let ((timer mail-thread-fill-timer))
+        (cl-letf (((symbol-function 'mail-thread-render)
+                   (lambda (&rest _) (signal 'quit nil))))
+          (expect (condition-case nil
+                      (progn (mail-thread-fill (current-buffer) timer) 'finished)
+                    (quit 'quit))
+                  :to-be 'quit))
+        (expect (thread-tests-timer-active-p timer) :to-be nil)
+        (expect (thread-tests-open-articles) :to-equal '(11))))))
 
 (describe "mail-thread-next-message"
   (it "moves to the message after the one point is in"
@@ -227,4 +353,30 @@ Rendering and the summary are stubbed; what they were asked for lands in
 (describe "open-mail-thread"
   (it "says so when point is on no article"
     (cl-letf (((symbol-function 'gnus-summary-article-number) (lambda (&rest _) nil)))
-      (expect (open-mail-thread) :to-throw 'user-error))))
+      (expect (open-mail-thread) :to-throw 'user-error)))
+  (it "shows the thread with the entry rendered and starts filling the rest"
+    (let ((summary (generate-new-buffer " *thread-tests summary*"))
+          (gnus-newsgroup-unreads '(12))
+          (gnus-newsgroup-name "nnmaildir+gmail:inbox"))
+      (setq thread-tests-rendered nil
+            thread-tests-marked nil)
+      (unwind-protect
+          (save-window-excursion
+            (cl-letf (((symbol-function 'gnus-summary-article-number) (lambda (&rest _) 11))
+                      ((symbol-function 'mail-thread-entries) (lambda () thread-tests-entries))
+                      ((symbol-function 'mail-thread-render)
+                       (lambda (_group article)
+                         (push article thread-tests-rendered)
+                         (format "body of %d" article)))
+                      ((symbol-function 'gnus-summary-mark-article)
+                       (lambda (article &rest _) (push article thread-tests-marked))))
+              (with-current-buffer summary
+                (open-mail-thread))
+              (expect (buffer-name (window-buffer)) :to-equal mail-thread-buffer-name)
+              (with-current-buffer mail-thread-buffer-name
+                (expect (thread-tests-open-articles) :to-equal '(11))
+                (expect (thread-tests-waiting) :to-equal '(12))
+                (expect (thread-tests-timer-active-p mail-thread-fill-timer) :to-be t))))
+        (when-let* ((thread (get-buffer mail-thread-buffer-name)))
+          (kill-buffer thread))
+        (kill-buffer summary)))))

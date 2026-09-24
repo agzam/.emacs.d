@@ -4,9 +4,12 @@
 ;; no such view: its tree pane still shows one article at a time.  Each
 ;; message gets a line of its own and its body is rendered through the
 ;; normal article pipeline, so shr, the MIME dissection and the charset
-;; decoding are the ones the article buffer uses.  Bodies render the
-;; first time they are unfolded - one sent message in this store is a
-;; 33 MB article, and a thread must not pay for it to show a line.
+;; decoding are the ones the article buffer uses.  Only the message the
+;; summary was on renders before the buffer shows.  The unread ones fill
+;; in while Emacs is idle, because every gmane article is an NNTP round
+;; trip.  A read one renders when it is unfolded - one sent message in
+;; this store is a 33 MB article, and a thread must not pay for it to
+;; show a line.
 ;;; Code:
 
 (require 'cl-lib)
@@ -35,6 +38,15 @@
 
 (defvar-local mail-thread-window-configuration nil
   "Window configuration `mail-thread-quit' restores.")
+
+(defvar-local mail-thread-waiting nil
+  "Unread messages whose bodies the fill has yet to render, in fill order.")
+
+(defvar-local mail-thread-fill-timer nil
+  "Idle timer rendering `mail-thread-waiting'.")
+
+(defvar mail-thread-fill-delay 0.1
+  "Seconds of idleness before the fill renders the next waiting body.")
 
 ;;; Reading the thread out of the summary
 
@@ -129,9 +141,13 @@ SUBJECT is the thread's, shown again only where a message changed it."
       (seq-find (lambda (overlay) (overlay-get overlay 'mail-thread-fold))
                 (overlays-in start end)))))
 
+(defun mail-thread-rendered-p (message)
+  "Non-nil when MESSAGE's body is in the buffer, folded or not."
+  (< (mail-thread-body-start message) (mail-thread-body-end message)))
+
 (defun mail-thread-message-open-p (message)
   "Non-nil when MESSAGE's body is rendered and visible."
-  (and (< (mail-thread-body-start message) (mail-thread-body-end message))
+  (and (mail-thread-rendered-p message)
        (not (mail-thread-fold-overlay message))))
 
 (defun mail-thread-set-indicator (message open)
@@ -142,12 +158,15 @@ a fallback font draws it at the wrong size."
     (put-text-property start (1+ start) 'display (if open "▼" "▶"))))
 
 (defun mail-thread-insert-body (message)
-  "Render MESSAGE's body and insert it, leaving point after it."
+  "Render MESSAGE's body and insert it, leaving point after it.
+Markers where the body goes end up after it, so a point or window start
+on the next message stays there while a body lands above it."
   (goto-char (mail-thread-body-start message))
-  (insert (or (mail-thread-render mail-thread-group
-                                  (mail-thread-message-article message))
-              "[the store no longer holds this message]")
-          "\n\n"))
+  (insert-before-markers
+   (or (mail-thread-render mail-thread-group
+                           (mail-thread-message-article message))
+       "[the store no longer holds this message]")
+   "\n\n"))
 
 (defun mail-thread-expand (message)
   "Show MESSAGE's body and mark its article read."
@@ -177,6 +196,66 @@ a fallback font draws it at the wrong size."
     (with-current-buffer mail-thread-summary-buffer
       (save-excursion
         (gnus-summary-mark-article article gnus-read-mark)))))
+
+;;; Filling in unread bodies
+
+(defun mail-thread-fill-order (entry)
+  "Every message but ENTRY, in the order the fill renders them.
+Reading goes on down from ENTRY, so the messages after it come first,
+then the ones before it, nearest first.  Without ENTRY, top to bottom."
+  (if-let* ((after (memq entry mail-thread-messages)))
+      (append (cdr after)
+              (reverse (seq-take-while (lambda (message) (not (eq message entry)))
+                                       mail-thread-messages)))
+    mail-thread-messages))
+
+(defun mail-thread-next-waiting ()
+  "Waiting message to render next: the one at point, else the first in line.
+Messages an unfold rendered meanwhile leave the queue."
+  (setq mail-thread-waiting (seq-remove #'mail-thread-rendered-p mail-thread-waiting))
+  (let ((here (mail-thread-message-at-point)))
+    (if (memq here mail-thread-waiting)
+        here
+      (car mail-thread-waiting))))
+
+(defun mail-thread-fill (buffer timer)
+  "Render BUFFER's waiting messages until input arrives.
+TIMER is the idle timer running this; it cancels itself once BUFFER is
+gone or holds another."
+  (if (not (and (buffer-live-p buffer)
+                (eq timer (buffer-local-value 'mail-thread-fill-timer buffer))))
+      (cancel-timer timer)
+    (with-current-buffer buffer
+      (if (not (buffer-live-p mail-thread-summary-buffer))
+          (mail-thread-stop-fill)
+        ;; timers run with quitting inhibited, and an NNTP fetch can hang
+        (let ((inhibit-quit nil))
+          (condition-case nil
+              (while-let ((message (and (not (input-pending-p))
+                                        (mail-thread-next-waiting))))
+                ;; off the queue first, so a render that signals is not
+                ;; retried every idle period
+                (setq mail-thread-waiting (delq message mail-thread-waiting))
+                (mail-thread-expand message)
+                (redisplay))
+            (quit (mail-thread-stop-fill)
+                  (signal 'quit nil))))
+        (unless mail-thread-waiting
+          (mail-thread-stop-fill))))))
+
+(defun mail-thread-start-fill ()
+  "Render the waiting messages whenever Emacs is idle."
+  (when mail-thread-waiting
+    (let ((timer (run-with-idle-timer mail-thread-fill-delay t #'ignore)))
+      (timer-set-function timer #'mail-thread-fill (list (current-buffer) timer))
+      (setq mail-thread-fill-timer timer))))
+
+(defun mail-thread-stop-fill ()
+  "Stop filling in bodies; whatever still waits stays a folded line."
+  (when mail-thread-fill-timer
+    (cancel-timer mail-thread-fill-timer))
+  (setq mail-thread-fill-timer nil
+        mail-thread-waiting nil))
 
 ;;; Commands
 
@@ -222,6 +301,7 @@ a fallback font draws it at the wrong size."
 (defun mail-thread-quit ()
   "Leave the thread and restore the layout it replaced."
   (interactive nil mail-thread-mode)
+  (mail-thread-stop-fill)
   (let ((configuration mail-thread-window-configuration))
     (bury-buffer)
     (when configuration (set-window-configuration configuration))))
@@ -241,31 +321,38 @@ attachments are opened here."
 
 (define-derived-mode mail-thread-mode special-mode "Mail thread"
   "Major mode for reading every message of a thread in one buffer."
-  (buffer-disable-undo))
+  (buffer-disable-undo)
+  ;; a fill must not outlive the thread it was started for
+  (add-hook 'kill-buffer-hook #'mail-thread-stop-fill nil t)
+  (add-hook 'change-major-mode-hook #'mail-thread-stop-fill nil t))
 
 (defun mail-thread-build (entries entry unreads)
-  "Insert every message of ENTRIES.
-ENTRY is the article the summary was on and UNREADS the articles it
-holds unread; those come up unfolded, the rest as a line each."
+  "Insert every message of ENTRIES, rendering the one the summary was on.
+ENTRY is that article and UNREADS the articles the summary holds unread;
+those wait in `mail-thread-waiting' for the fill, the rest stay a line."
   (let ((subject (mail-thread-subject (cdar entries)))
         (inhibit-read-only t)
-        messages)
+        messages shown)
     (setq-local header-line-format
                 (format "%s   %d messages" subject (length entries)))
     (pcase-dolist (`(,article . ,header) entries)
       (let ((message (mail-thread-message-create
                       :article article :header header
-                      :marker (point-marker)))
-            (open (or (eql article entry) (memq article unreads))))
+                      :marker (point-marker))))
         (push message messages)
-        (insert (mail-thread-message-line message subject open) "\n")
+        (insert (mail-thread-message-line message subject (eql article entry)) "\n")
         ;; a body unfolded later is inserted right where the next
         ;; message's marker sits, and that marker has to end up after it
         (set-marker-insertion-type (mail-thread-message-marker message) t)
-        (when open
+        (when (eql article entry)
+          (setq shown message)
           (mail-thread-insert-body message)
           (mail-thread-mark-read article))))
-    (setq mail-thread-messages (nreverse messages))
+    (setq mail-thread-messages (nreverse messages)
+          mail-thread-waiting (seq-filter
+                               (lambda (message)
+                                 (memq (mail-thread-message-article message) unreads))
+                               (mail-thread-fill-order shown)))
     (set-buffer-modified-p nil)))
 
 ;;;###autoload
@@ -289,7 +376,8 @@ holds unread; those come up unfolded, the rest as a line each."
       (setq mail-thread-summary-buffer summary
             mail-thread-group group
             mail-thread-window-configuration configuration)
-      (mail-thread-build entries entry unreads))
+      (mail-thread-build entries entry unreads)
+      (mail-thread-start-fill))
     (switch-to-buffer buffer)
     (delete-other-windows)
     (when-let* ((message (seq-find (lambda (message)
