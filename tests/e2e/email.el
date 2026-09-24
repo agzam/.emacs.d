@@ -17,9 +17,10 @@
 (require 'gnus-start)
 (require 'gnus-sum)
 
-(defun email-e2e--write-message (file from subject id &optional date references xref)
+(defun email-e2e--write-message (file from subject id &optional date references xref body)
   "Write a minimal RFC 822 message to FILE.
-FROM, SUBJECT, ID, DATE, REFERENCES and XREF fill the headers."
+FROM, SUBJECT, ID, DATE, REFERENCES and XREF fill the headers; BODY
+follows the body's first line."
   (with-temp-file file
     (insert "From: " from "\n"
             "To: to.plotnick@gmail.com\n"
@@ -29,7 +30,8 @@ FROM, SUBJECT, ID, DATE, REFERENCES and XREF fill the headers."
             (if references (concat "References: " references "\n") "")
             (if xref (concat "Xref: " xref "\n") "")
             "\n"
-            "body of " subject "\n")))
+            "body of " subject "\n"
+            (or body ""))))
 
 (defun email-e2e--article (subject)
   "Number of the article with SUBJECT in the current summary."
@@ -83,10 +85,15 @@ An untimed `read-event' is idle, and a timer ends it."
     (email-e2e--write-message (expand-file-name "cur/1700000002.3.fixture:2,S" inbox)
                               "Ann <ann@example.com>" "release plan" "plan"
                               "Mon, 21 Sep 2026 09:00:00 +0000")
+    ;; two lines one level deep, which gnus-cite would paint too, and a
+    ;; single line two levels deep, which it would skip
     (email-e2e--write-message (expand-file-name "cur/1700000003.4.fixture:2,S" inbox)
                               "Bob <bob@example.com>" "Re: release plan (Bob)" "plan-bob"
                               "Mon, 21 Sep 2026 10:00:00 +0000"
-                              "<plan@fixture.example>")
+                              "<plan@fixture.example>" nil
+                              (concat "> the plan, first line\n"
+                                      "> the plan, second line\n"
+                                      "> > the draft before it\n"))
     ;; the last one carries the Xref header every gmane article has
     (email-e2e--write-message (expand-file-name "new/1700000004.5.fixture" inbox)
                               "Ann <ann@example.com>" "Re: release plan (Ann)" "plan-ann"
@@ -120,7 +127,22 @@ An untimed `read-event' is idle, and a timer ends it."
                             (mail-fetch-field "Message-ID")))
                         files))
               (glyph-at-point ()
-                (char-after (line-beginning-position))))
+                (char-after (line-beginning-position)))
+              ;; what redisplay draws: an overlay face wins over the text's
+              (quote-faces ()
+                (mapcar (lambda (text)
+                          (save-excursion
+                            (goto-char (point-min))
+                            (when (search-forward text nil t)
+                              (list (get-char-property (line-beginning-position) 'face)
+                                    (get-char-property (1- (line-end-position)) 'face)))))
+                        '("the plan, first line" "the plan, second line"
+                          "the draft before it")))
+              (cite-overlays ()
+                (seq-filter (lambda (overlay)
+                              (string-prefix-p "gnus-cite"
+                                               (format "%s" (overlay-get overlay 'face))))
+                            (overlays-in (point-min) (point-max)))))
       (unwind-protect
           (condition-case e
               (progn
@@ -205,6 +227,13 @@ An untimed `read-event' is idle, and a timer ends it."
                 (record "a folded message costs a line, not a render"
                         (not (string-match-p "body of release plan" (thread-text)))
                         :got (format "%d chars" (buffer-size)))
+                (redisplay t)
+                (record "the thread view faces each quoted line by depth, markers included"
+                        (equal (quote-faces)
+                               '((message-cited-text-1 message-cited-text-1)
+                                 (message-cited-text-1 message-cited-text-1)
+                                 (message-cited-text-2 message-cited-text-2)))
+                        :got (format "%S" (quote-faces)))
                 ;; q before Emacs goes idle, so the fill never gets a turn
                 (execute-kbd-macro "q")
                 (email-e2e--idle 0.5)
@@ -265,6 +294,32 @@ An untimed `read-event' is idle, and a timer ends it."
                                              (buffer-substring-no-properties
                                               (point-min) (point-max))))
                         :got (format "%s, %s" major-mode gnus-article-current))
+                (redisplay t)
+                (record "the article buffer faces the quotes the same way, with no gnus-cite overlay"
+                        (and (equal (quote-faces)
+                                    '((message-cited-text-1 message-cited-text-1)
+                                      (message-cited-text-1 message-cited-text-1)
+                                      (message-cited-text-2 message-cited-text-2)))
+                             (null (cite-overlays)))
+                        :got (format "%S, %d gnus-cite overlays"
+                                     (quote-faces) (length (cite-overlays))))
+                ;; replying cites every line once more, and message-mode
+                ;; paints it with the same faces by the same depth rule
+                (switch-to-buffer "*Summary nnmaildir+gmail:inbox*")
+                (gnus-summary-goto-subject (email-e2e--article "Re: release plan (Bob)"))
+                (execute-kbd-macro "R")
+                (setq reply (current-buffer))
+                (font-lock-ensure)
+                (record "a cited reply paints the quotes a level deeper with the same faces"
+                        (and (derived-mode-p 'message-mode)
+                             (equal (quote-faces)
+                                    '((message-cited-text-2 message-cited-text-2)
+                                      (message-cited-text-2 message-cited-text-2)
+                                      (message-cited-text-3 message-cited-text-3))))
+                        :got (format "%s, %S" major-mode (quote-faces)))
+                (set-buffer-modified-p nil)
+                (kill-buffer reply)
+                (setq reply nil)
                 ;; deferred deletion and archive: nothing reaches the
                 ;; store until x
                 (switch-to-buffer "*Summary nnmaildir+gmail:inbox*")
