@@ -24,6 +24,9 @@
 (defvar mail-inbox-group "nnmaildir+gmail:inbox"
   "Gnus group `open-mail-inbox' enters.")
 
+(defvar mail-trash-group "nnmaildir+gmail:trash"
+  "Group a queued deletion is moved into; mbsync mirrors it from Gmail's Trash.")
+
 (defvar mail-groups (list mail-inbox-group "nntp+news.gmane.io:gmane.emacs.devel")
   "Groups Gnus subscribes to on startup, on top of every maildir group.")
 
@@ -90,7 +93,8 @@
         ;; would sort oldest first
         gnus-thread-sort-functions '(gnus-thread-sort-by-most-recent-date)
         gnus-summary-thread-gathering-function #'gnus-gather-threads-by-references
-        gnus-summary-line-format "%U%R %-16,16&user-date; %-24,24f %B%s\n"
+        ;; %uD is the queued delete or archive, drawn by marks.el
+        gnus-summary-line-format "%uD%U%R %-16,16&user-date; %-24,24f %B%s\n"
         gnus-sum-thread-tree-root ""
         gnus-sum-thread-tree-false-root ""
         gnus-sum-thread-tree-single-indent ""
@@ -118,6 +122,16 @@ again from `evil-collection-setup-hook'."
       (map! :map gnus-summary-mode-map
             :n "RET" #'open-mail-thread
             :n "<return>" #'open-mail-thread
+            ;; dired's d, u and x; the capitals take the thread at point.
+            ;; u, U and x displace evil-collection's process-mark and
+            ;; limit-to-unread keys
+            :n "d" #'mail-mark-for-deletion
+            :n "D" #'mail-mark-thread-for-deletion
+            :n "a" #'mail-mark-for-archive
+            :n "A" #'mail-mark-thread-for-archive
+            :n "u" #'mail-unmark
+            :n "U" #'mail-unmark-thread
+            :n "x" #'mail-execute-marks
             (:localleader
              :desc "sync"          "u" #'sync-mail
              :desc "search"        "s" #'search-mail

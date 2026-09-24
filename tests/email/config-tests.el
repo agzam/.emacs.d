@@ -137,6 +137,15 @@ back from the source instead of from a keymap."
       (expect (cdr (assoc "RET" pairs)) :to-equal '(function open-mail-thread))
       (expect (cdr (assoc "<return>" pairs)) :to-equal '(function open-mail-thread))))
 
+  (it "queues, unqueues and executes deletions and archives with Dired's keys"
+    (let ((pairs (mapcan #'map-form-key-pairs
+                         (map-form-groups config 'gnus-summary-mode-map))))
+      (expect (mapcar (lambda (key) (cadr (cdr (assoc key pairs))))
+                      '("d" "D" "a" "A" "u" "U" "x"))
+              :to-equal '(mail-mark-for-deletion mail-mark-thread-for-deletion
+                          mail-mark-for-archive mail-mark-thread-for-archive
+                          mail-unmark mail-unmark-thread mail-execute-marks))))
+
   (it "folds, moves and leaves inside the thread buffer"
     (let ((pairs (mapcan #'map-form-key-pairs
                          (map-form-groups config 'mail-thread-mode-map))))
@@ -179,6 +188,19 @@ back from the source instead of from a keymap."
                              (memq 'mail-thread-mode-map form)))
                       config)
             :to-be-truthy)))
+
+(describe "email module deferred deletion"
+  (it "draws the queued verb in the first summary column"
+    ;; the column is a user format function, so marks.el has to be
+    ;; loaded before the first summary line is drawn
+    (expect gnus-summary-line-format :to-match "\\`%uD")
+    (with-temp-buffer
+      (insert-file-contents
+       (expand-file-name "modules/email/autoload/marks.el" test-config-root))
+      (expect (buffer-string)
+              :to-match "^;;;###autoload\n(defun gnus-user-format-function-D ")))
+  (it "moves a queued deletion into the mirrored trash"
+    (expect mail-trash-group :to-equal "nnmaildir+gmail:trash")))
 
 (describe "email module subscriptions"
   (it "subscribes the inbox and emacs-devel on startup"

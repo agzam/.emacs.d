@@ -40,6 +40,9 @@ FROM, SUBJECT, ID, DATE and REFERENCES fill the headers."
   "Gnus reads the fixture maildir, replies, and shows a thread in one buffer."
   (let* ((root (expand-file-name "mail/" e2e-work-dir))
          (inbox (expand-file-name "inbox/" root))
+         ;; the group a queued deletion is moved into has to exist when
+         ;; Gnus starts, or nnmaildir refuses the article
+         (trash (expand-file-name "trash/" root))
          (results '())
          ;; gnus-started-hook subscribes every group under this root;
          ;; mail-groups would add gmane, and CI has no news server
@@ -53,8 +56,9 @@ FROM, SUBJECT, ID, DATE and REFERENCES fill the headers."
          (gnus-interactive-exit nil)
          (gnus-expert-user t)
          reply)
-    (dolist (sub '("cur" "new" "tmp"))
-      (make-directory (expand-file-name sub inbox) t))
+    (dolist (dir (list inbox trash))
+      (dolist (sub '("cur" "new" "tmp"))
+        (make-directory (expand-file-name sub dir) t)))
     (email-e2e--write-message (expand-file-name "new/1700000001.1.fixture" inbox)
                               "Someone <someone@example.com>" "fresh" "fresh")
     (email-e2e--write-message (expand-file-name "cur/1700000000.2.fixture:2,S" inbox)
@@ -80,7 +84,19 @@ FROM, SUBJECT, ID, DATE and REFERENCES fill the headers."
                         (seq-filter #'mail-thread-message-open-p mail-thread-messages)))
               (subject-at-point ()
                 (mail-header-subject
-                 (mail-thread-message-header (mail-thread-message-at-point)))))
+                 (mail-thread-message-header (mail-thread-message-at-point))))
+              (messages-in (dir)
+                (mapcan (lambda (sub)
+                          (directory-files (expand-file-name sub dir) t "\\`[^.]"))
+                        '("cur" "new")))
+              (message-ids (files)
+                (mapcar (lambda (file)
+                          (with-temp-buffer
+                            (insert-file-contents file)
+                            (mail-fetch-field "Message-ID")))
+                        files))
+              (glyph-at-point ()
+                (char-after (line-beginning-position))))
       (unwind-protect
           (condition-case e
               (progn
@@ -192,7 +208,53 @@ FROM, SUBJECT, ID, DATE and REFERENCES fill the headers."
                              (string-match-p "body of Re: release plan (Bob)"
                                              (buffer-substring-no-properties
                                               (point-min) (point-max))))
-                        :got (format "%s, %s" major-mode gnus-article-current)))
+                        :got (format "%s, %s" major-mode gnus-article-current))
+                ;; deferred deletion and archive: nothing reaches the
+                ;; store until x
+                (switch-to-buffer "*Summary nnmaildir+gmail:inbox*")
+                (gnus-summary-goto-subject (email-e2e--article "seen"))
+                (execute-kbd-macro "d")
+                (record "d queues the message at point for the trash and draws D"
+                        (and (eq (alist-get (email-e2e--article "seen") mail-marks) 'delete)
+                             (eq (glyph-at-point) ?D)
+                             (eq (car-safe (get-text-property (line-beginning-position) 'face))
+                                 'dired-flagged)
+                             (= 5 (length (messages-in inbox))))
+                        :got (format "%S, line starts with %c, face %S, %d files"
+                                     mail-marks (glyph-at-point)
+                                     (get-text-property (line-beginning-position) 'face)
+                                     (length (messages-in inbox))))
+                (execute-kbd-macro "u")
+                (record "u takes it back and clears the column"
+                        (and (null mail-marks) (eq (glyph-at-point) ?\s))
+                        :got (format "%S, line starts with %c" mail-marks (glyph-at-point)))
+                (execute-kbd-macro "d")
+                (gnus-summary-goto-subject (email-e2e--article "release plan"))
+                (execute-kbd-macro "A")
+                (record "A queues the whole thread at point for archive"
+                        (equal (mail-marked-articles 'archive)
+                               (sort (mapcar #'email-e2e--article
+                                             '("release plan" "Re: release plan (Bob)"
+                                               "Re: release plan (Ann)"))
+                                     #'<))
+                        :got (format "%S" mail-marks))
+                (execute-kbd-macro "x")
+                (record "x moves the queued deletion into the trash maildir"
+                        (equal (message-ids (messages-in trash)) '("<seen@fixture.example>"))
+                        :got (format "%S" (message-ids (messages-in trash))))
+                (record "x deletes the archived thread's files from the label"
+                        (equal (message-ids (messages-in inbox)) '("<fresh@fixture.example>"))
+                        :got (format "%S" (message-ids (messages-in inbox))))
+                (record "the executed lines leave the summary"
+                        (and (null mail-marks)
+                             (= 1 (count-lines (point-min) (point-max)))
+                             (equal (mail-header-subject
+                                     (gnus-summary-article-header
+                                      (progn (goto-char (point-min))
+                                             (gnus-summary-article-number))))
+                                    "fresh"))
+                        :got (format "%S, %d lines" mail-marks
+                                     (count-lines (point-min) (point-max)))))
             (error (record "flow signalled" nil :err e)))
         (when (buffer-live-p reply)
           (with-current-buffer reply
