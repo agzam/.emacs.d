@@ -75,7 +75,9 @@
           ;; slice instead of prompting for a count
           ("\\`nnmaildir\\+gmail:archive\\'" (display . 200))
           ("\\`nntp\\+news\\.gmane\\.io:" (gnus-use-scoring t)))
-        gnus-thread-sort-functions '((not gnus-thread-sort-by-most-recent-date))
+        ;; the function already puts the newest thread first; (not ...)
+        ;; would sort oldest first
+        gnus-thread-sort-functions '(gnus-thread-sort-by-most-recent-date)
         gnus-summary-thread-gathering-function #'gnus-gather-threads-by-references
         gnus-summary-line-format "%U%R %-16,16&user-date; %-24,24f %B%s\n"
         gnus-sum-thread-tree-root ""
