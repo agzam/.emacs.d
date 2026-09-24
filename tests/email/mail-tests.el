@@ -140,6 +140,18 @@
                             count-unread
                             (read "nnmaildir+gmail:inbox")))))))
 
+(describe "read-mail-article"
+  (it "selects the article before asking for its buffer"
+    ;; gnus-summary-select-article-buffer errors when no article buffer
+    ;; exists, which is the state every group is entered in
+    (let (calls)
+      (cl-letf (((symbol-function 'gnus-summary-select-article)
+                 (lambda (&rest _) (push 'select calls)))
+                ((symbol-function 'gnus-summary-select-article-buffer)
+                 (lambda (&rest _) (push 'select-buffer calls))))
+        (read-mail-article)
+        (expect (nreverse calls) :to-equal '(select select-buffer))))))
+
 (describe "search-mail"
   (it "hands the raw notmuch query to an ephemeral search over the gmail server"
     (let (captured)
