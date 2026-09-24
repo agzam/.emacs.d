@@ -17,9 +17,9 @@
 (require 'gnus-start)
 (require 'gnus-sum)
 
-(defun email-e2e--write-message (file from subject id &optional date references)
+(defun email-e2e--write-message (file from subject id &optional date references xref)
   "Write a minimal RFC 822 message to FILE.
-FROM, SUBJECT, ID, DATE and REFERENCES fill the headers."
+FROM, SUBJECT, ID, DATE, REFERENCES and XREF fill the headers."
   (with-temp-file file
     (insert "From: " from "\n"
             "To: to.plotnick@gmail.com\n"
@@ -27,6 +27,7 @@ FROM, SUBJECT, ID, DATE and REFERENCES fill the headers."
             "Date: " (or date "Tue, 22 Sep 2026 10:00:00 +0000") "\n"
             "Message-ID: <" id "@fixture.example>\n"
             (if references (concat "References: " references "\n") "")
+            (if xref (concat "Xref: " xref "\n") "")
             "\n"
             "body of " subject "\n")))
 
@@ -71,10 +72,12 @@ FROM, SUBJECT, ID, DATE and REFERENCES fill the headers."
                               "Bob <bob@example.com>" "Re: release plan (Bob)" "plan-bob"
                               "Mon, 21 Sep 2026 10:00:00 +0000"
                               "<plan@fixture.example>")
+    ;; the last one carries the Xref header every gmane article has
     (email-e2e--write-message (expand-file-name "new/1700000004.5.fixture" inbox)
                               "Ann <ann@example.com>" "Re: release plan (Ann)" "plan-ann"
                               "Mon, 21 Sep 2026 11:00:00 +0000"
-                              "<plan@fixture.example> <plan-bob@fixture.example>")
+                              "<plan@fixture.example> <plan-bob@fixture.example>"
+                              "news.gmane.io gmane.emacs.devel:346572")
     (cl-flet ((record (label ok &rest kv)
                 (push (append (list :label (format "email: %s" label) :ok ok) kv)
                       results))
@@ -156,6 +159,11 @@ FROM, SUBJECT, ID, DATE and REFERENCES fill the headers."
                              (= 5 (length gnus-newsgroup-headers)))
                         :got (format "%s, %d headers" major-mode
                                      (length gnus-newsgroup-headers)))
+                ;; the article buffer shows a shorter message without
+                ;; Xref, the way it does after reading mail; the render
+                ;; must not look the thread's Xref up in it
+                (gnus-summary-goto-subject (email-e2e--article "fresh"))
+                (gnus-summary-select-article)
                 ;; the thread view, entered from the middle message
                 (gnus-summary-goto-subject (email-e2e--article "Re: release plan (Bob)"))
                 (execute-kbd-macro (kbd "RET"))
@@ -171,6 +179,11 @@ FROM, SUBJECT, ID, DATE and REFERENCES fill the headers."
                         (equal (open-subjects)
                                '("Re: release plan (Bob)" "Re: release plan (Ann)"))
                         :got (format "%S" (open-subjects)))
+                (record "the message with an Xref header renders while another is shown"
+                        (string-match-p "body of Re: release plan (Ann)"
+                                        (buffer-substring-no-properties
+                                         (point-min) (point-max)))
+                        :got (format "%d chars" (buffer-size)))
                 (record "a folded message costs a line, not a render"
                         (not (string-match-p "body of release plan"
                                              (buffer-substring-no-properties
