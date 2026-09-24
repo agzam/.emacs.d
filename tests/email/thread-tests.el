@@ -8,6 +8,7 @@
 (require 'buttercup)
 
 (load-module-file "modules/email/autoload/thread.el")
+(load-module-file "modules/email/autoload/quotes.el")
 
 (defun thread-tests-header (number subject from date id &optional references)
   "Header of the article NUMBER the specs build a thread from.
@@ -35,6 +36,18 @@ SUBJECT, FROM, DATE, ID and REFERENCES are its fields."
           "\n"
           "The plan, as posted.\n")
   "Raw article shaped like gmane's: every gmane article carries an Xref header.")
+
+(defun thread-tests-quoted-article (body)
+  "Raw reply whose body is BODY."
+  (concat "From: Bob <bob@example.com>\n"
+          "Subject: Re: Plan\n"
+          "Date: Mon, 21 Sep 2026 11:00:00 +0000\n"
+          "Message-ID: <2@x>\n"
+          "\n"
+          body))
+
+(defvar thread-tests-quotes t
+  "Treatment condition the specs register `highlight-mail-quotes' under.")
 
 (defvar thread-tests-rendered nil
   "Articles `mail-thread-render' was asked for, newest first.")
@@ -90,6 +103,35 @@ summary buffer as `summary'."
   "The message of ARTICLE in the thread buffer."
   (seq-find (lambda (message) (eql (mail-thread-message-article message) article))
             mail-thread-messages))
+
+(defun thread-tests-thread-text (raw)
+  "Thread buffer text, properties kept, once its one message RAW renders.
+Nothing in the render is stubbed but the fetch; `highlight-mail-quotes'
+is the only treatment."
+  (let ((buffer (generate-new-buffer " *thread-tests*"))
+        (summary (generate-new-buffer " *thread-tests summary*")))
+    (unwind-protect
+        (let ((gnus-newsrc-hashtb (gnus-make-hashtable))
+              (gnus-treatment-function-alist
+               '((thread-tests-quotes highlight-mail-quotes))))
+          (cl-letf (((symbol-function 'gnus-request-article)
+                     (lambda (_article _group target)
+                       (with-current-buffer target (insert raw))
+                       t))
+                    ((symbol-function 'gnus-summary-mark-article) #'ignore))
+            (with-current-buffer buffer
+              (mail-thread-mode)
+              (setq mail-thread-group "nnmaildir+gmail:inbox"
+                    mail-thread-summary-buffer summary)
+              (mail-thread-build (list (nth 1 thread-tests-entries)) 11 nil)
+              (buffer-string))))
+      (kill-buffer summary)
+      (kill-buffer buffer))))
+
+(defun thread-tests-line-face (text line)
+  "Face on the last character of LINE in TEXT."
+  (let ((start (string-match (concat "^" (regexp-quote line) "$") text)))
+    (get-text-property (+ start (length line) -1) 'face text)))
 
 (describe "mail-thread-sender"
   (it "prefers the display name"
@@ -349,6 +391,26 @@ summary buffer as `summary'."
               (expect (mail-thread-render "nntp+news.gmane.io:gmane.emacs.devel" 346572)
                       :to-equal "The plan, as posted.")))
         (kill-buffer shown)))))
+
+(describe "quoted lines in the thread view"
+  ;; the thread view copies each rendered body as text, which drops
+  ;; overlays; the faces only survive as text properties
+  (it "keep the depth faces the render gave them"
+    (let ((text (thread-tests-thread-text
+                 (thread-tests-quoted-article
+                  "Agreed.\n> The plan, as posted.\n> > And its first draft.\n"))))
+      (expect (thread-tests-line-face text "Agreed.") :to-be nil)
+      (expect (thread-tests-line-face text "> The plan, as posted.")
+              :to-be 'message-cited-text-1)
+      (expect (thread-tests-line-face text "> > And its first draft.")
+              :to-be 'message-cited-text-2)))
+  (it "keep them in a message bigger than gnus-cite would parse"
+    (let* ((filler (concat "> " (make-string 70 ?x) "\n"))
+           (raw (thread-tests-quoted-article
+                 (concat (apply #'concat (make-list 400 filler)) "> > last\n"))))
+      (expect (< 25000 (length raw)) :to-be t)
+      (expect (thread-tests-line-face (thread-tests-thread-text raw) "> > last")
+              :to-be 'message-cited-text-2))))
 
 (describe "open-mail-thread"
   (it "says so when point is on no article"
