@@ -113,6 +113,65 @@ in this process, which the mail suite performs."
                       (gnus-sort-threads (list old new)))
               :to-equal '("new" "old")))))
 
+(defun email-tests--gnus-config-forms ()
+  "The :config forms of the `use-package gnus' block in the module config.
+The suite loads the config with :config skipped, so the bindings are read
+back from the source instead of from a keymap."
+  (with-temp-buffer
+    (insert-file-contents
+     (expand-file-name "modules/email/config.el" test-config-root))
+    (goto-char (point-min))
+    (let (form)
+      (while (and (setq form (ignore-errors (read (current-buffer))))
+                  (not (and (eq (car-safe form) 'use-package)
+                            (eq (cadr form) 'gnus)))))
+      (expect form :to-be-truthy)
+      (use-package-body-forms (cddr form) :config))))
+
+(describe "email module bindings"
+  :var* ((config (email-tests--gnus-config-forms)))
+
+  (it "opens the whole thread from the summary instead of one article"
+    (let ((pairs (mapcan #'map-form-key-pairs
+                         (map-form-groups config 'gnus-summary-mode-map))))
+      (expect (cdr (assoc "RET" pairs)) :to-equal '(function open-mail-thread))
+      (expect (cdr (assoc "<return>" pairs)) :to-equal '(function open-mail-thread))))
+
+  (it "folds, moves and leaves inside the thread buffer"
+    (let ((pairs (mapcan #'map-form-key-pairs
+                         (map-form-groups config 'mail-thread-mode-map))))
+      (expect pairs :to-have-same-items-as
+              '(("TAB" function mail-thread-toggle-message)
+                ("<tab>" function mail-thread-toggle-message)
+                ("RET" function mail-thread-open-article)
+                ("<return>" function mail-thread-open-article)
+                ("C-j" function mail-thread-next-message)
+                ("C-k" function mail-thread-previous-message)
+                ("]]" function mail-thread-next-message)
+                ("[[" function mail-thread-previous-message)
+                ("q" function mail-thread-quit)))))
+
+  (it "takes the summary keys back after evil-collection evilifies gnus"
+    ;; evil-collection binds RET in gnus-summary-mode-map from an
+    ;; after-load hook registered later than this module's, so applying
+    ;; the keys once loses them on a fresh boot
+    (expect (seq-find (lambda (form)
+                        (and (eq (car-safe form) 'add-hook)
+                             (equal (cadr form) ''evil-collection-setup-hook)
+                             (equal (nth 2 form) '#'bind-mail-summary-keys)))
+                      config)
+            :to-be-truthy))
+
+  (it "waits for the thread view to load before binding its map"
+    ;; the file loads with the first `open-mail-thread' call, so the map
+    ;; does not exist when gnus loads
+    (expect (seq-find (lambda (form)
+                        (and (eq (car-safe form) 'map!)
+                             (eq (cadr (memq :after form)) 'mail-thread)
+                             (memq 'mail-thread-mode-map form)))
+                      config)
+            :to-be-truthy)))
+
 (describe "email module subscriptions"
   (it "subscribes the inbox and emacs-devel on startup"
     (expect mail-groups :to-equal
