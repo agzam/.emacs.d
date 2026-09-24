@@ -66,14 +66,21 @@ from its in-memory map and then raises on the request."
     (when (condition-case nil
               (gnus-request-article article group (current-buffer))
             (error nil))
-      (let ((gnus-newsgroup-name group))
-        (gnus-article-mode)
-        (run-hooks 'gnus-article-decode-hook)
-        (gnus-article-prepare-display))
-      (widen)
-      (article-goto-body)
-      (prog1 (string-trim (buffer-substring (point) (point-max)))
-        (mm-destroy-parts gnus-article-mime-handles)))))
+      (let ((raw (current-buffer)))
+        (with-temp-buffer
+          (insert-buffer-substring raw)
+          ;; treatments read the undecoded article back out of the
+          ;; original-article buffer, and Gnus's own one holds whatever
+          ;; the article buffer showed last
+          (let ((gnus-newsgroup-name group)
+                (gnus-original-article-buffer raw))
+            (gnus-article-mode)
+            (run-hooks 'gnus-article-decode-hook)
+            (gnus-article-prepare-display))
+          (widen)
+          (article-goto-body)
+          (prog1 (string-trim (buffer-substring (point) (point-max)))
+            (mm-destroy-parts gnus-article-mime-handles)))))))
 
 (defun mail-thread-sender (header)
   "Display name of HEADER's sender, or their address."
