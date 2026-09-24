@@ -33,6 +33,10 @@
   (let* ((root (expand-file-name "mail/" e2e-work-dir))
          (inbox (expand-file-name "inbox/" root))
          (results '())
+         ;; gnus-started-hook subscribes every group under this root;
+         ;; mail-groups would add gmane, and CI has no news server
+         (gmail-maildir root)
+         (mail-groups nil)
          (gnus-secondary-select-methods
           `((nnmaildir "gmail" (directory ,root) (get-new-mail nil))))
          (gnus-startup-file (expand-file-name "newsrc" e2e-work-dir))
@@ -80,7 +84,22 @@
                         :got (message-fetch-field "To"))
                 (record "the reply files a copy into the synced sent group"
                         (equal (message-fetch-field "Gcc") "nnmaildir+gmail:sent")
-                        :got (message-fetch-field "Gcc")))
+                        :got (message-fetch-field "Gcc"))
+                (set-buffer-modified-p nil)
+                (kill-buffer reply)
+                (setq reply nil)
+                (switch-to-buffer "*Summary nnmaildir+gmail:inbox*")
+                (gnus-summary-exit-no-update)
+                ;; RET from the group buffer is the path the `display'
+                ;; parameter governs; without it only unread mail shows
+                (switch-to-buffer gnus-group-buffer)
+                (gnus-group-jump-to-group "nnmaildir+gmail:inbox")
+                (execute-kbd-macro (kbd "RET"))
+                (record "RET on the group line shows read mail too"
+                        (and (derived-mode-p 'gnus-summary-mode)
+                             (= 2 (length gnus-newsgroup-headers)))
+                        :got (format "%s, %d headers" major-mode
+                                     (length gnus-newsgroup-headers))))
             (error (record "flow signalled" nil :err e)))
         (when (buffer-live-p reply)
           (with-current-buffer reply

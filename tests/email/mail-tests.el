@@ -7,8 +7,10 @@
                                   "helper.el")))
 (require 'buttercup)
 
+(defvar gmail-maildir "/nonexistent-mail-tests/")
 (defvar mail-sync-program "mail-sync")
 (defvar mail-inbox-group "nnmaildir+gmail:inbox")
+(defvar mail-groups '("nnmaildir+gmail:inbox" "nntp+news.gmane.io:gmane.emacs.devel"))
 
 (load-module-file "modules/email/autoload/mail.el")
 
@@ -81,6 +83,30 @@
               (lambda (g &rest _) (push (list 'read g) ,calls))))
      ,@body))
 
+(describe "subscribe-mail-groups"
+  (it "subscribes every maildir group, since gnus-search drops a hit in a group nnmaildir never opened"
+    (let ((calls nil)
+          (gmail-maildir (make-temp-file "mail-tests-maildir" t))
+          (gnus-newsrc-hashtb (make-hash-table :test #'equal))
+          (gnus-group-buffer " *mail-tests group*"))
+      (puthash "nnmaildir+gmail:inbox" '(entry (info)) gnus-newsrc-hashtb)
+      (dolist (d '("inbox" "sent" "archive" "emacs"))
+        (make-directory (expand-file-name d gmail-maildir)))
+      ;; nnmaildir keeps its own state in a dot-dir beside the groups
+      (make-directory (expand-file-name ".mbsyncstate" gmail-maildir))
+      (with-current-buffer (get-buffer-create gnus-group-buffer)
+        (unwind-protect
+            (mail-tests--with-gnus-stubs calls
+              (subscribe-mail-groups)
+              ;; inbox is already in the newsrc, the dot-dir is not a group
+              (expect (sort (mapcar #'cadr (nreverse calls)) #'string<)
+                      :to-equal '("nnmaildir+gmail:archive"
+                                  "nnmaildir+gmail:emacs"
+                                  "nnmaildir+gmail:sent"
+                                  "nntp+news.gmane.io:gmane.emacs.devel")))
+          (kill-buffer gnus-group-buffer)
+          (delete-directory gmail-maildir t))))))
+
 (describe "open-mail-inbox"
   (it "starts Gnus, subscribes the inbox once, rescans it, then reads it"
     (let ((calls nil)
@@ -118,6 +144,7 @@
   (it "hands the raw notmuch query to an ephemeral search over the gmail server"
     (let (captured)
       (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
+                ((symbol-function 'subscribe-mail-groups) #'ignore)
                 ((symbol-function 'gnus-group-read-ephemeral-search-group)
                  (lambda (_no-parse specs) (setq captured specs))))
         (search-mail "from:someone subject:hello")
