@@ -100,6 +100,19 @@ in this process, which the mail suite performs."
   (it "never opens the first article on group entry"
     (expect gnus-auto-select-first :to-be nil)))
 
+(describe "email module thread order"
+  (before-all (require 'gnus-sum))
+  (it "puts the newest thread at the top"
+    ;; gnus-thread-sort-by-most-recent-date already sorts newest first,
+    ;; so a (not ...) wrapper would silently invert the summary
+    (let ((old (list (make-full-mail-header
+                      1 "old" "a@x" "Mon, 01 Jan 2024 00:00:00 +0000" "<1@x>" "" 0 0 nil)))
+          (new (list (make-full-mail-header
+                      2 "new" "b@x" "Thu, 01 Jan 2026 00:00:00 +0000" "<2@x>" "" 0 0 nil))))
+      (expect (mapcar (lambda (thread) (mail-header-subject (car thread)))
+                      (gnus-sort-threads (list old new)))
+              :to-equal '("new" "old")))))
+
 (describe "email module subscriptions"
   (it "subscribes the inbox and emacs-devel on startup"
     (expect mail-groups :to-equal
