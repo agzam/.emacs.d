@@ -97,7 +97,12 @@
          :desc "search" "s" #'search-mail
          :desc "inbox"  "i" #'open-mail-inbox))
 
+  ;; RET is gnus-summary-scroll-up, which displays the body but keeps
+  ;; point in the summary; evil-collection binds it too, so this has to
+  ;; be a normal-state binding to win
   (map! :map gnus-summary-mode-map
+        :n "RET" #'read-mail-article
+        :n "<return>" #'read-mail-article
         (:localleader
          :desc "sync"          "u" #'sync-mail
          :desc "search"        "s" #'search-mail
