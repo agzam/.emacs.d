@@ -26,6 +26,16 @@ SUBJECT, FROM, DATE, ID and REFERENCES are its fields."
                   "Mon, 21 Sep 2026 12:00:00 +0000" "<3@x>" "<1@x> <2@x>")))
   "Three messages of one thread, oldest first.")
 
+(defvar thread-tests-gmane-article
+  (concat "From: Ann <ann@example.com>\n"
+          "Subject: Plan\n"
+          "Date: Mon, 21 Sep 2026 10:00:00 +0000\n"
+          "Message-ID: <1@x>\n"
+          "Xref: news.gmane.io gmane.emacs.devel:346572\n"
+          "\n"
+          "The plan, as posted.\n")
+  "Raw article shaped like gmane's: every gmane article carries an Xref header.")
+
 (defvar thread-tests-rendered nil
   "Articles `mail-thread-render' was asked for, newest first.")
 
@@ -193,6 +203,26 @@ Rendering and the summary are stubbed; what they were asked for lands in
                 ((symbol-function 'gnus-summary-articles-in-thread)
                  (lambda (&rest _) '(12 9 10 11))))
         (expect (mapcar #'car (mail-thread-entries)) :to-equal '(10 11 12))))))
+
+(describe "mail-thread-render"
+  (it "reads the raw article it renders, not the one Gnus showed last"
+    ;; article-decode-group-name looks every Xref header up again in the
+    ;; original-article buffer, which holds whatever the article buffer
+    ;; showed last - here a mail article too short for the match
+    (let ((shown (generate-new-buffer " *thread-tests original*")))
+      (unwind-protect
+          (let ((gnus-original-article-buffer shown)
+                (gnus-newsrc-hashtb (gnus-make-hashtable)))
+            (with-current-buffer shown
+              (insert "From: bob@example.com\n\nshort\n"))
+            (cl-letf (((symbol-function 'gnus-request-article)
+                       (lambda (_article _group buffer)
+                         (with-current-buffer buffer
+                           (insert thread-tests-gmane-article))
+                         t)))
+              (expect (mail-thread-render "nntp+news.gmane.io:gmane.emacs.devel" 346572)
+                      :to-equal "The plan, as posted.")))
+        (kill-buffer shown)))))
 
 (describe "open-mail-thread"
   (it "says so when point is on no article"
