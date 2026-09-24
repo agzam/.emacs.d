@@ -8,6 +8,7 @@
 (defvar mail-sync-program)
 (defvar mail-inbox-group)
 (defvar mail-groups)
+(defvar mail-bulk-groups)
 
 ;;; Sync
 
@@ -16,15 +17,14 @@
   (list mail-sync-program (if full "full" "sync")))
 
 (defun mail-sync-sentinel (proc event)
-  "Report PROC's EVENT and refresh the Gnus group buffer after a clean exit."
+  "Report PROC's EVENT and refresh the routine mail groups after a clean exit."
   (when (memq (process-status proc) '(exit signal))
     (if (and (eq (process-status proc) 'exit)
              (zerop (process-exit-status proc)))
         (progn
           (message "Mail synced")
-          (when (and (gnus-alive-p) (get-buffer gnus-group-buffer))
-            (with-current-buffer gnus-group-buffer
-              (gnus-group-get-new-news))))
+          (when (gnus-alive-p)
+            (refresh-mail-groups)))
       (message "Mail sync failed: %s (see %s)"
                (string-trim event) (buffer-name (process-buffer proc))))))
 
@@ -55,12 +55,24 @@
             (seq-filter #'file-directory-p
                         (directory-files gmail-maildir t "\\`[^.]")))))
 
+(defun defer-bulk-mail-groups ()
+  "Put `mail-bulk-groups' one level above `gnus-activate-level'.
+A routine scan then leaves them alone; they still list and enter normally."
+  (let ((level (1+ gnus-activate-level)))
+    (dolist (group mail-bulk-groups)
+      (when-let* ((known (gnus-group-entry group))
+                  (old (gnus-group-level group)))
+        (unless (= old level)
+          (gnus-group-change-level group level old))))))
+
 ;;;###autoload
 (defun subscribe-mail-groups ()
   "Subscribe every maildir group plus `mail-groups', skipping known ones.
 Subscribing activates, and gnus-search silently drops a hit whose group
-nnmaildir never opened - notmuch returns whichever duplicate it likes."
-  (mapc #'subscribe-mail-group (append (maildir-groups) mail-groups)))
+nnmaildir never opened - notmuch returns whichever duplicate it likes.
+The bulk groups are then moved out of the routine scan."
+  (mapc #'subscribe-mail-group (append (maildir-groups) mail-groups))
+  (defer-bulk-mail-groups))
 
 (defun refresh-mail-group (group)
   "Rescan GROUP's maildir and merge its flags, like `g' on the group line."
@@ -69,6 +81,24 @@ nnmaildir never opened - notmuch returns whichever duplicate it likes."
     (when-let* ((info (gnus-get-info group)))
       (gnus-request-update-info info method)
       (gnus-get-unread-articles-in-group info (gnus-active group)))))
+
+(defun scanned-mail-groups ()
+  "Maildir groups at or below `gnus-activate-level'."
+  (seq-filter (lambda (group)
+                (and (<= (gnus-group-level group) gnus-activate-level)
+                     (eq (car (gnus-find-method-for-group group)) 'nnmaildir)))
+              gnus-group-list))
+
+;;;###autoload
+(defun refresh-mail-groups ()
+  "Rescan the maildir groups a routine scan covers, one group at a time.
+`gnus-group-get-new-news' asks nnmaildir for a server-wide scan instead,
+which walks every label in the store whatever its level and builds an
+overview for each message it has none for, and it reaches gmane over NNTP."
+  (interactive)
+  (dolist (group (scanned-mail-groups))
+    (refresh-mail-group group)
+    (gnus-group-update-group group t)))
 
 ;;;###autoload
 (defun open-mail-inbox ()

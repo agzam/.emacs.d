@@ -27,6 +27,11 @@
 (defvar mail-groups (list mail-inbox-group "nntp+news.gmane.io:gmane.emacs.devel")
   "Groups Gnus subscribes to on startup, on top of every maildir group.")
 
+(defvar mail-bulk-groups
+  '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs" "nnmaildir+gmail:org-mode"
+    "nnmaildir+gmail:new" "nntp+news.gmane.io:gmane.emacs.devel")
+  "Groups no sync rescans: tens of thousands of files, or an NNTP round trip.")
+
 (use-package gnus
   :ensure nil
   :defer t
@@ -41,6 +46,12 @@
         gnus-save-killed-list nil
         gnus-read-active-file 'some
         gnus-agent nil
+        ;; a scan reads every message it has no overview for, so the
+        ;; mailing-list labels sit above this level (`mail-bulk-groups')
+        ;; and are read on entry instead.  3 is where a subscription
+        ;; lands (`gnus-level-default-subscribed'), which gnus.el has not
+        ;; defined yet here
+        gnus-activate-level 3
         gnus-inhibit-startup-message t
         ;; a dribble left by a session that never saved otherwise asks
         ;; a yes-or-no question before the group buffer appears
@@ -97,12 +108,12 @@
          :desc "search" "s" #'search-mail
          :desc "inbox"  "i" #'open-mail-inbox))
 
-  (defun bind-mail-summary-keys (mode &rest _)
-    "Bind the summary keys of this module when MODE is gnus.
+  (defun bind-mail-keys (mode &rest _)
+    "Bind the keys of this module that evil-collection owns, when MODE is gnus.
 evil-collection evilifies gnus from an after-load hook of its own, and
 `elpaca-after-init' registers that hook after this one, so its RET (which
-only scrolls the article) wins unless the keys are applied again from
-`evil-collection-setup-hook'."
+only scrolls the article) and its `gR' win unless the keys are applied
+again from `evil-collection-setup-hook'."
     (when (eq mode 'gnus)
       (map! :map gnus-summary-mode-map
             :n "RET" #'open-mail-thread
@@ -111,10 +122,14 @@ only scrolls the article) wins unless the keys are applied again from
              :desc "sync"          "u" #'sync-mail
              :desc "search"        "s" #'search-mail
              :desc "open in Gmail" "g" #'open-message-in-gmail
-             :desc "list archive"  "l" #'open-message-in-list-archive))))
+             :desc "list archive"  "l" #'open-message-in-list-archive))
+      ;; gR is gnus-group-get-new-news, a server-wide nnmaildir scan; gr
+      ;; stays Gnus's own per-group rescan, which is already cheap
+      (map! :map gnus-group-mode-map
+            :n "gR" #'refresh-mail-groups)))
 
-  (bind-mail-summary-keys 'gnus)
-  (add-hook 'evil-collection-setup-hook #'bind-mail-summary-keys)
+  (bind-mail-keys 'gnus)
+  (add-hook 'evil-collection-setup-hook #'bind-mail-keys)
 
   ;; the thread view loads with its first use, so its map exists only
   ;; then; C-j and C-k move by section the way rfc-mode binds them

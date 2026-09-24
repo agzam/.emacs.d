@@ -151,14 +151,22 @@ back from the source instead of from a keymap."
                 ("[[" function mail-thread-previous-message)
                 ("q" function mail-thread-quit)))))
 
-  (it "takes the summary keys back after evil-collection evilifies gnus"
-    ;; evil-collection binds RET in gnus-summary-mode-map from an
-    ;; after-load hook registered later than this module's, so applying
-    ;; the keys once loses them on a fresh boot
+  (it "refreshes the routine groups from the group buffer's gR"
+    ;; gR is gnus-group-get-new-news, which asks nnmaildir for a
+    ;; server-wide scan; gr stays Gnus's own per-group rescan
+    (let ((pairs (mapcan #'map-form-key-pairs
+                         (map-form-groups config 'gnus-group-mode-map))))
+      (expect (cdr (assoc "gR" pairs)) :to-equal '(function refresh-mail-groups))
+      (expect (assoc "gr" pairs) :to-be nil)))
+
+  (it "takes the keys evil-collection owns back after it evilifies gnus"
+    ;; evil-collection binds RET and gR from an after-load hook
+    ;; registered later than this module's, so applying the keys once
+    ;; loses them on a fresh boot
     (expect (seq-find (lambda (form)
                         (and (eq (car-safe form) 'add-hook)
                              (equal (cadr form) ''evil-collection-setup-hook)
-                             (equal (nth 2 form) '#'bind-mail-summary-keys)))
+                             (equal (nth 2 form) '#'bind-mail-keys)))
                       config)
             :to-be-truthy))
 
@@ -177,6 +185,23 @@ back from the source instead of from a keymap."
     (expect mail-groups :to-equal
             '("nnmaildir+gmail:inbox" "nntp+news.gmane.io:gmane.emacs.devel"))
     (expect (member mail-inbox-group mail-groups) :to-be-truthy)))
+
+(describe "email module scan scope"
+  (it "scans no further than a fresh subscription's level"
+    ;; a scan reads every message it has no overview for, so the level
+    ;; decides what a sync touches; 3 is gnus-level-default-subscribed
+    (expect gnus-activate-level :to-equal 3)
+    (require 'gnus)
+    (expect gnus-activate-level :to-equal gnus-level-default-subscribed))
+  (it "keeps the inbox in the routine scan and the big labels out of it"
+    (expect (member mail-inbox-group mail-bulk-groups) :to-be nil)
+    (expect mail-bulk-groups :to-have-same-items-as
+            '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs"
+              "nnmaildir+gmail:org-mode" "nnmaildir+gmail:new"
+              "nntp+news.gmane.io:gmane.emacs.devel")))
+  (it "leaves every bulk group inside the group buffer's list level"
+    (require 'gnus)
+    (expect (<= (1+ gnus-activate-level) gnus-level-subscribed) :to-be t)))
 
 (describe "email module quarantine"
   (before-all
