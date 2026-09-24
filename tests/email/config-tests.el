@@ -113,10 +113,10 @@ in this process, which the mail suite performs."
                       (gnus-sort-threads (list old new)))
               :to-equal '("new" "old")))))
 
-(defun email-tests--gnus-config-forms ()
-  "The :config forms of the `use-package gnus' block in the module config.
-The suite loads the config with :config skipped, so the bindings are read
-back from the source instead of from a keymap."
+(defun email-tests--config-forms (package)
+  "The :config forms of the `use-package' block for PACKAGE in the module config.
+The suite loads the config with :config skipped, so these are read back
+from the source."
   (with-temp-buffer
     (insert-file-contents
      (expand-file-name "modules/email/config.el" test-config-root))
@@ -124,12 +124,12 @@ back from the source instead of from a keymap."
     (let (form)
       (while (and (setq form (ignore-errors (read (current-buffer))))
                   (not (and (eq (car-safe form) 'use-package)
-                            (eq (cadr form) 'gnus)))))
+                            (eq (cadr form) package)))))
       (expect form :to-be-truthy)
       (use-package-body-forms (cddr form) :config))))
 
 (describe "email module bindings"
-  :var* ((config (email-tests--gnus-config-forms)))
+  :var* ((config (email-tests--config-forms 'gnus)))
 
   (it "opens the whole thread from the summary instead of one article"
     (let ((pairs (mapcan #'map-form-key-pairs
@@ -188,6 +188,29 @@ back from the source instead of from a keymap."
                              (memq 'mail-thread-mode-map form)))
                       config)
             :to-be-truthy)))
+
+(describe "email module quoted lines"
+  (it "leaves them to one painter in articles and replies"
+    ;; gnus-cite's overlays would cover the depth faces, and its reply
+    ;; mode puts gnus-cite faces in front of message-mode's
+    (require 'gnus-art)
+    (require 'gnus-msg)
+    (expect gnus-treat-highlight-citation :to-be nil)
+    (expect gnus-message-highlight-citation :to-be nil))
+  (it "paints them by depth as an article treatment"
+    (require 'gnus-art)
+    (let ((gnus-treatment-function-alist (copy-sequence gnus-treatment-function-alist)))
+      (dolist (form (email-tests--config-forms 'gnus-art))
+        (eval form t))
+      (expect (assq 'mail-treat-quotes gnus-treatment-function-alist)
+              :to-equal '(mail-treat-quotes highlight-mail-quotes))
+      (expect mail-treat-quotes :to-be t)))
+  (it "loads the painter on the first article, before any command of its file"
+    (with-temp-buffer
+      (insert-file-contents
+       (expand-file-name "modules/email/autoload/quotes.el" test-config-root))
+      (expect (buffer-string)
+              :to-match "^;;;###autoload\n(defun highlight-mail-quotes "))))
 
 (describe "email module deferred deletion"
   (it "draws the queued verb in the first summary column"

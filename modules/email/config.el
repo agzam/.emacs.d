@@ -35,6 +35,9 @@
     "nnmaildir+gmail:new" "nntp+news.gmane.io:gmane.emacs.devel")
   "Groups no sync rescans: tens of thousands of files, or an NNTP round trip.")
 
+(defvar mail-treat-quotes t
+  "Treatment condition for `highlight-mail-quotes', like the gnus-treat ones.")
+
 (use-package gnus
   :ensure nil
   :defer t
@@ -158,6 +161,19 @@ again from `evil-collection-setup-hook'."
         :n "]]" #'mail-thread-next-message
         :n "[[" #'mail-thread-previous-message
         :n "q" #'mail-thread-quit))
+
+(use-package gnus-art
+  :ensure nil
+  :defer t
+  :init
+  ;; one painter for quoted lines: gnus-cite's overlays would cover the
+  ;; depth faces, and its reply-buffer mode puts gnus-cite faces in front
+  ;; of the message-cited-text ones message-mode paints
+  (setq gnus-treat-highlight-citation nil
+        gnus-message-highlight-citation nil)
+  :config
+  (add-to-list 'gnus-treatment-function-alist
+               '(mail-treat-quotes highlight-mail-quotes) t))
 
 (use-package gnus-search
   :ensure nil
