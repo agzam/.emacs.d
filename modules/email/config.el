@@ -97,17 +97,38 @@
          :desc "search" "s" #'search-mail
          :desc "inbox"  "i" #'open-mail-inbox))
 
-  ;; RET is gnus-summary-scroll-up, which displays the body but keeps
-  ;; point in the summary; evil-collection binds it too, so this has to
-  ;; be a normal-state binding to win
-  (map! :map gnus-summary-mode-map
-        :n "RET" #'read-mail-article
-        :n "<return>" #'read-mail-article
-        (:localleader
-         :desc "sync"          "u" #'sync-mail
-         :desc "search"        "s" #'search-mail
-         :desc "open in Gmail" "g" #'open-message-in-gmail
-         :desc "list archive"  "l" #'open-message-in-list-archive)))
+  (defun bind-mail-summary-keys (mode &rest _)
+    "Bind the summary keys of this module when MODE is gnus.
+evil-collection evilifies gnus from an after-load hook of its own, and
+`elpaca-after-init' registers that hook after this one, so its RET (which
+only scrolls the article) wins unless the keys are applied again from
+`evil-collection-setup-hook'."
+    (when (eq mode 'gnus)
+      (map! :map gnus-summary-mode-map
+            :n "RET" #'open-mail-thread
+            :n "<return>" #'open-mail-thread
+            (:localleader
+             :desc "sync"          "u" #'sync-mail
+             :desc "search"        "s" #'search-mail
+             :desc "open in Gmail" "g" #'open-message-in-gmail
+             :desc "list archive"  "l" #'open-message-in-list-archive))))
+
+  (bind-mail-summary-keys 'gnus)
+  (add-hook 'evil-collection-setup-hook #'bind-mail-summary-keys)
+
+  ;; the thread view loads with its first use, so its map exists only
+  ;; then; C-j and C-k move by section the way rfc-mode binds them
+  (map! :after mail-thread
+        :map mail-thread-mode-map
+        :n "TAB" #'mail-thread-toggle-message
+        :n "<tab>" #'mail-thread-toggle-message
+        :n "RET" #'mail-thread-open-article
+        :n "<return>" #'mail-thread-open-article
+        :n "C-j" #'mail-thread-next-message
+        :n "C-k" #'mail-thread-previous-message
+        :n "]]" #'mail-thread-next-message
+        :n "[[" #'mail-thread-previous-message
+        :n "q" #'mail-thread-quit))
 
 (use-package gnus-search
   :ensure nil
