@@ -117,9 +117,22 @@ FROM, SUBJECT, ID, DATE and REFERENCES fill the headers."
                 (setq reply nil)
                 (switch-to-buffer "*Summary nnmaildir+gmail:inbox*")
                 (gnus-summary-exit-no-update)
+                (switch-to-buffer gnus-group-buffer)
+                (gnus-group-jump-to-group "nnmaildir+gmail:inbox")
+                ;; gR belongs to evil-collection until the module takes
+                ;; it back, and it used to ask nnmaildir for a
+                ;; server-wide scan - every label in the store
+                (let (called)
+                  (cl-letf (((symbol-function 'refresh-mail-groups)
+                             (lambda () (interactive) (setq called 'routine-groups)))
+                            ((symbol-function 'gnus-group-get-new-news)
+                             (lambda (&rest _) (interactive "P") (setq called 'whole-server))))
+                    (execute-kbd-macro (kbd "gR")))
+                  (record "gR refreshes the routine groups, not the whole server"
+                          (eq called 'routine-groups)
+                          :got (format "%s" called)))
                 ;; RET from the group buffer is the path the `display'
                 ;; parameter governs; without it only unread mail shows
-                (switch-to-buffer gnus-group-buffer)
                 (gnus-group-jump-to-group "nnmaildir+gmail:inbox")
                 (execute-kbd-macro (kbd "RET"))
                 (record "RET on the group line shows read mail too"
