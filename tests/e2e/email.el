@@ -33,6 +33,28 @@ follows the body's first line."
             "body of " subject "\n"
             (or body ""))))
 
+(defun email-e2e--write-alternative (file subject id plain html)
+  "Write to FILE a multipart/alternative message with PLAIN and HTML parts.
+SUBJECT and ID fill the headers."
+  (with-temp-file file
+    (insert "From: Carol <carol@example.com>\n"
+            "To: to.plotnick@gmail.com\n"
+            "Subject: " subject "\n"
+            "Date: Tue, 22 Sep 2026 12:00:00 +0000\n"
+            "Message-ID: <" id "@fixture.example>\n"
+            "MIME-Version: 1.0\n"
+            "Content-Type: multipart/alternative; boundary=\"alt\"\n"
+            "\n"
+            "--alt\n"
+            "Content-Type: text/plain; charset=utf-8\n"
+            "\n"
+            plain "\n"
+            "--alt\n"
+            "Content-Type: text/html; charset=utf-8\n"
+            "\n"
+            html "\n"
+            "--alt--\n")))
+
 (defun email-e2e--article (subject)
   "Number of the article with SUBJECT in the current summary."
   (mail-header-number
@@ -61,6 +83,8 @@ An untimed `read-event' is idle, and a timer ends it."
          ;; the group a queued deletion is moved into has to exist when
          ;; Gnus starts, or nnmaildir refuses the article
          (trash (expand-file-name "trash/" root))
+         ;; a label of its own, so the inbox holds what the flow counts
+         (html (expand-file-name "html/" root))
          (results '())
          ;; gnus-started-hook subscribes every group under this root;
          ;; mail-groups would add gmane, and CI has no news server
@@ -74,9 +98,20 @@ An untimed `read-event' is idle, and a timer ends it."
          (gnus-interactive-exit nil)
          (gnus-expert-user t)
          reply)
-    (dolist (dir (list inbox trash))
+    (dolist (dir (list inbox trash html))
       (dolist (sub '("cur" "new" "tmp"))
         (make-directory (expand-file-name sub dir) t)))
+    ;; the sender's colors would paint white on white, and the paragraph
+    ;; is longer than any terminal line
+    (email-e2e--write-alternative
+     (expand-file-name "cur/1700000005.6.fixture:2,S" html) "html letter" "html"
+     "PLAIN alternative\n\n> quoted once\n> > quoted twice"
+     (concat "<p>HTML alternative</p>"
+             "<p>paragraph start " (string-join (make-list 60 "wrapping") " ")
+             " paragraph end</p>"
+             "<p style=\"color:#ffffff;background-color:#ffffff\">white on white</p>"
+             "<blockquote><p>quoted once</p>"
+             "<blockquote><p>quoted twice</p></blockquote></blockquote>"))
     (email-e2e--write-message (expand-file-name "new/1700000001.1.fixture" inbox)
                               "Someone <someone@example.com>" "fresh" "fresh")
     (email-e2e--write-message (expand-file-name "cur/1700000000.2.fixture:2,S" inbox)
@@ -142,7 +177,40 @@ An untimed `read-event' is idle, and a timer ends it."
                 (seq-filter (lambda (overlay)
                               (string-prefix-p "gnus-cite"
                                                (format "%s" (overlay-get overlay 'face))))
-                            (overlays-in (point-min) (point-max)))))
+                            (overlays-in (point-min) (point-max))))
+              ;; each quoted line of the HTML letter with the faces drawn
+              ;; at its start and end
+              (html-quotes ()
+                (mapcar (lambda (text)
+                          (save-excursion
+                            (goto-char (point-min))
+                            (when (search-forward text nil t)
+                              (list (buffer-substring-no-properties
+                                     (line-beginning-position) (line-end-position))
+                                    (get-char-property (line-beginning-position) 'face)
+                                    (get-char-property (1- (line-end-position)) 'face)))))
+                        '("quoted once" "quoted twice")))
+              (sender-colors ()
+                (save-excursion
+                  (goto-char (point-min))
+                  (if (not (search-forward "white on white" nil t))
+                      :missing
+                    (let ((face (get-char-property (1- (point)) 'face)))
+                      (seq-filter (lambda (spec)
+                                    (and (keywordp (car-safe spec))
+                                         (or (plist-get spec :foreground)
+                                             (plist-get spec :background))))
+                                  (if (keywordp (car-safe face)) (list face) (ensure-list face)))))))
+              ;; buffer lines and screen lines the long paragraph takes
+              (paragraph-lines ()
+                (save-excursion
+                  (goto-char (point-min))
+                  (if (not (search-forward "paragraph start" nil t))
+                      :missing
+                    (let ((start (line-beginning-position)))
+                      (search-forward "paragraph end")
+                      (list (count-lines start (point))
+                            (count-screen-lines start (point))))))))
       (unwind-protect
           (condition-case e
               (progn
@@ -365,7 +433,49 @@ An untimed `read-event' is idle, and a timer ends it."
                                              (gnus-summary-article-number))))
                                     "fresh"))
                         :got (format "%S, %d lines" mail-marks
-                                     (count-lines (point-min) (point-max)))))
+                                     (count-lines (point-min) (point-max))))
+                ;; an HTML letter with a plain alternative: both views
+                ;; show the HTML part, quoted like plain mail and wrapped
+                ;; at the window edge instead of cut there
+                (switch-to-buffer "*Summary nnmaildir+gmail:inbox*")
+                (gnus-summary-exit-no-update)
+                (switch-to-buffer gnus-group-buffer)
+                (gnus-group-jump-to-group "nnmaildir+gmail:html")
+                (execute-kbd-macro (kbd "RET"))
+                (gnus-summary-goto-subject (email-e2e--article "html letter"))
+                (execute-kbd-macro (kbd "RET"))
+                (redisplay t)
+                (record "the thread view shows the HTML part, its quote levels drawn as > lines"
+                        (and (derived-mode-p 'mail-thread-mode)
+                             (string-match-p "HTML alternative" (thread-text))
+                             (not (string-match-p "PLAIN alternative" (thread-text)))
+                             (equal (html-quotes)
+                                    '(("> quoted once" message-cited-text-1 message-cited-text-1)
+                                      ("> > quoted twice" message-cited-text-2 message-cited-text-2))))
+                        :got (format "%s, %S" major-mode (html-quotes)))
+                (record "the thread view drops the sender's colors"
+                        (null (sender-colors))
+                        :got (format "%S" (sender-colors)))
+                (record "the thread view wraps a long HTML paragraph instead of cutting it"
+                        (pcase (paragraph-lines) (`(1 ,screen) (< 1 screen)))
+                        :got (format "%S buffer and screen lines" (paragraph-lines)))
+                (execute-kbd-macro (kbd "RET"))
+                (redisplay t)
+                (record "the article buffer shows the HTML part, its quote levels drawn as > lines"
+                        (and (derived-mode-p 'gnus-article-mode)
+                             (string-match-p "HTML alternative" (buffer-string))
+                             (not (string-match-p "PLAIN alternative" (buffer-string)))
+                             (equal (html-quotes)
+                                    '(("> quoted once" message-cited-text-1 message-cited-text-1)
+                                      ("> > quoted twice" message-cited-text-2 message-cited-text-2))))
+                        :got (format "%s, %S" major-mode (html-quotes)))
+                (record "the article buffer drops the sender's colors"
+                        (null (sender-colors))
+                        :got (format "%S" (sender-colors)))
+                (record "the article buffer wraps a long HTML paragraph instead of cutting it"
+                        (pcase (paragraph-lines) (`(1 ,screen) (< 1 screen)))
+                        :got (format "%S buffer and screen lines, truncate-lines %S"
+                                     (paragraph-lines) truncate-lines)))
             (error (record "flow signalled" nil :err e)))
         (when (buffer-live-p reply)
           (with-current-buffer reply
@@ -378,9 +488,10 @@ An untimed `read-event' is idle, and a timer ends it."
           (kill-buffer thread))
         (when (gnus-alive-p)
           ;; a live summary makes gnus-group-exit ask whether to update it
-          (when-let* ((summary (get-buffer "*Summary nnmaildir+gmail:inbox*")))
-            (with-current-buffer summary
-              (gnus-summary-exit-no-update)))
+          (dolist (name '("*Summary nnmaildir+gmail:inbox*" "*Summary nnmaildir+gmail:html*"))
+            (when-let* ((summary (get-buffer name)))
+              (with-current-buffer summary
+                (gnus-summary-exit-no-update))))
           (with-current-buffer gnus-group-buffer
             (gnus-group-exit)))
         (discard-input)))

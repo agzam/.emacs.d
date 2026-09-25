@@ -212,6 +212,26 @@ from the source."
       (expect (buffer-string)
               :to-match "^;;;###autoload\n(defun highlight-mail-quotes "))))
 
+(describe "email module HTML"
+  (it "renders HTML parts through the module's renderer"
+    (require 'mm-decode)
+    (expect mm-text-html-renderer :to-be 'render-mail-html))
+  (it "loads the renderer on the first HTML part, before any command of its file"
+    (with-temp-buffer
+      (insert-file-contents
+       (expand-file-name "modules/email/autoload/html.el" test-config-root))
+      (expect (buffer-string)
+              :to-match "^;;;###autoload\n(defun render-mail-html ")))
+  (it "wraps article lines at the window edge instead of cutting them"
+    ;; Gnus applies gnus-article-truncate-lines after the mode hooks, so
+    ;; the hooks alone would lose to it on every article
+    (require 'gnus-art)
+    (expect gnus-article-truncate-lines :to-be nil)
+    (with-temp-buffer
+      (gnus-article-mode)
+      (expect visual-line-mode :to-be-truthy)
+      (expect visual-wrap-prefix-mode :to-be-truthy))))
+
 (describe "email module deferred deletion"
   (it "draws the queued verb in the first summary column"
     ;; the column is a user format function, so marks.el has to be
