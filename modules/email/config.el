@@ -127,13 +127,17 @@ again from `evil-collection-setup-hook'."
             :n "<return>" #'open-mail-thread
             ;; dired's d, u and x; the capitals take the thread at point.
             ;; u, U and x displace evil-collection's process-mark and
-            ;; limit-to-unread keys
-            :n "d" #'mail-mark-for-deletion
-            :n "D" #'mail-mark-thread-for-deletion
-            :n "a" #'mail-mark-for-archive
-            :n "A" #'mail-mark-thread-for-archive
-            :n "u" #'mail-unmark
-            :n "U" #'mail-unmark-thread
+            ;; limit-to-unread keys.  Every mark key takes the visual
+            ;; selection, and visual state needs the keys of its own:
+            ;; evil's visual and motion maps bind a, A, u, U and ! there
+            :nv "d" #'mail-mark-for-deletion
+            :nv "D" #'mail-mark-thread-for-deletion
+            :nv "a" #'mail-mark-for-archive
+            :nv "A" #'mail-mark-thread-for-archive
+            :nv "u" #'mail-unmark
+            :nv "U" #'mail-unmark-thread
+            :nv "!" #'mail-toggle-read
+            :nv "=" #'mail-toggle-star
             :n "x" #'mail-execute-marks
             :n "J" #'gnus-summary-scroll-up
             :n "K" #'gnus-summary-scroll-down

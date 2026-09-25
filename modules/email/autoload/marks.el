@@ -1,14 +1,18 @@
 ;;; modules/email/autoload/marks.el -*- lexical-binding: t; -*-
 ;;; Commentary:
-;; Deferred deletion and archive in the summary, the way Dired flags
-;; files: one key queues the message at point, one takes it back, one
-;; executes the whole queue.  The queue is a table of this module's own,
-;; not a Gnus mark: every Gnus mark but unread, ticked and dormant counts
-;; as read, so a queued message would reach Gmail as seen at summary exit
-;; even when nothing was executed, and the process mark cannot tell
-;; delete from archive.  Delete moves the file into the trash group,
-;; which Gmail shows as Trash; archive deletes the file from the label
-;; group at hand, which drops that label and keeps the All Mail copy.
+;; Marking in the summary, the way Dired flags files: every mark command
+;; acts on the message at point, or on each one the active region
+;; touches, and moves point to the message below them.
+;;
+;; Deletion and archive are deferred: one key queues, one takes back,
+;; one executes the whole queue.  The queue is a table of this module's
+;; own, not a Gnus mark: every Gnus mark but unread, ticked and dormant
+;; counts as read, so a queued message would reach Gmail as seen at
+;; summary exit even when nothing was executed, and the process mark
+;; cannot tell delete from archive.  Delete moves the file into the trash
+;; group, which Gmail shows as Trash; archive deletes the file from the
+;; label group at hand, which drops that label and keeps the All Mail
+;; copy.  Read and star are Gnus's own marks, toggled.
 ;;; Code:
 
 (require 'dired)
@@ -24,7 +28,7 @@
 ;;; The summary column
 
 (defun mail-mark-glyph (verb)
-  "One-column glyph for a queued VERB, in dired's mark colours."
+  "One-column glyph for a queued VERB, in Dired's mark colours."
   ;; line highlighting swaps the second face for the line's own where
   ;; `gnus-face' is set, and overwrites the property everywhere else
   (pcase verb
@@ -36,6 +40,46 @@
 (defun gnus-user-format-function-D (header)
   "The `%uD' summary column: the verb queued on HEADER's article, if any."
   (mail-mark-glyph (alist-get (mail-header-number header) mail-marks)))
+
+;;; What a command marks, and where point goes next
+
+(defun mail-real-articles (articles)
+  "ARTICLES without the sparse placeholders Gnus invents for missing parents."
+  (seq-remove (lambda (article) (memq article gnus-newsgroup-sparse)) articles))
+
+(defun mail-articles-at-point-or-region ()
+  "Articles on every line the active region touches, else the one at point.
+Reading the region deactivates it, which also ends evil's visual state."
+  (if (not (use-region-p))
+      (list (gnus-summary-article-number))
+    (let ((end (region-end))
+          articles)
+      (save-excursion
+        (goto-char (region-beginning))
+        (while (progn (push (gnus-summary-article-number) articles)
+                      (and (gnus-summary-find-next)
+                           (< (line-beginning-position) end)))))
+      (deactivate-mark)
+      (nreverse articles))))
+
+(defun thread-articles-at-point ()
+  "Articles of the thread at point, the sparse placeholders left out."
+  (mail-real-articles (save-excursion
+                        (gnus-summary-top-thread)
+                        (gnus-summary-articles-in-thread))))
+
+(defun mail-whole-threads (articles)
+  "Articles of every thread holding one of ARTICLES, in summary order."
+  (seq-uniq (mapcan (lambda (article)
+                      (save-excursion
+                        (gnus-summary-goto-subject article)
+                        (thread-articles-at-point)))
+                    articles)))
+
+(defun mail-move-below (articles)
+  "Move point to the message below the last of ARTICLES."
+  (gnus-summary-goto-subject (car (last articles)) nil t)
+  (gnus-summary-next-subject 1))
 
 ;;; Queueing
 
@@ -54,51 +98,91 @@
       (if verb
           (setf (alist-get article mail-marks) verb)
         (setf (alist-get article mail-marks nil t) nil))
-      (mail-mark-redraw article)))
-  (gnus-summary-position-point))
+      (mail-mark-redraw article))))
 
-(defun thread-articles-at-point ()
-  "Articles of the thread at point, the sparse placeholders left out."
-  (seq-remove (lambda (article) (memq article gnus-newsgroup-sparse))
-              (save-excursion
-                (gnus-summary-top-thread)
-                (gnus-summary-articles-in-thread))))
+(defun mail-queue (verb &optional whole-threads)
+  "Queue the message at point, or the region's, under VERB; nil unqueues.
+WHOLE-THREADS extends that to every message of their threads.  Point
+moves to the message below."
+  (let* ((covered (mail-articles-at-point-or-region))
+         (articles (if whole-threads
+                       (mail-whole-threads covered)
+                     (mail-real-articles covered))))
+    (mail-mark-articles articles verb)
+    (mail-move-below (if whole-threads articles covered))))
 
 ;;;###autoload
 (defun mail-mark-for-deletion ()
-  "Queue the message at point for the trash."
+  "Queue the message at point, or the region's, for the trash."
   (interactive nil gnus-summary-mode)
-  (mail-mark-articles (list (gnus-summary-article-number)) 'delete))
+  (mail-queue 'delete))
 
 ;;;###autoload
 (defun mail-mark-for-archive ()
-  "Queue the message at point to leave this label."
+  "Queue the message at point, or the region's, to leave this label."
   (interactive nil gnus-summary-mode)
-  (mail-mark-articles (list (gnus-summary-article-number)) 'archive))
+  (mail-queue 'archive))
 
 ;;;###autoload
 (defun mail-unmark ()
-  "Take the message at point out of the queue."
+  "Take the message at point, or the region's, out of the queue."
   (interactive nil gnus-summary-mode)
-  (mail-mark-articles (list (gnus-summary-article-number)) nil))
+  (mail-queue nil))
 
 ;;;###autoload
 (defun mail-mark-thread-for-deletion ()
-  "Queue every message of the thread at point for the trash."
+  "Queue the thread at point, or each one in the region, for the trash."
   (interactive nil gnus-summary-mode)
-  (mail-mark-articles (thread-articles-at-point) 'delete))
+  (mail-queue 'delete t))
 
 ;;;###autoload
 (defun mail-mark-thread-for-archive ()
-  "Queue every message of the thread at point to leave this label."
+  "Queue the thread at point, or each one in the region, to leave this label."
   (interactive nil gnus-summary-mode)
-  (mail-mark-articles (thread-articles-at-point) 'archive))
+  (mail-queue 'archive t))
 
 ;;;###autoload
 (defun mail-unmark-thread ()
-  "Take every message of the thread at point out of the queue."
+  "Take the thread at point, or each one in the region, out of the queue."
   (interactive nil gnus-summary-mode)
-  (mail-mark-articles (thread-articles-at-point) nil))
+  (mail-queue nil t))
+
+;;; Read and star
+
+(defun mail-set-mark (articles mark)
+  "Give ARTICLES Gnus's MARK the way its own forward commands do."
+  (save-excursion
+    (dolist (article articles)
+      (gnus-summary-mark-article article mark gnus-inhibit-user-auto-expire))))
+
+;;;###autoload
+(defun mail-toggle-read ()
+  "Mark the message at point, or the region's, read; unread if all are read.
+Starred messages are left alone: the tick replaces the unread mark and
+counts as read, so either change would drop the star."
+  (interactive nil gnus-summary-mode)
+  (let* ((covered (mail-articles-at-point-or-region))
+         (starred (seq-intersection covered gnus-newsgroup-marked))
+         (articles (seq-difference (mail-real-articles covered) starred)))
+    (mail-set-mark articles (if (seq-intersection articles gnus-newsgroup-unreads)
+                                gnus-del-mark
+                              gnus-unread-mark))
+    (mail-move-below covered)
+    (when starred
+      (message "Left %d starred %s alone" (length starred)
+               (if (cdr starred) "messages" "message")))))
+
+;;;###autoload
+(defun mail-toggle-star ()
+  "Star the message at point, or the region's; unstar if all are starred.
+An unstarred message stays read, since Gnus counts the tick as read."
+  (interactive nil gnus-summary-mode)
+  (let* ((covered (mail-articles-at-point-or-region))
+         (articles (mail-real-articles covered)))
+    (mail-set-mark articles (if (seq-difference articles gnus-newsgroup-marked)
+                                gnus-ticked-mark
+                              gnus-del-mark))
+    (mail-move-below covered)))
 
 ;;; Executing
 

@@ -128,6 +128,19 @@ from the source."
       (expect form :to-be-truthy)
       (use-package-body-forms (cddr form) :config))))
 
+(defun email-tests--key-states (form map)
+  "Alist of (KEY . STATES) for the keys FORM binds on MAP.
+STATES is the evil state keyword `map!' reads right before the key."
+  (let (states)
+    (dolist (body (map-form-groups form map))
+      (while body
+        (let ((item (pop body)))
+          (when (and (keywordp item)
+                     (stringp (car body))
+                     (string-match-p "\\`:[nviemorg]+\\'" (symbol-name item)))
+            (push (cons (car body) item) states)))))
+    (nreverse states)))
+
 (describe "email module bindings"
   :var* ((config (email-tests--config-forms 'gnus)))
 
@@ -145,6 +158,19 @@ from the source."
               :to-equal '(mail-mark-for-deletion mail-mark-thread-for-deletion
                           mail-mark-for-archive mail-mark-thread-for-archive
                           mail-unmark mail-unmark-thread mail-execute-marks))))
+
+  (it "toggles read on ! and the star on ="
+    (let ((pairs (mapcan #'map-form-key-pairs
+                         (map-form-groups config 'gnus-summary-mode-map))))
+      (expect (cdr (assoc "!" pairs)) :to-equal '(function mail-toggle-read))
+      (expect (cdr (assoc "=" pairs)) :to-equal '(function mail-toggle-star))))
+
+  (it "binds every mark key in visual state too, where a selection is marked"
+    ;; evil's visual and motion maps answer a, A, u, U and ! there otherwise
+    (let ((states (email-tests--key-states config 'gnus-summary-mode-map)))
+      (expect (mapcar (lambda (key) (cdr (assoc key states)))
+                      '("d" "D" "a" "A" "u" "U" "!" "=" "x"))
+              :to-equal '(:nv :nv :nv :nv :nv :nv :nv :nv :n))))
 
   (it "scrolls the article forward on J and back on K"
     ;; both show the article at point first; gnus-summary-scroll-down
