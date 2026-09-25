@@ -188,11 +188,14 @@ on the next message stays there while a body lands above it."
     (set-buffer-modified-p nil)))
 
 (defun mail-thread-mark-read (article)
-  "Mark ARTICLE read in the summary the thread came from."
+  "Mark ARTICLE in the summary the way Gnus marks an article it displays."
   (when (buffer-live-p mail-thread-summary-buffer)
     (with-current-buffer mail-thread-summary-buffer
       (save-excursion
-        (gnus-summary-mark-article article gnus-read-mark)))))
+        ;; the hook reads the mark on the line at point
+        (when (gnus-summary-goto-subject article nil t)
+          (let ((gnus-current-article article))
+            (run-hooks 'gnus-mark-article-hook)))))))
 
 ;;; Filling in unread bodies
 

@@ -96,8 +96,9 @@
         ;; would sort oldest first
         gnus-thread-sort-functions '(gnus-thread-sort-by-most-recent-date)
         gnus-summary-thread-gathering-function #'gnus-gather-threads-by-references
-        ;; %uD is the queued delete or archive, drawn by marks.el
-        gnus-summary-line-format "%uD%U%R %-16,16&user-date; %-24,24f %B%s\n"
+        ;; %uD is the queued delete or archive and %uS the star, both
+        ;; drawn by marks.el
+        gnus-summary-line-format "%uD%U%R%uS %-16,16&user-date; %-24,24f %B%s\n"
         gnus-sum-thread-tree-root ""
         gnus-sum-thread-tree-false-root ""
         gnus-sum-thread-tree-single-indent ""
@@ -187,6 +188,14 @@ columns would go to the window left of Gnus."
     :around #'gnus-configure-windows
     (let ((window-combination-limit t))
       (apply fn args))))
+
+(use-package gnus-sum
+  :ensure nil
+  :defer t
+  :config
+  ;; ahead of Gnus's own function, which marks a starred unread message
+  ;; read as it is displayed and drops the star with it
+  (add-hook 'gnus-mark-article-hook #'mail-keep-star-on-read-h))
 
 (use-package gnus-art
   :ensure nil

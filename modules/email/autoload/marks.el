@@ -12,7 +12,7 @@
 ;; cannot tell delete from archive.  Delete moves the file into the trash
 ;; group, which Gmail shows as Trash; archive deletes the file from the
 ;; label group at hand, which drops that label and keeps the All Mail
-;; copy.  Read and star are Gnus's own marks, toggled.
+;; copy.  Read and star are Gnus's own marks, toggled independently.
 ;;; Code:
 
 (require 'dired)
@@ -148,40 +148,85 @@ moves to the message below."
   (mail-queue nil t))
 
 ;;; Read and star
+;;
+;; An article in both the unread and the tick list is starred and
+;; unread, and nnmaildir saves it that way.  Gnus's own commands never
+;; make one: its tick counts as read.
 
-(defun mail-set-mark (articles mark)
-  "Give ARTICLES Gnus's MARK the way its own forward commands do."
-  (save-excursion
-    (dolist (article articles)
-      (gnus-summary-mark-article article mark gnus-inhibit-user-auto-expire))))
+(defun mail-star-glyph ()
+  "One-column star in the colour of Gnus's starred lines."
+  ;; the buffer font has U+2217; a star from a fallback font breaks the
+  ;; columns
+  (propertize "\u2217" 'face (list 'gnus-summary-normal-ticked 'default) 'gnus-face t))
+
+;;;###autoload
+(defun gnus-user-format-function-S (header)
+  "The `%uS' summary column: a star if HEADER's article is starred.
+Gnus's own `%U' column shows the tick on a read message only."
+  (if (memq (mail-header-number header) gnus-newsgroup-marked)
+      (mail-star-glyph)
+    " "))
+
+(defun mail-mark-keeping-star (article mark)
+  "Give ARTICLE the read or unread MARK without dropping its star.
+Marked read, a starred message becomes Gnus's tick; marked unread, it
+goes back into the tick list too."
+  (let ((starred (memq article gnus-newsgroup-marked))
+        (unread (= mark gnus-unread-mark)))
+    (gnus-summary-mark-article article
+                               (if (and starred (not unread)) gnus-ticked-mark mark)
+                               gnus-inhibit-user-auto-expire)
+    (when (and starred unread)
+      (setq gnus-newsgroup-marked
+            (gnus-add-to-sorted-list gnus-newsgroup-marked article)))))
+
+(defun mail-set-star (article star)
+  "Star ARTICLE when STAR is non-nil, else unstar it; it stays read or unread.
+Gnus's tick would make an unread message read, so an unread one only
+joins or leaves the tick list."
+  (if (memq article gnus-newsgroup-unreads)
+      (setq gnus-newsgroup-marked
+            (if star
+                (gnus-add-to-sorted-list gnus-newsgroup-marked article)
+              (delq article gnus-newsgroup-marked)))
+    (gnus-summary-mark-article article (if star gnus-ticked-mark gnus-del-mark)
+                               gnus-inhibit-user-auto-expire))
+  (mail-mark-redraw article))
+
+;;;###autoload
+(defun mail-keep-star-on-read-h ()
+  "Mark a starred article read as it is displayed, keeping its star.
+Runs ahead of `gnus-summary-mark-read-and-unread-as-read', which sees
+the unread mark on a starred unread article and drops the star."
+  (when (memq gnus-current-article gnus-newsgroup-marked)
+    (mail-mark-keeping-star gnus-current-article gnus-read-mark)))
 
 ;;;###autoload
 (defun mail-toggle-read ()
   "Mark the message at point, or the region's, read; unread if all are read.
-Starred messages are left alone: the tick replaces the unread mark and
-counts as read, so either change would drop the star."
+A star stays either way."
   (interactive nil gnus-summary-mode)
   (let* ((covered (mail-articles-at-point-or-region))
-         (starred (seq-intersection covered gnus-newsgroup-marked))
-         (articles (seq-difference (mail-real-articles covered) starred)))
-    (mail-set-mark articles (if (seq-intersection articles gnus-newsgroup-unreads)
-                                gnus-del-mark
-                              gnus-unread-mark))
-    (mail-move-below covered)
-    (when starred
-      (message "Left %d starred %s alone" (length starred)
-               (if (cdr starred) "messages" "message")))))
+         (articles (mail-real-articles covered))
+         (mark (if (seq-intersection articles gnus-newsgroup-unreads)
+                   gnus-del-mark
+                 gnus-unread-mark)))
+    (save-excursion
+      (dolist (article articles)
+        (mail-mark-keeping-star article mark)))
+    (mail-move-below covered)))
 
 ;;;###autoload
 (defun mail-toggle-star ()
   "Star the message at point, or the region's; unstar if all are starred.
-An unstarred message stays read, since Gnus counts the tick as read."
+Read and unread stay as they were."
   (interactive nil gnus-summary-mode)
   (let* ((covered (mail-articles-at-point-or-region))
-         (articles (mail-real-articles covered)))
-    (mail-set-mark articles (if (seq-difference articles gnus-newsgroup-marked)
-                                gnus-ticked-mark
-                              gnus-del-mark))
+         (articles (mail-real-articles covered))
+         (star (seq-difference articles gnus-newsgroup-marked)))
+    (save-excursion
+      (dolist (article articles)
+        (mail-set-star article star)))
     (mail-move-below covered)))
 
 ;;; Executing
