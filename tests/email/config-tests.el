@@ -146,6 +146,14 @@ from the source."
                           mail-mark-for-archive mail-mark-thread-for-archive
                           mail-unmark mail-unmark-thread mail-execute-marks))))
 
+  (it "scrolls the article forward on J and back on K"
+    ;; both show the article at point first; gnus-summary-scroll-down
+    ;; alone never moves forward, which is what M-RET gives
+    (let ((pairs (mapcan #'map-form-key-pairs
+                         (map-form-groups config 'gnus-summary-mode-map))))
+      (expect (cdr (assoc "J" pairs)) :to-equal '(function gnus-summary-scroll-up))
+      (expect (cdr (assoc "K" pairs)) :to-equal '(function gnus-summary-scroll-down))))
+
   (it "folds, moves and leaves inside the thread buffer"
     (let ((pairs (mapcan #'map-form-key-pairs
                          (map-form-groups config 'mail-thread-mode-map))))
@@ -231,6 +239,72 @@ from the source."
       (gnus-article-mode)
       (expect visual-line-mode :to-be-truthy)
       (expect visual-wrap-prefix-mode :to-be-truthy))))
+
+(defun email-tests--gnus-layout (steps)
+  "Call STEPS with the window left of Gnus, Gnus laid out in the right half.
+The module's `gnus-win' config applies meanwhile.  The article buffer is
+created after the summary, as in a real group, so a re-layout keeps its
+window and deletes the summary's."
+  (require 'gnus)
+  (require 'gnus-win)
+  (let ((gnus-buffer-configuration (copy-tree gnus-buffer-configuration))
+        (gnus-window-to-buffer (copy-sequence gnus-window-to-buffer))
+        (gnus-buffers nil)
+        (gnus-summary-buffer "*Summary layout*")
+        (gnus-article-buffer "*Article layout*"))
+    (unwind-protect
+        (progn
+          (dolist (form (email-tests--config-forms 'gnus-win))
+            (eval form t))
+          (delete-other-windows)
+          (let ((beside (selected-window)))
+            (select-window (split-window beside 40 t))
+            (switch-to-buffer (gnus-get-buffer-create gnus-summary-buffer))
+            (gnus-get-buffer-create gnus-article-buffer)
+            (funcall steps beside)))
+      (advice-remove 'gnus-configure-windows 'nest-gnus-windows-a)
+      (delete-other-windows)
+      (dolist (buffer (gnus-buffers))
+        (kill-buffer buffer)))))
+
+(describe "email module layout"
+  (it "puts the article to the right of the summary"
+    (email-tests--gnus-layout
+     (lambda (beside)
+       (gnus-configure-windows 'article 'force)
+       (let ((summary (get-buffer-window gnus-summary-buffer))
+             (article (get-buffer-window gnus-article-buffer)))
+         (expect (window-top-line summary) :to-equal (window-top-line article))
+         (expect (window-left-column summary) :to-be-less-than (window-left-column article))
+         (expect (window-total-width summary) :to-be-less-than (window-total-width article))
+         (expect (window-total-width beside) :to-equal 40)))))
+
+  (it "puts the thread view to the right of the summary, where the article goes"
+    (load-module-file "modules/email/autoload/thread.el")
+    (email-tests--gnus-layout
+     (lambda (beside)
+       (gnus-get-buffer-create mail-thread-buffer-name)
+       (gnus-configure-windows 'mail-thread 'force)
+       (let ((summary (get-buffer-window gnus-summary-buffer))
+             (thread (get-buffer-window mail-thread-buffer-name)))
+         (expect (window-top-line summary) :to-equal (window-top-line thread))
+         (expect (window-left-column summary) :to-be-less-than (window-left-column thread))
+         (expect (window-total-width summary) :to-be-less-than (window-total-width thread))
+         (expect (selected-window) :to-be thread)
+         (expect (window-total-width beside) :to-equal 40)))))
+
+  (it "keeps the window beside Gnus at its width through a re-layout and an exit"
+    ;; every read-mail-article forces the article layout again, and
+    ;; summary exit forces the group one while the article is still shown
+    (email-tests--gnus-layout
+     (lambda (beside)
+       (let (widths)
+         (dolist (setting '(article article group))
+           (gnus-configure-windows setting 'force)
+           (push (window-total-width beside) widths))
+         (expect widths :to-equal '(40 40 40))
+         (expect (window-total-width (get-buffer-window gnus-group-buffer))
+                 :to-equal 40))))))
 
 (describe "email module deferred deletion"
   (it "draws the queued verb in the first summary column"
