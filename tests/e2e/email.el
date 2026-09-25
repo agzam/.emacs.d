@@ -55,6 +55,21 @@ SUBJECT and ID fill the headers."
             html "\n"
             "--alt--\n")))
 
+(defun email-e2e--write-list-message (file from subject id date &optional references)
+  "Write to FILE a message FROM posted to emacs-devel with two people in Cc.
+SUBJECT, ID, DATE and REFERENCES fill the headers."
+  (with-temp-file file
+    (insert "From: " from "\n"
+            "To: emacs-devel@gnu.org\n"
+            "Cc: Carol <carol@example.com>, Dan <dan@example.com>\n"
+            "List-Post: <mailto:emacs-devel@gnu.org>\n"
+            "Subject: " subject "\n"
+            "Date: " date "\n"
+            "Message-ID: <" id "@fixture.example>\n"
+            (if references (concat "References: " references "\n") "")
+            "\n"
+            "body of " subject "\n")))
+
 (defun email-e2e--article (subject)
   "Number of the article with SUBJECT in the current summary."
   (mail-header-number
@@ -87,6 +102,11 @@ An untimed `read-event' is idle, and a timer ends it."
          (html (expand-file-name "html/" root))
          ;; read and star apart, the way Gmail keeps them
          (starred (expand-file-name "starred/" root))
+         ;; a list thread answered every way, and the labels messages
+         ;; are moved and copied into
+         (lists (expand-file-name "lists/" root))
+         (moved (expand-file-name "moved/" root))
+         (labelled (expand-file-name "labelled/" root))
          ;; what the %uS column draws on a starred message
          (star (string #x2217))
          (results '())
@@ -102,7 +122,7 @@ An untimed `read-event' is idle, and a timer ends it."
          (gnus-interactive-exit nil)
          (gnus-expert-user t)
          reply)
-    (dolist (dir (list inbox trash html starred))
+    (dolist (dir (list inbox trash html starred lists moved labelled))
       (dolist (sub '("cur" "new" "tmp"))
         (make-directory (expand-file-name sub dir) t)))
     ;; the sender's colors would paint white on white, and the paragraph
@@ -157,6 +177,21 @@ An untimed `read-event' is idle, and a timer ends it."
                      ("cur/1700000016.16.fixture:2,F" "starred, unstarred" "unstarred")))
       (email-e2e--write-message (expand-file-name file starred)
                                 "Eve <eve@example.com>" subject id))
+    ;; a read root and its starred unread answer, then two newer
+    ;; messages that leave for other labels
+    (email-e2e--write-list-message (expand-file-name "cur/1700000020.20.fixture:2,S" lists)
+                                   "Carol <carol@example.com>" "list plan" "list-plan"
+                                   "Mon, 21 Sep 2026 09:00:00 +0000")
+    (email-e2e--write-list-message (expand-file-name "cur/1700000021.21.fixture:2,F" lists)
+                                   "Dan <dan@example.com>" "Re: list plan" "list-plan-dan"
+                                   "Mon, 21 Sep 2026 10:00:00 +0000"
+                                   "<list-plan@fixture.example>")
+    (email-e2e--write-message (expand-file-name "cur/1700000022.22.fixture:2,S" lists)
+                              "Frank <frank@example.com>" "to move" "to-move"
+                              "Tue, 22 Sep 2026 08:00:00 +0000")
+    (email-e2e--write-message (expand-file-name "cur/1700000023.23.fixture:2,S" lists)
+                              "Grace <grace@example.com>" "to label" "to-label"
+                              "Tue, 22 Sep 2026 07:00:00 +0000")
     (cl-flet ((record (label ok &rest kv)
                 (push (append (list :label (format "email: %s" label) :ok ok) kv)
                       results))
@@ -797,12 +832,328 @@ An untimed `read-event' is idle, and a timer ends it."
                   (record "q saves read and star apart, the way Gmail keeps them"
                           (equal (mapcar (lambda (id) (flags-of starred id)) ids)
                                  '("FS" "FS" "FS" "F" "F" ""))
-                          :got (format "%S" (mapcar (lambda (id) (flags-of starred id)) ids)))))
+                          :got (format "%S" (mapcar (lambda (id) (flags-of starred id)) ids))))
+                ;; the reply keys and the localleader wherever a message is
+                ;; read: a list thread answered each way, messages moved
+                ;; and copied between labels, the summary folded, narrowed
+                ;; and sorted.  What would reach the network is stubbed
+                (delete-other-windows)
+                (switch-to-buffer gnus-group-buffer)
+                (execute-kbd-macro (kbd "gR"))
+                (gnus-group-jump-to-group "nnmaildir+gmail:lists")
+                (execute-kbd-macro (kbd "RET"))
+                (let ((summary (current-buffer))
+                      (plan (email-e2e--article "list plan"))
+                      (answer (email-e2e--article "Re: list plan"))
+                      (to-move (email-e2e--article "to move"))
+                      (to-label (email-e2e--article "to label"))
+                      (browsed nil)
+                      (called nil))
+                  (cl-flet* ((at (article)
+                               (delete-other-windows)
+                               (switch-to-buffer summary)
+                               (gnus-summary-goto-subject article))
+                             (field (message key)
+                               (or (plist-get message key) ""))
+                             ;; the message buffer KEYS open, killed once read
+                             (composed (keys)
+                               (execute-kbd-macro (kbd keys))
+                               (if (not (derived-mode-p 'message-mode))
+                                   (list :mode major-mode)
+                                 ;; a forward carries the original's headers
+                                 ;; in its body
+                                 (prog1 (append (list :mode major-mode)
+                                                (save-restriction
+                                                  (message-narrow-to-headers)
+                                                  (list :from (message-fetch-field "From")
+                                                        :to (message-fetch-field "To")
+                                                        :cc (message-fetch-field "Cc")
+                                                        :subject (message-fetch-field "Subject")))
+                                                (list :body (save-excursion
+                                                              (message-goto-body)
+                                                              (buffer-substring-no-properties
+                                                               (point) (point-max)))))
+                                   (set-buffer-modified-p nil)
+                                   (kill-buffer (current-buffer)))))
+                             (recipients (message)
+                               (concat (field message :to) " " (field message :cc)))
+                             (hidden-p (article)
+                               (with-current-buffer summary
+                                 (invisible-p (gnus-data-pos (gnus-data-find article)))))
+                             (top-subject ()
+                               (with-current-buffer summary
+                                 (save-excursion
+                                   (goto-char (point-min))
+                                   (mail-header-subject (gnus-summary-article-header)))))
+                             (queued ()
+                               (with-current-buffer summary
+                                 (mail-marked-articles 'delete))))
+                    (cl-letf (((symbol-function 'browse-url)
+                               (lambda (url &rest _) (push url browsed)))
+                              ((symbol-function 'sync-mail)
+                               (lambda (&optional _) (interactive "P") (push 'sync called)))
+                              ((symbol-function 'search-mail)
+                               (lambda (&rest _) (interactive) (push 'search called)))
+                              ((symbol-function 'open-mail-inbox)
+                               (lambda () (interactive) (push 'inbox called)))
+                              ;; notmuch is not on CI
+                              ((symbol-function 'gnus-summary-refer-thread)
+                               (lambda (&rest _) (interactive "P")
+                                 (push (list 'fetch (gnus-summary-article-number)) called)))
+                              ;; no news server either
+                              ((symbol-function 'gnus-summary-followup-with-original)
+                               (lambda (&rest _) (interactive "P")
+                                 (push (list 'follow-up (gnus-summary-article-number)) called)))
+                              ;; Gnus's own group prompt, answered
+                              ((symbol-function 'gnus-read-move-group-name)
+                               (lambda (prompt &rest _)
+                                 (if (equal prompt "Copy")
+                                     "nnmaildir+gmail:labelled"
+                                   "nnmaildir+gmail:moved"))))
+                      (record "the list thread shows its answer starred and unread"
+                              (and (= 4 (length gnus-newsgroup-headers))
+                                   (memq answer gnus-newsgroup-unreads)
+                                   (memq answer gnus-newsgroup-marked)
+                                   (not (memq plan gnus-newsgroup-unreads)))
+                              :got (format "%d headers, unread %S, starred %S"
+                                           (length gnus-newsgroup-headers)
+                                           gnus-newsgroup-unreads gnus-newsgroup-marked))
+                      (at plan)
+                      (execute-kbd-macro (kbd "TAB"))
+                      (let ((folded (hidden-p answer)))
+                        (execute-kbd-macro (kbd "TAB"))
+                        (record "TAB folds the thread at point and unfolds it again"
+                                (and folded (not (hidden-p answer)))
+                                :got (format "folded %S, then %S" folded (hidden-p answer))))
+                      (execute-kbd-macro "za")
+                      (let ((folded (hidden-p answer)))
+                        (execute-kbd-macro "za")
+                        (record "za folds the thread at point and unfolds it again"
+                                (and folded (not (hidden-p answer)))
+                                :got (format "folded %S, then %S" folded (hidden-p answer))))
+                      (execute-kbd-macro "zM")
+                      (let ((folded (hidden-p answer)))
+                        (execute-kbd-macro "zR")
+                        (record "zM folds every thread and zR unfolds them"
+                                (and folded (not (hidden-p answer)))
+                                :got (format "folded %S, then %S" folded (hidden-p answer))))
+                      (execute-kbd-macro (kbd ", n u"))
+                      (let ((limit (copy-sequence gnus-newsgroup-limit)))
+                        (execute-kbd-macro (kbd ", n w"))
+                        (record ", n u narrows the summary to unread mail and , n w widens it again"
+                                (and (equal limit (list answer))
+                                     (= 4 (length gnus-newsgroup-limit)))
+                                :got (format "%S, then %S" limit gnus-newsgroup-limit)))
+                      ;; before anything displays the answer, which reads it
+                      (at plan)
+                      (execute-kbd-macro (kbd ", t r"))
+                      (record ", t r marks the whole thread read and keeps the answer's star"
+                              (and (not (memq plan gnus-newsgroup-unreads))
+                                   (not (memq answer gnus-newsgroup-unreads))
+                                   (memq answer gnus-newsgroup-marked))
+                              :got (format "unread %S, starred %S"
+                                           gnus-newsgroup-unreads gnus-newsgroup-marked))
+                      (at plan)
+                      (let ((message (composed "r")))
+                        (record "r answers the sender only, quoting the message"
+                                (and (eq (plist-get message :mode) 'message-mode)
+                                     (string-match-p "carol@example\\.com" (field message :to))
+                                     (not (string-match-p "dan@\\|emacs-devel@" (recipients message)))
+                                     (string-match-p "^> body of list plan" (field message :body)))
+                                :got (format "%S" message)))
+                      (at plan)
+                      (let ((message (composed "R")))
+                        (record "R answers the sender and every recipient, quoting the message"
+                                (and (string-match-p "carol@example\\.com" (recipients message))
+                                     (string-match-p "dan@example\\.com" (recipients message))
+                                     (string-match-p "emacs-devel@gnu\\.org" (recipients message))
+                                     (not (string-match-p "plotnick\\|agzam" (recipients message)))
+                                     (string-match-p "^> body of list plan" (field message :body)))
+                                :got (format "%S" message)))
+                      (at plan)
+                      (let ((message (composed ", r l")))
+                        (record ", r l answers the list only"
+                                (and (equal (field message :to) "emacs-devel@gnu.org")
+                                     (null (plist-get message :cc)))
+                                :got (format "%S" message)))
+                      (at plan)
+                      (let ((message (composed ", f")))
+                        (record ", f forwards the message"
+                                (and (eq (plist-get message :mode) 'message-mode)
+                                     (string-match-p "list plan" (field message :subject))
+                                     (string-match-p "body of list plan" (field message :body)))
+                                :got (format "%S" message)))
+                      (at plan)
+                      (let ((message (composed ", c")))
+                        (record ", c starts a new message sent as agzam.ibragimov"
+                                (and (eq (plist-get message :mode) 'message-mode)
+                                     (string-match-p "agzam\\.ibragimov@gmail\\.com"
+                                                     (field message :from))
+                                     (not (string-match-p "list plan" (field message :subject))))
+                                :got (format "%S" message)))
+                      (at answer)
+                      (execute-kbd-macro (kbd ", u"))
+                      (execute-kbd-macro (kbd ", /"))
+                      (execute-kbd-macro (kbd ", t f"))
+                      (execute-kbd-macro (kbd ", r n"))
+                      (record ", u syncs, , / searches, , t f fetches the thread and , r n follows up, at point"
+                              (equal (reverse called)
+                                     `(sync search (fetch ,answer) (follow-up ,answer)))
+                              :got (format "%S" (reverse called)))
+                      (setq called nil)
+                      (at answer)
+                      (execute-kbd-macro (kbd ", o g"))
+                      (execute-kbd-macro (kbd ", o l"))
+                      (record ", o g opens the message in Gmail and , o l in its list archive"
+                              (equal (reverse browsed)
+                                     (list (gmail-message-url "<list-plan-dan@fixture.example>")
+                                           "https://yhetil.org/emacs-devel/list-plan-dan%40fixture.example"))
+                              :got (format "%S" (reverse browsed)))
+                      (setq browsed nil)
+                      ;; the thread view acts on the message at point
+                      (at plan)
+                      (execute-kbd-macro (kbd "RET"))
+                      (execute-kbd-macro (kbd "C-j"))
+                      (let ((message (composed "r")))
+                        (record "r in the thread view answers the message at point"
+                                (and (eq (plist-get message :mode) 'message-mode)
+                                     (string-match-p "dan@example\\.com" (field message :to))
+                                     (string-match-p "^> body of Re: list plan" (field message :body)))
+                                :got (format "%S" message)))
+                      (at plan)
+                      (execute-kbd-macro (kbd "RET"))
+                      (let ((view (selected-window)))
+                        (execute-kbd-macro "=")
+                        (record "= in the thread view stars the message at point and stays in the view"
+                                (and (with-current-buffer summary (memq plan gnus-newsgroup-marked))
+                                     (eq (selected-window) view)
+                                     (derived-mode-p 'mail-thread-mode))
+                                :got (format "starred %S, %s"
+                                             (with-current-buffer summary gnus-newsgroup-marked)
+                                             major-mode))
+                        (execute-kbd-macro "=")
+                        (record "= again in the thread view unstars it"
+                                (not (with-current-buffer summary (memq plan gnus-newsgroup-marked)))
+                                :got (format "%S" (with-current-buffer summary gnus-newsgroup-marked)))
+                        (execute-kbd-macro "D")
+                        (record "D in the thread view queues the whole thread in the summary"
+                                (equal (queued) (sort (list plan answer) #'<))
+                                :got (format "%S" (queued)))
+                        (execute-kbd-macro "U")
+                        (record "U in the thread view takes the thread back"
+                                (null (queued))
+                                :got (format "%S" (queued)))
+                        (execute-kbd-macro (kbd ", o g"))
+                        (record ", o g in the thread view opens the message at point in Gmail"
+                                (equal browsed (list (gmail-message-url "<list-plan@fixture.example>")))
+                                :got (format "%S" browsed))
+                        (setq browsed nil))
+                      ;; and so does the article buffer, on its article
+                      (at plan)
+                      (execute-kbd-macro (kbd "RET"))
+                      (execute-kbd-macro (kbd "RET"))
+                      (let ((in-article (derived-mode-p 'gnus-article-mode)))
+                        (execute-kbd-macro (kbd ", o l"))
+                        (let ((message (composed "r")))
+                          (record "the article buffer opens its message in the list archive and answers it on r"
+                                  (and in-article
+                                       (equal browsed
+                                              '("https://yhetil.org/emacs-devel/list-plan%40fixture.example"))
+                                       (string-match-p "carol@example\\.com" (field message :to))
+                                       (string-match-p "^> body of list plan" (field message :body)))
+                                  :got (format "article %S, %S, %S" in-article browsed message))))
+                      (setq browsed nil)
+                      (at plan)
+                      (let ((tops (list (top-subject))))
+                        ;; a macro starts with no last command, so a second
+                        ;; press counts only inside the macro of the first
+                        (dolist (keys '(", s d" ", s d , s d" ", s s" ", s s , s s"))
+                          (execute-kbd-macro (kbd keys))
+                          (push (top-subject) tops))
+                        (setq tops (nreverse tops))
+                        (record ", s d and , s s sort by date and by subject, the same key again reversing"
+                                (equal tops '("to move" "to move" "list plan" "list plan" "to move"))
+                                :got (format "%S" tops)))
+                      (at to-move)
+                      (execute-kbd-macro (kbd ", m"))
+                      (record ", m moves the message into another label"
+                              (and (equal (message-ids (messages-in moved))
+                                          '("<to-move@fixture.example>"))
+                                   (not (member "<to-move@fixture.example>"
+                                                (message-ids (messages-in lists)))))
+                              :got (format "moved %S, lists %S"
+                                           (message-ids (messages-in moved))
+                                           (message-ids (messages-in lists))))
+                      (at to-label)
+                      (execute-kbd-macro (kbd ", l"))
+                      (record ", l adds a label: a copy lands there and the message stays"
+                              (and (equal (message-ids (messages-in labelled))
+                                          '("<to-label@fixture.example>"))
+                                   (member "<to-label@fixture.example>"
+                                           (message-ids (messages-in lists))))
+                              :got (format "labelled %S, lists %S"
+                                           (message-ids (messages-in labelled))
+                                           (message-ids (messages-in lists))))
+                      ;; expreg-transient opens with visual state and replays
+                      ;; a , it lets through, except inside a keyboard macro,
+                      ;; which general assumes recorded the replayed key
+                      (at plan)
+                      (let ((general--simulate-as-is t))
+                        (execute-kbd-macro (kbd "V j , l")))
+                      (let ((ids (sort (message-ids (messages-in labelled)) #'string<)))
+                        (record ", l on a visual selection labels each message in it and ends visual state"
+                                (and (equal ids '("<list-plan-dan@fixture.example>"
+                                                  "<list-plan@fixture.example>"
+                                                  "<to-label@fixture.example>"))
+                                     (eq evil-state 'normal))
+                                :got (format "%S, %s state" ids evil-state)))
+                      (at plan)
+                      (execute-kbd-macro "q")
+                      (record "q saves the root read and the answer read and starred"
+                              (and (equal (flags-of lists "list-plan") "S")
+                                   (equal (flags-of lists "list-plan-dan") "FS"))
+                              :got (format "%S %S" (flags-of lists "list-plan")
+                                           (flags-of lists "list-plan-dan")))
+                      ;; the group buffer shares the reading buffers' keys
+                      (delete-other-windows)
+                      (switch-to-buffer gnus-group-buffer)
+                      (execute-kbd-macro (kbd ", u"))
+                      (execute-kbd-macro (kbd ", /"))
+                      (execute-kbd-macro (kbd ", i"))
+                      (record "the group buffer's , u syncs, , / searches and , i opens the inbox"
+                              (equal (reverse called) '(sync search inbox))
+                              :got (format "%S" (reverse called)))
+                      (let ((message (composed ", c")))
+                        (record "the group buffer's , c starts a new message sent as agzam.ibragimov"
+                                (and (eq (plist-get message :mode) 'message-mode)
+                                     (string-match-p "agzam\\.ibragimov@gmail\\.com"
+                                                     (field message :from)))
+                                :got (format "%S" message)))
+                      ;; the new-tab templates reach Gnus on G
+                      (delete-other-windows)
+                      (switch-to-buffer gnus-group-buffer)
+                      (let ((tabs (length (tab-bar-tabs))))
+                        (execute-kbd-macro (kbd "SPC l t G"))
+                        (record "SPC l t G shows the group buffer in a new tab"
+                                (and (= (length (tab-bar-tabs)) (1+ tabs))
+                                     (eq (window-buffer (selected-window))
+                                         (get-buffer gnus-group-buffer)))
+                                :got (format "%d tabs, then %d, showing %s" tabs
+                                             (length (tab-bar-tabs))
+                                             (buffer-name (window-buffer (selected-window)))))
+                        (when (< tabs (length (tab-bar-tabs)))
+                          (tab-bar-close-tab)))))))
             (error (record "flow signalled" nil :err e)))
         (when (buffer-live-p reply)
           (with-current-buffer reply
             (set-buffer-modified-p nil))
           (kill-buffer reply))
+        ;; whatever a key composed before the flow died
+        (dolist (buffer (buffer-list))
+          (when (eq (buffer-local-value 'major-mode buffer) 'message-mode)
+            (with-current-buffer buffer
+              (set-buffer-modified-p nil))
+            (kill-buffer buffer)))
         ;; the thread view loads with its first use, so its buffer name
         ;; is void when the flow died before reaching it
         (when-let* ((name (bound-and-true-p mail-thread-buffer-name))
@@ -811,7 +1162,7 @@ An untimed `read-event' is idle, and a timer ends it."
         (when (gnus-alive-p)
           ;; a live summary makes gnus-group-exit ask whether to update it
           (dolist (name '("*Summary nnmaildir+gmail:inbox*" "*Summary nnmaildir+gmail:html*"
-                          "*Summary nnmaildir+gmail:starred*"))
+                          "*Summary nnmaildir+gmail:starred*" "*Summary nnmaildir+gmail:lists*"))
             (when-let* ((summary (get-buffer name)))
               (with-current-buffer summary
                 (gnus-summary-exit-no-update))))

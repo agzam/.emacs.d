@@ -197,7 +197,7 @@ resurrecting their buffers before the modes exist."
 
    ;; apps/chat column: elfeed dropped (web-browsing)
    [("t" "telega" telega)
-    ("m" "mail" open-mail-inbox)]
+    ("G" "gnus" gnus)]
 
    [("ed" "config" find-in-config-dir)
     ("D" "dotfile.org" (lambda ()

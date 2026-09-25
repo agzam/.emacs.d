@@ -236,6 +236,84 @@ from the server-wide scan that froze the frame."
         (read-mail-article)
         (expect (nreverse calls) :to-equal '(select select-buffer))))))
 
+(defmacro mail-tests--sorting (sorts &rest body)
+  "Run BODY in a buffer of its own with each summary sort logged into SORTS."
+  (declare (indent 1))
+  `(with-temp-buffer
+     (cl-letf (((symbol-function 'gnus-summary-sort)
+                (lambda (predicate reverse) (push (list predicate reverse) ,sorts))))
+       ,@body)))
+
+(defun mail-tests--press (command &optional previous)
+  "Call COMMAND the way a key does, PREVIOUS being the command before it."
+  (let ((this-command command)
+        (last-command previous))
+    (funcall command)))
+
+(describe "sort-mail"
+  (it "sorts forward, reverses when the same sort runs again, then goes forward again"
+    ;; Gnus's own sort commands reverse only on a prefix argument
+    (let (sorts)
+      (mail-tests--sorting sorts
+        (mail-tests--press #'sort-mail-by-date 'evil-next-line)
+        (mail-tests--press #'sort-mail-by-date #'sort-mail-by-date)
+        (mail-tests--press #'sort-mail-by-date #'sort-mail-by-date))
+      (expect (nreverse sorts)
+              :to-equal '((most-recent-date nil) (most-recent-date t) (most-recent-date nil)))))
+  (it "starts forward when another sort ran last, reversed or not"
+    (let (sorts)
+      (mail-tests--sorting sorts
+        (mail-tests--press #'sort-mail-by-author 'evil-next-line)
+        (mail-tests--press #'sort-mail-by-author #'sort-mail-by-author)
+        (mail-tests--press #'sort-mail-by-subject #'sort-mail-by-author))
+      (expect (nreverse sorts)
+              :to-equal '((author nil) (author t) (subject nil)))))
+  (it "keeps the direction per summary"
+    (let (sorts)
+      (mail-tests--sorting sorts
+        (mail-tests--press #'sort-mail-by-date 'evil-next-line)
+        (mail-tests--press #'sort-mail-by-date #'sort-mail-by-date)
+        (expect mail-sort-reversed :to-be t))
+      (with-temp-buffer
+        (expect mail-sort-reversed :to-be nil)))))
+
+(describe "toggle-mail-thread-fold"
+  (it "unfolds a folded thread and leaves it at that"
+    (let (calls)
+      (cl-letf (((symbol-function 'gnus-summary-show-thread)
+                 (lambda () (push 'show calls) 42))
+                ((symbol-function 'gnus-summary-hide-thread)
+                 (lambda () (push 'hide calls))))
+        (toggle-mail-thread-fold))
+      (expect calls :to-equal '(show))))
+  (it "folds a thread that had nothing folded"
+    (let (calls)
+      (cl-letf (((symbol-function 'gnus-summary-show-thread)
+                 (lambda () (push 'show calls) nil))
+                ((symbol-function 'gnus-summary-hide-thread)
+                 (lambda () (push 'hide calls))))
+        (toggle-mail-thread-fold))
+      (expect (nreverse calls) :to-equal '(show hide)))))
+
+(describe "open-message-in-gmail"
+  (it "opens the message the current buffer shows, looked up in its summary"
+    (let ((summary (generate-new-buffer " *mail-tests summary*"))
+          opened)
+      (unwind-protect
+          (progn
+            (with-current-buffer summary
+              (setq-local gnus-newsgroup-data
+                          (list (gnus-data-make
+                                 7 gnus-read-mark 1
+                                 (make-full-mail-header 7 "s" "a@x" "" "<seven@x>" "" 0 0)
+                                 0))))
+            (cl-letf (((symbol-function 'mail-on-screen) (lambda () (cons summary 7)))
+                      ((symbol-function 'browse-url) (lambda (url &rest _) (setq opened url))))
+              (with-temp-buffer
+                (open-message-in-gmail)))
+            (expect opened :to-equal (gmail-message-url "<seven@x>")))
+        (kill-buffer summary)))))
+
 (describe "search-mail"
   (it "hands the raw notmuch query to an ephemeral search over the gmail server"
     (let (captured)

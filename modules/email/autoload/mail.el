@@ -131,6 +131,43 @@ The select call is what creates the article buffer, without which
    t `((search-query-spec . ((query . ,query) (raw . t)))
        (search-group-spec . (("nnmaildir:gmail"))))))
 
+;;; Order and folds
+
+(defvar-local mail-sort-reversed nil
+  "Non-nil when the summary's last sort ran reversed.")
+
+(defun sort-mail (predicate)
+  "Sort the summary by PREDICATE, reversed when the same sort command repeats.
+Gnus reverses only on a prefix argument."
+  (setq mail-sort-reversed (and (eq last-command this-command)
+                                (not mail-sort-reversed)))
+  (gnus-summary-sort predicate mail-sort-reversed))
+
+;;;###autoload
+(defun sort-mail-by-date ()
+  "Sort the summary newest thread first; again, oldest first."
+  (interactive nil gnus-summary-mode)
+  (sort-mail 'most-recent-date))
+
+;;;###autoload
+(defun sort-mail-by-author ()
+  "Sort the summary by author; again, in reverse."
+  (interactive nil gnus-summary-mode)
+  (sort-mail 'author))
+
+;;;###autoload
+(defun sort-mail-by-subject ()
+  "Sort the summary by subject; again, in reverse."
+  (interactive nil gnus-summary-mode)
+  (sort-mail 'subject))
+
+;;;###autoload
+(defun toggle-mail-thread-fold ()
+  "Fold the thread at point, or unfold it when it is folded."
+  (interactive nil gnus-summary-mode)
+  (unless (gnus-summary-show-thread)
+    (gnus-summary-hide-thread)))
+
 ;;; Web archives
 
 (defun bare-message-id (message-id)
@@ -158,21 +195,23 @@ address appears there."
               (match-string 1 recipients) "/messageid$3A"
               (url-hexify-string (concat "\"" id "\"")))))))
 
-(defun summary-message-id ()
-  "Message-ID of the article at point in a Gnus summary buffer."
-  (mail-header-id (gnus-summary-article-header)))
+(defun mail-header-on-screen ()
+  "Header of the message the current summary, thread or article buffer shows."
+  (pcase-let ((`(,summary . ,article) (mail-on-screen)))
+    (with-current-buffer summary
+      (gnus-summary-article-header article))))
 
 ;;;###autoload
 (defun open-message-in-gmail ()
-  "Open the article at point in the Gmail web UI."
-  (interactive nil gnus-summary-mode)
-  (browse-url (gmail-message-url (summary-message-id))))
+  "Open the message at point in the Gmail web UI."
+  (interactive nil gnus-summary-mode mail-thread-mode gnus-article-mode)
+  (browse-url (gmail-message-url (mail-header-id (mail-header-on-screen)))))
 
 ;;;###autoload
 (defun open-message-in-list-archive ()
-  "Open the article at point in its mailing list's public archive."
-  (interactive nil gnus-summary-mode)
-  (let* ((header (gnus-summary-article-header))
+  "Open the message at point in its mailing list's public archive."
+  (interactive nil gnus-summary-mode mail-thread-mode gnus-article-mode)
+  (let* ((header (mail-header-on-screen))
          (extra (mail-header-extra header))
          (recipients (concat (cdr (assq 'To extra)) " " (cdr (assq 'Cc extra)))))
     (if-let* ((url (list-archive-message-url (mail-header-id header) recipients)))
