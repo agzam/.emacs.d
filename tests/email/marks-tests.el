@@ -1,4 +1,4 @@
-;;; tests/email/marks-tests.el --- deferred delete and archive specs -*- lexical-binding: t; -*-
+;;; tests/email/marks-tests.el --- summary marking specs -*- lexical-binding: t; -*-
 
 (require 'test-helper
          (expand-file-name
@@ -20,21 +20,53 @@
 (defvar marks-tests-redrawn nil
   "Articles whose line was redrawn, newest first.")
 
-(defmacro marks-tests-in-summary (article thread &rest body)
-  "Run BODY in a stand-in summary with point on ARTICLE inside THREAD.
-Redrawing is stubbed and logged in `marks-tests-redrawn'."
-  (declare (indent 2))
+(defvar marks-tests-marked nil
+  "(ARTICLE . MARK) pairs Gnus was asked to set, newest first.")
+
+(defun marks-tests-insert-lines (lines)
+  "Insert a summary line and its Gnus data for each (ARTICLE LEVEL) in LINES."
+  (dolist (line lines)
+    (pcase-let ((`(,article ,level) line))
+      (push (gnus-data-make article gnus-read-mark (1+ (point)) nil level)
+            gnus-newsgroup-data)
+      (insert (propertize (format "%s%d\n" (make-string (* 2 level) ?\s) article)
+                          'gnus-number article))))
+  (setq gnus-newsgroup-data (nreverse gnus-newsgroup-data))
+  (goto-char (point-min)))
+
+(defmacro marks-tests-in-summary (lines &rest body)
+  "Run BODY in a stand-in summary of LINES, point on the first.
+Each line is (ARTICLE LEVEL).  Gnus finds lines, threads and the next
+message through its own data; only the redraw of a line and the mark
+Gnus sets are stubbed, and logged."
+  (declare (indent 1))
   `(with-temp-buffer
-     (setq marks-tests-redrawn nil)
+     (setq marks-tests-redrawn nil
+           marks-tests-marked nil)
      (let ((gnus-newsgroup-name "nnmaildir+gmail:inbox")
-           (gnus-newsgroup-sparse nil))
-       (cl-letf (((symbol-function 'gnus-summary-article-number) (lambda () ,article))
-                 ((symbol-function 'gnus-summary-top-thread) #'ignore)
-                 ((symbol-function 'gnus-summary-articles-in-thread) (lambda (&rest _) ,thread))
-                 ((symbol-function 'gnus-summary-position-point) #'ignore)
+           (gnus-newsgroup-data nil)
+           (gnus-newsgroup-data-reverse nil)
+           (gnus-newsgroup-sparse nil)
+           (gnus-newsgroup-unreads nil)
+           (gnus-newsgroup-marked nil)
+           (transient-mark-mode t))
+       (marks-tests-insert-lines ,lines)
+       (cl-letf (((symbol-function 'gnus-summary-recenter) #'ignore)
                  ((symbol-function 'mail-mark-redraw)
-                  (lambda (article) (push article marks-tests-redrawn))))
+                  (lambda (article) (push article marks-tests-redrawn)))
+                 ((symbol-function 'gnus-summary-mark-article)
+                  (lambda (article mark &rest _)
+                    (push (cons article mark) marks-tests-marked))))
          ,@body))))
+
+(defun marks-tests-select (from to)
+  "Select the lines of articles FROM to TO the way evil's linewise selection does.
+Evil stretches the region from the start of the first line to the start
+of the line after the last before a command runs."
+  (gnus-summary-goto-subject from)
+  (set-mark (line-beginning-position))
+  (gnus-summary-goto-subject to)
+  (forward-line 1))
 
 (describe "gnus-user-format-function-D"
   (it "draws D for a queued deletion, A for a queued archive, a space otherwise"
@@ -56,24 +88,87 @@ Redrawing is stubbed and logged in `marks-tests-redrawn'."
     (with-temp-buffer
       (expect (gnus-user-format-function-D (marks-tests-header 1)) :to-equal " "))))
 
+(describe "mail-articles-at-point-or-region"
+  (it "answers the article at point when no region is active"
+    (marks-tests-in-summary '((1 0) (2 0) (3 0))
+      (gnus-summary-goto-subject 2)
+      (expect (mail-articles-at-point-or-region) :to-equal '(2))))
+  (it "answers every line a linewise selection covers, and not the line after it"
+    (marks-tests-in-summary '((1 0) (2 0) (3 0) (4 0))
+      (marks-tests-select 2 3)
+      (expect (mail-articles-at-point-or-region) :to-equal '(2 3))))
+  (it "counts a line the region only reaches into"
+    ;; a characterwise selection starts and ends inside lines
+    (marks-tests-in-summary '((1 0) (2 0) (3 0) (4 0))
+      (gnus-summary-goto-subject 2)
+      (forward-char 1)
+      (set-mark (point))
+      (gnus-summary-goto-subject 3)
+      (forward-char 1)
+      (expect (mail-articles-at-point-or-region) :to-equal '(2 3))))
+  (it "reaches the last line of the summary"
+    (marks-tests-in-summary '((1 0) (2 0))
+      (marks-tests-select 1 2)
+      (expect (mail-articles-at-point-or-region) :to-equal '(1 2))))
+  (it "deactivates the region, which is what ends evil's visual state"
+    (marks-tests-in-summary '((1 0) (2 0))
+      (marks-tests-select 1 2)
+      (mail-articles-at-point-or-region)
+      (expect mark-active :to-be nil))))
+
+(describe "mail-whole-threads"
+  (it "answers every article of each thread the articles sit in, once, in summary order"
+    (marks-tests-in-summary '((1 0) (2 1) (3 2) (4 0) (5 0) (6 1))
+      (expect (mail-whole-threads '(3 2 6)) :to-equal '(1 2 3 5 6))))
+  (it "leaves out the sparse placeholders Gnus invents for missing parents"
+    (marks-tests-in-summary '((-1 0) (2 1) (3 1))
+      (let ((gnus-newsgroup-sparse '(-1)))
+        (expect (mail-whole-threads '(3)) :to-equal '(2 3))))))
+
+(describe "mail-move-below"
+  (it "moves to the message below the last of the articles"
+    (marks-tests-in-summary '((1 0) (2 0) (3 0))
+      (mail-move-below '(1 2))
+      (expect (gnus-summary-article-number) :to-be 3)))
+  (it "stays on the last message when nothing is below it"
+    (marks-tests-in-summary '((1 0) (2 0))
+      (mail-move-below '(2))
+      (expect (gnus-summary-article-number) :to-be 2))))
+
 (describe "mail-mark-for-deletion and mail-mark-for-archive"
-  (it "queue the message at point and redraw its line"
-    (marks-tests-in-summary 7 '(7)
+  (it "queue the message at point, redraw its line and move to the next message"
+    (marks-tests-in-summary '((7 0) (8 0))
       (mail-mark-for-deletion)
       (expect mail-marks :to-equal '((7 . delete)))
-      (expect marks-tests-redrawn :to-equal '(7))))
+      (expect marks-tests-redrawn :to-equal '(7))
+      (expect (gnus-summary-article-number) :to-be 8)))
   (it "replace one verb with the other instead of queueing twice"
-    (marks-tests-in-summary 7 '(7)
+    (marks-tests-in-summary '((7 0) (8 0))
       (mail-mark-for-deletion)
+      (gnus-summary-goto-subject 7)
       (mail-mark-for-archive)
       (expect mail-marks :to-equal '((7 . archive)))))
   (it "leave the rest of the queue alone"
-    (marks-tests-in-summary 7 '(7)
-      (setq mail-marks '((3 . archive)))
+    (marks-tests-in-summary '((7 0))
+      (setq mail-marks (list (cons 3 'archive)))
       (mail-mark-for-deletion)
       (expect mail-marks :to-have-same-items-as '((3 . archive) (7 . delete)))))
+  (it "queue every message a selection covers and land below it"
+    (marks-tests-in-summary '((1 0) (2 0) (3 0) (4 0))
+      (marks-tests-select 2 3)
+      (mail-mark-for-archive)
+      (expect mail-marks :to-have-same-items-as '((2 . archive) (3 . archive)))
+      (expect (gnus-summary-article-number) :to-be 4)
+      (expect mark-active :to-be nil)))
+  (it "skip a sparse placeholder a selection covers"
+    (marks-tests-in-summary '((-1 0) (2 1) (3 0))
+      (let ((gnus-newsgroup-sparse '(-1)))
+        (marks-tests-select -1 2)
+        (mail-mark-for-deletion))
+      (expect mail-marks :to-equal '((2 . delete)))
+      (expect (gnus-summary-article-number) :to-be 3)))
   (it "refuse to archive out of the trash, where dropping the file deletes for good"
-    (marks-tests-in-summary 7 '(7)
+    (marks-tests-in-summary '((7 0) (8 0))
       (let ((gnus-newsgroup-name mail-trash-group))
         (expect (mail-mark-for-archive) :to-throw 'user-error)
         (expect mail-marks :to-be nil)
@@ -81,33 +176,109 @@ Redrawing is stubbed and logged in `marks-tests-redrawn'."
         (expect mail-marks :to-equal '((7 . delete)))))))
 
 (describe "mail-unmark"
-  (it "takes the message at point out of the queue and redraws it"
-    (marks-tests-in-summary 7 '(7)
-      (setq mail-marks '((7 . delete) (8 . archive)))
+  (it "takes the message at point out of the queue, redraws it and moves on"
+    (marks-tests-in-summary '((7 0) (8 0))
+      (setq mail-marks (list (cons 7 'delete) (cons 8 'archive)))
       (mail-unmark)
       (expect mail-marks :to-equal '((8 . archive)))
-      (expect marks-tests-redrawn :to-equal '(7))))
+      (expect marks-tests-redrawn :to-equal '(7))
+      (expect (gnus-summary-article-number) :to-be 8)))
   (it "is a no-op on an unqueued message"
-    (marks-tests-in-summary 7 '(7)
+    (marks-tests-in-summary '((7 0))
       (mail-unmark)
-      (expect mail-marks :to-be nil))))
+      (expect mail-marks :to-be nil)))
+  (it "takes every message a selection covers out of the queue"
+    (marks-tests-in-summary '((1 0) (2 0) (3 0))
+      (setq mail-marks (list (cons 1 'delete) (cons 2 'delete) (cons 3 'archive)))
+      (marks-tests-select 1 2)
+      (mail-unmark)
+      (expect mail-marks :to-equal '((3 . archive))))))
 
 (describe "the thread commands"
-  (it "queue every real article of the thread at point"
-    (marks-tests-in-summary 11 '(10 11 12)
+  (it "queue every article of the thread at point and move below the thread"
+    (marks-tests-in-summary '((10 0) (11 1) (12 2) (13 0))
+      (gnus-summary-goto-subject 11)
       (mail-mark-thread-for-deletion)
       (expect mail-marks :to-have-same-items-as '((10 . delete) (11 . delete) (12 . delete)))
-      (expect marks-tests-redrawn :to-have-same-items-as '(10 11 12))))
+      (expect marks-tests-redrawn :to-have-same-items-as '(10 11 12))
+      (expect (gnus-summary-article-number) :to-be 13)))
   (it "skip the sparse placeholders Gnus invents for missing parents"
-    (marks-tests-in-summary 11 '(-1 10 11)
+    (marks-tests-in-summary '((-1 0) (10 1) (11 1))
       (let ((gnus-newsgroup-sparse '(-1)))
+        (gnus-summary-goto-subject 11)
         (mail-mark-thread-for-archive))
       (expect mail-marks :to-have-same-items-as '((10 . archive) (11 . archive)))))
+  (it "take every thread a selection touches and move below the last"
+    (marks-tests-in-summary '((1 0) (2 1) (3 0) (4 0) (5 1) (6 0))
+      (marks-tests-select 2 4)
+      (mail-mark-thread-for-archive)
+      (expect (mapcar #'car mail-marks) :to-have-same-items-as '(1 2 3 4 5))
+      (expect (gnus-summary-article-number) :to-be 6)))
   (it "unqueue the whole thread"
-    (marks-tests-in-summary 11 '(10 11 12)
-      (setq mail-marks '((10 . delete) (12 . archive) (20 . delete)))
+    (marks-tests-in-summary '((10 0) (11 1) (12 1) (20 0))
+      (setq mail-marks (list (cons 10 'delete) (cons 12 'archive) (cons 20 'delete)))
+      (gnus-summary-goto-subject 11)
       (mail-unmark-thread)
       (expect mail-marks :to-equal '((20 . delete))))))
+
+(describe "mail-toggle-read"
+  (it "marks an unread message read and moves on"
+    (marks-tests-in-summary '((1 0) (2 0))
+      (setq gnus-newsgroup-unreads (list 1 2))
+      (mail-toggle-read)
+      (expect marks-tests-marked :to-equal `((1 . ,gnus-del-mark)))
+      (expect (gnus-summary-article-number) :to-be 2)))
+  (it "marks a read message unread"
+    (marks-tests-in-summary '((1 0) (2 0))
+      (mail-toggle-read)
+      (expect marks-tests-marked :to-equal `((1 . ,gnus-unread-mark)))))
+  (it "marks a selection read while any of it is unread, unread once all of it is read"
+    ;; Gmail's toolbar offers the same choice for a selection
+    (marks-tests-in-summary '((1 0) (2 0) (3 0))
+      (setq gnus-newsgroup-unreads (list 2))
+      (marks-tests-select 1 2)
+      (mail-toggle-read)
+      (expect marks-tests-marked :to-have-same-items-as
+              `((1 . ,gnus-del-mark) (2 . ,gnus-del-mark)))
+      (expect (gnus-summary-article-number) :to-be 3)
+      (setq marks-tests-marked nil
+            gnus-newsgroup-unreads nil)
+      (marks-tests-select 1 2)
+      (mail-toggle-read)
+      (expect marks-tests-marked :to-have-same-items-as
+              `((1 . ,gnus-unread-mark) (2 . ,gnus-unread-mark)))))
+  (it "leaves a starred message alone, says so and still moves past it"
+    ;; the tick replaces the unread mark, so either change drops the star
+    (marks-tests-in-summary '((1 0) (2 0) (3 0))
+      (setq gnus-newsgroup-marked (list 2))
+      (spy-on 'message)
+      (marks-tests-select 1 2)
+      (mail-toggle-read)
+      (expect marks-tests-marked :to-equal `((1 . ,gnus-unread-mark)))
+      (expect 'message :to-have-been-called-with "Left %d starred %s alone" 1 "message")
+      (expect (gnus-summary-article-number) :to-be 3))))
+
+(describe "mail-toggle-star"
+  (it "stars the message at point and moves on"
+    (marks-tests-in-summary '((1 0) (2 0))
+      (mail-toggle-star)
+      (expect marks-tests-marked :to-equal `((1 . ,gnus-ticked-mark)))
+      (expect (gnus-summary-article-number) :to-be 2)))
+  (it "stars a whole selection unless every message in it is starred"
+    (marks-tests-in-summary '((1 0) (2 0) (3 0))
+      (setq gnus-newsgroup-marked (list 1))
+      (marks-tests-select 1 2)
+      (mail-toggle-star)
+      (expect marks-tests-marked :to-have-same-items-as
+              `((1 . ,gnus-ticked-mark) (2 . ,gnus-ticked-mark)))))
+  (it "unstars a selection whose messages are all starred, leaving them read"
+    (marks-tests-in-summary '((1 0) (2 0) (3 0))
+      (setq gnus-newsgroup-marked (list 1 2))
+      (marks-tests-select 1 2)
+      (mail-toggle-star)
+      (expect marks-tests-marked :to-have-same-items-as
+              `((1 . ,gnus-del-mark) (2 . ,gnus-del-mark)))
+      (expect (gnus-summary-article-number) :to-be 3))))
 
 (describe "mail-marked-articles"
   (it "answers one verb's articles, lowest first"
