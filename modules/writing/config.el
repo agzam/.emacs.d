@@ -93,8 +93,12 @@
   (setq google-translate-pop-up-buffer-set-focus t
         google-translate-default-source-language "auto"
         google-translate-default-target-language "en")
+  ;; Without -multiple_requests, ffmpeg's http reader ends Google's chunked TTS
+  ;; response with an I/O error, and -autoexit quits before queued audio plays.
   (setq google-translate-listen-program (executable-find "ffplay")
-        google-translate-listen-program-args '("-nodisp" "-autoexit" "-loglevel" "quiet"))
+        google-translate-listen-program-args
+        '("-nodisp" "-autoexit" "-loglevel" "quiet" "-multiple_requests" "1"
+          "-af" "atempo=1.3"))
   (setq google-translate-input-method-auto-toggling t
         google-translate-preferable-input-methods-alist
         '((nil . ("en"))
