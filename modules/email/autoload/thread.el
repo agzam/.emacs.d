@@ -36,9 +36,6 @@
 (defvar-local mail-thread-group nil
   "Group the articles are fetched from.")
 
-(defvar-local mail-thread-window-configuration nil
-  "Window configuration `mail-thread-quit' restores.")
-
 (defvar-local mail-thread-waiting nil
   "Unread messages whose bodies the fill has yet to render, in fill order.")
 
@@ -299,12 +296,14 @@ gone or holds another."
     (goto-char (mail-thread-message-marker message))))
 
 (defun mail-thread-quit ()
-  "Leave the thread and restore the layout it replaced."
+  "Leave the thread, giving its window back to the summary."
   (interactive nil mail-thread-mode)
   (mail-thread-stop-fill)
-  (let ((configuration mail-thread-window-configuration))
-    (bury-buffer)
-    (when configuration (set-window-configuration configuration))))
+  (let ((summary mail-thread-summary-buffer))
+    (bury-buffer (current-buffer))
+    (when (buffer-live-p summary)
+      (let ((gnus-summary-buffer summary))
+        (gnus-configure-windows 'summary 'force)))))
 
 (defun mail-thread-open-article ()
   "Read the message at point in the article buffer.
@@ -369,24 +368,25 @@ those wait in `mail-thread-waiting' for the fill, the rest stay a line."
          (summary (current-buffer))
          (entries (or (mail-thread-entries)
                       (user-error "No article Gnus can fetch in this thread")))
-         (configuration (current-window-configuration))
          (buffer (get-buffer-create mail-thread-buffer-name)))
     (with-current-buffer buffer
       (let ((inhibit-read-only t))
         (erase-buffer)
         (remove-overlays))
       (mail-thread-mode)
+      ;; the next Gnus layout replaces a Gnus buffer's window
+      (gnus-add-buffer)
       (setq mail-thread-summary-buffer summary
-            mail-thread-group group
-            mail-thread-window-configuration configuration)
+            mail-thread-group group)
       (mail-thread-build entries entry unreads)
       (mail-thread-start-fill))
-    (switch-to-buffer buffer)
-    (delete-other-windows)
-    (when-let* ((message (seq-find (lambda (message)
-                                     (eql (mail-thread-message-article message) entry))
-                                   mail-thread-messages)))
-      (mail-thread-goto-message message))))
+    (let ((gnus-summary-buffer summary))
+      (gnus-configure-windows 'mail-thread))
+    (with-current-buffer buffer
+      (when-let* ((message (seq-find (lambda (message)
+                                       (eql (mail-thread-message-article message) entry))
+                                     mail-thread-messages)))
+        (mail-thread-goto-message message)))))
 
 (provide 'mail-thread)
 ;;; thread.el ends here

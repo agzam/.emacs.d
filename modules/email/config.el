@@ -135,6 +135,8 @@ again from `evil-collection-setup-hook'."
             :n "u" #'mail-unmark
             :n "U" #'mail-unmark-thread
             :n "x" #'mail-execute-marks
+            :n "J" #'gnus-summary-scroll-up
+            :n "K" #'gnus-summary-scroll-down
             (:localleader
              :desc "sync"          "u" #'sync-mail
              :desc "search"        "s" #'search-mail
@@ -161,6 +163,26 @@ again from `evil-collection-setup-hook'."
         :n "]]" #'mail-thread-next-message
         :n "[[" #'mail-thread-previous-message
         :n "q" #'mail-thread-quit))
+
+(use-package gnus-win
+  :ensure nil
+  :defer t
+  :config
+  ;; the display is ultra-wide, so the article and the thread view go
+  ;; beside the summary
+  (gnus-add-configuration
+   '(article (horizontal 1.0 (summary 0.33 point) (article 1.0))))
+  (add-to-list 'gnus-window-to-buffer '(mail-thread . mail-thread-buffer-name))
+  (gnus-add-configuration
+   '(mail-thread (horizontal 1.0 (summary 0.33) (mail-thread 1.0 point))))
+
+  (defadvice! nest-gnus-windows-a (fn &rest args)
+    "Call FN with ARGS, splitting Gnus windows under a parent of their own.
+A re-layout deletes the summary's window, and without the parent its
+columns would go to the window left of Gnus."
+    :around #'gnus-configure-windows
+    (let ((window-combination-limit t))
+      (apply fn args))))
 
 (use-package gnus-art
   :ensure nil

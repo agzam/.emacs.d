@@ -299,15 +299,28 @@ is the only treatment."
           (thread-tests-fill)
           (expect (window-start) :to-equal (marker-position marker)))))))
 
+(describe "mail-thread-quit"
+  (it "gives the thread's window back to the summary it came from"
+    (thread-tests-with-buffer 11 nil
+      (let (layouts)
+        (cl-letf (((symbol-function 'gnus-configure-windows)
+                   (lambda (setting &optional force)
+                     (push (list setting force gnus-summary-buffer) layouts))))
+          (mail-thread-quit))
+        (expect layouts :to-equal `((summary force ,summary)))))))
+
 (describe "a cancelled fill"
   (it "stops when the reader quits, leaving the rest unread"
     (thread-tests-with-buffer 11 '(12)
       (mail-thread-start-fill)
-      (let ((timer mail-thread-fill-timer))
+      ;; quitting selects the summary's window, and its buffer with it
+      (let ((thread (current-buffer))
+            (timer mail-thread-fill-timer))
         (mail-thread-quit)
         (expect (thread-tests-timer-active-p timer) :to-be nil)
-        (mail-thread-fill (current-buffer) timer)
-        (expect (thread-tests-open-articles) :to-equal '(11))
+        (mail-thread-fill thread timer)
+        (with-current-buffer thread
+          (expect (thread-tests-open-articles) :to-equal '(11)))
         (expect thread-tests-marked :to-equal '(11)))))
   (it "stops when another thread takes the buffer"
     (thread-tests-with-buffer 11 '(12)
@@ -453,7 +466,8 @@ is the only treatment."
   (it "shows the thread with the entry rendered and starts filling the rest"
     (let ((summary (generate-new-buffer " *thread-tests summary*"))
           (gnus-newsgroup-unreads '(12))
-          (gnus-newsgroup-name "nnmaildir+gmail:inbox"))
+          (gnus-newsgroup-name "nnmaildir+gmail:inbox")
+          layouts)
       (setq thread-tests-rendered nil
             thread-tests-marked nil)
       (unwind-protect
@@ -465,9 +479,16 @@ is the only treatment."
                          (push article thread-tests-rendered)
                          (format "body of %d" article)))
                       ((symbol-function 'gnus-summary-mark-article)
-                       (lambda (article &rest _) (push article thread-tests-marked))))
+                       (lambda (article &rest _) (push article thread-tests-marked)))
+                      ;; the layout itself is the config's, specced there
+                      ((symbol-function 'gnus-configure-windows)
+                       (lambda (setting &rest _)
+                         (push (list setting gnus-summary-buffer) layouts)
+                         (switch-to-buffer mail-thread-buffer-name))))
               (with-current-buffer summary
                 (open-mail-thread))
+              (expect layouts :to-equal `((mail-thread ,summary)))
+              (expect (memq (get-buffer mail-thread-buffer-name) (gnus-buffers)) :to-be-truthy)
               (expect (buffer-name (window-buffer)) :to-equal mail-thread-buffer-name)
               (with-current-buffer mail-thread-buffer-name
                 (expect (thread-tests-open-articles) :to-equal '(11))
