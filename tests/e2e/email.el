@@ -85,6 +85,10 @@ An untimed `read-event' is idle, and a timer ends it."
          (trash (expand-file-name "trash/" root))
          ;; a label of its own, so the inbox holds what the flow counts
          (html (expand-file-name "html/" root))
+         ;; read and star apart, the way Gmail keeps them
+         (starred (expand-file-name "starred/" root))
+         ;; what the %uS column draws on a starred message
+         (star (string #x2217))
          (results '())
          ;; gnus-started-hook subscribes every group under this root;
          ;; mail-groups would add gmane, and CI has no news server
@@ -98,7 +102,7 @@ An untimed `read-event' is idle, and a timer ends it."
          (gnus-interactive-exit nil)
          (gnus-expert-user t)
          reply)
-    (dolist (dir (list inbox trash html))
+    (dolist (dir (list inbox trash html starred))
       (dolist (sub '("cur" "new" "tmp"))
         (make-directory (expand-file-name sub dir) t)))
     ;; the sender's colors would paint white on white, and the paragraph
@@ -141,6 +145,18 @@ An untimed `read-event' is idle, and a timer ends it."
                               "Mon, 21 Sep 2026 11:00:00 +0000"
                               "<plan@fixture.example> <plan-bob@fixture.example>"
                               "news.gmane.io gmane.emacs.devel:346572")
+    ;; one file per state of read and star, and the flow does one thing
+    ;; to each
+    (pcase-dolist (`(,file ,subject ,id)
+                   '(("cur/1700000010.10.fixture:2,F" "starred, left alone" "left")
+                     ("cur/1700000011.11.fixture:2,F" "starred, opened" "opened")
+                     ("cur/1700000012.12.fixture:2,F" "starred, shown" "shown")
+                     ("cur/1700000013.13.fixture:2,FS" "starred and read, opened" "read-opened")
+                     ("cur/1700000014.14.fixture:2,FS" "starred and read, marked unread" "read-unread")
+                     ("new/1700000015.15.fixture" "unread, starred" "plain")
+                     ("cur/1700000016.16.fixture:2,F" "starred, unstarred" "unstarred")))
+      (email-e2e--write-message (expand-file-name file starred)
+                                "Eve <eve@example.com>" subject id))
     (cl-flet ((record (label ok &rest kv)
                 (push (append (list :label (format "email: %s" label) :ok ok) kv)
                       results))
@@ -174,6 +190,26 @@ An untimed `read-event' is idle, and a timer ends it."
                   (gnus-summary-goto-subject article)
                   (buffer-substring-no-properties (line-beginning-position)
                                                   (+ 2 (line-beginning-position)))))
+              ;; the %uS column of ARTICLE's line
+              (line-star (article)
+                (save-excursion
+                  (gnus-summary-goto-subject article)
+                  (buffer-substring-no-properties (+ 3 (line-beginning-position))
+                                                  (+ 4 (line-beginning-position)))))
+              ;; the maildir flags of the message with ID, as nnmaildir
+              ;; saved them
+              (flags-of (dir id)
+                (let ((wanted (format "<%s@fixture.example>" id)))
+                  (seq-some (lambda (file)
+                              (when (with-temp-buffer
+                                      (insert-file-contents file)
+                                      (equal (mail-fetch-field "Message-ID") wanted))
+                                (if (string-match ":2,\\([A-Z]*\\)\\'" file)
+                                    (match-string 1 file)
+                                  "")))
+                            (mapcan (lambda (sub)
+                                      (directory-files (expand-file-name sub dir) t "\\`[^.]"))
+                                    '("cur" "new")))))
               (line-face (article)
                 (save-excursion
                   (gnus-summary-goto-subject article)
@@ -441,22 +477,37 @@ An untimed `read-event' is idle, and a timer ends it."
                   (execute-kbd-macro "k=")
                   (record "= stars the message and moves down"
                           (and (equal (line-marks fresh) " !")
+                               (equal (line-star fresh) star)
                                (memq fresh gnus-newsgroup-marked)
                                (eql (gnus-summary-article-number) below))
-                          :got (format "line starts %S, point on %S"
-                                       (line-marks fresh) (gnus-summary-article-number)))
+                          :got (format "line starts %S, star %S, point on %S"
+                                       (line-marks fresh) (line-star fresh)
+                                       (gnus-summary-article-number)))
                   (execute-kbd-macro "k!")
-                  (record "! leaves a starred message alone and still moves down"
-                          (and (equal (line-marks fresh) " !")
+                  (record "! marks a starred message unread, keeps the star and moves down"
+                          (and (equal (line-marks fresh) "  ")
+                               (equal (line-star fresh) star)
+                               (memq fresh gnus-newsgroup-unreads)
+                               (memq fresh gnus-newsgroup-marked)
                                (eql (gnus-summary-article-number) below))
-                          :got (format "line starts %S, point on %S"
-                                       (line-marks fresh) (gnus-summary-article-number)))
+                          :got (format "line starts %S, star %S, point on %S"
+                                       (line-marks fresh) (line-star fresh)
+                                       (gnus-summary-article-number)))
+                  (execute-kbd-macro "k!")
+                  (record "! marks a starred unread message read and keeps the star"
+                          (and (equal (line-marks fresh) " !")
+                               (equal (line-star fresh) star)
+                               (not (memq fresh gnus-newsgroup-unreads)))
+                          :got (format "line starts %S, star %S"
+                                       (line-marks fresh) (line-star fresh)))
                   (execute-kbd-macro "k=")
                   (record "= on a starred message unstars it and leaves it read"
                           (and (equal (line-marks fresh) " r")
+                               (equal (line-star fresh) " ")
                                (not (memq fresh gnus-newsgroup-marked))
                                (not (memq fresh gnus-newsgroup-unreads)))
-                          :got (format "line starts %S" (line-marks fresh)))
+                          :got (format "line starts %S, star %S"
+                                       (line-marks fresh) (line-star fresh)))
                   ;; visual state opens expreg-transient, which passes =
                   ;; on to the summary but swallows ! and u
                   (gnus-summary-goto-subject fresh)
@@ -676,7 +727,77 @@ An untimed `read-event' is idle, and a timer ends it."
                     (record "q in the summary leaves the window beside Gnus at its width"
                             (and (eq (window-buffer (selected-window)) (get-buffer gnus-group-buffer))
                                  (= width (beside-width)))
-                            :got (format "%d wide before, now %s" width (layout))))))
+                            :got (format "%d wide before, now %s" width (layout)))))
+                ;; read and star apart: every message of the starred
+                ;; label gets one action, and q saves them all
+                (delete-other-windows)
+                (switch-to-buffer gnus-group-buffer)
+                ;; the label was subscribed after startup merged the
+                ;; maildir flags, so only a refresh merges them, the one
+                ;; every sync runs
+                (execute-kbd-macro (kbd "gR"))
+                (gnus-group-jump-to-group "nnmaildir+gmail:starred")
+                (execute-kbd-macro (kbd "RET"))
+                (let ((summary (current-buffer))
+                      (left (email-e2e--article "starred, left alone"))
+                      (opened (email-e2e--article "starred, opened"))
+                      (shown (email-e2e--article "starred, shown"))
+                      (read-opened (email-e2e--article "starred and read, opened"))
+                      (read-unread (email-e2e--article "starred and read, marked unread"))
+                      (plain (email-e2e--article "unread, starred"))
+                      (unstarred (email-e2e--article "starred, unstarred"))
+                      (ids '("opened" "shown" "read-opened" "read-unread" "plain" "unstarred")))
+                  (cl-flet ((state (article)
+                              (with-current-buffer summary
+                                (list (line-marks article) (line-star article))))
+                            (at (article)
+                              (select-window (get-buffer-window summary))
+                              (gnus-summary-goto-subject article)))
+                    (record "a message starred while unread shows its star and reads as unread"
+                            (and (equal (state left) (list "  " star))
+                                 (equal (state read-opened) (list " !" star)))
+                            :got (format "%S, %S" (state left) (state read-opened)))
+                    (at opened)
+                    (execute-kbd-macro (kbd "RET"))
+                    (execute-kbd-macro "q")
+                    (record "RET on a starred unread message reads it and keeps the star"
+                            (equal (state opened) (list " !" star))
+                            :got (format "%S" (state opened)))
+                    (at read-opened)
+                    (execute-kbd-macro (kbd "RET"))
+                    (execute-kbd-macro "q")
+                    (record "RET on a starred read message keeps the star"
+                            (equal (state read-opened) (list " !" star))
+                            :got (format "%S" (state read-opened)))
+                    (at shown)
+                    (execute-kbd-macro "J")
+                    (record "J on a starred unread message reads it and keeps the star"
+                            (equal (state shown) (list " !" star))
+                            :got (format "%S" (state shown)))
+                    (at read-unread)
+                    (execute-kbd-macro "!")
+                    (record "! on a starred read message marks it unread and keeps the star"
+                            (equal (state read-unread) (list "  " star))
+                            :got (format "%S" (state read-unread)))
+                    (at plain)
+                    (execute-kbd-macro "=")
+                    (record "= stars an unread message and leaves it unread"
+                            (equal (state plain) (list "  " star))
+                            :got (format "%S" (state plain)))
+                    (at unstarred)
+                    (execute-kbd-macro "=")
+                    (record "= unstars a starred unread message and leaves it unread"
+                            (equal (state unstarred) (list "  " " "))
+                            :got (format "%S" (state unstarred)))
+                    (select-window (get-buffer-window summary))
+                    (execute-kbd-macro "q"))
+                  (record "q leaves a message starred while unread flagged and unread"
+                          (equal (flags-of starred "left") "F")
+                          :got (format "%S" (flags-of starred "left")))
+                  (record "q saves read and star apart, the way Gmail keeps them"
+                          (equal (mapcar (lambda (id) (flags-of starred id)) ids)
+                                 '("FS" "FS" "FS" "F" "F" ""))
+                          :got (format "%S" (mapcar (lambda (id) (flags-of starred id)) ids)))))
             (error (record "flow signalled" nil :err e)))
         (when (buffer-live-p reply)
           (with-current-buffer reply
@@ -689,7 +810,8 @@ An untimed `read-event' is idle, and a timer ends it."
           (kill-buffer thread))
         (when (gnus-alive-p)
           ;; a live summary makes gnus-group-exit ask whether to update it
-          (dolist (name '("*Summary nnmaildir+gmail:inbox*" "*Summary nnmaildir+gmail:html*"))
+          (dolist (name '("*Summary nnmaildir+gmail:inbox*" "*Summary nnmaildir+gmail:html*"
+                          "*Summary nnmaildir+gmail:starred*"))
             (when-let* ((summary (get-buffer name)))
               (with-current-buffer summary
                 (gnus-summary-exit-no-update))))

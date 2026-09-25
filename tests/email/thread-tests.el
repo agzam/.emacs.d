@@ -67,23 +67,44 @@ SUBJECT, FROM, DATE, ID and REFERENCES are its fields."
 (defvar thread-tests-marked nil
   "Articles marked read in the summary, newest first.")
 
+(defun thread-tests-mark-on-display ()
+  "Stand-in for Gnus's display marking: log the article it marks.
+An article marked while point is on another line is logged as
+\(off-line ARTICLE): Gnus's own function reads the mark at point."
+  (push (if (eql gnus-current-article (gnus-summary-article-number))
+            gnus-current-article
+          (list 'off-line gnus-current-article))
+        thread-tests-marked))
+
+(defun thread-tests-summary-lines (articles)
+  "Give the current buffer a summary line and Gnus data for each of ARTICLES."
+  (setq-local gnus-newsgroup-data nil)
+  (dolist (article articles)
+    (push (gnus-data-make article gnus-unread-mark (1+ (point)) nil 0)
+          gnus-newsgroup-data)
+    (insert (propertize (format "%d\n" article) 'gnus-number article)))
+  (setq gnus-newsgroup-data (nreverse gnus-newsgroup-data))
+  (goto-char (point-min)))
+
 (defmacro thread-tests-with-buffer (entry unreads &rest body)
   "Run BODY in a thread buffer entered on ENTRY with UNREADS unread.
-Rendering and the summary are stubbed; what they were asked for lands in
+Rendering is stubbed and the summary holds a line per message; what the
+render and Gnus's display hook were asked for lands in
 `thread-tests-rendered' and `thread-tests-marked'.  BODY sees the stub
 summary buffer as `summary'."
   (declare (indent 2))
   `(let ((buffer (generate-new-buffer " *thread-tests*"))
-         (summary (generate-new-buffer " *thread-tests summary*")))
+         (summary (generate-new-buffer " *thread-tests summary*"))
+         (gnus-mark-article-hook (list #'thread-tests-mark-on-display)))
      (setq thread-tests-rendered nil
            thread-tests-marked nil)
      (unwind-protect
          (cl-letf (((symbol-function 'mail-thread-render)
                     (lambda (_group article)
                       (push article thread-tests-rendered)
-                      (format "body of %d\nsecond line" article)))
-                   ((symbol-function 'gnus-summary-mark-article)
-                    (lambda (article &rest _) (push article thread-tests-marked))))
+                      (format "body of %d\nsecond line" article))))
+           (with-current-buffer summary
+             (thread-tests-summary-lines (mapcar #'car thread-tests-entries)))
            (with-current-buffer buffer
              (mail-thread-mode)
              (setq mail-thread-group "nnmaildir+gmail:inbox"
@@ -129,8 +150,7 @@ is the only treatment."
           (cl-letf (((symbol-function 'gnus-request-article)
                      (lambda (_article _group target)
                        (with-current-buffer target (insert raw))
-                       t))
-                    ((symbol-function 'gnus-summary-mark-article) #'ignore))
+                       t)))
             (with-current-buffer buffer
               (mail-thread-mode)
               (setq mail-thread-group "nnmaildir+gmail:inbox"
@@ -478,8 +498,6 @@ is the only treatment."
                        (lambda (_group article)
                          (push article thread-tests-rendered)
                          (format "body of %d" article)))
-                      ((symbol-function 'gnus-summary-mark-article)
-                       (lambda (article &rest _) (push article thread-tests-marked)))
                       ;; the layout itself is the config's, specced there
                       ((symbol-function 'gnus-configure-windows)
                        (lambda (setting &rest _)

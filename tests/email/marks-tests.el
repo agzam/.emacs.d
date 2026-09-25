@@ -34,11 +34,24 @@
   (setq gnus-newsgroup-data (nreverse gnus-newsgroup-data))
   (goto-char (point-min)))
 
+(defun marks-tests-set-mark (article mark &rest _)
+  "Log MARK on ARTICLE and change the lists the way Gnus's marking does.
+The tick and the unread mark each take the article out of the other's
+list; every other mark takes it out of both."
+  (push (cons article mark) marks-tests-marked)
+  (setq gnus-newsgroup-unreads (delq article gnus-newsgroup-unreads)
+        gnus-newsgroup-marked (delq article gnus-newsgroup-marked))
+  (cond ((= mark gnus-ticked-mark)
+         (setq gnus-newsgroup-marked (gnus-add-to-sorted-list gnus-newsgroup-marked article)))
+        ((= mark gnus-unread-mark)
+         (setq gnus-newsgroup-unreads (gnus-add-to-sorted-list gnus-newsgroup-unreads article)))))
+
 (defmacro marks-tests-in-summary (lines &rest body)
   "Run BODY in a stand-in summary of LINES, point on the first.
 Each line is (ARTICLE LEVEL).  Gnus finds lines, threads and the next
 message through its own data; only the redraw of a line and the mark
-Gnus sets are stubbed, and logged."
+Gnus sets are stubbed, and logged.  The mark stub keeps the unread and
+tick lists the way Gnus does."
   (declare (indent 1))
   `(with-temp-buffer
      (setq marks-tests-redrawn nil
@@ -54,9 +67,7 @@ Gnus sets are stubbed, and logged."
        (cl-letf (((symbol-function 'gnus-summary-recenter) #'ignore)
                  ((symbol-function 'mail-mark-redraw)
                   (lambda (article) (push article marks-tests-redrawn)))
-                 ((symbol-function 'gnus-summary-mark-article)
-                  (lambda (article mark &rest _)
-                    (push (cons article mark) marks-tests-marked))))
+                 ((symbol-function 'gnus-summary-mark-article) #'marks-tests-set-mark))
          ,@body))))
 
 (defun marks-tests-select (from to)
@@ -87,6 +98,62 @@ of the line after the last before a command runs."
   (it "reads the queue of the buffer it draws in"
     (with-temp-buffer
       (expect (gnus-user-format-function-D (marks-tests-header 1)) :to-equal " "))))
+
+(describe "gnus-user-format-function-S"
+  (it "draws a star on a starred message, read or unread, and a space on any other"
+    ;; Gnus's own column draws the tick on a read message only
+    (let ((gnus-newsgroup-marked (list 1 2))
+          (gnus-newsgroup-unreads (list 2 3)))
+      (expect (mapcar (lambda (n) (substring-no-properties
+                                   (gnus-user-format-function-S (marks-tests-header n))))
+                      '(1 2 3))
+              :to-equal (list (string #x2217) (string #x2217) " "))))
+  (it "colours the star the way line highlighting preserves"
+    (let* ((gnus-newsgroup-marked (list 1))
+           (glyph (gnus-user-format-function-S (marks-tests-header 1))))
+      (expect (get-text-property 0 'gnus-face glyph) :to-be t)
+      (expect (get-text-property 0 'face glyph)
+              :to-equal '(gnus-summary-normal-ticked default)))))
+
+(describe "mail-mark-keeping-star"
+  (it "gives an unstarred message the mark it is asked for"
+    (marks-tests-in-summary '((1 0))
+      (setq gnus-newsgroup-unreads (list 1))
+      (mail-mark-keeping-star 1 gnus-read-mark)
+      (expect marks-tests-marked :to-equal `((1 . ,gnus-read-mark)))
+      (expect gnus-newsgroup-unreads :to-be nil)))
+  (it "marks a starred unread message read by ticking it, so the star stays"
+    (marks-tests-in-summary '((1 0))
+      (setq gnus-newsgroup-unreads (list 1)
+            gnus-newsgroup-marked (list 1))
+      (mail-mark-keeping-star 1 gnus-read-mark)
+      (expect marks-tests-marked :to-equal `((1 . ,gnus-ticked-mark)))
+      (expect gnus-newsgroup-unreads :to-be nil)
+      (expect gnus-newsgroup-marked :to-equal '(1))))
+  (it "puts a starred message marked unread back into the tick list"
+    ;; Gnus's unread mark takes it out; nnmaildir saves both as a
+    ;; flagged unread file
+    (marks-tests-in-summary '((1 0))
+      (setq gnus-newsgroup-marked (list 1))
+      (mail-mark-keeping-star 1 gnus-unread-mark)
+      (expect gnus-newsgroup-unreads :to-equal '(1))
+      (expect gnus-newsgroup-marked :to-equal '(1)))))
+
+(describe "mail-keep-star-on-read-h"
+  (it "ticks a starred unread article as Gnus displays it, which Gnus's own function then skips"
+    (marks-tests-in-summary '((1 0))
+      (setq gnus-newsgroup-unreads (list 1)
+            gnus-newsgroup-marked (list 1))
+      (let ((gnus-current-article 1))
+        (mail-keep-star-on-read-h))
+      (expect marks-tests-marked :to-equal `((1 . ,gnus-ticked-mark)))
+      (expect gnus-newsgroup-marked :to-equal '(1))))
+  (it "leaves an unstarred article to Gnus's own hook"
+    (marks-tests-in-summary '((1 0))
+      (setq gnus-newsgroup-unreads (list 1))
+      (let ((gnus-current-article 1))
+        (mail-keep-star-on-read-h))
+      (expect marks-tests-marked :to-be nil))))
 
 (describe "mail-articles-at-point-or-region"
   (it "answers the article at point when no region is active"
@@ -247,15 +314,28 @@ of the line after the last before a command runs."
       (mail-toggle-read)
       (expect marks-tests-marked :to-have-same-items-as
               `((1 . ,gnus-unread-mark) (2 . ,gnus-unread-mark)))))
-  (it "leaves a starred message alone, says so and still moves past it"
-    ;; the tick replaces the unread mark, so either change drops the star
+  (it "marks a starred read message unread and keeps its star"
+    (marks-tests-in-summary '((1 0) (2 0))
+      (setq gnus-newsgroup-marked (list 1))
+      (mail-toggle-read)
+      (expect gnus-newsgroup-unreads :to-equal '(1))
+      (expect gnus-newsgroup-marked :to-equal '(1))
+      (expect (gnus-summary-article-number) :to-be 2)))
+  (it "marks a starred unread message read and keeps its star"
+    (marks-tests-in-summary '((1 0) (2 0))
+      (setq gnus-newsgroup-unreads (list 1)
+            gnus-newsgroup-marked (list 1))
+      (mail-toggle-read)
+      (expect gnus-newsgroup-unreads :to-be nil)
+      (expect gnus-newsgroup-marked :to-equal '(1))))
+  (it "takes starred messages in a selection along with the rest"
     (marks-tests-in-summary '((1 0) (2 0) (3 0))
-      (setq gnus-newsgroup-marked (list 2))
-      (spy-on 'message)
+      (setq gnus-newsgroup-unreads (list 1 2)
+            gnus-newsgroup-marked (list 2))
       (marks-tests-select 1 2)
       (mail-toggle-read)
-      (expect marks-tests-marked :to-equal `((1 . ,gnus-unread-mark)))
-      (expect 'message :to-have-been-called-with "Left %d starred %s alone" 1 "message")
+      (expect gnus-newsgroup-unreads :to-be nil)
+      (expect gnus-newsgroup-marked :to-equal '(2))
       (expect (gnus-summary-article-number) :to-be 3))))
 
 (describe "mail-toggle-star"
@@ -278,7 +358,32 @@ of the line after the last before a command runs."
       (mail-toggle-star)
       (expect marks-tests-marked :to-have-same-items-as
               `((1 . ,gnus-del-mark) (2 . ,gnus-del-mark)))
-      (expect (gnus-summary-article-number) :to-be 3))))
+      (expect (gnus-summary-article-number) :to-be 3)))
+  (it "stars an unread message and leaves it unread"
+    ;; Gnus's tick would make it read
+    (marks-tests-in-summary '((1 0) (2 0))
+      (setq gnus-newsgroup-unreads (list 1))
+      (mail-toggle-star)
+      (expect marks-tests-marked :to-be nil)
+      (expect gnus-newsgroup-marked :to-equal '(1))
+      (expect gnus-newsgroup-unreads :to-equal '(1))
+      (expect (gnus-summary-article-number) :to-be 2)))
+  (it "unstars a starred unread message and leaves it unread"
+    (marks-tests-in-summary '((1 0) (2 0))
+      (setq gnus-newsgroup-unreads (list 1)
+            gnus-newsgroup-marked (list 1))
+      (mail-toggle-star)
+      (expect marks-tests-marked :to-be nil)
+      (expect gnus-newsgroup-marked :to-be nil)
+      (expect gnus-newsgroup-unreads :to-equal '(1))))
+  (it "redraws every line it stars, which draws the star column"
+    (marks-tests-in-summary '((1 0) (2 0) (3 0))
+      (setq gnus-newsgroup-unreads (list 2))
+      (marks-tests-select 1 2)
+      (mail-toggle-star)
+      (expect marks-tests-redrawn :to-have-same-items-as '(1 2))
+      (expect gnus-newsgroup-marked :to-equal '(1 2))
+      (expect gnus-newsgroup-unreads :to-equal '(2)))))
 
 (describe "mail-marked-articles"
   (it "answers one verb's articles, lowest first"
