@@ -345,6 +345,31 @@ window and deletes the summary's."
   (it "moves a queued deletion into the mirrored trash"
     (expect mail-trash-group :to-equal "nnmaildir+gmail:trash")))
 
+(describe "email module stars"
+  (it "draws the star in a summary column of its own"
+    ;; Gnus's own column draws the tick on a read message only
+    (expect gnus-summary-line-format :to-match "%U%R%uS ")
+    (with-temp-buffer
+      (insert-file-contents
+       (expand-file-name "modules/email/autoload/marks.el" test-config-root))
+      (expect (buffer-string)
+              :to-match "^;;;###autoload\n(defun gnus-user-format-function-S ")))
+  (it "keeps the star of an article Gnus marks read as it displays it"
+    ;; ahead of Gnus's own function, which would drop the star
+    (require 'gnus-sum)
+    (let ((gnus-mark-article-hook (copy-sequence gnus-mark-article-hook)))
+      (dolist (form (email-tests--config-forms 'gnus-sum))
+        (eval form t))
+      (expect gnus-mark-article-hook
+              :to-equal '(mail-keep-star-on-read-h
+                          gnus-summary-mark-read-and-unread-as-read))))
+  (it "loads the hook function on the first article, before any command of its file"
+    (with-temp-buffer
+      (insert-file-contents
+       (expand-file-name "modules/email/autoload/marks.el" test-config-root))
+      (expect (buffer-string)
+              :to-match "^;;;###autoload\n(defun mail-keep-star-on-read-h "))))
+
 (describe "email module subscriptions"
   (it "subscribes the inbox and emacs-devel on startup"
     (expect mail-groups :to-equal
