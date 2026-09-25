@@ -9,6 +9,7 @@
 
 (load-module-file "modules/email/autoload/thread.el")
 (load-module-file "modules/email/autoload/quotes.el")
+(load-module-file "modules/email/autoload/html.el")
 
 (defun thread-tests-header (number subject from date id &optional references)
   "Header of the article NUMBER the specs build a thread from.
@@ -45,6 +46,17 @@ SUBJECT, FROM, DATE, ID and REFERENCES are its fields."
           "Message-ID: <2@x>\n"
           "\n"
           body))
+
+(defun thread-tests-html-article (html)
+  "Raw reply whose body is the single text/html part HTML."
+  (concat "From: Bob <bob@example.com>\n"
+          "Subject: Re: Plan\n"
+          "Date: Mon, 21 Sep 2026 11:00:00 +0000\n"
+          "Message-ID: <2@x>\n"
+          "MIME-Version: 1.0\n"
+          "Content-Type: text/html; charset=utf-8\n"
+          "\n"
+          html))
 
 (defvar thread-tests-quotes t
   "Treatment condition the specs register `highlight-mail-quotes' under.")
@@ -411,6 +423,28 @@ is the only treatment."
       (expect (< 25000 (length raw)) :to-be t)
       (expect (thread-tests-line-face (thread-tests-thread-text raw) "> > last")
               :to-be 'message-cited-text-2))))
+
+(describe "HTML messages in the thread view"
+  (it "keep the > markers and depth faces the renderer drew"
+    (let* ((mm-text-html-renderer #'render-mail-html)
+           (text (thread-tests-thread-text
+                  (thread-tests-html-article
+                   (concat "<p>Agreed.</p><blockquote><p>The plan, as posted.</p>"
+                           "<blockquote><p>And its first draft.</p></blockquote>"
+                           "</blockquote>")))))
+      (expect (thread-tests-line-face text "Agreed.") :to-be nil)
+      (expect (thread-tests-line-face text "> The plan, as posted.")
+              :to-be 'message-cited-text-1)
+      (expect (thread-tests-line-face text "> > And its first draft.")
+              :to-be 'message-cited-text-2))))
+
+(describe "mail-thread-mode"
+  (it "wraps long lines at the window edge, keeping their indentation"
+    (with-temp-buffer
+      (mail-thread-mode)
+      (expect visual-line-mode :to-be-truthy)
+      (expect visual-wrap-prefix-mode :to-be-truthy)
+      (expect truncate-lines :to-be nil))))
 
 (describe "open-mail-thread"
   (it "says so when point is on no article"

@@ -170,7 +170,12 @@ again from `evil-collection-setup-hook'."
   ;; depth faces, and its reply-buffer mode puts gnus-cite faces in front
   ;; of the message-cited-text ones message-mode paints
   (setq gnus-treat-highlight-citation nil
-        gnus-message-highlight-citation nil)
+        gnus-message-highlight-citation nil
+        ;; HTML paragraphs come unfilled and wrap at the window edge.
+        ;; Gnus applies this after the mode hooks on every article
+        gnus-article-truncate-lines nil)
+  (add-hook 'gnus-article-mode-hook #'visual-line-mode)
+  (add-hook 'gnus-article-mode-hook #'visual-wrap-prefix-mode)
   :config
   (add-to-list 'gnus-treatment-function-alist
                '(mail-treat-quotes highlight-mail-quotes) t))
@@ -214,6 +219,6 @@ again from `evil-collection-setup-hook'."
   :ensure nil
   :defer t
   :init
-  (setq mm-text-html-renderer 'shr))
+  (setq mm-text-html-renderer #'render-mail-html))
 
 ;;; config.el ends here

@@ -322,6 +322,9 @@ attachments are opened here."
 (define-derived-mode mail-thread-mode special-mode "Mail thread"
   "Major mode for reading every message of a thread in one buffer."
   (buffer-disable-undo)
+  ;; HTML paragraphs come unfilled, and the window decides where they wrap
+  (visual-line-mode)
+  (visual-wrap-prefix-mode)
   ;; a fill must not outlive the thread it was started for
   (add-hook 'kill-buffer-hook #'mail-thread-stop-fill nil t)
   (add-hook 'change-major-mode-hook #'mail-thread-stop-fill nil t))
