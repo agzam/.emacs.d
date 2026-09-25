@@ -167,8 +167,21 @@ An untimed `read-event' is idle, and a timer ends it."
                             (insert-file-contents file)
                             (mail-fetch-field "Message-ID")))
                         files))
-              (glyph-at-point ()
-                (char-after (line-beginning-position)))
+              ;; the queue glyph and Gnus's read mark that start the line
+              ;; of ARTICLE, wherever point is
+              (line-marks (article)
+                (save-excursion
+                  (gnus-summary-goto-subject article)
+                  (buffer-substring-no-properties (line-beginning-position)
+                                                  (+ 2 (line-beginning-position)))))
+              (line-face (article)
+                (save-excursion
+                  (gnus-summary-goto-subject article)
+                  (get-text-property (line-beginning-position) 'face)))
+              (article-below (article)
+                (save-excursion
+                  (gnus-summary-goto-subject article)
+                  (gnus-summary-find-next)))
               ;; what redisplay draws: an overlay face wins over the text's
               (quote-faces ()
                 (mapcar (lambda (text)
@@ -401,35 +414,134 @@ An untimed `read-event' is idle, and a timer ends it."
                 (set-buffer-modified-p nil)
                 (kill-buffer reply)
                 (setq reply nil)
+                ;; read and star toggle Gnus's own marks; they and the
+                ;; queue below move to the message below what they marked,
+                ;; and take a visual selection whole
+                (switch-to-buffer "*Summary nnmaildir+gmail:inbox*")
+                (let* ((fresh (email-e2e--article "fresh"))
+                       (below (article-below fresh))
+                       (after (article-below below))
+                       ;; displaying fresh further up read it
+                       (before (line-marks fresh)))
+                  (gnus-summary-goto-subject fresh)
+                  (execute-kbd-macro "!")
+                  (record "! marks a read message unread and moves down"
+                          (and (equal before " R")
+                               (equal (line-marks fresh) "  ")
+                               (eql (gnus-summary-article-number) below))
+                          :got (format "line starts %S, then %S, point on %S, below is %S"
+                                       before (line-marks fresh)
+                                       (gnus-summary-article-number) below))
+                  (execute-kbd-macro "k!")
+                  (record "! on an unread message marks it read"
+                          (and (equal (line-marks fresh) " r")
+                               (eql (gnus-summary-article-number) below))
+                          :got (format "line starts %S, point on %S"
+                                       (line-marks fresh) (gnus-summary-article-number)))
+                  (execute-kbd-macro "k=")
+                  (record "= stars the message and moves down"
+                          (and (equal (line-marks fresh) " !")
+                               (memq fresh gnus-newsgroup-marked)
+                               (eql (gnus-summary-article-number) below))
+                          :got (format "line starts %S, point on %S"
+                                       (line-marks fresh) (gnus-summary-article-number)))
+                  (execute-kbd-macro "k!")
+                  (record "! leaves a starred message alone and still moves down"
+                          (and (equal (line-marks fresh) " !")
+                               (eql (gnus-summary-article-number) below))
+                          :got (format "line starts %S, point on %S"
+                                       (line-marks fresh) (gnus-summary-article-number)))
+                  (execute-kbd-macro "k=")
+                  (record "= on a starred message unstars it and leaves it read"
+                          (and (equal (line-marks fresh) " r")
+                               (not (memq fresh gnus-newsgroup-marked))
+                               (not (memq fresh gnus-newsgroup-unreads)))
+                          :got (format "line starts %S" (line-marks fresh)))
+                  ;; visual state opens expreg-transient, which passes =
+                  ;; on to the summary but swallows ! and u
+                  (gnus-summary-goto-subject fresh)
+                  (execute-kbd-macro "Vj=")
+                  (record "= on a visual selection stars each message in it, ends visual state and moves below"
+                          (and (equal (mapcar #'line-marks (list fresh below)) '(" !" " !"))
+                               (eq evil-state 'normal)
+                               (not (region-active-p))
+                               (eql (gnus-summary-article-number) after))
+                          :got (format "lines start %S, %s state, region %S, point on %S, after is %S"
+                                       (mapcar #'line-marks (list fresh below)) evil-state
+                                       (region-active-p) (gnus-summary-article-number) after))
+                  (gnus-summary-goto-subject fresh)
+                  (execute-kbd-macro "Vj=")
+                  (record "= on a visual selection of starred messages unstars each, leaving it read"
+                          (equal (mapcar #'line-marks (list fresh below)) '(" r" " r"))
+                          :got (format "lines start %S" (mapcar #'line-marks (list fresh below)))))
                 ;; deferred deletion and archive: nothing reaches the
                 ;; store until x
-                (switch-to-buffer "*Summary nnmaildir+gmail:inbox*")
-                (gnus-summary-goto-subject (email-e2e--article "seen"))
-                (execute-kbd-macro "d")
-                (record "d queues the message at point for the trash and draws D"
-                        (and (eq (alist-get (email-e2e--article "seen") mail-marks) 'delete)
-                             (eq (glyph-at-point) ?D)
-                             (eq (car-safe (get-text-property (line-beginning-position) 'face))
-                                 'dired-flagged)
-                             (= 5 (length (messages-in inbox))))
-                        :got (format "%S, line starts with %c, face %S, %d files"
-                                     mail-marks (glyph-at-point)
-                                     (get-text-property (line-beginning-position) 'face)
-                                     (length (messages-in inbox))))
-                (execute-kbd-macro "u")
-                (record "u takes it back and clears the column"
-                        (and (null mail-marks) (eq (glyph-at-point) ?\s))
-                        :got (format "%S, line starts with %c" mail-marks (glyph-at-point)))
-                (execute-kbd-macro "d")
-                (gnus-summary-goto-subject (email-e2e--article "release plan"))
-                (execute-kbd-macro "A")
-                (record "A queues the whole thread at point for archive"
-                        (equal (mail-marked-articles 'archive)
-                               (sort (mapcar #'email-e2e--article
-                                             '("release plan" "Re: release plan (Bob)"
-                                               "Re: release plan (Ann)"))
-                                     #'<))
-                        :got (format "%S" mail-marks))
+                (let* ((seen (email-e2e--article "seen"))
+                       (below (article-below seen))
+                       (after (article-below below))
+                       (plan (mapcar #'email-e2e--article
+                                     '("release plan" "Re: release plan (Bob)"
+                                       "Re: release plan (Ann)")))
+                       (ann (car (last plan))))
+                  (gnus-summary-goto-subject seen)
+                  (execute-kbd-macro "d")
+                  (record "d queues the message at point for the trash, draws D and moves down"
+                          (and (eq (alist-get seen mail-marks) 'delete)
+                               (eq (aref (line-marks seen) 0) ?D)
+                               (eq (car-safe (line-face seen)) 'dired-flagged)
+                               (eql (gnus-summary-article-number) below)
+                               (= 5 (length (messages-in inbox))))
+                          :got (format "%S, line starts %S, face %S, point on %S, below is %S, %d files"
+                                       mail-marks (line-marks seen) (line-face seen)
+                                       (gnus-summary-article-number) below
+                                       (length (messages-in inbox))))
+                  (execute-kbd-macro "ku")
+                  (record "u takes it back, clears the column and moves down"
+                          (and (null mail-marks)
+                               (eq (aref (line-marks seen) 0) ?\s)
+                               (eql (gnus-summary-article-number) below))
+                          :got (format "%S, line starts %S, point on %S"
+                                       mail-marks (line-marks seen) (gnus-summary-article-number)))
+                  (gnus-summary-goto-subject seen)
+                  (execute-kbd-macro "Vjd")
+                  (record "d on a visual selection queues each message in it, ends visual state and moves below"
+                          (and (equal (mail-marked-articles 'delete) (sort (list seen below) #'<))
+                               (eq evil-state 'normal)
+                               (not (region-active-p))
+                               (eql (gnus-summary-article-number) after))
+                          :got (format "%S, %s state, region %S, point on %S, after is %S"
+                                       mail-marks evil-state (region-active-p)
+                                       (gnus-summary-article-number) after))
+                  (gnus-summary-goto-subject seen)
+                  (execute-kbd-macro "uu")
+                  (record "u twice from the top takes both messages back"
+                          (null mail-marks)
+                          :got (format "%S" mail-marks))
+                  ;; the release plan thread is the only one with more
+                  ;; than one message
+                  (let* ((threads (if (memq below plan)
+                                      (cons seen (copy-sequence plan))
+                                    (list seen below)))
+                         (last (if (memq below plan) ann below)))
+                    (gnus-summary-goto-subject seen)
+                    (execute-kbd-macro "VjA")
+                    (record "A on a visual selection queues every thread it touches and moves below them"
+                            (and (equal (mail-marked-articles 'archive) (sort threads #'<))
+                                 (eql (gnus-summary-article-number) (or (article-below last) last)))
+                            :got (format "%S, point on %S" mail-marks (gnus-summary-article-number))))
+                  (gnus-summary-goto-subject seen)
+                  (execute-kbd-macro "UU")
+                  (record "U twice from the top takes both threads back"
+                          (null mail-marks)
+                          :got (format "%S" mail-marks))
+                  (gnus-summary-goto-subject seen)
+                  (execute-kbd-macro "d")
+                  (gnus-summary-goto-subject (email-e2e--article "Re: release plan (Bob)"))
+                  (execute-kbd-macro "A")
+                  (record "A queues the whole thread at point for archive and moves below it"
+                          (and (equal (mail-marked-articles 'archive) (sort (copy-sequence plan) #'<))
+                               (eql (gnus-summary-article-number) (or (article-below ann) ann)))
+                          :got (format "%S, point on %S" mail-marks (gnus-summary-article-number))))
                 (execute-kbd-macro "x")
                 (record "x moves the queued deletion into the trash maildir"
                         (equal (message-ids (messages-in trash)) '("<seen@fixture.example>"))
