@@ -8,6 +8,7 @@
 (require 'buttercup)
 
 (defvar mail-trash-group "nnmaildir+gmail:trash")
+(defvar mail-archive-group "nnmaildir+gmail:archive")
 
 (load-module-file "modules/email/autoload/marks.el")
 
@@ -240,6 +241,15 @@ of the line after the last before a command runs."
         (expect (mail-mark-for-archive) :to-throw 'user-error)
         (expect mail-marks :to-be nil)
         (mail-mark-for-deletion)
+        (expect mail-marks :to-equal '((7 . delete))))))
+  (it "refuse to archive out of All Mail, which holds every message already"
+    ;; what Gmail does with a message expunged from All Mail is unverified
+    (marks-tests-in-summary '((7 0) (8 1) (9 0))
+      (let ((gnus-newsgroup-name mail-archive-group))
+        (expect (mail-mark-for-archive) :to-throw 'user-error)
+        (expect (mail-mark-thread-for-archive) :to-throw 'user-error)
+        (expect mail-marks :to-be nil)
+        (mail-mark-for-deletion)
         (expect mail-marks :to-equal '((7 . delete)))))))
 
 (describe "mail-unmark"
@@ -337,6 +347,40 @@ of the line after the last before a command runs."
       (expect gnus-newsgroup-unreads :to-be nil)
       (expect gnus-newsgroup-marked :to-equal '(2))
       (expect (gnus-summary-article-number) :to-be 3))))
+
+(describe "mail-mark-thread-read"
+  (it "marks every message of the thread at point read and moves below the thread"
+    (marks-tests-in-summary '((10 0) (11 1) (12 2) (13 0))
+      (setq gnus-newsgroup-unreads (list 10 11 12 13))
+      (gnus-summary-goto-subject 11)
+      (mail-mark-thread-read)
+      (expect gnus-newsgroup-unreads :to-equal '(13))
+      (expect marks-tests-marked :to-have-same-items-as
+              `((10 . ,gnus-del-mark) (11 . ,gnus-del-mark) (12 . ,gnus-del-mark)))
+      (expect (gnus-summary-article-number) :to-be 13)))
+  (it "keeps the star of a starred unread message, which Gnus's own thread command drops"
+    (marks-tests-in-summary '((10 0) (11 1) (13 0))
+      (setq gnus-newsgroup-unreads (list 10 11)
+            gnus-newsgroup-marked (list 11))
+      (mail-mark-thread-read)
+      (expect gnus-newsgroup-unreads :to-be nil)
+      (expect gnus-newsgroup-marked :to-equal '(11))
+      (expect (alist-get 11 marks-tests-marked) :to-equal gnus-ticked-mark)))
+  (it "takes every thread a selection touches and moves below the last"
+    (marks-tests-in-summary '((1 0) (2 1) (3 0) (4 0) (5 1) (6 0))
+      (setq gnus-newsgroup-unreads (list 1 2 3 4 5 6))
+      (marks-tests-select 2 4)
+      (mail-mark-thread-read)
+      (expect gnus-newsgroup-unreads :to-equal '(6))
+      (expect (gnus-summary-article-number) :to-be 6)
+      (expect mark-active :to-be nil)))
+  (it "skips the sparse placeholders Gnus invents for missing parents"
+    (marks-tests-in-summary '((-1 0) (10 1) (11 1))
+      (let ((gnus-newsgroup-sparse '(-1)))
+        (setq gnus-newsgroup-unreads (list 10 11))
+        (gnus-summary-goto-subject 11)
+        (mail-mark-thread-read))
+      (expect (mapcar #'car marks-tests-marked) :to-have-same-items-as '(10 11)))))
 
 (describe "mail-toggle-star"
   (it "stars the message at point and moves on"

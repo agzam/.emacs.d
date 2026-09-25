@@ -391,5 +391,87 @@ those wait in `mail-thread-waiting' for the fill, the rest stay a line."
                                      mail-thread-messages)))
         (mail-thread-goto-message message)))))
 
+;;; Acting on the message on screen
+;;
+;; Gnus's reply and marking commands work in the summary only, so the
+;; thread view and the article buffer run them there, with the summary's
+;; point on the message they show.
+
+;;;###autoload
+(defun mail-on-screen ()
+  "Summary and article of the message the current buffer shows.
+That is the message at point in the summary and in the thread view, and
+the article on display in the article buffer."
+  (cond ((derived-mode-p 'mail-thread-mode)
+         (cons mail-thread-summary-buffer
+               (mail-thread-message-article (mail-thread-message-at-point))))
+        ((derived-mode-p 'gnus-article-mode)
+         (cons gnus-article-current-summary (cdr gnus-article-current)))
+        (t (cons (current-buffer) (gnus-summary-article-number)))))
+
+(defun mail-summary-call (article command)
+  "Call COMMAND in the current summary with point on ARTICLE."
+  (unless (gnus-summary-goto-subject article nil t)
+    (user-error "The summary no longer shows this message"))
+  (call-interactively command))
+
+;;;###autoload
+(defun run-in-mail-summary (command &optional stay)
+  "Call COMMAND in the summary, on the message the current buffer shows.
+With STAY the selected window stays selected; otherwise the summary's
+window is selected first, so a reply leaves point in its message buffer."
+  (pcase-let ((`(,summary . ,article) (mail-on-screen)))
+    (cond ((eq summary (current-buffer))
+           (call-interactively command))
+          ((not (and summary (buffer-live-p (get-buffer summary))))
+           (user-error "The summary of this message is gone"))
+          ((not stay)
+           (pop-to-buffer summary)
+           (mail-summary-call article command))
+          ((get-buffer-window summary)
+           (with-selected-window (get-buffer-window summary)
+             (mail-summary-call article command)))
+          (t
+           (with-current-buffer summary
+             (mail-summary-call article command))))))
+
+;;;###autoload
+(defun reply-to-sender ()
+  "Reply to the sender of the message at point, quoting it."
+  (interactive nil gnus-summary-mode mail-thread-mode gnus-article-mode)
+  (run-in-mail-summary #'gnus-summary-reply-with-original))
+
+;;;###autoload
+(defun reply-to-everyone ()
+  "Reply to the sender and every recipient of the message at point, quoting it."
+  (interactive nil gnus-summary-mode mail-thread-mode gnus-article-mode)
+  (run-in-mail-summary #'gnus-summary-wide-reply-with-original))
+
+;;;###autoload
+(defun reply-to-list ()
+  "Reply to the mailing list of the message at point only, quoting it."
+  (interactive nil gnus-summary-mode mail-thread-mode gnus-article-mode)
+  (run-in-mail-summary #'gnus-summary-reply-to-list-with-original))
+
+;;;###autoload
+(defun follow-up-on-newsgroup ()
+  "Post a followup to the newsgroup of the message at point, quoting it."
+  (interactive nil gnus-summary-mode mail-thread-mode gnus-article-mode)
+  (run-in-mail-summary #'gnus-summary-followup-with-original))
+
+;;;###autoload
+(defun forward-mail ()
+  "Forward the message at point."
+  (interactive nil gnus-summary-mode mail-thread-mode gnus-article-mode)
+  (run-in-mail-summary #'gnus-summary-mail-forward))
+
+;;;###autoload
+(defun compose-new-mail ()
+  "Start a new message with the posting style of the group at hand."
+  (interactive nil gnus-group-mode gnus-summary-mode mail-thread-mode gnus-article-mode)
+  (if (derived-mode-p 'gnus-group-mode)
+      (call-interactively #'gnus-group-mail)
+    (run-in-mail-summary #'gnus-summary-mail-other-window)))
+
 (provide 'mail-thread)
 ;;; thread.el ends here

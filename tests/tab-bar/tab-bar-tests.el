@@ -299,7 +299,7 @@ interns for lambda suffixes."
     (expect (seq-uniq (tab-bar-tests--layout-symbols 'tab-bar-new-tab-transient))
             :to-have-same-items-as
             '(vulpea-find vulpea-backlinks open-gptel gh-notify telega
-              open-mail-inbox find-in-config-dir go-jira-browse-default-board
+              gnus find-in-config-dir go-jira-browse-default-board
               consult-zoxide consult-buffer consult-recent-file tab-bar-kill-tab))))
 
 (describe "desktop quarantine"

@@ -21,6 +21,7 @@
 (require 'seq)
 
 (defvar mail-trash-group)
+(defvar mail-archive-group)
 
 (defvar-local mail-marks nil
   "Queue of (ARTICLE . VERB) for this summary; VERB is `delete' or `archive'.")
@@ -91,8 +92,11 @@ Reading the region deactivates it, which also ends evil's visual state."
 
 (defun mail-mark-articles (articles verb)
   "Queue ARTICLES under VERB, or take them out of the queue when VERB is nil."
-  (when (and (eq verb 'archive) (equal gnus-newsgroup-name mail-trash-group))
-    (user-error "Archiving out of the trash deletes for good; move the message instead"))
+  (when (eq verb 'archive)
+    (cond ((equal gnus-newsgroup-name mail-trash-group)
+           (user-error "Archiving out of the trash deletes for good; move the message instead"))
+          ((equal gnus-newsgroup-name mail-archive-group)
+           (user-error "All Mail is the archive already; delete the message or archive it from a label"))))
   (save-excursion
     (dolist (article articles)
       (if verb
@@ -215,6 +219,18 @@ A star stays either way."
       (dolist (article articles)
         (mail-mark-keeping-star article mark)))
     (mail-move-below covered)))
+
+;;;###autoload
+(defun mail-mark-thread-read ()
+  "Mark the thread at point, or each one in the region, read.
+Stars stay, which Gnus's own `gnus-summary-kill-thread' drops.  Point
+moves below the threads."
+  (interactive nil gnus-summary-mode)
+  (let ((articles (mail-whole-threads (mail-articles-at-point-or-region))))
+    (save-excursion
+      (dolist (article articles)
+        (mail-mark-keeping-star article gnus-del-mark)))
+    (mail-move-below articles)))
 
 ;;;###autoload
 (defun mail-toggle-star ()

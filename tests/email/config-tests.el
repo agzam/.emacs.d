@@ -141,6 +141,23 @@ STATES is the evil state keyword `map!' reads right before the key."
             (push (cons (car body) item) states)))))
     (nreverse states)))
 
+(defun email-tests--localleader-pairs (form map)
+  "Alist of (KEYS . DEFINITION) FORM binds under the localleader of MAP.
+KEYS holds a prefix's key and the key under it apart by a space, as
+`kbd' reads them."
+  (let (pairs)
+    (cl-labels ((collect (body prefix)
+                  (dolist (pair (map-form-key-pairs body))
+                    (push (cons (concat prefix (car pair)) (cdr pair)) pairs))
+                  (dolist (group body)
+                    (when (eq (car-safe group) :prefix)
+                      (collect (cddr group) (concat prefix (car (cadr group)) " "))))))
+      (dolist (body (map-form-groups form map))
+        (dolist (group body)
+          (when (eq (car-safe group) :localleader)
+            (collect (cdr group) "")))))
+    (nreverse pairs)))
+
 (describe "email module bindings"
   :var* ((config (email-tests--config-forms 'gnus)))
 
@@ -183,7 +200,9 @@ STATES is the evil state keyword `map!' reads right before the key."
   (it "folds, moves and leaves inside the thread buffer"
     (let ((pairs (mapcan #'map-form-key-pairs
                          (map-form-groups config 'mail-thread-mode-map))))
-      (expect pairs :to-have-same-items-as
+      (expect (mapcar (lambda (key) (assoc key pairs))
+                      '("TAB" "<tab>" "RET" "<return>" "C-j" "C-k" "]]" "[[" "q"))
+              :to-equal
               '(("TAB" function mail-thread-toggle-message)
                 ("<tab>" function mail-thread-toggle-message)
                 ("RET" function mail-thread-open-article)
@@ -193,6 +212,74 @@ STATES is the evil state keyword `map!' reads right before the key."
                 ("]]" function mail-thread-next-message)
                 ("[[" function mail-thread-previous-message)
                 ("q" function mail-thread-quit)))))
+
+  (it "marks from the thread buffer through the summary, which draws the marks"
+    (let ((pairs (mapcan #'map-form-key-pairs
+                         (map-form-groups config 'mail-thread-mode-map))))
+      (expect (mapcar (lambda (key) (cdr (assoc key pairs)))
+                      '("d" "D" "a" "A" "u" "U" "!" "="))
+              :to-equal
+              (mapcar (lambda (command) `(cmd! (run-in-mail-summary #',command t)))
+                      '(mail-mark-for-deletion mail-mark-thread-for-deletion
+                        mail-mark-for-archive mail-mark-thread-for-archive
+                        mail-unmark mail-unmark-thread
+                        mail-toggle-read mail-toggle-star)))
+      ;; executing would delete the messages the view shows
+      (expect (assoc "x" pairs) :to-be nil)))
+
+  (it "answers and opens the same way wherever a message is read"
+    (dolist (map '(gnus-summary-mode-map gnus-article-mode-map mail-thread-mode-map))
+      (let ((pairs (mapcan #'map-form-key-pairs (map-form-groups config map)))
+            (leader (email-tests--localleader-pairs config map)))
+        (expect (list (cdr (assoc "r" pairs)) (cdr (assoc "R" pairs)))
+                :to-equal '((function reply-to-sender) (function reply-to-everyone)))
+        (expect (mapcar (lambda (keys) (cdr (assoc keys leader)))
+                        '("u" "/" "c" "f" "r l" "r n" "o g" "o l"))
+                :to-equal '((function sync-mail) (function search-mail)
+                            (function compose-new-mail) (function forward-mail)
+                            (function reply-to-list) (function follow-up-on-newsgroup)
+                            (function open-message-in-gmail)
+                            (function open-message-in-list-archive))))))
+
+  (it "takes r and R back from evil-collection in normal state"
+    (dolist (map '(gnus-summary-mode-map gnus-article-mode-map))
+      (let ((states (email-tests--key-states config map)))
+        (expect (list (cdr (assoc "r" states)) (cdr (assoc "R" states)))
+                :to-equal '(:n :n)))))
+
+  (it "folds threads with vim's fold keys"
+    (let ((pairs (mapcan #'map-form-key-pairs
+                         (map-form-groups config 'gnus-summary-mode-map))))
+      (expect (mapcar (lambda (key) (cdr (assoc key pairs)))
+                      '("TAB" "<tab>" "za" "zM" "zR"))
+              :to-equal '((function toggle-mail-thread-fold)
+                          (function toggle-mail-thread-fold)
+                          (function toggle-mail-thread-fold)
+                          (function gnus-summary-hide-all-threads)
+                          (function gnus-summary-show-all-threads)))))
+
+  (it "labels, narrows, sorts and handles threads from the summary's localleader"
+    (let ((leader (email-tests--localleader-pairs config 'gnus-summary-mode-map)))
+      (expect (mapcar (lambda (keys) (cdr (assoc keys leader)))
+                      '("m" "l" "n" "t f" "t r" "s d" "s a" "s s"))
+              :to-equal '((function gnus-summary-move-article)
+                          (function gnus-summary-copy-article)
+                          (function gnus-summary-limit-map)
+                          (function gnus-summary-refer-thread)
+                          (function mail-mark-thread-read)
+                          (function sort-mail-by-date)
+                          (function sort-mail-by-author)
+                          (function sort-mail-by-subject)))
+      ;; search moved to / so that s sorts, as in dired and ibuffer
+      (expect (assoc "s" leader) :to-be nil)
+      (expect (assoc "g" leader) :to-be nil)))
+
+  (it "gives the group buffer the summary's sync, search and new message keys"
+    (expect (email-tests--localleader-pairs config 'gnus-group-mode-map)
+            :to-equal '(("u" function sync-mail)
+                        ("/" function search-mail)
+                        ("c" function compose-new-mail)
+                        ("i" function open-mail-inbox))))
 
   (it "refreshes the routine groups from the group buffer's gR"
     ;; gR is gnus-group-get-new-news, which asks nnmaildir for a
@@ -343,7 +430,26 @@ window and deletes the summary's."
       (expect (buffer-string)
               :to-match "^;;;###autoload\n(defun gnus-user-format-function-D ")))
   (it "moves a queued deletion into the mirrored trash"
-    (expect mail-trash-group :to-equal "nnmaildir+gmail:trash")))
+    (expect mail-trash-group :to-equal "nnmaildir+gmail:trash"))
+  (it "knows the group of All Mail, where archiving is refused"
+    (expect mail-archive-group :to-equal "nnmaildir+gmail:archive")))
+
+(describe "email module autoloads"
+  (it "loads each command a key runs before its file has loaded"
+    ;; a key pressed before the file loads calls a void function otherwise
+    (pcase-dolist (`(,file . ,commands)
+                   '(("thread.el" reply-to-sender reply-to-everyone reply-to-list
+                      follow-up-on-newsgroup forward-mail compose-new-mail
+                      run-in-mail-summary mail-on-screen)
+                     ("mail.el" sort-mail-by-date sort-mail-by-author
+                      sort-mail-by-subject toggle-mail-thread-fold)
+                     ("marks.el" mail-mark-thread-read)))
+      (with-temp-buffer
+        (insert-file-contents
+         (expand-file-name (concat "modules/email/autoload/" file) test-config-root))
+        (dolist (command commands)
+          (expect (buffer-string)
+                  :to-match (format "^;;;###autoload\n(defun %s " command)))))))
 
 (describe "email module stars"
   (it "draws the star in a summary column of its own"
