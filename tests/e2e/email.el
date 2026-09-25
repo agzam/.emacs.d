@@ -112,6 +112,12 @@ An untimed `read-event' is idle, and a timer ends it."
              "<p style=\"color:#ffffff;background-color:#ffffff\">white on white</p>"
              "<blockquote><p>quoted once</p>"
              "<blockquote><p>quoted twice</p></blockquote></blockquote>"))
+    ;; longer than any window, so J has an article to scroll
+    (email-e2e--write-message (expand-file-name "cur/1700000006.7.fixture:2,S" html)
+                              "Dan <dan@example.com>" "long letter" "long"
+                              "Tue, 22 Sep 2026 13:00:00 +0000" nil nil
+                              (mapconcat (lambda (n) (format "line %d\n" n))
+                                         (number-sequence 1 300) ""))
     (email-e2e--write-message (expand-file-name "new/1700000001.1.fixture" inbox)
                               "Someone <someone@example.com>" "fresh" "fresh")
     (email-e2e--write-message (expand-file-name "cur/1700000000.2.fixture:2,S" inbox)
@@ -201,6 +207,13 @@ An untimed `read-event' is idle, and a timer ends it."
                                          (or (plist-get spec :foreground)
                                              (plist-get spec :background))))
                                   (if (keywordp (car-safe face)) (list face) (ensure-list face)))))))
+              ;; each window's buffer, left column and width
+              (layout ()
+                (format "%S" (mapcar (lambda (window)
+                                       (list (buffer-name (window-buffer window))
+                                             (window-left-column window)
+                                             (window-total-width window)))
+                                     (window-list nil 'nomini (frame-first-window)))))
               ;; buffer lines and screen lines the long paragraph takes
               (paragraph-lines ()
                 (save-excursion
@@ -475,7 +488,83 @@ An untimed `read-event' is idle, and a timer ends it."
                 (record "the article buffer wraps a long HTML paragraph instead of cutting it"
                         (pcase (paragraph-lines) (`(1 ,screen) (< 1 screen)))
                         :got (format "%S buffer and screen lines, truncate-lines %S"
-                                     (paragraph-lines) truncate-lines)))
+                                     (paragraph-lines) truncate-lines))
+                ;; the thread and the article open right of the summary,
+                ;; and a window left of Gnus keeps its width while Gnus
+                ;; lays out again: every read forces the article layout,
+                ;; q in the summary the group one
+                (delete-other-windows)
+                (switch-to-buffer "*Summary nnmaildir+gmail:html*")
+                (set-window-buffer (split-window nil nil 'left) (get-buffer-create "*beside*"))
+                (cl-flet ((summary-window ()
+                            (get-buffer-window "*Summary nnmaildir+gmail:html*"))
+                          (beside-width ()
+                            (window-total-width (get-buffer-window "*beside*")))
+                          (right-of-summary-p (buffer)
+                            (let ((summary (get-buffer-window "*Summary nnmaildir+gmail:html*"))
+                                  (window (get-buffer-window buffer)))
+                              (and summary window
+                                   (= (window-top-line summary) (window-top-line window))
+                                   (< (window-left-column summary) (window-left-column window))))))
+                  (let ((width (beside-width))
+                        (article "*Article nnmaildir+gmail:html*"))
+                    (gnus-summary-goto-subject (email-e2e--article "html letter"))
+                    (execute-kbd-macro (kbd "RET"))
+                    (record "RET opens the thread to the right of the summary"
+                            (and (eq (window-buffer (selected-window))
+                                     (get-buffer mail-thread-buffer-name))
+                                 (right-of-summary-p mail-thread-buffer-name)
+                                 (= width (beside-width)))
+                            :got (layout))
+                    (execute-kbd-macro (kbd "RET"))
+                    (record "the article opens to the right of the summary"
+                            (right-of-summary-p article)
+                            :got (layout))
+                    ;; the article is shown this time, so Gnus deletes the
+                    ;; summary's window before it lays out again
+                    (select-window (summary-window))
+                    (execute-kbd-macro (kbd "RET"))
+                    (execute-kbd-macro (kbd "RET"))
+                    (record "reading an article again leaves the window beside Gnus at its width"
+                            (= width (beside-width))
+                            :got (format "%d wide before, now %s" width (layout)))
+                    ;; RET once more from the summary while the thread shows
+                    (select-window (summary-window))
+                    (execute-kbd-macro (kbd "RET"))
+                    (select-window (summary-window))
+                    (execute-kbd-macro (kbd "RET"))
+                    (execute-kbd-macro "q")
+                    (record "q in the thread gives its window back to the summary"
+                            (and (eq (selected-window) (summary-window))
+                                 (null (get-buffer-window mail-thread-buffer-name))
+                                 (= width (beside-width)))
+                            :got (layout))
+                    (with-current-buffer "*Summary nnmaildir+gmail:html*"
+                      (gnus-summary-goto-subject (email-e2e--article "long letter")))
+                    (execute-kbd-macro "J")
+                    (record "J shows the article at point right of the summary, point staying there"
+                            (and (eq (selected-window) (summary-window))
+                                 (right-of-summary-p article)
+                                 (with-current-buffer article
+                                   (string-match-p "body of long letter" (buffer-string))))
+                            :got (layout))
+                    (let ((start (window-start (get-buffer-window article))))
+                      (execute-kbd-macro "J")
+                      (record "J again scrolls the article forward"
+                              (< start (window-start (get-buffer-window article)))
+                              :got (format "window start %d, then %d"
+                                           start (window-start (get-buffer-window article)))))
+                    (let ((start (window-start (get-buffer-window article))))
+                      (execute-kbd-macro "K")
+                      (record "K scrolls the article back"
+                              (< (window-start (get-buffer-window article)) start)
+                              :got (format "window start %d, then %d"
+                                           start (window-start (get-buffer-window article)))))
+                    (execute-kbd-macro "q")
+                    (record "q in the summary leaves the window beside Gnus at its width"
+                            (and (eq (window-buffer (selected-window)) (get-buffer gnus-group-buffer))
+                                 (= width (beside-width)))
+                            :got (format "%d wide before, now %s" width (layout))))))
             (error (record "flow signalled" nil :err e)))
         (when (buffer-live-p reply)
           (with-current-buffer reply
@@ -494,6 +583,9 @@ An untimed `read-event' is idle, and a timer ends it."
                 (gnus-summary-exit-no-update))))
           (with-current-buffer gnus-group-buffer
             (gnus-group-exit)))
+        (when-let* ((beside (get-buffer "*beside*")))
+          (kill-buffer beside))
+        (delete-other-windows)
         (discard-input)))
     (nreverse results)))
 
