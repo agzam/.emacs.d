@@ -27,6 +27,9 @@
 (defvar mail-trash-group "nnmaildir+gmail:trash"
   "Group a queued deletion is moved into; mbsync mirrors it from Gmail's Trash.")
 
+(defvar mail-archive-group "nnmaildir+gmail:archive"
+  "Group mbsync mirrors from Gmail's All Mail, where archived mail lives.")
+
 (defvar mail-groups (list mail-inbox-group "nntp+news.gmane.io:gmane.emacs.devel")
   "Groups Gnus subscribes to on startup, on top of every maildir group.")
 
@@ -110,19 +113,30 @@
   (add-hook 'gnus-group-mode-hook #'gnus-topic-mode)
   (add-hook 'gnus-started-hook #'subscribe-mail-groups)
 
-  (map! :map gnus-group-mode-map
-        (:localleader
-         :desc "sync"   "u" #'sync-mail
-         :desc "search" "s" #'search-mail
-         :desc "inbox"  "i" #'open-mail-inbox))
-
   (defun bind-mail-keys (mode &rest _)
-    "Bind the keys of this module that evil-collection owns, when MODE is gnus.
+    "Bind this module's keys on the Gnus maps when MODE is gnus.
 evil-collection evilifies gnus from an after-load hook of its own, and
 `elpaca-after-init' registers that hook after this one, so its RET (which
-only scrolls the article) and its `gR' win unless the keys are applied
-again from `evil-collection-setup-hook'."
+only scrolls the article), its `gR' and its r and R win unless the keys
+are applied again from `evil-collection-setup-hook'."
     (when (eq mode 'gnus)
+      ;; a key reads the same wherever a message is read; the thread
+      ;; view's map exists once its file loads, and general waits for it
+      (map! :map (gnus-summary-mode-map gnus-article-mode-map mail-thread-mode-map)
+            ;; both quote the message; the capital answers everyone
+            :n "r" #'reply-to-sender
+            :n "R" #'reply-to-everyone
+            (:localleader
+             :desc "sync"            "u" #'sync-mail
+             :desc "search all mail" "/" #'search-mail
+             :desc "new message"     "c" #'compose-new-mail
+             :desc "forward"         "f" #'forward-mail
+             (:prefix ("r" . "reply")
+              :desc "to the list only" "l" #'reply-to-list
+              :desc "on the newsgroup" "n" #'follow-up-on-newsgroup)
+             (:prefix ("o" . "open")
+              :desc "in Gmail"        "g" #'open-message-in-gmail
+              :desc "in list archive" "l" #'open-message-in-list-archive)))
       (map! :map gnus-summary-mode-map
             :n "RET" #'open-mail-thread
             :n "<return>" #'open-mail-thread
@@ -142,15 +156,33 @@ again from `evil-collection-setup-hook'."
             :n "x" #'mail-execute-marks
             :n "J" #'gnus-summary-scroll-up
             :n "K" #'gnus-summary-scroll-down
+            ;; vim's folds, over threads
+            :n "TAB" #'toggle-mail-thread-fold
+            :n "<tab>" #'toggle-mail-thread-fold
+            :n "za" #'toggle-mail-thread-fold
+            :n "zM" #'gnus-summary-hide-all-threads
+            :n "zR" #'gnus-summary-show-all-threads
             (:localleader
-             :desc "sync"          "u" #'sync-mail
-             :desc "search"        "s" #'search-mail
-             :desc "open in Gmail" "g" #'open-message-in-gmail
-             :desc "list archive"  "l" #'open-message-in-list-archive))
+             ;; Gmail's Move to and Label as: a label is a group
+             :desc "move to label" "m" #'gnus-summary-move-article
+             :desc "add label"     "l" #'gnus-summary-copy-article
+             :desc "narrow"        "n" #'gnus-summary-limit-map
+             (:prefix ("t" . "thread")
+              :desc "fetch from every group" "f" #'gnus-summary-refer-thread
+              :desc "mark read"              "r" #'mail-mark-thread-read)
+             (:prefix ("s" . "sort")
+              :desc "date"    "d" #'sort-mail-by-date
+              :desc "author"  "a" #'sort-mail-by-author
+              :desc "subject" "s" #'sort-mail-by-subject)))
       ;; gR is gnus-group-get-new-news, a server-wide nnmaildir scan; gr
       ;; stays Gnus's own per-group rescan, which is already cheap
       (map! :map gnus-group-mode-map
-            :n "gR" #'refresh-mail-groups)))
+            :n "gR" #'refresh-mail-groups
+            (:localleader
+             :desc "sync"            "u" #'sync-mail
+             :desc "search all mail" "/" #'search-mail
+             :desc "new message"     "c" #'compose-new-mail
+             :desc "inbox"           "i" #'open-mail-inbox))))
 
   (bind-mail-keys 'gnus)
   (add-hook 'evil-collection-setup-hook #'bind-mail-keys)
@@ -167,7 +199,17 @@ again from `evil-collection-setup-hook'."
         :n "C-k" #'mail-thread-previous-message
         :n "]]" #'mail-thread-next-message
         :n "[[" #'mail-thread-previous-message
-        :n "q" #'mail-thread-quit))
+        :n "q" #'mail-thread-quit
+        ;; the summary's mark keys, on the message at point or its
+        ;; thread; the summary beside the view draws the marks
+        :n "d" (cmd! (run-in-mail-summary #'mail-mark-for-deletion t))
+        :n "D" (cmd! (run-in-mail-summary #'mail-mark-thread-for-deletion t))
+        :n "a" (cmd! (run-in-mail-summary #'mail-mark-for-archive t))
+        :n "A" (cmd! (run-in-mail-summary #'mail-mark-thread-for-archive t))
+        :n "u" (cmd! (run-in-mail-summary #'mail-unmark t))
+        :n "U" (cmd! (run-in-mail-summary #'mail-unmark-thread t))
+        :n "!" (cmd! (run-in-mail-summary #'mail-toggle-read t))
+        :n "=" (cmd! (run-in-mail-summary #'mail-toggle-star t))))
 
 (use-package gnus-win
   :ensure nil

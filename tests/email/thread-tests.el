@@ -515,3 +515,117 @@ is the only treatment."
         (when-let* ((thread (get-buffer mail-thread-buffer-name)))
           (kill-buffer thread))
         (kill-buffer summary)))))
+
+(defvar thread-tests-calls nil
+  "Where `thread-tests-probe' ran: its buffer, the article at point, the window.")
+
+(defun thread-tests-probe ()
+  "Log where this command runs into `thread-tests-calls'."
+  (interactive)
+  (push (list (current-buffer) (gnus-summary-article-number) (selected-window))
+        thread-tests-calls))
+
+(describe "mail-on-screen"
+  (it "answers the summary and the message at point in the thread view"
+    (thread-tests-with-buffer 11 nil
+      (goto-char (mail-thread-message-marker (thread-tests-message 12)))
+      (forward-line 1)
+      (expect (mail-on-screen) :to-equal (cons summary 12))))
+  (it "answers the summary and the article on display in the article buffer"
+    (let ((summary (generate-new-buffer " *thread-tests summary*"))
+          (gnus-article-current '("nnmaildir+gmail:inbox" . 12)))
+      (unwind-protect
+          (with-temp-buffer
+            (gnus-article-mode)
+            (setq gnus-article-current-summary summary)
+            (expect (mail-on-screen) :to-equal (cons summary 12)))
+        (kill-buffer summary))))
+  (it "answers the summary itself and the article at point there"
+    (with-temp-buffer
+      (thread-tests-summary-lines '(10 11 12))
+      (gnus-summary-goto-subject 11)
+      (expect (mail-on-screen) :to-equal (cons (current-buffer) 11)))))
+
+(describe "run-in-mail-summary"
+  (before-each (setq thread-tests-calls nil))
+  (it "runs the command in the summary on the message at point, and stays in the view"
+    (thread-tests-with-buffer 11 nil
+      (save-window-excursion
+        (delete-other-windows)
+        (set-window-buffer (selected-window) (current-buffer))
+        (let ((view (selected-window))
+              (summary-window (split-window nil nil 'left)))
+          (set-window-buffer summary-window summary)
+          (goto-char (mail-thread-message-marker (thread-tests-message 12)))
+          (run-in-mail-summary #'thread-tests-probe t)
+          (expect thread-tests-calls :to-equal (list (list summary 12 summary-window)))
+          (expect (selected-window) :to-be view)))))
+  (it "runs the command in a summary no window shows"
+    (thread-tests-with-buffer 11 nil
+      (save-window-excursion
+        (delete-other-windows)
+        (set-window-buffer (selected-window) (current-buffer))
+        (goto-char (mail-thread-message-marker (thread-tests-message 10)))
+        (run-in-mail-summary #'thread-tests-probe t)
+        (expect (butlast (car thread-tests-calls)) :to-equal (list summary 10))
+        (expect (window-buffer (selected-window)) :to-be (current-buffer)))))
+  (it "selects the summary's window first unless told to stay, so a reply ends up selected"
+    (thread-tests-with-buffer 11 nil
+      (save-window-excursion
+        (delete-other-windows)
+        (set-window-buffer (selected-window) (current-buffer))
+        (let ((summary-window (split-window nil nil 'left)))
+          (set-window-buffer summary-window summary)
+          (goto-char (mail-thread-message-marker (thread-tests-message 12)))
+          (run-in-mail-summary #'thread-tests-probe)
+          (expect thread-tests-calls :to-equal (list (list summary 12 summary-window)))
+          (expect (selected-window) :to-be summary-window)))))
+  (it "calls the command right there in the summary"
+    (with-temp-buffer
+      (thread-tests-summary-lines '(10 11))
+      (gnus-summary-goto-subject 11)
+      (run-in-mail-summary #'thread-tests-probe t)
+      (expect (butlast (car thread-tests-calls)) :to-equal (list (current-buffer) 11))))
+  (it "refuses when the summary is gone"
+    (thread-tests-with-buffer 11 nil
+      (kill-buffer summary)
+      (expect (run-in-mail-summary #'thread-tests-probe t) :to-throw 'user-error)
+      (expect thread-tests-calls :to-be nil)))
+  (it "refuses a message the summary no longer shows, instead of acting on another"
+    (thread-tests-with-buffer 11 nil
+      (with-current-buffer summary
+        (setq gnus-newsgroup-data
+              (seq-remove (lambda (data) (eql (gnus-data-number data) 12))
+                          gnus-newsgroup-data)))
+      (goto-char (mail-thread-message-marker (thread-tests-message 12)))
+      (expect (run-in-mail-summary #'thread-tests-probe t) :to-throw 'user-error)
+      (expect thread-tests-calls :to-be nil))))
+
+(describe "the reply commands"
+  (it "run Gnus's quoting commands in the summary, which they select"
+    (let (calls)
+      (cl-letf (((symbol-function 'run-in-mail-summary)
+                 (lambda (command &optional stay) (push (list command stay) calls))))
+        (reply-to-sender)
+        (reply-to-everyone)
+        (reply-to-list)
+        (follow-up-on-newsgroup)
+        (forward-mail))
+      (expect (nreverse calls)
+              :to-equal '((gnus-summary-reply-with-original nil)
+                          (gnus-summary-wide-reply-with-original nil)
+                          (gnus-summary-reply-to-list-with-original nil)
+                          (gnus-summary-followup-with-original nil)
+                          (gnus-summary-mail-forward nil)))))
+  (it "start a new message with the group buffer's own command there"
+    (let (calls)
+      (cl-letf (((symbol-function 'run-in-mail-summary)
+                 (lambda (command &optional stay) (push (list command stay) calls)))
+                ((symbol-function 'gnus-group-mail)
+                 (lambda (&rest _) (interactive) (push 'group-mail calls))))
+        (with-temp-buffer
+          (setq major-mode 'gnus-group-mode)
+          (compose-new-mail))
+        (compose-new-mail))
+      (expect (nreverse calls)
+              :to-equal '(group-mail (gnus-summary-mail-other-window nil))))))
