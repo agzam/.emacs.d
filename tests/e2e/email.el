@@ -1338,6 +1338,16 @@ An untimed `read-event' is idle, and a timer ends it."
                   (record "! in search results marks the inbox copy unread, and q saves it"
                           (equal (where "twin-read") '(:inbox "" :archive "S" :trash nil))
                           :got (format "%S" (where "twin-read")))
+                  ;; hits/ still names the inbox file as it was before ! renamed
+                  ;; it, as notmuch does until its next run
+                  (search-for "twin-read")
+                  (record "a search finds the inbox copy Gnus renamed since notmuch indexed it"
+                          (and (derived-mode-p 'gnus-summary-mode)
+                               (equal (nnselect-article-group (car gnus-newsgroup-articles))
+                                      "nnmaildir+gmail:inbox"))
+                          :got (format "%s in %s" major-mode (buffer-name)))
+                  (when (derived-mode-p 'gnus-summary-mode)
+                    (execute-kbd-macro "q"))
                   (search-for "twin-star")
                   (execute-kbd-macro "=q")
                   (record "= in search results stars the inbox copy"

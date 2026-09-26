@@ -529,23 +529,70 @@ would have been bounded by in `large'."
   (it "drops the lines before the first message"
     (expect (message-copies '("x" "a1" "a2") '("a1")) :to-equal '(("a1" "a2")))))
 
+(defun mail-tests--fill-store (root files)
+  "Create FILES, named relative to the store at ROOT; each maildir gets cur/ and new/."
+  (dolist (file files)
+    (let* ((path (expand-file-name file root))
+           (maildir (file-name-directory (directory-file-name (file-name-directory path)))))
+      (dolist (sub '("cur" "new"))
+        (make-directory (expand-file-name sub maildir) t))
+      (write-region "" nil path nil 'silent))))
+
+(defmacro mail-tests--in-store (files &rest body)
+  "Run BODY with `root' naming a temporary mail store that holds FILES."
+  (declare (indent 1))
+  `(let ((root (file-name-as-directory (make-temp-file "mail-store" t))))
+     (unwind-protect
+         (progn
+           (mail-tests--fill-store root ,files)
+           ,@body)
+       (delete-directory root t))))
+
+(defun mail-tests--in (root &rest files)
+  "FILES, named relative to the store at ROOT, as absolute names."
+  (mapcar (lambda (file) (concat root file)) files))
+
 (describe "likeliest-copy"
-  :var ((root "/store/"))
   (it "takes the inbox copy over any other"
-    (expect (likeliest-copy '("/store/archive/cur/1" "/store/github/cur/2" "/store/inbox/cur/3")
-                            root)
-            :to-equal "/store/inbox/cur/3"))
+    (mail-tests--in-store '("archive/cur/1" "github/cur/2" "inbox/cur/3")
+      (expect (likeliest-copy (mail-tests--in root "archive/cur/1" "github/cur/2" "inbox/cur/3")
+                              root)
+              :to-equal (concat root "inbox/cur/3"))))
   (it "takes a label read at startup over All Mail, and All Mail over a list label"
-    (expect (likeliest-copy '("/store/archive/cur/1" "/store/github/new/2") root)
-            :to-equal "/store/github/new/2")
-    (expect (likeliest-copy '("/store/emacs/new/1" "/store/archive/cur/2") root)
-            :to-equal "/store/archive/cur/2"))
+    (mail-tests--in-store '("archive/cur/1" "github/new/2" "emacs/new/3" "archive/cur/4")
+      (expect (likeliest-copy (mail-tests--in root "archive/cur/1" "github/new/2") root)
+              :to-equal (concat root "github/new/2"))
+      (expect (likeliest-copy (mail-tests--in root "emacs/new/3" "archive/cur/4") root)
+              :to-equal (concat root "archive/cur/4"))))
   (it "takes the trash copy last"
-    (expect (likeliest-copy '("/store/trash/cur/1" "/store/emacs/cur/2") root)
-            :to-equal "/store/emacs/cur/2"))
+    (mail-tests--in-store '("trash/cur/1" "emacs/cur/2")
+      (expect (likeliest-copy (mail-tests--in root "trash/cur/1" "emacs/cur/2") root)
+              :to-equal (concat root "emacs/cur/2"))))
   (it "keeps notmuch's order between copies of one rank"
-    (expect (likeliest-copy '("/store/github/cur/1" "/store/job/cur/2") root)
-            :to-equal "/store/github/cur/1")))
+    (mail-tests--in-store '("github/cur/1" "job/cur/2")
+      (expect (likeliest-copy (mail-tests--in root "github/cur/1" "job/cur/2") root)
+              :to-equal (concat root "github/cur/1"))))
+  (it "takes a copy under the name Gnus gave it after notmuch indexed it"
+    ;; a scan moves new mail into cur/, and a saved flag renames the file
+    (mail-tests--in-store '("archive/new/1:2," "inbox/cur/2:2,S")
+      (expect (likeliest-copy (mail-tests--in root "archive/new/1:2," "inbox/new/2:2,") root)
+              :to-equal (concat root "inbox/cur/2:2,S"))))
+  (it "passes over a copy that is gone"
+    (mail-tests--in-store '("archive/cur/1:2,S" "inbox/cur/other:2,")
+      (expect (likeliest-copy (mail-tests--in root "archive/cur/1:2,S" "inbox/cur/2:2,S") root)
+              :to-equal (concat root "archive/cur/1:2,S"))))
+  (it "answers nil when every copy is gone"
+    (mail-tests--in-store '("archive/cur/other:2," "inbox/cur/other:2,")
+      (expect (likeliest-copy (mail-tests--in root "archive/cur/1:2," "inbox/cur/2:2,") root)
+              :to-be nil)))
+  (it "reads a cur/ once for every copy one search looks up in it"
+    (mail-tests--in-store '("inbox/cur/1:2,S" "inbox/cur/2:2,S")
+      (let ((listings (make-hash-table :test #'equal)))
+        (spy-on 'maildir-file-names :and-call-through)
+        (expect (list (likeliest-copy (mail-tests--in root "inbox/new/1:2,") root listings)
+                      (likeliest-copy (mail-tests--in root "inbox/new/2:2,") root listings))
+                :to-equal (mail-tests--in root "inbox/cur/1:2,S" "inbox/cur/2:2,S"))
+        (expect (spy-calls-count 'maildir-file-names) :to-be 1)))))
 
 (defun mail-tests--notmuch (dir files)
   "Stand-in notmuch in DIR: log its arguments to DIR/args, print FILES."
@@ -559,12 +606,13 @@ would have been bounded by in `large'."
     (set-file-modes script #o755)
     script))
 
-(defmacro mail-tests--parsing (firsts all query &rest body)
+(defmacro mail-tests--parsing (store firsts all query &rest body)
   "Run BODY after the likeliest-copy advice read FIRSTS for QUERY.
-FIRSTS is what the first notmuch run left in the engine's buffer, ALL
-what the second run prints.  BODY sees what reached the parser in
-`parsed' and notmuch's arguments in `runs'."
-  (declare (indent 3))
+STORE names the files the store holds, relative to `root'.  FIRSTS is
+what the first notmuch run left in the engine's buffer, ALL what the
+second run prints.  BODY sees what reached the parser in `parsed' and
+notmuch's arguments in `runs'."
+  (declare (indent 4))
   `(let* ((dir (make-temp-file "mail-tests" t))
           (root (file-name-as-directory dir))
           (gnus-search-notmuch-config-file "/config/file")
@@ -574,6 +622,7 @@ what the second run prints.  BODY sees what reached the parser in
           parsed runs)
      (unwind-protect
          (with-current-buffer (slot-value engine 'proc-buffer)
+           (mail-tests--fill-store root ,store)
            (insert (mapconcat (lambda (file) (concat file "\n")) ,firsts "")
                    "\nProcess search-nnmaildir:gmail finished\n")
            (search-likeliest-copies-a (lambda (&rest _) (setq parsed (buffer-string)))
@@ -592,19 +641,34 @@ what the second run prints.  BODY sees what reached the parser in
           (mail-archive-group "nnmaildir+gmail:archive")
           (mail-trash-group "nnmaildir+gmail:trash")
           (mail-bulk-groups '("nnmaildir+gmail:archive")))
-      (mail-tests--parsing (list (concat root "archive/cur/a") (concat root "archive/cur/b"))
+      (mail-tests--parsing '("archive/cur/a" "inbox/cur/a2" "archive/cur/b" "github/cur/b2")
+          (list (concat root "archive/cur/a") (concat root "archive/cur/b"))
           (list (concat root "archive/cur/a") (concat root "inbox/cur/a2")
                 (concat root "archive/cur/b") (concat root "github/cur/b2"))
           '((query . "from:x") (raw . t) (limit . 500))
         (expect parsed :to-equal (concat root "inbox/cur/a2\n" root "github/cur/b2\n"))
         ;; the second run names every copy of the same newest 500
         (expect runs :to-equal '("--config=/config/file search --output=files --limit=500 from:x")))))
+  (it "hands the parser a copy Gnus renamed under its new name, and drops a gone message"
+    ;; notmuch names the files as they were at its last run
+    (let ((mail-inbox-group "nnmaildir+gmail:inbox")
+          (mail-archive-group "nnmaildir+gmail:archive")
+          (mail-trash-group "nnmaildir+gmail:trash")
+          (mail-bulk-groups '("nnmaildir+gmail:archive")))
+      (mail-tests--parsing '("archive/new/a:2," "inbox/cur/a2:2,S" "archive/cur/c:2,S")
+          (list (concat root "archive/new/a:2,") (concat root "archive/cur/b:2,")
+                (concat root "archive/cur/c:2,S"))
+          (list (concat root "archive/new/a:2,") (concat root "inbox/new/a2:2,")
+                (concat root "archive/cur/b:2,") (concat root "inbox/cur/b2:2,")
+                (concat root "archive/cur/c:2,S"))
+          '((query . "from:x") (raw . t))
+        (expect parsed :to-equal (concat root "inbox/cur/a2:2,S\n" root "archive/cur/c:2,S\n")))))
   (it "keeps the first run's hits when the second run fails"
     (let ((firsts (list "/store/archive/cur/a")))
-      (mail-tests--parsing firsts nil '((query . "from:x") (raw . t))
+      (mail-tests--parsing nil firsts nil '((query . "from:x") (raw . t))
         (expect parsed :to-match "\\`/store/archive/cur/a\n"))))
   (it "leaves a thread search alone, which asks for every copy already"
-    (mail-tests--parsing (list "/store/archive/cur/a" "/store/inbox/cur/a2") (list "/x")
+    (mail-tests--parsing nil (list "/store/archive/cur/a" "/store/inbox/cur/a2") (list "/x")
         '((query . "id:a") (thread . t))
       (expect parsed :to-match "\\`/store/archive/cur/a\n/store/inbox/cur/a2\n")
       (expect runs :to-be nil))))
