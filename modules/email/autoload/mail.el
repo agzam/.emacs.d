@@ -322,6 +322,36 @@ marks and moves in search results would miss the inbox."
               (insert copy "\n")))))))
   (funcall fn engine server query groups))
 
+;;; Flags set elsewhere
+;;
+;; nnmaildir remembers each file's flags from when it read the file, and
+;; mbsync renames the file whenever the phone changes one.
+
+(defun rebase-mail-flags (from to onto)
+  "Maildir suffix ONTO, with the flags that differ from FROM to TO set as in TO."
+  (let ((from (string-to-list (substring from 3)))
+        (to (string-to-list (substring to 3))))
+    (concat ":2," (sort (seq-union (seq-difference (string-to-list (substring onto 3))
+                                                   (seq-difference from to))
+                                   (seq-difference to from))
+                        #'<))))
+
+;;;###autoload
+(defun keep-flags-set-elsewhere-a (fn article new-suffix curdir)
+  "Call FN to give ARTICLE in CURDIR the flags of NEW-SUFFIX, keeping the rest.
+nnmaildir derives NEW-SUFFIX from the flags it remembers, and renaming
+the file to it would drop a flag the phone changed since."
+  (let* ((prefix (nnmaildir--art-prefix article))
+         (old (nnmaildir--art-suffix article))
+         (file (current-mail-file (concat curdir prefix old)
+                                  (make-hash-table :test #'equal)))
+         (now (and file (substring (file-name-nondirectory file) (length prefix)))))
+    (funcall fn article
+             (if (and now (not (equal now old)) (string-prefix-p ":2," now))
+                 (rebase-mail-flags old new-suffix now)
+               new-suffix)
+             curdir)))
+
 ;;; Order and folds
 
 (defvar-local mail-sort-reversed nil

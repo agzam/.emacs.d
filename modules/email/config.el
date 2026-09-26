@@ -247,15 +247,21 @@ columns would go to the window left of Gnus."
   ;; ahead of Gnus's own function, which marks a starred unread message
   ;; read as it is displayed and drops the star with it
   (add-hook 'gnus-mark-article-hook #'mail-keep-star-on-read-h)
+  ;; a summary's exit writes its whole view of read and star; what it
+  ;; held on entry tells its own changes from those made elsewhere
+  (add-hook 'gnus-select-group-hook #'note-entry-marks-h)
   ;; a summary open under a search learns what the search changed, or
   ;; its own exit would write the older state back
-  (add-hook 'gnus-select-group-hook #'note-search-entry-marks-h)
   (add-hook 'gnus-summary-prepare-exit-hook #'carry-search-marks-h)
   ;; mail a search found may lie above its group's active range, where
   ;; nnselect saves no read mark
   (add-hook 'gnus-summary-prepare-exit-hook #'activate-search-hit-groups-h)
   ;; a summary's exit would unmark the mail that arrived after it opened
-  (advice-add 'gnus-update-read-articles :around #'keep-newer-read-marks-a))
+  (advice-add 'gnus-update-read-articles :around #'keep-newer-read-marks-a)
+  ;; and it would undo what a refresh brought from the phone meanwhile;
+  ;; a label saves before the prepare-exit hook runs, a search after it
+  (add-hook 'gnus-exit-group-hook #'keep-group-changes-h)
+  (add-hook 'gnus-summary-prepare-exit-hook #'keep-search-group-changes-h))
 
 (use-package gnus-art
   :ensure nil
@@ -284,7 +290,9 @@ columns would go to the window left of Gnus."
   (advice-add 'nnmaildir-request-scan :around #'defer-mail-server-scan-a)
   (advice-add 'nnmaildir-request-group :around #'scan-unknown-mail-group-a)
   (advice-add 'nnmaildir-request-accept-article :around #'scan-unknown-mail-group-a)
-  (advice-add 'nnmaildir-base-name-to-article-number :around #'scan-mail-group-on-miss-a))
+  (advice-add 'nnmaildir-base-name-to-article-number :around #'scan-mail-group-on-miss-a)
+  ;; a flag Gnus saves would drop the flags the phone changed on that file
+  (advice-add 'nnmaildir--article-set-flags :around #'keep-flags-set-elsewhere-a))
 
 (use-package gnus-search
   :ensure nil

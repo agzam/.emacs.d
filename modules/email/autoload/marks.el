@@ -394,14 +394,14 @@ No drops the queue, and \\[keyboard-quit] stays in the summary."
 ;;; A search and the summaries open under it
 
 (defvar-local mail-entry-marks nil
-  "Unread and starred articles of a search summary as it opened, a cons.")
+  "Unread and starred articles of this summary as it opened, a cons.")
 
 ;;;###autoload
-(defun note-search-entry-marks-h ()
-  "Note which articles of a search summary are unread and starred as it opens."
-  (when (gnus-nnselect-group-p gnus-newsgroup-name)
-    (setq mail-entry-marks (cons (copy-sequence gnus-newsgroup-unreads)
-                                 (copy-sequence gnus-newsgroup-marked)))))
+(defun note-entry-marks-h ()
+  "Note which articles of this summary are unread and starred as it opens."
+  (setq mail-entry-marks (cons (gnus-sorted-union gnus-newsgroup-unreads
+                                                  gnus-newsgroup-unselected)
+                               (copy-sequence gnus-newsgroup-marked))))
 
 (defun mail-set-read-and-star (article unread starred)
   "Make this summary's ARTICLE read unless UNREAD, and starred when STARRED."
@@ -416,7 +416,9 @@ No drops the queue, and \\[keyboard-quit] stays in the summary."
   "Give the summaries open under this search what it changed in read and star.
 The search writes its changes to the groups as it closes, and a summary
 left open would write its own older state back when it exits."
-  (when (and mail-entry-marks (not gnus-group-is-exiting-without-update-p))
+  (when (and mail-entry-marks
+             (gnus-nnselect-group-p gnus-newsgroup-name)
+             (not gnus-group-is-exiting-without-update-p))
     (let (changes)
       (dolist (article gnus-newsgroup-articles)
         (let ((unread (and (memq article gnus-newsgroup-unreads) t))
@@ -465,5 +467,58 @@ Gnus would take the read mark off every article above it."
                                  (gnus-info-read (gnus-get-info group)))))
                  compute))
     (funcall fn group unread compute)))
+
+;;; Changes a refresh merged while a summary was open
+;;
+;; A summary saves its whole view of read and star when it exits, over
+;; what a refresh brought from the phone into its groups meanwhile.
+
+(defun mail-toggled (from to)
+  "Articles in just one of the sorted lists FROM and TO."
+  (gnus-sorted-union (gnus-sorted-difference from to)
+                     (gnus-sorted-difference to from)))
+
+(defun merge-mark-list (mine entry theirs)
+  "MINE, with the changes THEIRS made since ENTRY where MINE made none.
+Each is a sorted list of the articles in one state, such as unread."
+  (mail-toggled mine (gnus-sorted-difference (mail-toggled entry theirs)
+                                             (mail-toggled entry mine))))
+
+(defun keep-group-changes (info)
+  "Give this summary the changes in read and star INFO got since it opened.
+INFO numbers the articles the way the summary does."
+  (when-let* ((entry mail-entry-marks)
+              (active gnus-newsgroup-active))
+    (let ((unread (merge-mark-list
+                   (gnus-sorted-union gnus-newsgroup-unreads gnus-newsgroup-unselected)
+                   (car entry)
+                   (range-uncompress
+                    (range-difference (list active) (gnus-info-read info))))))
+      (setq gnus-newsgroup-unselected (gnus-sorted-intersection gnus-newsgroup-unselected
+                                                                unread)
+            gnus-newsgroup-unreads (gnus-sorted-difference unread gnus-newsgroup-unselected)
+            gnus-newsgroup-marked (merge-mark-list
+                                   gnus-newsgroup-marked (cdr entry)
+                                   (range-uncompress
+                                    (range-intersection
+                                     (list active) (alist-get 'tick (gnus-info-marks info)))))))))
+
+;;;###autoload
+(defun keep-group-changes-h ()
+  "Give a label's summary the changes in read and star its group got meanwhile."
+  (when-let* (((not (gnus-nnselect-group-p gnus-newsgroup-name)))
+              (info (gnus-get-info gnus-newsgroup-name)))
+    (keep-group-changes info)))
+
+;;;###autoload
+(defun keep-search-group-changes-h ()
+  "Give a search summary the changes in read and star its hits got meanwhile.
+The hits' groups hold them, and nnselect maps them to the search's
+numbers the way it does when the search opens."
+  (when (and (gnus-nnselect-group-p gnus-newsgroup-name)
+             (not gnus-group-is-exiting-without-update-p))
+    (let ((info (list gnus-newsgroup-name 1 nil nil)))
+      (nnselect-request-update-info gnus-newsgroup-name info)
+      (keep-group-changes info))))
 
 ;;; marks.el ends here

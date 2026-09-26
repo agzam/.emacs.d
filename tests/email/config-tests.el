@@ -469,10 +469,12 @@ window and deletes the summary's."
                       sort-mail-by-subject toggle-mail-thread-fold
                       ;; a search, an advice or a sibling file calls these
                       search-likeliest-copies-a retrieve-search-hit-headers
-                      read-mail-search-limit refresh-mail-group)
+                      read-mail-search-limit refresh-mail-group
+                      keep-flags-set-elsewhere-a)
                      ("marks.el" mail-mark-thread-read quit-mail-summary
-                      note-search-entry-marks-h carry-search-marks-h
-                      activate-search-hit-groups-h keep-newer-read-marks-a)
+                      note-entry-marks-h carry-search-marks-h
+                      activate-search-hit-groups-h keep-newer-read-marks-a
+                      keep-group-changes-h keep-search-group-changes-h)
                      ("similar.el" count-mail)))
       (with-temp-buffer
         (insert-file-contents
@@ -499,7 +501,8 @@ window and deletes the summary's."
     (require 'gnus-sum)
     (let ((gnus-mark-article-hook (copy-sequence gnus-mark-article-hook))
           (gnus-select-group-hook nil)
-          (gnus-summary-prepare-exit-hook nil))
+          (gnus-summary-prepare-exit-hook nil)
+          (gnus-exit-group-hook nil))
       (dolist (form (email-tests--config-forms 'gnus-sum))
         (eval form t))
       (expect gnus-mark-article-hook
@@ -510,18 +513,33 @@ window and deletes the summary's."
     (require 'gnus-sum)
     (let ((gnus-mark-article-hook nil)
           (gnus-select-group-hook nil)
-          (gnus-summary-prepare-exit-hook nil))
+          (gnus-summary-prepare-exit-hook nil)
+          (gnus-exit-group-hook nil))
       (dolist (form (email-tests--config-forms 'gnus-sum))
         (eval form t))
-      (expect gnus-select-group-hook :to-equal '(note-search-entry-marks-h))
+      (expect gnus-select-group-hook :to-equal '(note-entry-marks-h))
       (expect gnus-summary-prepare-exit-hook
-              :to-equal '(activate-search-hit-groups-h carry-search-marks-h))))
+              :to-equal '(keep-search-group-changes-h activate-search-hit-groups-h
+                          carry-search-marks-h))))
+  (it "keeps what a refresh merged while a summary was open"
+    ;; a label saves before the prepare-exit hook runs, and nnselect
+    ;; saves a search after it
+    (require 'gnus-sum)
+    (let ((gnus-mark-article-hook nil)
+          (gnus-select-group-hook nil)
+          (gnus-summary-prepare-exit-hook nil)
+          (gnus-exit-group-hook nil))
+      (dolist (form (email-tests--config-forms 'gnus-sum))
+        (eval form t))
+      (expect gnus-exit-group-hook :to-equal '(keep-group-changes-h))
+      (expect (car gnus-summary-prepare-exit-hook) :to-be 'keep-search-group-changes-h)))
   (it "spares the read marks of mail that arrived after a summary opened"
     ;; the summary's exit would take them off
     (require 'gnus-sum)
     (let ((gnus-mark-article-hook nil)
           (gnus-select-group-hook nil)
-          (gnus-summary-prepare-exit-hook nil))
+          (gnus-summary-prepare-exit-hook nil)
+          (gnus-exit-group-hook nil))
       (dolist (form (email-tests--config-forms 'gnus-sum))
         (eval form t))
       (expect (advice-member-p #'keep-newer-read-marks-a 'gnus-update-read-articles)
@@ -577,7 +595,22 @@ window and deletes the summary's."
       (advice-remove 'nnmaildir-request-scan #'defer-mail-server-scan-a)
       (advice-remove 'nnmaildir-request-group #'scan-unknown-mail-group-a)
       (advice-remove 'nnmaildir-request-accept-article #'scan-unknown-mail-group-a)
-      (advice-remove 'nnmaildir-base-name-to-article-number #'scan-mail-group-on-miss-a)))
+      (advice-remove 'nnmaildir-base-name-to-article-number #'scan-mail-group-on-miss-a)
+      (advice-remove 'nnmaildir--article-set-flags #'keep-flags-set-elsewhere-a)))
+  (it "saves a flag over the flags the file has now, not the ones nnmaildir read"
+    ;; mbsync renames the file when the phone changes a flag
+    (require 'nnmaildir)
+    (unwind-protect
+        (progn
+          (dolist (form (email-tests--config-forms 'nnmaildir))
+            (eval form t))
+          (expect (advice-member-p #'keep-flags-set-elsewhere-a 'nnmaildir--article-set-flags)
+                  :to-be-truthy))
+      (advice-remove 'nnmaildir-request-scan #'defer-mail-server-scan-a)
+      (advice-remove 'nnmaildir-request-group #'scan-unknown-mail-group-a)
+      (advice-remove 'nnmaildir-request-accept-article #'scan-unknown-mail-group-a)
+      (advice-remove 'nnmaildir-base-name-to-article-number #'scan-mail-group-on-miss-a)
+      (advice-remove 'nnmaildir--article-set-flags #'keep-flags-set-elsewhere-a)))
   (it "queues the routine groups once Gnus has started, after the subscriptions"
     ;; a label subscribed at this start is queued with the others
     (require 'gnus)
