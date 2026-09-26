@@ -159,6 +159,9 @@ are applied again from `evil-collection-setup-hook'."
             :nv "!" #'mail-toggle-read
             :nv "=" #'mail-toggle-star
             :n "x" #'mail-execute-marks
+            ;; leaving would drop the queue unasked
+            :n "q" #'quit-mail-summary
+            :n "ZZ" #'quit-mail-summary
             :n "J" #'gnus-summary-scroll-up
             :n "K" #'gnus-summary-scroll-down
             ;; vim's folds, over threads
@@ -243,7 +246,11 @@ columns would go to the window left of Gnus."
   :config
   ;; ahead of Gnus's own function, which marks a starred unread message
   ;; read as it is displayed and drops the star with it
-  (add-hook 'gnus-mark-article-hook #'mail-keep-star-on-read-h))
+  (add-hook 'gnus-mark-article-hook #'mail-keep-star-on-read-h)
+  ;; a summary open under a search learns what the search changed, or
+  ;; its own exit would write the older state back
+  (add-hook 'gnus-select-group-hook #'note-search-entry-marks-h)
+  (add-hook 'gnus-summary-prepare-exit-hook #'carry-search-marks-h))
 
 (use-package gnus-art
   :ensure nil
@@ -283,7 +290,19 @@ columns would go to the window left of Gnus."
         gnus-search-notmuch-config-file
         (expand-file-name "notmuch/default/config"
                           (or (getenv "XDG_CONFIG_HOME") "~/.config"))
-        gnus-search-notmuch-remove-prefix gmail-maildir))
+        gnus-search-notmuch-remove-prefix gmail-maildir)
+  :config
+  ;; a hit is the copy in the inbox when there is one, so marks and
+  ;; moves in search results reach what the inbox shows
+  (advice-add 'gnus-search-indexed-parse-output :around #'search-likeliest-copies-a))
+
+(use-package nnselect
+  :ensure nil
+  :defer t
+  :init
+  ;; a search keeps only its hits, and the labels' old headers would make
+  ;; nnmaildir read every header of the archive for each search
+  (setq nnselect-retrieve-headers-override-function #'retrieve-search-hit-headers))
 
 (use-package message
   :ensure nil

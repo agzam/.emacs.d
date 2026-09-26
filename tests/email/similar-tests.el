@@ -231,25 +231,31 @@ With OUTPUT nil, count --batch answers 2, 3, ... for its queries."
       (expect (all-completions "" table) :to-equal '("List:\"x\"" "from:\"a@b\"")))))
 
 (describe "search-mail-like-this"
-  :var (searched)
+  :var (searched shown)
   (before-each
-    (setq searched nil)
+    (setq searched nil
+          shown 'unset)
     (spy-on 'similar-mail-message :and-return-value '(:from "Bob <bob@acme.com>"))
-    (spy-on 'search-mail :and-call-fake (lambda (query) (setq searched query))))
+    (spy-on 'search-mail :and-call-fake (lambda (query &optional limit)
+                                          (setq searched query
+                                                shown limit))))
 
-  (it "searches with the query picked from the counted candidates"
+  (it "searches with the query picked from the counted candidates, at the default cap"
     (spy-on 'count-mail :and-call-fake (lambda (queries) (make-list (length queries) 3)))
     (spy-on 'read-similar-mail-query :and-call-fake #'caar)
     (search-mail-like-this)
     (expect (spy-calls-args-for 'read-similar-mail-query 0)
             :to-equal '((("from:\"bob@acme.com\" or to:\"bob@acme.com\"" both-ways 3))))
-    (expect searched :to-equal "from:\"bob@acme.com\" or to:\"bob@acme.com\""))
-  (it "hands the pick to the minibuffer first when asked to edit"
+    (expect searched :to-equal "from:\"bob@acme.com\" or to:\"bob@acme.com\"")
+    (expect shown :to-be nil))
+  (it "hands the pick to the minibuffer first when asked to edit, and asks how many to show"
     (spy-on 'count-mail :and-call-fake (lambda (queries) (number-sequence 2 (1+ (length queries)))))
     (spy-on 'read-similar-mail-query :and-call-fake #'caar)
     (spy-on 'read-string :and-call-fake (lambda (_prompt initial) (concat initial " and tag:unread")))
+    (spy-on 'read-mail-search-limit :and-return-value 0)
     (search-mail-like-this t)
-    (expect searched :to-equal "from:\"bob@acme.com\" or to:\"bob@acme.com\" and tag:unread"))
+    (expect searched :to-equal "from:\"bob@acme.com\" or to:\"bob@acme.com\" and tag:unread")
+    (expect shown :to-be 0))
   (it "says so when no query finds other mail"
     (spy-on 'count-mail :and-call-fake (lambda (queries) (make-list (length queries) 1)))
     (spy-on 'read-similar-mail-query)

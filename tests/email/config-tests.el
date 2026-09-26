@@ -53,7 +53,21 @@ in this process, which the mail suite performs."
   (it "searches nnmaildir groups through notmuch, mapping paths back to groups"
     (expect (alist-get 'nnmaildir gnus-search-default-engines) :to-be 'gnus-search-notmuch)
     (expect gnus-search-notmuch-remove-prefix :to-equal gmail-maildir)
-    (expect gnus-refer-thread-use-search :to-be t)))
+    (expect gnus-refer-thread-use-search :to-be t))
+  (it "reads only the hits' headers for a search, never a label's older ones"
+    ;; the labels' gnus-fetch-old-headers made nnmaildir hand every
+    ;; search every header of All Mail
+    (expect nnselect-retrieve-headers-override-function :to-be 'retrieve-search-hit-headers))
+  (it "hands the search parser each message's inbox copy"
+    (require 'gnus-search)
+    (unwind-protect
+        (progn
+          (dolist (form (email-tests--config-forms 'gnus-search))
+            (eval form t))
+          (expect (advice-member-p #'search-likeliest-copies-a
+                                   'gnus-search-indexed-parse-output)
+                  :to-be-truthy))
+      (advice-remove 'gnus-search-indexed-parse-output #'search-likeliest-copies-a))))
 
 (defmacro email-tests--with-empty-newsrc (&rest body)
   "Run BODY over an empty newsrc, so lookups fall through to `gnus-parameters'."
@@ -175,6 +189,15 @@ KEYS holds a prefix's key and the key under it apart by a space, as
               :to-equal '(mail-mark-for-deletion mail-mark-thread-for-deletion
                           mail-mark-for-archive mail-mark-thread-for-archive
                           mail-unmark mail-unmark-thread mail-execute-marks))))
+
+  (it "asks before q or ZZ leaves a queue of deletions and archives behind"
+    (let ((pairs (mapcan #'map-form-key-pairs
+                         (map-form-groups config 'gnus-summary-mode-map)))
+          (states (email-tests--key-states config 'gnus-summary-mode-map)))
+      (expect (list (cdr (assoc "q" pairs)) (cdr (assoc "ZZ" pairs)))
+              :to-equal '((function quit-mail-summary) (function quit-mail-summary)))
+      (expect (list (cdr (assoc "q" states)) (cdr (assoc "ZZ" states)))
+              :to-equal '(:n :n))))
 
   (it "toggles read on ! and the star on ="
     (let ((pairs (mapcan #'map-form-key-pairs
@@ -432,7 +455,7 @@ window and deletes the summary's."
               :to-match "^;;;###autoload\n(defun gnus-user-format-function-D ")))
   (it "moves a queued deletion into the mirrored trash"
     (expect mail-trash-group :to-equal "nnmaildir+gmail:trash"))
-  (it "knows the group of All Mail, where archiving is refused"
+  (it "knows the group of All Mail, whose copy a search shows below a label's"
     (expect mail-archive-group :to-equal "nnmaildir+gmail:archive")))
 
 (describe "email module autoloads"
@@ -443,8 +466,13 @@ window and deletes the summary's."
                       follow-up-on-newsgroup forward-mail compose-new-mail
                       run-in-mail-summary mail-on-screen)
                      ("mail.el" sort-mail-by-date sort-mail-by-author
-                      sort-mail-by-subject toggle-mail-thread-fold)
-                     ("marks.el" mail-mark-thread-read)))
+                      sort-mail-by-subject toggle-mail-thread-fold
+                      ;; a search, an advice or a sibling file calls these
+                      search-likeliest-copies-a retrieve-search-hit-headers
+                      read-mail-search-limit refresh-mail-group)
+                     ("marks.el" mail-mark-thread-read quit-mail-summary
+                      note-search-entry-marks-h carry-search-marks-h)
+                     ("similar.el" count-mail)))
       (with-temp-buffer
         (insert-file-contents
          (expand-file-name (concat "modules/email/autoload/" file) test-config-root))
@@ -464,12 +492,24 @@ window and deletes the summary's."
   (it "keeps the star of an article Gnus marks read as it displays it"
     ;; ahead of Gnus's own function, which would drop the star
     (require 'gnus-sum)
-    (let ((gnus-mark-article-hook (copy-sequence gnus-mark-article-hook)))
+    (let ((gnus-mark-article-hook (copy-sequence gnus-mark-article-hook))
+          (gnus-select-group-hook nil)
+          (gnus-summary-prepare-exit-hook nil))
       (dolist (form (email-tests--config-forms 'gnus-sum))
         (eval form t))
       (expect gnus-mark-article-hook
               :to-equal '(mail-keep-star-on-read-h
                           gnus-summary-mark-read-and-unread-as-read))))
+  (it "carries what a search changed in read and star to the summaries under it"
+    ;; their own exit would write the older state back
+    (require 'gnus-sum)
+    (let ((gnus-mark-article-hook nil)
+          (gnus-select-group-hook nil)
+          (gnus-summary-prepare-exit-hook nil))
+      (dolist (form (email-tests--config-forms 'gnus-sum))
+        (eval form t))
+      (expect gnus-select-group-hook :to-equal '(note-search-entry-marks-h))
+      (expect gnus-summary-prepare-exit-hook :to-equal '(carry-search-marks-h))))
   (it "loads the hook function on the first article, before any command of its file"
     (with-temp-buffer
       (insert-file-contents
