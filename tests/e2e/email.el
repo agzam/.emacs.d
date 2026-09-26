@@ -63,6 +63,7 @@ SUBJECT, ID, DATE and REFERENCES fill the headers."
     (insert "From: " from "\n"
             "To: emacs-devel@gnu.org\n"
             "Cc: Carol <carol@example.com>, Dan <dan@example.com>\n"
+            "List-Id: \"Emacs development discussions.\" <emacs-devel.gnu.org>\n"
             "List-Post: <mailto:emacs-devel@gnu.org>\n"
             "Subject: " subject "\n"
             "Date: " date "\n"
@@ -112,9 +113,11 @@ An untimed `read-event' is idle, and a timer ends it."
          ;; archive, and a mailing list label is entered from its line
          (archive (expand-file-name "archive/" root))
          (emacs (expand-file-name "emacs/" root))
-         ;; stands in for notmuch, which CI lacks: it answers every query
-         ;; with the archive's copy, as the real index does
+         ;; stands in for notmuch, which CI lacks: it answers every search
+         ;; with the archive's copy, as the real index does, and counts
+         ;; 2, 3 ... for a batch, which it keeps in counted-log
          (notmuch (expand-file-name "notmuch" e2e-work-dir))
+         (counted-log (expand-file-name "notmuch-counted" e2e-work-dir))
          ;; what the %uS column draws on a starred message
          (star (string #x2217))
          (results '())
@@ -147,7 +150,17 @@ An untimed `read-event' is idle, and a timer ends it."
       (email-e2e--write-message archived "Ann <ann@example.com>" "archived" "archived"
                                 "Sun, 20 Sep 2026 09:00:00 +0000")
       (with-temp-file notmuch
-        (insert "#!/bin/sh\nprintf '%s\\n' '" archived "'\n"))
+        (insert "#!/bin/sh\n"
+                "case \" $* \" in\n"
+                "  *\" count \"*)\n"
+                "    : > '" counted-log "'\n"
+                "    n=1\n"
+                "    while IFS= read -r query; do\n"
+                "      printf '%s\\n' \"$query\" >> '" counted-log "'\n"
+                "      n=$((n+1)); echo $n\n"
+                "    done;;\n"
+                "  *) printf '%s\\n' '" archived "';;\n"
+                "esac\n"))
       (set-file-modes notmuch #o755))
     ;; the sender's colors would paint white on white, and the paragraph
     ;; is longer than any terminal line
@@ -656,12 +669,14 @@ An untimed `read-event' is idle, and a timer ends it."
                                        (gnus-summary-article-number) below
                                        (length (messages-in inbox))))
                   (execute-kbd-macro "ku")
-                  (record "u takes it back, clears the column and moves down"
+                  (record "u takes it back, marks it unread, clears both columns and moves down"
                           (and (null mail-marks)
-                               (eq (aref (line-marks seen) 0) ?\s)
+                               (equal (line-marks seen) "  ")
+                               (memq seen gnus-newsgroup-unreads)
                                (eql (gnus-summary-article-number) below))
-                          :got (format "%S, line starts %S, point on %S"
-                                       mail-marks (line-marks seen) (gnus-summary-article-number)))
+                          :got (format "%S, line starts %S, unread %S, point on %S"
+                                       mail-marks (line-marks seen) gnus-newsgroup-unreads
+                                       (gnus-summary-article-number)))
                   (gnus-summary-goto-subject seen)
                   (execute-kbd-macro "Vjd")
                   (record "d on a visual selection queues each message in it, ends visual state and moves below"
@@ -674,9 +689,11 @@ An untimed `read-event' is idle, and a timer ends it."
                                        (gnus-summary-article-number) after))
                   (gnus-summary-goto-subject seen)
                   (execute-kbd-macro "uu")
-                  (record "u twice from the top takes both messages back"
-                          (null mail-marks)
-                          :got (format "%S" mail-marks))
+                  (record "u twice from the top takes both messages back and leaves both unread"
+                          (and (null mail-marks)
+                               (memq seen gnus-newsgroup-unreads)
+                               (memq below gnus-newsgroup-unreads))
+                          :got (format "%S, unread %S" mail-marks gnus-newsgroup-unreads))
                   ;; the release plan thread is the only one with more
                   ;; than one message
                   (let* ((threads (if (memq below plan)
@@ -922,7 +939,8 @@ An untimed `read-event' is idle, and a timer ends it."
                       (to-move (email-e2e--article "to move"))
                       (to-label (email-e2e--article "to label"))
                       (browsed nil)
-                      (called nil))
+                      (called nil)
+                      (searched nil))
                   (cl-flet* ((at (article)
                                (delete-other-windows)
                                (switch-to-buffer summary)
@@ -961,13 +979,22 @@ An untimed `read-event' is idle, and a timer ends it."
                                    (mail-header-subject (gnus-summary-article-header)))))
                              (queued ()
                                (with-current-buffer summary
-                                 (mail-marked-articles 'delete))))
+                                 (mail-marked-articles 'delete)))
+                             ;; the queries of notmuch's last count
+                             (counted ()
+                               (when (file-exists-p counted-log)
+                                 (with-temp-buffer
+                                   (insert-file-contents counted-log)
+                                   (split-string (buffer-string) "\n" t)))))
                     (cl-letf (((symbol-function 'browse-url)
                                (lambda (url &rest _) (push url browsed)))
                               ((symbol-function 'sync-mail)
                                (lambda (&optional _) (interactive "P") (push 'sync called)))
                               ((symbol-function 'search-mail)
-                               (lambda (&rest _) (interactive) (push 'search called)))
+                               (lambda (&optional query)
+                                 (interactive)
+                                 (push 'search called)
+                                 (setq searched query)))
                               ((symbol-function 'open-mail-inbox)
                                (lambda () (interactive) (push 'inbox called)))
                               ;; notmuch is not on CI
@@ -1084,6 +1111,26 @@ An untimed `read-event' is idle, and a timer ends it."
                                            "https://yhetil.org/emacs-devel/list-plan-dan%40fixture.example"))
                               :got (format "%S" (reverse browsed)))
                       (setq browsed nil)
+                      ;; RET takes the first query the prompt offers
+                      (at plan)
+                      (execute-kbd-macro (kbd ", ? RET"))
+                      (record ", ? searches for mail like the message at point, its list first"
+                              (and (equal searched "List:\"emacs-devel.gnu.org\"")
+                                   (equal (car (counted)) searched)
+                                   (member "from:\"carol@example.com\"" (counted)))
+                              :got (format "searched %S, counted %S" searched (counted)))
+                      (setq searched nil)
+                      (at plan)
+                      (execute-kbd-macro (kbd "RET"))
+                      (execute-kbd-macro (kbd "C-j"))
+                      (execute-kbd-macro (kbd ", ? RET"))
+                      (record ", ? in the thread view takes the message at point"
+                              (and (equal searched "List:\"emacs-devel.gnu.org\"")
+                                   (member "from:\"dan@example.com\"" (counted))
+                                   (not (member "from:\"carol@example.com\"" (counted))))
+                              :got (format "searched %S, counted %S" searched (counted)))
+                      (setq called nil
+                            searched nil)
                       ;; the thread view acts on the message at point
                       (at plan)
                       (execute-kbd-macro (kbd "RET"))
@@ -1114,9 +1161,17 @@ An untimed `read-event' is idle, and a timer ends it."
                                 (equal (queued) (sort (list plan answer) #'<))
                                 :got (format "%S" (queued)))
                         (execute-kbd-macro "U")
-                        (record "U in the thread view takes the thread back"
-                                (null (queued))
-                                :got (format "%S" (queued)))
+                        (record "U in the thread view takes the thread back and marks it unread, the answer's star kept"
+                                (and (null (queued))
+                                     (with-current-buffer summary
+                                       (and (memq plan gnus-newsgroup-unreads)
+                                            (memq answer gnus-newsgroup-unreads)
+                                            (equal (line-marks answer) "  ")
+                                            (equal (line-star answer) star))))
+                                :got (with-current-buffer summary
+                                       (format "%S, unread %S, answer's line starts %S, star %S"
+                                               (queued) gnus-newsgroup-unreads
+                                               (line-marks answer) (line-star answer))))
                         (execute-kbd-macro (kbd ", o g"))
                         (record ", o g in the thread view opens the message at point in Gmail"
                                 (equal browsed (list (gmail-message-url "<list-plan@fixture.example>")))
@@ -1181,11 +1236,13 @@ An untimed `read-event' is idle, and a timer ends it."
                                                   "<to-label@fixture.example>"))
                                      (eq evil-state 'normal))
                                 :got (format "%S, %s state" ids evil-state)))
+                      ;; U left the thread unread, and the article view read
+                      ;; the root again
                       (at plan)
                       (execute-kbd-macro "q")
-                      (record "q saves the root read and the answer read and starred"
+                      (record "q saves the root read and the answer starred and unread"
                               (and (equal (flags-of lists "list-plan") "S")
-                                   (equal (flags-of lists "list-plan-dan") "FS"))
+                                   (equal (flags-of lists "list-plan-dan") "F"))
                               :got (format "%S %S" (flags-of lists "list-plan")
                                            (flags-of lists "list-plan-dan")))
                       ;; the group buffer shares the reading buffers' keys

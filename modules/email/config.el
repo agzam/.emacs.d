@@ -131,10 +131,11 @@ are applied again from `evil-collection-setup-hook'."
             :n "r" #'reply-to-sender
             :n "R" #'reply-to-everyone
             (:localleader
-             :desc "sync"            "u" #'sync-mail
-             :desc "search all mail" "/" #'search-mail
-             :desc "new message"     "c" #'compose-new-mail
-             :desc "forward"         "f" #'forward-mail
+             :desc "sync"             "u" #'sync-mail
+             :desc "search all mail"  "/" #'search-mail
+             :desc "search like this" "?" #'search-mail-like-this
+             :desc "new message"      "c" #'compose-new-mail
+             :desc "forward"          "f" #'forward-mail
              (:prefix ("r" . "reply")
               :desc "to the list only" "l" #'reply-to-list
               :desc "on the newsgroup" "n" #'follow-up-on-newsgroup)
