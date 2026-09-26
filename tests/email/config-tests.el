@@ -471,7 +471,8 @@ window and deletes the summary's."
                       search-likeliest-copies-a retrieve-search-hit-headers
                       read-mail-search-limit refresh-mail-group)
                      ("marks.el" mail-mark-thread-read quit-mail-summary
-                      note-search-entry-marks-h carry-search-marks-h)
+                      note-search-entry-marks-h carry-search-marks-h
+                      activate-search-hit-groups-h keep-newer-read-marks-a)
                      ("similar.el" count-mail)))
       (with-temp-buffer
         (insert-file-contents
@@ -481,6 +482,10 @@ window and deletes the summary's."
                   :to-match (format "^;;;###autoload\n(defun %s " command)))))))
 
 (describe "email module stars"
+  ;; evaluating the gnus-sum forms advises Gnus for the rest of the run
+  (after-each
+    (advice-remove 'gnus-update-read-articles #'keep-newer-read-marks-a))
+
   (it "draws the star in a summary column of its own"
     ;; Gnus's own column draws the tick on a read message only
     (expect gnus-summary-line-format :to-match "%U%R%uS ")
@@ -509,7 +514,18 @@ window and deletes the summary's."
       (dolist (form (email-tests--config-forms 'gnus-sum))
         (eval form t))
       (expect gnus-select-group-hook :to-equal '(note-search-entry-marks-h))
-      (expect gnus-summary-prepare-exit-hook :to-equal '(carry-search-marks-h))))
+      (expect gnus-summary-prepare-exit-hook
+              :to-equal '(activate-search-hit-groups-h carry-search-marks-h))))
+  (it "spares the read marks of mail that arrived after a summary opened"
+    ;; the summary's exit would take them off
+    (require 'gnus-sum)
+    (let ((gnus-mark-article-hook nil)
+          (gnus-select-group-hook nil)
+          (gnus-summary-prepare-exit-hook nil))
+      (dolist (form (email-tests--config-forms 'gnus-sum))
+        (eval form t))
+      (expect (advice-member-p #'keep-newer-read-marks-a 'gnus-update-read-articles)
+              :to-be-truthy)))
   (it "loads the hook function on the first article, before any command of its file"
     (with-temp-buffer
       (insert-file-contents

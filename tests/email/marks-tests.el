@@ -774,4 +774,100 @@ can tell which articles each verb reached."
               (expect 'mail-set-read-and-star :not :to-have-been-called)))
         (kill-buffer inbox)))))
 
+(describe "activate-search-hit-groups-h"
+  :var (activated)
+  (before-each
+    (setq activated nil)
+    (spy-on 'gnus-activate-group
+            :and-call-fake (lambda (group &rest _) (push group activated))))
+
+  (it "activates each group whose active range ends below one of its hits"
+    ;; nnselect would save no read mark above the range
+    (marks-tests-in-summary '((1 0) (2 0) (3 0) (4 0))
+      (let ((gnus-newsgroup-name "nnselect:search")
+            (gnus-newsgroup-selection [["nnmaildir+gmail:inbox" 12 100]
+                                       ["nnmaildir+gmail:inbox" 1066 100]
+                                       ["nnmaildir+gmail:github" 5 100]
+                                       ["nnmaildir+gmail:money" 7 100]])
+            (gnus-newsgroup-articles (list 1 2 3 4))
+            (gnus-active-hashtb (make-hash-table :test #'equal)))
+        (puthash "nnmaildir+gmail:inbox" '(2 . 1065) gnus-active-hashtb)
+        (puthash "nnmaildir+gmail:github" '(1 . 10) gnus-active-hashtb)
+        (activate-search-hit-groups-h)))
+    ;; money has no active range at all
+    (expect (sort activated #'string<)
+            :to-equal '("nnmaildir+gmail:inbox" "nnmaildir+gmail:money")))
+  (it "activates nothing when the search is left without saving"
+    (marks-tests-in-summary '((1 0))
+      (let ((gnus-newsgroup-name "nnselect:search")
+            (gnus-newsgroup-selection [["nnmaildir+gmail:inbox" 1066 100]])
+            (gnus-newsgroup-articles (list 1))
+            (gnus-active-hashtb (make-hash-table :test #'equal))
+            (gnus-group-is-exiting-without-update-p t))
+        (activate-search-hit-groups-h)))
+    (expect activated :to-be nil))
+  (it "leaves a label's summary alone"
+    (marks-tests-in-summary '((1 0))
+      (let ((gnus-newsgroup-articles (list 1))
+            (gnus-active-hashtb (make-hash-table :test #'equal)))
+        (activate-search-hit-groups-h)))
+    (expect activated :to-be nil)))
+
+(defmacro marks-tests-updating (group entry now read &rest body)
+  "Run BODY in a summary of GROUP opened at the active range ENTRY.
+GROUP's active range is NOW and its info's read ranges READ."
+  (declare (indent 4))
+  `(with-temp-buffer
+     (setq major-mode 'gnus-summary-mode)
+     (setq-local gnus-newsgroup-name ,group)
+     (setq-local gnus-newsgroup-active ,entry)
+     (let ((gnus-active-hashtb (make-hash-table :test #'equal))
+           (gnus-newsrc-hashtb (make-hash-table :test #'equal)))
+       (puthash ,group ,now gnus-active-hashtb)
+       (puthash ,group (list 3 (list ,group 1 ,read)) gnus-newsrc-hashtb)
+       ,@body)))
+
+(describe "keep-newer-read-marks-a"
+  :var (called)
+  (before-each
+    (setq called nil))
+
+  (it "counts mail above the summary's range as the info has it"
+    ;; Gnus would take the read mark off every article above the range
+    (marks-tests-updating "nnmaildir+gmail:inbox" '(2 . 1065) '(2 . 1068)
+        '((1 . 1064) 1066 1068)
+      (keep-newer-read-marks-a
+       (lambda (&rest args) (setq called (cons gnus-newsgroup-active args)))
+       "nnmaildir+gmail:inbox" (list 1065))
+      (expect gnus-newsgroup-active :to-equal '(2 . 1065)))
+    (expect called :to-equal '((2 . 1068) "nnmaildir+gmail:inbox" (1065 1067) nil)))
+  (it "passes the call on untouched when nothing arrived since the summary opened"
+    (marks-tests-updating "nnmaildir+gmail:inbox" '(2 . 1065) '(2 . 1065) '((1 . 1064))
+      (keep-newer-read-marks-a
+       (lambda (&rest args) (setq called (cons gnus-newsgroup-active args)))
+       "nnmaildir+gmail:inbox" (list 1065)))
+    (expect called :to-equal '((2 . 1065) "nnmaildir+gmail:inbox" (1065) nil)))
+  (it "passes on a save into a group other than the summary's"
+    ;; the summary's range says nothing about that group's articles
+    (marks-tests-updating "nnmaildir+gmail:inbox" '(1 . 3) '(2 . 1068) '((1 . 1064) 1066)
+      (setq-local gnus-newsgroup-name "nnselect:search")
+      (keep-newer-read-marks-a
+       (lambda (&rest args) (setq called (cons gnus-newsgroup-active args)))
+       "nnmaildir+gmail:inbox" (list 1065)))
+    (expect called :to-equal '((1 . 3) "nnmaildir+gmail:inbox" (1065) nil)))
+  (it "passes on a call from outside a summary"
+    ;; the group buffer's catch-up saves the group without one
+    (marks-tests-updating "nnmaildir+gmail:inbox" '(2 . 1065) '(2 . 1068) '((1 . 1064) 1066)
+      (setq major-mode 'fundamental-mode)
+      (keep-newer-read-marks-a
+       (lambda (&rest args) (setq called (cons gnus-newsgroup-active args)))
+       "nnmaildir+gmail:inbox" nil))
+    (expect called :to-equal '((2 . 1065) "nnmaildir+gmail:inbox" nil nil)))
+  (it "passes on a computation, which saves nothing"
+    (marks-tests-updating "nnmaildir+gmail:inbox" '(2 . 1065) '(2 . 1068) '((1 . 1064) 1066)
+      (keep-newer-read-marks-a
+       (lambda (&rest args) (setq called (cons gnus-newsgroup-active args)))
+       "nnmaildir+gmail:inbox" (list 1065) t))
+    (expect called :to-equal '((2 . 1065) "nnmaildir+gmail:inbox" (1065) t))))
+
 ;;; marks-tests.el ends here
