@@ -253,23 +253,32 @@ of the line after the last before a command runs."
         (expect mail-marks :to-equal '((7 . delete)))))))
 
 (describe "mail-unmark"
-  (it "takes the message at point out of the queue, redraws it and moves on"
+  (it "takes the message at point out of the queue, marks it unread, redraws it and moves on"
     (marks-tests-in-summary '((7 0) (8 0))
       (setq mail-marks (list (cons 7 'delete) (cons 8 'archive)))
       (mail-unmark)
       (expect mail-marks :to-equal '((8 . archive)))
+      (expect marks-tests-marked :to-equal `((7 . ,gnus-unread-mark)))
       (expect marks-tests-redrawn :to-equal '(7))
       (expect (gnus-summary-article-number) :to-be 8)))
-  (it "is a no-op on an unqueued message"
+  (it "marks an unqueued message unread and queues nothing"
     (marks-tests-in-summary '((7 0))
       (mail-unmark)
-      (expect mail-marks :to-be nil)))
-  (it "takes every message a selection covers out of the queue"
+      (expect mail-marks :to-be nil)
+      (expect gnus-newsgroup-unreads :to-equal '(7))))
+  (it "keeps the star of a message it marks unread"
+    (marks-tests-in-summary '((7 0))
+      (setq gnus-newsgroup-marked (list 7))
+      (mail-unmark)
+      (expect gnus-newsgroup-unreads :to-equal '(7))
+      (expect gnus-newsgroup-marked :to-equal '(7))))
+  (it "takes every message a selection covers out of the queue and marks each unread"
     (marks-tests-in-summary '((1 0) (2 0) (3 0))
       (setq mail-marks (list (cons 1 'delete) (cons 2 'delete) (cons 3 'archive)))
       (marks-tests-select 1 2)
       (mail-unmark)
-      (expect mail-marks :to-equal '((3 . archive))))))
+      (expect mail-marks :to-equal '((3 . archive)))
+      (expect gnus-newsgroup-unreads :to-equal '(1 2)))))
 
 (describe "the thread commands"
   (it "queue every article of the thread at point and move below the thread"
@@ -291,12 +300,19 @@ of the line after the last before a command runs."
       (mail-mark-thread-for-archive)
       (expect (mapcar #'car mail-marks) :to-have-same-items-as '(1 2 3 4 5))
       (expect (gnus-summary-article-number) :to-be 6)))
-  (it "unqueue the whole thread"
+  (it "unqueue the whole thread and mark each of its messages unread"
     (marks-tests-in-summary '((10 0) (11 1) (12 1) (20 0))
       (setq mail-marks (list (cons 10 'delete) (cons 12 'archive) (cons 20 'delete)))
       (gnus-summary-goto-subject 11)
       (mail-unmark-thread)
-      (expect mail-marks :to-equal '((20 . delete))))))
+      (expect mail-marks :to-equal '((20 . delete)))
+      (expect gnus-newsgroup-unreads :to-equal '(10 11 12))))
+  (it "never mark a sparse placeholder unread, which Gnus refuses"
+    (marks-tests-in-summary '((-1 0) (10 1) (11 1))
+      (let ((gnus-newsgroup-sparse '(-1)))
+        (gnus-summary-goto-subject 11)
+        (mail-unmark-thread))
+      (expect (mapcar #'car marks-tests-marked) :to-have-same-items-as '(10 11)))))
 
 (describe "mail-toggle-read"
   (it "marks an unread message read and moves on"
