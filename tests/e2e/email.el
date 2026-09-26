@@ -16,6 +16,7 @@
 (require 'gnus)
 (require 'gnus-start)
 (require 'gnus-sum)
+(require 'gnus-search)
 
 (defun email-e2e--write-message (file from subject id &optional date references xref body)
   "Write a minimal RFC 822 message to FILE.
@@ -107,6 +108,13 @@ An untimed `read-event' is idle, and a timer ends it."
          (lists (expand-file-name "lists/" root))
          (moved (expand-file-name "moved/" root))
          (labelled (expand-file-name "labelled/" root))
+         ;; bulk groups, which no start reads: notmuch answers from the
+         ;; archive, and a mailing list label is entered from its line
+         (archive (expand-file-name "archive/" root))
+         (emacs (expand-file-name "emacs/" root))
+         ;; stands in for notmuch, which CI lacks: it answers every query
+         ;; with the archive's copy, as the real index does
+         (notmuch (expand-file-name "notmuch" e2e-work-dir))
          ;; what the %uS column draws on a starred message
          (star (string #x2217))
          (results '())
@@ -114,6 +122,13 @@ An untimed `read-event' is idle, and a timer ends it."
          ;; mail-groups would add gmane, and CI has no news server
          (gmail-maildir root)
          (mail-groups nil)
+         ;; moved sits with the bulk groups, so , m files into a group
+         ;; nnmaildir has not read this session
+         (mail-bulk-groups '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs"
+                             "nnmaildir+gmail:moved"))
+         (gnus-search-notmuch-program notmuch)
+         (gnus-search-notmuch-remove-prefix root)
+         (gnus-search-engine-instance-alist nil)
          (gnus-secondary-select-methods
           `((nnmaildir "gmail" (directory ,root) (get-new-mail nil))))
          (gnus-startup-file (expand-file-name "newsrc" e2e-work-dir))
@@ -122,9 +137,18 @@ An untimed `read-event' is idle, and a timer ends it."
          (gnus-interactive-exit nil)
          (gnus-expert-user t)
          reply)
-    (dolist (dir (list inbox trash html starred lists moved labelled))
+    (dolist (dir (list inbox trash html starred lists moved labelled archive emacs))
       (dolist (sub '("cur" "new" "tmp"))
         (make-directory (expand-file-name sub dir) t)))
+    (email-e2e--write-list-message (expand-file-name "cur/1700000031.31.fixture:2,S" emacs)
+                                   "Eli <eli@example.com>" "emacs-devel post" "devel-post"
+                                   "Sun, 20 Sep 2026 10:00:00 +0000")
+    (let ((archived (expand-file-name "cur/1700000030.30.fixture:2,S" archive)))
+      (email-e2e--write-message archived "Ann <ann@example.com>" "archived" "archived"
+                                "Sun, 20 Sep 2026 09:00:00 +0000")
+      (with-temp-file notmuch
+        (insert "#!/bin/sh\nprintf '%s\\n' '" archived "'\n"))
+      (set-file-modes notmuch #o755))
     ;; the sender's colors would paint white on white, and the paragraph
     ;; is longer than any terminal line
     (email-e2e--write-alternative
@@ -195,6 +219,10 @@ An untimed `read-event' is idle, and a timer ends it."
     (cl-flet ((record (label ok &rest kv)
                 (push (append (list :label (format "email: %s" label) :ok ok) kv)
                       results))
+              ;; the groups nnmaildir has read this session
+              (read-groups ()
+                (when-let* ((server (alist-get "gmail" nnmaildir--servers nil nil #'equal)))
+                  (sort (hash-table-keys (nnmaildir--srv-groups server)) #'string<)))
               (open-subjects ()
                 (mapcar (lambda (message)
                           (mail-header-subject (mail-thread-message-header message)))
@@ -312,6 +340,52 @@ An untimed `read-event' is idle, and a timer ends it."
           (condition-case e
               (progn
                 (discard-input)
+                ;; the start reads no maildir: the routine groups follow on
+                ;; timer turns, and nothing reads the bulk ones
+                (gnus)
+                (record "gnus shows the group buffer before reading any maildir"
+                        (and (gnus-alive-p) (null (read-groups)))
+                        :got (format "alive %s, read %S" (gnus-alive-p) (read-groups)))
+                ;; the turns run on plain timers, which a timed wait
+                ;; serves; `email-e2e--idle' would leave Emacs idle, and
+                ;; the thread fill's cases below need it busy
+                (with-timeout (10)
+                  (while (or mail-refresh-queue (timerp mail-refresh-timer))
+                    (accept-process-output nil 0.05)))
+                (record "the routine groups are read on timer turns after the start"
+                        (equal (read-groups)
+                               '("html" "inbox" "labelled" "lists" "starred" "trash"))
+                        :got (format "%S" (read-groups)))
+                (record "a routine group's line counts its unread mail, a bulk group's line does not"
+                        (and (eql (gnus-group-unread "nnmaildir+gmail:inbox") 2)
+                             (not (numberp (gnus-group-unread "nnmaildir+gmail:archive"))))
+                        :got (format "inbox %S, archive %S"
+                                     (gnus-group-unread "nnmaildir+gmail:inbox")
+                                     (gnus-group-unread "nnmaildir+gmail:archive")))
+                ;; the stand-in notmuch answers with the archive's copy
+                (search-mail "archived")
+                (record "a search hit in a group no start read opens in the search summary"
+                        (and (derived-mode-p 'gnus-summary-mode)
+                             (equal (mapcar #'mail-header-subject gnus-newsgroup-headers)
+                                    '("archived")))
+                        :got (format "%s: %S" major-mode
+                                     (mapcar #'mail-header-subject gnus-newsgroup-headers)))
+                (gnus-summary-exit-no-update)
+                (record "the search reads the archive and no other bulk group"
+                        (and (member "archive" (read-groups))
+                             (not (member "emacs" (read-groups)))
+                             (not (member "moved" (read-groups))))
+                        :got (format "%S" (read-groups)))
+                ;; entering a label is where Gnus asks nnmaildir for it
+                (gnus-group-jump-to-group "nnmaildir+gmail:emacs")
+                (execute-kbd-macro (kbd "RET"))
+                (record "RET on a bulk group's line reads the group and shows its mail"
+                        (and (derived-mode-p 'gnus-summary-mode)
+                             (equal (mapcar #'mail-header-subject gnus-newsgroup-headers)
+                                    '("emacs-devel post")))
+                        :got (format "%s: %S" major-mode
+                                     (mapcar #'mail-header-subject gnus-newsgroup-headers)))
+                (gnus-summary-exit-no-update)
                 (open-mail-inbox)
                 (record "opens the inbox summary"
                         (and (derived-mode-p 'gnus-summary-mode)
@@ -1159,6 +1233,9 @@ An untimed `read-event' is idle, and a timer ends it."
         (when-let* ((name (bound-and-true-p mail-thread-buffer-name))
                     (thread (get-buffer name)))
           (kill-buffer thread))
+        ;; SPC l t G on a running Gnus queues refresh turns
+        (when (timerp (bound-and-true-p mail-refresh-timer))
+          (cancel-timer mail-refresh-timer))
         (when (gnus-alive-p)
           ;; a live summary makes gnus-group-exit ask whether to update it
           (dolist (name '("*Summary nnmaildir+gmail:inbox*" "*Summary nnmaildir+gmail:html*"
