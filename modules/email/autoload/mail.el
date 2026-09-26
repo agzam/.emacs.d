@@ -2,6 +2,7 @@
 
 (require 'gnus)
 (require 'gnus-sum)
+(require 'nnmaildir)
 (require 'url-util)
 
 (defvar gmail-maildir)
@@ -91,14 +92,78 @@ The bulk groups are then moved out of the routine scan."
 
 ;;;###autoload
 (defun refresh-mail-groups ()
-  "Rescan the maildir groups a routine scan covers, one group at a time.
-`gnus-group-get-new-news' asks nnmaildir for a server-wide scan instead,
-which walks every label in the store whatever its level and builds an
-overview for each message it has none for, and it reaches gmane over NNTP."
+  "Rescan the maildir groups a routine scan covers now, one group at a time.
+`gnus-group-get-new-news' leaves these rescans to timer turns instead,
+through `defer-mail-server-scan-a'."
   (interactive)
   (dolist (group (scanned-mail-groups))
     (refresh-mail-group group)
     (gnus-group-update-group group t)))
+
+;;; Reading the store without blocking
+
+(defvar mail-refresh-queue nil
+  "Maildir groups `refresh-next-mail-group' has yet to read, the next one first.")
+
+(defvar mail-refresh-timer nil
+  "Timer of the next `refresh-next-mail-group' turn, or nil when none is due.")
+
+;;;###autoload
+(defun queue-mail-refresh ()
+  "Queue the maildir groups a routine scan covers, the inbox first.
+Each group is read on a timer turn of its own, so a key pressed meanwhile
+waits for one group, not for all of them."
+  (let ((groups (scanned-mail-groups)))
+    (setq mail-refresh-queue
+          (if (member mail-inbox-group groups)
+              (cons mail-inbox-group (remove mail-inbox-group groups))
+            groups)))
+  (unless (timerp mail-refresh-timer)
+    (setq mail-refresh-timer (run-with-timer 0 nil #'refresh-next-mail-group))))
+
+(defun refresh-next-mail-group ()
+  "Rescan the next group of `mail-refresh-queue' and redraw its line.
+The next turn is set before this one reads, so a group that fails to
+read leaves the rest of the queue running."
+  (setq mail-refresh-timer nil)
+  (when-let* (((gnus-alive-p))
+              (group (pop mail-refresh-queue)))
+    (when mail-refresh-queue
+      (setq mail-refresh-timer (run-with-timer 0 nil #'refresh-next-mail-group)))
+    (refresh-mail-group group)
+    (gnus-group-update-group group t)))
+
+;;;###autoload
+(defun defer-mail-server-scan-a (fn &optional group server)
+  "Call FN to scan GROUP on SERVER; queue the routine groups instead of all.
+With no GROUP nnmaildir reads every label in the store, the archive and
+the mailing lists included, in the main thread - tens of seconds before
+the group buffer appears."
+  (if group
+      (funcall fn group server)
+    (queue-mail-refresh)
+    t))
+
+;;;###autoload
+(defun scan-mail-group-on-miss-a (fn base-name group server)
+  "Call FN for BASE-NAME in GROUP on SERVER; on a miss, scan GROUP and retry.
+gnus-search maps each notmuch hit through this, and notmuch answers with
+the archive's copy of nearly every message, a group no startup reads."
+  (or (funcall fn base-name group server)
+      (progn
+        (nnmaildir-request-scan group server)
+        (funcall fn base-name group server))))
+
+;;;###autoload
+(defun scan-unknown-mail-group-a (fn group &optional server &rest args)
+  "Call FN on GROUP, SERVER and ARGS; if it fails, scan GROUP and call again.
+nnmaildir refuses a group it has not read this session with \"No such
+group\" - after a start, every group but the routine ones - so entering
+a label, filing a copy or moving a message into one would fail."
+  (or (apply fn group server args)
+      (progn
+        (nnmaildir-request-scan group server)
+        (apply fn group server args))))
 
 ;;;###autoload
 (defun open-mail-inbox ()
