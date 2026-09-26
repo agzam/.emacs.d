@@ -264,9 +264,33 @@ names a message's copies in the same order with and without
              (push file (car messages)))))
     (nreverse (mapcar #'reverse messages))))
 
-(defun likeliest-copy (copies root)
-  "The one of COPIES, a message's files in the store at ROOT, a search shows."
-  (car (seq-sort-by (lambda (file) (mail-copy-rank file root)) #'< copies)))
+(defun maildir-file-names (dir)
+  "Hash of each message file's name in maildir directory DIR by its base name."
+  (let ((names (make-hash-table :test #'equal)))
+    (dolist (name (directory-files dir nil "\\`[^.]" t))
+      (puthash (car (split-string name ":")) (expand-file-name name dir) names))
+    names))
+
+(defun current-mail-file (file listings)
+  "FILE under the name it has now, or nil once it is gone.
+A scan moves new mail into cur/ and a saved flag renames the file, and
+notmuch learns the new name at its next run.  LISTINGS holds the cur/
+directories read so far, each by `maildir-file-names'."
+  (if (file-exists-p file)
+      file
+    (let ((cur (expand-file-name
+                "cur" (file-name-directory (directory-file-name (file-name-directory file))))))
+      (gethash (car (split-string (file-name-nondirectory file) ":"))
+               (with-memoization (gethash cur listings)
+                 (maildir-file-names cur))))))
+
+(defun likeliest-copy (copies root &optional listings)
+  "The one of COPIES, a message's files in the store at ROOT, a search shows.
+A copy counts under the name it has now, and not at all once it is gone.
+LISTINGS caches directory reads across the messages of one search."
+  (let ((listings (or listings (make-hash-table :test #'equal))))
+    (seq-some (lambda (file) (current-mail-file file listings))
+              (seq-sort-by (lambda (file) (mail-copy-rank file root)) #'< copies))))
 
 (defun notmuch-files (text)
   "The file names in TEXT, notmuch's output, without the lines around them."
@@ -292,8 +316,10 @@ marks and moves in search results would miss the inbox."
       ;; no files means the second run failed; the first run's hits stand
       (when files
         (erase-buffer)
-        (dolist (copies (message-copies files firsts))
-          (insert (likeliest-copy copies root) "\n")))))
+        (let ((listings (make-hash-table :test #'equal)))
+          (dolist (copies (message-copies files firsts))
+            (when-let* ((copy (likeliest-copy copies root listings)))
+              (insert copy "\n")))))))
   (funcall fn engine server query groups))
 
 ;;; Order and folds
