@@ -15,6 +15,7 @@
 (require 'gnus-group)
 (require 'gnus-sum)
 (require 'nnselect)
+(require 'range)
 (require 'seq)
 
 (defvar mail-inbox-group)
@@ -430,5 +431,39 @@ left open would write its own older state back when it exits."
           (with-current-buffer buffer
             (save-excursion
               (mail-set-read-and-star article unread starred))))))))
+
+;;;###autoload
+(defun activate-search-hit-groups-h ()
+  "Activate each group whose active range ends below a hit this search shows.
+nnselect saves read marks only within a group's active range, and a hit
+can be mail that arrived after its group was last read."
+  (when (and (gnus-nnselect-group-p gnus-newsgroup-name)
+             (not gnus-group-is-exiting-without-update-p))
+    (pcase-dolist (`(,group . ,articles)
+                   (seq-group-by #'mail-article-group gnus-newsgroup-articles))
+      (when (< (or (cdr (gnus-active group)) 0)
+               (apply #'max (mapcar #'mail-article-number articles)))
+        (gnus-activate-group group)))))
+
+;;;###autoload
+(defun keep-newer-read-marks-a (fn group unread &optional compute)
+  "Call FN with GROUP, UNREAD and COMPUTE, sparing mail the summary never saw.
+A summary's read ranges end at the active range it copied on entry, and
+Gnus would take the read mark off every article above it."
+  (if-let* (((not compute))
+            ((derived-mode-p 'gnus-summary-mode))
+            ((equal group gnus-newsgroup-name))
+            (entry gnus-newsgroup-active)
+            (now (cdr (gnus-active group)))
+            ((< (cdr entry) now)))
+      (let ((gnus-newsgroup-active (cons (car entry) now)))
+        (funcall fn group
+                 (gnus-sorted-union
+                  unread
+                  (range-uncompress
+                   (range-remove (list (cons (1+ (cdr entry)) now))
+                                 (gnus-info-read (gnus-get-info group)))))
+                 compute))
+    (funcall fn group unread compute)))
 
 ;;; marks.el ends here

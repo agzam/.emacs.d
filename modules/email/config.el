@@ -250,7 +250,12 @@ columns would go to the window left of Gnus."
   ;; a summary open under a search learns what the search changed, or
   ;; its own exit would write the older state back
   (add-hook 'gnus-select-group-hook #'note-search-entry-marks-h)
-  (add-hook 'gnus-summary-prepare-exit-hook #'carry-search-marks-h))
+  (add-hook 'gnus-summary-prepare-exit-hook #'carry-search-marks-h)
+  ;; mail a search found may lie above its group's active range, where
+  ;; nnselect saves no read mark
+  (add-hook 'gnus-summary-prepare-exit-hook #'activate-search-hit-groups-h)
+  ;; a summary's exit would unmark the mail that arrived after it opened
+  (advice-add 'gnus-update-read-articles :around #'keep-newer-read-marks-a))
 
 (use-package gnus-art
   :ensure nil

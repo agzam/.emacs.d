@@ -1407,10 +1407,31 @@ An untimed `read-event' is idle, and a timer ends it."
                             :got (format "%s, line %S, trash %S" (buffer-name)
                                          (gnus-summary-goto-subject drop nil t)
                                          (flags-of trash "twin-drop")))
+                    ;; mail arriving while that summary is open: a sync
+                    ;; started from Emacs reads twin-late in, and nothing
+                    ;; reads twin-fresh before the search does
+                    (twin "twin-late" "")
+                    (refresh-mail-group "nnmaildir+gmail:inbox")
+                    (twin "twin-fresh" "")
+                    (search-for "twin-fresh")
+                    (execute-kbd-macro "!q")
+                    (record "! in search results reaches mail that arrived after the inbox was read"
+                            (equal (flags-of inbox "twin-fresh") "S")
+                            :got (format "%S" (where "twin-fresh")))
+                    (search-for "twin-late")
+                    (execute-kbd-macro "!q")
+                    (record "! in search results reaches mail a sync read in after the summary opened"
+                            (equal (flags-of inbox "twin-late") "S")
+                            :got (format "%S" (where "twin-late")))
                     (execute-kbd-macro "q")
                     (record "q in that inbox keeps what the search saved instead of its older state"
                             (equal (where "twin-carry") '(:inbox "" :archive "S" :trash nil))
-                            :got (format "%S" (where "twin-carry"))))))
+                            :got (format "%S" (where "twin-carry")))
+                    (record "q in that inbox keeps the read marks searches gave mail newer than it"
+                            (and (equal (flags-of inbox "twin-late") "S")
+                                 (equal (flags-of inbox "twin-fresh") "S"))
+                            :got (format "late %S, fresh %S"
+                                         (where "twin-late") (where "twin-fresh"))))))
             (error (record "flow signalled" nil :err e)))
         (when (buffer-live-p reply)
           (with-current-buffer reply
