@@ -11,7 +11,11 @@
 ;; move that every scan makes.  A rebuild discards nov/ and num/ first,
 ;; which renumbers the group; nnmaildir re-derives read state from the
 ;; maildir flags, and marks/ is keyed by file name, so both survive.
+;; Numbers follow each file's mtime, the day Gmail received the message,
+;; so a group's highest numbers - the ones a `display' limit shows - are
+;; its newest mail even when a backfill downloaded old mail last.
 
+(require 'cl-lib)
 (require 'gnus)
 ;; the header parser reads a decoder variable gnus-sum defines
 (require 'gnus-sum)
@@ -49,6 +53,30 @@
       (when (file-directory-p dir)
         (delete-directory dir t)))))
 
+(defun mail-index-arrival-order (dir)
+  "Predicate ordering the message files of DIR by mtime, oldest first.
+mbsync's CopyArrivalDate sets the mtime to Gmail's arrival date, while
+nnmaildir's own order is the download time in the file name, which
+breaks the ties."
+  (let ((mtimes (make-hash-table :test #'equal))
+        (by-name (symbol-function 'nnmaildir--sort-files)))
+    (cl-flet ((mtime (file)
+                ;; nnmaildir--parse-filename wraps a name it can read
+                ;; in a vector and leaves (PREFIX . SUFFIX) otherwise
+                (let ((file (if (vectorp file) (aref file 3) file)))
+                  (with-memoization (gethash (car file) mtimes)
+                    (float-time
+                     (or (file-attribute-modification-time
+                          (file-attributes
+                           (expand-file-name (concat (car file) (cdr file)) dir)))
+                         0))))))
+      (lambda (a b)
+        (let ((ta (mtime a))
+              (tb (mtime b)))
+          (if (= ta tb)
+              (funcall by-name a b)
+            (< ta tb)))))))
+
 (defun mail-index-build (store groups rebuild)
   "Scan GROUPS of the nnmaildir store at STORE, building missing overviews.
 With REBUILD, discard each group's overviews first.  Returns one
@@ -74,7 +102,12 @@ With REBUILD, discard each group's overviews first.  Returns one
                         (start (float-time)))
                     (message "Scanning %s: %d messages, %d overviews..."
                              group messages before)
-                    (nnmaildir-request-scan group mail-index-server)
+                    ;; nnmaildir numbers the files it has no number for
+                    ;; in the order this sorts them
+                    (cl-letf (((symbol-function 'nnmaildir--sort-files)
+                               (mail-index-arrival-order
+                                (expand-file-name (concat group "/cur") store))))
+                      (nnmaildir-request-scan group mail-index-server))
                     (list group messages before (mail-index-overviews store group)
                           (- (float-time) start))))
                 groups)
