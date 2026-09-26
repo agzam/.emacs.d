@@ -1315,13 +1315,32 @@ An untimed `read-event' is idle, and a timer ends it."
                                (last (split-string (buffer-string) "\n" t) 2)))
                            (where (id)
                              (list :inbox (flags-of inbox id) :archive (flags-of archive id)
-                                   :trash (flags-of trash id))))
+                                   :trash (flags-of trash id)))
+                           ;; what the phone did to ID, as mbsync brings it:
+                           ;; the inbox file renamed to Gmail's FLAGS
+                           (phone (id flags)
+                             (let ((file (seq-find (lambda (file)
+                                                     (string-prefix-p (concat id ".")
+                                                                      (file-name-nondirectory file)))
+                                                   (messages-in inbox))))
+                               (rename-file file (expand-file-name
+                                                  (format "cur/%s:2,%s"
+                                                          (car (split-string
+                                                                (file-name-nondirectory file) ":"))
+                                                          flags)
+                                                  inbox)))))
                   (delete-other-windows)
                   (switch-to-buffer gnus-group-buffer)
                   (dolist (id '("twin-read" "twin-star" "twin-keep" "twin-trash" "twin-gone"
                                 "twin-carry" "twin-drop"))
                     (twin id "S"))
                   (twin "twin-label" "S" lists)
+                  ;; the phone changes these while the inbox summary is open
+                  (pcase-dolist (`(,id ,flags) '(("phone-read" "") ("phone-star" "")
+                                                 ("phone-unread" "S") ("phone-unstar" "FS")
+                                                 ("phone-mixed" "S") ("own-read" "")
+                                                 ("phone-search" "")))
+                    (twin id flags))
                   (execute-kbd-macro (kbd "gR"))
                   (search-for "twin-read")
                   (record "a search hit is the inbox copy when the inbox holds the message"
@@ -1371,6 +1390,15 @@ An untimed `read-event' is idle, and a timer ends it."
                   (record "a in search results archives: the inbox copy goes, All Mail's stays"
                           (equal (where "twin-gone") '(:inbox nil :archive "S" :trash nil))
                           :got (format "%S" (where "twin-gone")))
+                  ;; the phone reads and stars a hit while its search is
+                  ;; open, and a sync started from Emacs merges that
+                  (search-for "phone-search")
+                  (phone "phone-search" "FS")
+                  (refresh-mail-group "nnmaildir+gmail:inbox")
+                  (execute-kbd-macro "q")
+                  (record "q in search results keeps a read and a star the phone made meanwhile"
+                          (equal (flags-of inbox "phone-search") "FS")
+                          :got (format "%S" (where "phone-search")))
                   (gnus-group-jump-to-group "nnmaildir+gmail:lists")
                   (execute-kbd-macro (kbd "RET"))
                   (let ((label (email-e2e--article "twin-label")))
@@ -1433,7 +1461,51 @@ An untimed `read-event' is idle, and a timer ends it."
                     (record "! in search results reaches mail a sync read in after the summary opened"
                             (equal (flags-of inbox "twin-late") "S")
                             :got (format "%S" (where "twin-late")))
-                    (execute-kbd-macro "q")
+                    ;; the phone changes mail the summary shows, the summary
+                    ;; reads one message and unreads another, and a sync
+                    ;; started from Emacs merges the phone's changes
+                    (phone "phone-read" "S")
+                    (phone "phone-star" "F")
+                    (phone "phone-unread" "")
+                    (phone "phone-unstar" "S")
+                    (phone "phone-mixed" "FS")
+                    (gnus-summary-goto-subject (email-e2e--article "own-read"))
+                    (execute-kbd-macro "!")
+                    (gnus-summary-goto-subject (email-e2e--article "phone-mixed"))
+                    (execute-kbd-macro "!")
+                    (refresh-mail-group "nnmaildir+gmail:inbox")
+                    ;; the files, and the group the next summary reads
+                    (let ((numbers (mapcar #'email-e2e--article
+                                           '("phone-read" "phone-star"
+                                             "phone-unread" "phone-unstar"))))
+                      (execute-kbd-macro "q")
+                      (pcase-let* ((`(,read ,star ,unread ,unstar) numbers)
+                                   (info (gnus-get-info "nnmaildir+gmail:inbox"))
+                                   (ticks (alist-get 'tick (gnus-info-marks info))))
+                        (record "q in that inbox keeps a read and a star the phone made meanwhile"
+                                (and (equal (list (flags-of inbox "phone-read")
+                                                  (flags-of inbox "phone-star"))
+                                            '("S" "F"))
+                                     (range-member-p read (gnus-info-read info))
+                                     (range-member-p star ticks))
+                                :got (format "%S %S, group read %S, starred %S"
+                                             (where "phone-read") (where "phone-star")
+                                             (range-member-p read (gnus-info-read info))
+                                             (range-member-p star ticks)))
+                        (record "q in that inbox keeps an unread and an unstar the phone made meanwhile"
+                                (and (equal (list (flags-of inbox "phone-unread")
+                                                  (flags-of inbox "phone-unstar"))
+                                            '("" "S"))
+                                     (not (range-member-p unread (gnus-info-read info)))
+                                     (not (range-member-p unstar ticks)))
+                                :got (format "%S %S, group read %S, starred %S"
+                                             (where "phone-unread") (where "phone-unstar")
+                                             (range-member-p unread (gnus-info-read info))
+                                             (range-member-p unstar ticks)))))
+                    (record "q in that inbox saves its own read marks beside the phone's star"
+                            (equal (list (flags-of inbox "own-read") (flags-of inbox "phone-mixed"))
+                                   '("S" "F"))
+                            :got (format "%S %S" (where "own-read") (where "phone-mixed")))
                     (record "q in that inbox keeps what the search saved instead of its older state"
                             (equal (where "twin-carry") '(:inbox "" :archive "S" :trash nil))
                             :got (format "%S" (where "twin-carry")))

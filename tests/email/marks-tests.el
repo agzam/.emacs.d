@@ -708,20 +708,24 @@ can tell which articles each verb reached."
       (setq-local mail-marks '((1 . archive) (2 . archive)))
       (expect (mail-queue-description) :to-equal "2 archives"))))
 
-(describe "note-search-entry-marks-h"
-  (it "notes a search summary's unread and starred articles as it opens"
+(describe "note-entry-marks-h"
+  (it "notes a summary's unread, unselected and starred articles as it opens"
     (marks-tests-in-summary '((1 0) (2 0))
-      (let ((gnus-newsgroup-name "nnselect:search"))
+      (let ((gnus-newsgroup-unselected (list 5)))
         (setq gnus-newsgroup-unreads (list 1)
               gnus-newsgroup-marked (list 2))
-        (note-search-entry-marks-h)
+        (note-entry-marks-h)
         ;; the note is a copy, which marking later leaves alone
         (setcar gnus-newsgroup-unreads 9)
-        (expect mail-entry-marks :to-equal '((1) . (2))))))
-  (it "notes nothing for a label"
+        (setcar gnus-newsgroup-marked 9)
+        (expect mail-entry-marks :to-equal '((1 5) . (2))))))
+  (it "notes a search summary the same way"
     (marks-tests-in-summary '((1 0))
-      (note-search-entry-marks-h)
-      (expect mail-entry-marks :to-be nil))))
+      (let ((gnus-newsgroup-name "nnselect:search")
+            (gnus-newsgroup-unselected nil))
+        (setq gnus-newsgroup-unreads (list 1))
+        (note-entry-marks-h)
+        (expect mail-entry-marks :to-equal '((1) . nil))))))
 
 (describe "mail-set-read-and-star"
   (it "gives the article the read and star state asked for, keeping the other"
@@ -768,6 +772,17 @@ can tell which articles each verb reached."
                   (gnus-newsgroup-articles (list 1))
                   (gnus-group-is-exiting-without-update-p t))
               ;; read 1, which the inbox summary would learn on a saving exit
+              (setq-local mail-entry-marks (cons (list 1) nil))
+              (spy-on 'mail-set-read-and-star)
+              (carry-search-marks-h)
+              (expect 'mail-set-read-and-star :not :to-have-been-called)))
+        (kill-buffer inbox))))
+  (it "leaves a label's summary alone, whose own exit saves what it changed"
+    (let ((inbox (get-buffer-create "*Summary nnmaildir+gmail:inbox*")))
+      (unwind-protect
+          (marks-tests-in-summary '((1 0))
+            (let ((gnus-newsgroup-articles (list 1)))
+              ;; read 1 since the summary opened
               (setq-local mail-entry-marks (cons (list 1) nil))
               (spy-on 'mail-set-read-and-star)
               (carry-search-marks-h)
@@ -869,5 +884,101 @@ GROUP's active range is NOW and its info's read ranges READ."
        (lambda (&rest args) (setq called (cons gnus-newsgroup-active args)))
        "nnmaildir+gmail:inbox" (list 1065) t))
     (expect called :to-equal '((2 . 1065) "nnmaildir+gmail:inbox" (1065) t))))
+
+(describe "merge-mark-list"
+  (it "takes a change made elsewhere where the summary made none"
+    ;; 1 and 2 changed elsewhere only, 3 and 4 in the summary only, 5 on
+    ;; both sides, 6 nowhere
+    (expect (merge-mark-list '(1 4 6) '(1 3 5 6) '(2 3 6)) :to-equal '(2 4 6)))
+  (it "returns the summary's list when nothing changed elsewhere"
+    (expect (merge-mark-list '(1 3) '(1 2) '(1 2)) :to-equal '(1 3))))
+
+(describe "keep-group-changes-h"
+  (before-each
+    (spy-on 'gnus-nnselect-group-p
+            :and-call-fake (lambda (group) (string-prefix-p "nnselect:" group))))
+
+  (it "gives a label's summary what its group got meanwhile, keeping its own changes"
+    ;; elsewhere 2 and 9 were read, 3 unread, 4 starred and 7 unstarred;
+    ;; the summary read 4 and unread 1 itself, and 9 and 10 are unselected
+    (marks-tests-updating "nnmaildir+gmail:inbox" '(1 . 10) '(1 . 10) '((1 . 2) 5 (7 . 9))
+      (gnus-info-set-marks (gnus-get-info "nnmaildir+gmail:inbox") '((tick 4 6)) t)
+      (setq-local mail-entry-marks (cons (list 2 4 6 9 10) (list 6 7)))
+      (setq-local gnus-newsgroup-unreads (list 1 2 6))
+      (setq-local gnus-newsgroup-unselected (list 9 10))
+      (setq-local gnus-newsgroup-marked (list 6 7))
+      (keep-group-changes-h)
+      (expect gnus-newsgroup-unreads :to-equal '(1 3 6))
+      (expect gnus-newsgroup-unselected :to-equal '(10))
+      (expect gnus-newsgroup-marked :to-equal '(4 6))))
+  (it "changes nothing in a summary that noted nothing as it opened"
+    ;; the group counts 3 unread, which the summary never showed
+    (marks-tests-updating "nnmaildir+gmail:inbox" '(1 . 3) '(1 . 3) nil
+      (setq-local mail-entry-marks nil)
+      (setq-local gnus-newsgroup-unreads (list 1 2))
+      (setq-local gnus-newsgroup-unselected nil)
+      (setq-local gnus-newsgroup-marked nil)
+      (keep-group-changes-h)
+      (expect gnus-newsgroup-unreads :to-equal '(1 2))))
+  (it "leaves a search summary to the hook that maps its hits"
+    ;; the search group's own info says nothing about the hits
+    (marks-tests-updating "nnselect:search" '(1 . 3) '(1 . 3) '((1 . 3))
+      (setq-local mail-entry-marks (cons (list 1 2) nil))
+      (setq-local gnus-newsgroup-unreads (list 1 2))
+      (setq-local gnus-newsgroup-unselected nil)
+      (setq-local gnus-newsgroup-marked nil)
+      (keep-group-changes-h)
+      (expect gnus-newsgroup-unreads :to-equal '(1 2)))))
+
+(defmacro marks-tests-in-search (&rest body)
+  "Run BODY in a search of inbox 11 and 12 and github 5, all unread as it opened.
+The inbox's info holds 11 read and 12 starred; github's holds nothing."
+  (declare (indent 0))
+  `(with-temp-buffer
+     (setq-local gnus-newsgroup-name "nnselect:search")
+     (setq-local gnus-newsgroup-selection [["nnmaildir+gmail:inbox" 11 100]
+                                           ["nnmaildir+gmail:inbox" 12 100]
+                                           ["nnmaildir+gmail:github" 5 100]])
+     (setq-local gnus-newsgroup-active '(1 . 3))
+     (setq-local mail-entry-marks (cons (list 1 2 3) nil))
+     (setq-local gnus-newsgroup-unselected nil)
+     (setq-local gnus-newsgroup-marked nil)
+     (let ((gnus-active-hashtb (make-hash-table :test #'equal))
+           (gnus-newsrc-hashtb (make-hash-table :test #'equal)))
+       (puthash "nnmaildir+gmail:inbox"
+                (list 3 (list "nnmaildir+gmail:inbox" 1 '((1 . 11)) '((tick 12))))
+                gnus-newsrc-hashtb)
+       (puthash "nnmaildir+gmail:github"
+                (list 3 (list "nnmaildir+gmail:github" 1 nil nil))
+                gnus-newsrc-hashtb)
+       ,@body)))
+
+(describe "keep-search-group-changes-h"
+  (before-each
+    (spy-on 'gnus-nnselect-group-p
+            :and-call-fake (lambda (group) (string-prefix-p "nnselect:" group))))
+
+  (it "gives a search what its hits' groups got meanwhile, keeping its own changes"
+    ;; elsewhere inbox 11 was read and 12 starred; the search read github 5
+    (marks-tests-in-search
+      (setq-local gnus-newsgroup-unreads (list 1 2))
+      (keep-search-group-changes-h)
+      (expect gnus-newsgroup-unreads :to-equal '(2))
+      (expect gnus-newsgroup-marked :to-equal '(2))))
+  (it "changes nothing when the search is left without saving"
+    (marks-tests-in-search
+      (setq-local gnus-newsgroup-unreads (list 1 2))
+      (let ((gnus-group-is-exiting-without-update-p t))
+        (keep-search-group-changes-h))
+      (expect gnus-newsgroup-unreads :to-equal '(1 2))
+      (expect gnus-newsgroup-marked :to-be nil)))
+  (it "leaves a label's summary to its own hook"
+    (marks-tests-in-search
+      (setq-local gnus-newsgroup-name "nnmaildir+gmail:inbox")
+      (setq-local gnus-newsgroup-unreads (list 1 2))
+      (spy-on 'nnselect-request-update-info)
+      (keep-search-group-changes-h)
+      (expect 'nnselect-request-update-info :not :to-have-been-called)
+      (expect gnus-newsgroup-unreads :to-equal '(1 2)))))
 
 ;;; marks-tests.el ends here

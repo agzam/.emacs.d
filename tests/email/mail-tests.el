@@ -672,3 +672,35 @@ notmuch's arguments in `runs'."
         '((query . "id:a") (thread . t))
       (expect parsed :to-match "\\`/store/archive/cur/a\n/store/inbox/cur/a2\n")
       (expect runs :to-be nil))))
+
+(describe "rebase-mail-flags"
+  (it "applies what Gnus changed to the flags the file has now"
+    ;; Gnus unreads a message nnmaildir read as S, which the phone starred
+    (expect (rebase-mail-flags ":2,S" ":2," ":2,FS") :to-equal ":2,F")
+    ;; Gnus reads a message the phone starred
+    (expect (rebase-mail-flags ":2," ":2,S" ":2,F") :to-equal ":2,FS"))
+  (it "keeps the flags sorted, as maildir wants them"
+    (expect (rebase-mail-flags ":2," ":2,T" ":2,FS") :to-equal ":2,FST")))
+
+(describe "keep-flags-set-elsewhere-a"
+  (it "renames a file the phone renamed to Gnus's change over the phone's flags"
+    (mail-tests--in-store '("inbox/cur/1.x:2,FS")
+      (let ((article (make-nnmaildir--art :prefix "1.x" :suffix ":2,S"))
+            (cur (concat root "inbox/cur/")))
+        (keep-flags-set-elsewhere-a #'nnmaildir--article-set-flags article ":2," cur)
+        (expect (directory-files cur nil "\\`[^.]") :to-equal '("1.x:2,F"))
+        (expect (nnmaildir--art-suffix article) :to-equal ":2,F"))))
+  (it "passes the new flags on when the file still has the ones nnmaildir read"
+    (mail-tests--in-store '("inbox/cur/1.x:2,S")
+      (let ((article (make-nnmaildir--art :prefix "1.x" :suffix ":2,S"))
+            (cur (concat root "inbox/cur/"))
+            called)
+        (keep-flags-set-elsewhere-a (lambda (&rest args) (setq called args)) article ":2," cur)
+        (expect called :to-equal (list article ":2," cur)))))
+  (it "passes the new flags on when the file is gone, which nnmaildir reports"
+    (mail-tests--in-store '("inbox/cur/other:2,")
+      (let ((article (make-nnmaildir--art :prefix "1.x" :suffix ":2,S"))
+            (cur (concat root "inbox/cur/"))
+            called)
+        (keep-flags-set-elsewhere-a (lambda (&rest args) (setq called args)) article ":2," cur)
+        (expect called :to-equal (list article ":2," cur))))))
