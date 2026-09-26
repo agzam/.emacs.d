@@ -113,11 +113,15 @@ An untimed `read-event' is idle, and a timer ends it."
          ;; archive, and a mailing list label is entered from its line
          (archive (expand-file-name "archive/" root))
          (emacs (expand-file-name "emacs/" root))
-         ;; stands in for notmuch, which CI lacks: it answers every search
-         ;; with the archive's copy, as the real index does, and counts
-         ;; 2, 3 ... for a batch, which it keeps in counted-log
+         ;; stands in for notmuch, which CI lacks: a search whose query
+         ;; names a file under hits/ answers with the copies listed there,
+         ;; All Mail's first as the real index names it, and any other
+         ;; search with the archive's copy.  It logs each search's
+         ;; arguments, and counts 2, 3 ... for a batch, kept in counted-log
          (notmuch (expand-file-name "notmuch" e2e-work-dir))
          (counted-log (expand-file-name "notmuch-counted" e2e-work-dir))
+         (hits (expand-file-name "hits/" e2e-work-dir))
+         (searches-log (expand-file-name "notmuch-searches" e2e-work-dir))
          ;; what the %uS column draws on a starred message
          (star (string #x2217))
          (results '())
@@ -149,6 +153,7 @@ An untimed `read-event' is idle, and a timer ends it."
     (let ((archived (expand-file-name "cur/1700000030.30.fixture:2,S" archive)))
       (email-e2e--write-message archived "Ann <ann@example.com>" "archived" "archived"
                                 "Sun, 20 Sep 2026 09:00:00 +0000")
+      (make-directory hits t)
       (with-temp-file notmuch
         (insert "#!/bin/sh\n"
                 "case \" $* \" in\n"
@@ -159,7 +164,17 @@ An untimed `read-event' is idle, and a timer ends it."
                 "      printf '%s\\n' \"$query\" >> '" counted-log "'\n"
                 "      n=$((n+1)); echo $n\n"
                 "    done;;\n"
-                "  *) printf '%s\\n' '" archived "';;\n"
+                "  *)\n"
+                "    printf '%s\\n' \"$*\" >> '" searches-log "'\n"
+                "    for query; do :; done\n"
+                "    if [ -f '" hits "'\"$query\" ]; then\n"
+                "      case \" $* \" in\n"
+                "        *\" --duplicate=1 \"*) head -n 1 '" hits "'\"$query\";;\n"
+                "        *) cat '" hits "'\"$query\";;\n"
+                "      esac\n"
+                "    else\n"
+                "      printf '%s\\n' '" archived "'\n"
+                "    fi;;\n"
                 "esac\n"))
       (set-file-modes notmuch #o755))
     ;; the sender's colors would paint white on white, and the paragraph
@@ -1273,7 +1288,129 @@ An untimed `read-event' is idle, and a timer ends it."
                                              (length (tab-bar-tabs))
                                              (buffer-name (window-buffer (selected-window)))))
                         (when (< tabs (length (tab-bar-tabs)))
-                          (tab-bar-close-tab)))))))
+                          (tab-bar-close-tab))))))
+                ;; search results act on the inbox copy: each message
+                ;; below sits in the inbox and in All Mail, and notmuch
+                ;; names All Mail's copy first
+                (cl-flet* ((twin (id flags &rest labels)
+                             ;; a copy of ID's message in All Mail, the inbox
+                             ;; and LABELS, All Mail's first in hits/ID
+                             (let ((files (mapcar (lambda (dir)
+                                                    (expand-file-name
+                                                     (format "cur/%s.%s:2,%s" id
+                                                             (file-name-nondirectory
+                                                              (directory-file-name dir))
+                                                             flags)
+                                                     dir))
+                                                  (append (list archive inbox) labels))))
+                               (dolist (file files)
+                                 (email-e2e--write-message file "Tom <tom@example.com>" id id))
+                               (with-temp-file (expand-file-name id hits)
+                                 (insert (mapconcat (lambda (file) (concat file "\n")) files "")))))
+                           (search-for (query)
+                             (execute-kbd-macro (kbd (concat ", / " query " RET"))))
+                           (searches ()
+                             (with-temp-buffer
+                               (insert-file-contents searches-log)
+                               (last (split-string (buffer-string) "\n" t) 2)))
+                           (where (id)
+                             (list :inbox (flags-of inbox id) :archive (flags-of archive id)
+                                   :trash (flags-of trash id))))
+                  (delete-other-windows)
+                  (switch-to-buffer gnus-group-buffer)
+                  (dolist (id '("twin-read" "twin-star" "twin-keep" "twin-trash" "twin-gone"
+                                "twin-carry" "twin-drop"))
+                    (twin id "S"))
+                  (twin "twin-label" "S" lists)
+                  (execute-kbd-macro (kbd "gR"))
+                  (search-for "twin-read")
+                  (record "a search hit is the inbox copy when the inbox holds the message"
+                          (and (derived-mode-p 'gnus-summary-mode)
+                               (equal (nnselect-article-group (car gnus-newsgroup-articles))
+                                      "nnmaildir+gmail:inbox"))
+                          :got (format "%s, %S" major-mode (bound-and-true-p gnus-newsgroup-selection)))
+                  (record "a search asks notmuch for the newest 500, then for every copy of them"
+                          (let ((runs (searches)))
+                            (and (string-match-p "--duplicate=1 --limit=500 twin-read\\'" (car runs))
+                                 (string-match-p "--output=files --limit=500 twin-read\\'" (cadr runs))))
+                          :got (format "%S" (searches)))
+                  (execute-kbd-macro "!q")
+                  (record "! in search results marks the inbox copy unread, and q saves it"
+                          (equal (where "twin-read") '(:inbox "" :archive "S" :trash nil))
+                          :got (format "%S" (where "twin-read")))
+                  (search-for "twin-star")
+                  (execute-kbd-macro "=q")
+                  (record "= in search results stars the inbox copy"
+                          (equal (where "twin-star") '(:inbox "FS" :archive "S" :trash nil))
+                          :got (format "%S" (where "twin-star")))
+                  (search-for "twin-keep")
+                  (execute-kbd-macro "dqn")
+                  (record "q asks before it leaves a queue behind, and n leaves without running it"
+                          (and (eq (window-buffer (selected-window)) (get-buffer gnus-group-buffer))
+                               (equal (where "twin-keep") '(:inbox "S" :archive "S" :trash nil)))
+                          :got (format "%s, %S" (buffer-name (window-buffer (selected-window)))
+                                       (where "twin-keep")))
+                  (search-for "twin-trash")
+                  (execute-kbd-macro "dqy")
+                  (record "y runs the queue first: d sends the inbox copy to the trash"
+                          (pcase (where "twin-trash")
+                            (`(:inbox nil :archive "S" :trash ,trashed) trashed))
+                          :got (format "%S" (where "twin-trash")))
+                  (search-for "twin-gone")
+                  (execute-kbd-macro "axq")
+                  (record "a in search results archives: the inbox copy goes, All Mail's stays"
+                          (equal (where "twin-gone") '(:inbox nil :archive "S" :trash nil))
+                          :got (format "%S" (where "twin-gone")))
+                  (gnus-group-jump-to-group "nnmaildir+gmail:lists")
+                  (execute-kbd-macro (kbd "RET"))
+                  (let ((label (email-e2e--article "twin-label")))
+                    (gnus-summary-goto-subject label)
+                    (execute-kbd-macro "ax")
+                    (record "a in a label archives: the inbox copy goes, the label keeps the message"
+                            (and (null (flags-of inbox "twin-label"))
+                                 (equal (flags-of lists "twin-label") "S")
+                                 (gnus-summary-goto-subject label nil t)
+                                 (null mail-marks))
+                            :got (format "inbox %S, lists %S, line %S, queue %S"
+                                         (flags-of inbox "twin-label") (flags-of lists "twin-label")
+                                         (gnus-summary-goto-subject label nil t) mail-marks)))
+                  (gnus-summary-goto-subject (email-e2e--article "to label"))
+                  (condition-case nil
+                      (execute-kbd-macro "a")
+                    (user-error nil))
+                  (record "a refuses a message the inbox does not hold"
+                          (and (null mail-marks)
+                               (equal (flags-of lists "to-label") "S"))
+                          :got (format "queue %S, lists %S" mail-marks (flags-of lists "to-label")))
+                  (execute-kbd-macro "q")
+                  ;; a search opened from the inbox summary, which stays
+                  ;; open under it and writes its own state on exit
+                  (open-mail-inbox)
+                  (let ((summary (current-buffer))
+                        (carry (email-e2e--article "twin-carry"))
+                        (drop (email-e2e--article "twin-drop")))
+                    (search-for "twin-carry")
+                    (execute-kbd-macro "!q")
+                    (record "the inbox summary under a search learns what it changed"
+                            (and (eq (current-buffer) summary)
+                                 (memq carry gnus-newsgroup-unreads)
+                                 (equal (line-marks carry) "  "))
+                            :got (format "%s, unread %S, line starts %S" (buffer-name)
+                                         (memq carry gnus-newsgroup-unreads)
+                                         (line-marks carry)))
+                    (search-for "twin-drop")
+                    (execute-kbd-macro "dxq")
+                    (record "a message trashed from that search leaves the inbox summary's lines"
+                            (and (eq (current-buffer) summary)
+                                 (not (gnus-summary-goto-subject drop nil t))
+                                 (flags-of trash "twin-drop"))
+                            :got (format "%s, line %S, trash %S" (buffer-name)
+                                         (gnus-summary-goto-subject drop nil t)
+                                         (flags-of trash "twin-drop")))
+                    (execute-kbd-macro "q")
+                    (record "q in that inbox keeps what the search saved instead of its older state"
+                            (equal (where "twin-carry") '(:inbox "" :archive "S" :trash nil))
+                            :got (format "%S" (where "twin-carry"))))))
             (error (record "flow signalled" nil :err e)))
         (when (buffer-live-p reply)
           (with-current-buffer reply
@@ -1294,6 +1431,12 @@ An untimed `read-event' is idle, and a timer ends it."
         (when (timerp (bound-and-true-p mail-refresh-timer))
           (cancel-timer mail-refresh-timer))
         (when (gnus-alive-p)
+          ;; a search summary a case left behind, which returns to the
+          ;; summary it was opened from
+          (dolist (summary (buffer-list))
+            (when (string-prefix-p "*Summary nnselect:" (buffer-name summary))
+              (with-current-buffer summary
+                (gnus-summary-exit-no-update t))))
           ;; a live summary makes gnus-group-exit ask whether to update it
           (dolist (name '("*Summary nnmaildir+gmail:inbox*" "*Summary nnmaildir+gmail:html*"
                           "*Summary nnmaildir+gmail:starred*" "*Summary nnmaildir+gmail:lists*"))

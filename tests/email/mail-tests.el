@@ -10,7 +10,12 @@
 (defvar gmail-maildir "/nonexistent-mail-tests/")
 (defvar mail-sync-program "mail-sync")
 (defvar mail-inbox-group "nnmaildir+gmail:inbox")
+(defvar mail-trash-group "nnmaildir+gmail:trash")
+(defvar mail-archive-group "nnmaildir+gmail:archive")
 (defvar mail-groups '("nnmaildir+gmail:inbox" "nntp+news.gmane.io:gmane.emacs.devel"))
+(defvar mail-bulk-groups
+  '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs" "nnmaildir+gmail:org-mode"
+    "nnmaildir+gmail:new" "nntp+news.gmane.io:gmane.emacs.devel"))
 
 (load-module-file "modules/email/autoload/mail.el")
 
@@ -215,7 +220,15 @@ from the server-wide scan that froze the frame."
         (expect (scan-mail-group-on-miss-a (lambda (&rest _) (and read 23195))
                                            "1700.1.host" "archive" "gmail")
                 :to-equal 23195))
-      (expect scans :to-equal '(("archive" "gmail"))))))
+      (expect scans :to-equal '(("archive" "gmail")))))
+  (it "says why Emacs waits while it reads the group"
+    ;; the first search of a session reads All Mail, about ten seconds
+    (let (said)
+      (cl-letf (((symbol-function 'nnmaildir-request-scan) #'ignore)
+                ((symbol-function 'message)
+                 (lambda (format &rest args) (setq said (apply #'format format args)))))
+        (scan-mail-group-on-miss-a #'ignore "1700.1.host" "archive" "gmail"))
+      (expect said :to-equal "Reading archive for the search..."))))
 
 (describe "scan-unknown-mail-group-a"
   (it "answers for a group nnmaildir knows without reading it again"
@@ -431,15 +444,167 @@ from the server-wide scan that froze the frame."
             (expect opened :to-equal (gmail-message-url "<seven@x>")))
         (kill-buffer summary)))))
 
+(defmacro mail-tests--searching (hits &rest body)
+  "Run BODY with the search stubbed to open a summary of HITS articles.
+The search specs land in `captured', and what Gnus's count question
+would have been bounded by in `large'."
+  (declare (indent 1))
+  `(let (captured large (summary (get-buffer-create "*Summary nnselect:search-tests*")))
+     (unwind-protect
+         (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
+                   ((symbol-function 'subscribe-mail-groups) #'ignore)
+                   ((symbol-function 'gnus-group-read-ephemeral-search-group)
+                    (lambda (_no-parse specs)
+                      (setq captured specs
+                            large gnus-large-ephemeral-newsgroup)
+                      (with-current-buffer summary
+                        (setq-local gnus-newsgroup-articles (number-sequence 1 ,hits)))
+                      (and (< 0 ,hits) "nnselect:search-tests"))))
+           ,@body)
+       (kill-buffer summary))))
+
 (describe "search-mail"
   (it "hands the raw notmuch query to an ephemeral search over the gmail server"
-    (let (captured)
-      (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
-                ((symbol-function 'subscribe-mail-groups) #'ignore)
-                ((symbol-function 'gnus-group-read-ephemeral-search-group)
-                 (lambda (_no-parse specs) (setq captured specs))))
-        (search-mail "from:someone subject:hello")
-        (expect (cdr (assq 'search-query-spec captured))
-                :to-equal '((query . "from:someone subject:hello") (raw . t)))
-        (expect (cdr (assq 'search-group-spec captured))
-                :to-equal '(("nnmaildir:gmail")))))))
+    (mail-tests--searching 3
+      (search-mail "from:someone subject:hello")
+      (expect (cdr (assq 'search-group-spec captured))
+              :to-equal '(("nnmaildir:gmail")))
+      (expect (alist-get 'query (cdr (assq 'search-query-spec captured)))
+              :to-equal "from:someone subject:hello")
+      (expect (alist-get 'raw (cdr (assq 'search-query-spec captured))) :to-be t)))
+  (it "shows the newest 500 matches unless told otherwise"
+    ;; a list query finds tens of thousands, and Gnus blocks on each
+    (mail-tests--searching 3
+      (search-mail "List:x")
+      (expect (alist-get 'limit (cdr (assq 'search-query-spec captured))) :to-equal 500)))
+  (it "takes the number of matches it is given, and every match for 0"
+    (mail-tests--searching 3
+      (search-mail "List:x" 50)
+      (expect (alist-get 'limit (cdr (assq 'search-query-spec captured))) :to-equal 50)
+      (search-mail "List:x" 0)
+      (expect (assq 'limit (cdr (assq 'search-query-spec captured))) :to-be nil)))
+  (it "never lets Gnus ask how many articles to show"
+    (mail-tests--searching 3
+      (search-mail "List:x")
+      (expect large :to-be nil)))
+  (it "asks for the number of matches on a prefix argument"
+    (mail-tests--searching 3
+      (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "List:x"))
+                ((symbol-function 'read-number) (lambda (&rest _) 0)))
+        (let ((current-prefix-arg '(4)))
+          (call-interactively #'search-mail)))
+      (expect (assq 'limit (cdr (assq 'search-query-spec captured))) :to-be nil)))
+  (it "says how many match in all when the cap cut the result"
+    (let (said counted)
+      (mail-tests--searching 500
+        (cl-letf (((symbol-function 'count-mail)
+                   (lambda (queries) (setq counted queries) '(33492)))
+                  ((symbol-function 'message)
+                   (lambda (format &rest args) (setq said (apply #'format format args)))))
+          (search-mail "limit:700 List:x" 500)))
+      (expect counted :to-equal '("List:x"))
+      (expect said :to-equal "The newest 500 of 33492 matches; a prefix argument shows more")))
+  (it "counts nothing when every match is shown"
+    (let (counted)
+      (mail-tests--searching 12
+        (cl-letf (((symbol-function 'count-mail) (lambda (queries) (setq counted queries) '(12))))
+          (search-mail "List:x")
+          (search-mail "List:x" 0)))
+      (expect counted :to-be nil))))
+
+(describe "retrieve-search-hit-headers"
+  (it "asks for the hits' headers and no older ones"
+    ;; the labels' gnus-fetch-old-headers makes nnmaildir answer with
+    ;; every header of the group, which a search then throws away
+    (let (asked)
+      (cl-letf (((symbol-function 'gnus-retrieve-headers)
+                 (lambda (&rest args) (setq asked args) 'nov)))
+        (expect (retrieve-search-hit-headers '(3 9) "nnmaildir+gmail:archive") :to-be 'nov))
+      (expect asked :to-equal '((3 9) "nnmaildir+gmail:archive" nil)))))
+
+(describe "message-copies"
+  (it "splits every copy notmuch named into one list per message"
+    (expect (message-copies '("a1" "a2" "b1" "c1" "c2" "c3") '("a1" "b1" "c1"))
+            :to-equal '(("a1" "a2") ("b1") ("c1" "c2" "c3"))))
+  (it "drops the lines before the first message"
+    (expect (message-copies '("x" "a1" "a2") '("a1")) :to-equal '(("a1" "a2")))))
+
+(describe "likeliest-copy"
+  :var ((root "/store/"))
+  (it "takes the inbox copy over any other"
+    (expect (likeliest-copy '("/store/archive/cur/1" "/store/github/cur/2" "/store/inbox/cur/3")
+                            root)
+            :to-equal "/store/inbox/cur/3"))
+  (it "takes a label read at startup over All Mail, and All Mail over a list label"
+    (expect (likeliest-copy '("/store/archive/cur/1" "/store/github/new/2") root)
+            :to-equal "/store/github/new/2")
+    (expect (likeliest-copy '("/store/emacs/new/1" "/store/archive/cur/2") root)
+            :to-equal "/store/archive/cur/2"))
+  (it "takes the trash copy last"
+    (expect (likeliest-copy '("/store/trash/cur/1" "/store/emacs/cur/2") root)
+            :to-equal "/store/emacs/cur/2"))
+  (it "keeps notmuch's order between copies of one rank"
+    (expect (likeliest-copy '("/store/github/cur/1" "/store/job/cur/2") root)
+            :to-equal "/store/github/cur/1")))
+
+(defun mail-tests--notmuch (dir files)
+  "Stand-in notmuch in DIR: log its arguments to DIR/args, print FILES."
+  (let ((script (expand-file-name "notmuch" dir)))
+    (with-temp-file script
+      (insert "#!/bin/sh\n"
+              "printf '%s\\n' \"$*\" >> " (shell-quote-argument (expand-file-name "args" dir)) "\n"
+              (if files
+                  (format "printf '%%s\\n' %s\n" (mapconcat #'shell-quote-argument files " "))
+                "exit 1\n")))
+    (set-file-modes script #o755)
+    script))
+
+(defmacro mail-tests--parsing (firsts all query &rest body)
+  "Run BODY after the likeliest-copy advice read FIRSTS for QUERY.
+FIRSTS is what the first notmuch run left in the engine's buffer, ALL
+what the second run prints.  BODY sees what reached the parser in
+`parsed' and notmuch's arguments in `runs'."
+  (declare (indent 3))
+  `(let* ((dir (make-temp-file "mail-tests" t))
+          (root (file-name-as-directory dir))
+          (gnus-search-notmuch-config-file "/config/file")
+          (engine (make-instance 'gnus-search-notmuch
+                                 :program (mail-tests--notmuch dir ,all)
+                                 :remove-prefix root))
+          parsed runs)
+     (unwind-protect
+         (with-current-buffer (slot-value engine 'proc-buffer)
+           (insert (mapconcat (lambda (file) (concat file "\n")) ,firsts "")
+                   "\nProcess search-nnmaildir:gmail finished\n")
+           (search-likeliest-copies-a (lambda (&rest _) (setq parsed (buffer-string)))
+                                      engine "nnmaildir:gmail" ,query)
+           (setq runs (and (file-exists-p (expand-file-name "args" dir))
+                           (with-temp-buffer
+                             (insert-file-contents (expand-file-name "args" dir))
+                             (split-string (buffer-string) "\n" t))))
+           ,@body)
+       (kill-buffer (slot-value engine 'proc-buffer))
+       (delete-directory dir t))))
+
+(describe "search-likeliest-copies-a"
+  (it "hands the parser each message's inbox copy in place of All Mail's"
+    (let ((mail-inbox-group "nnmaildir+gmail:inbox")
+          (mail-archive-group "nnmaildir+gmail:archive")
+          (mail-trash-group "nnmaildir+gmail:trash")
+          (mail-bulk-groups '("nnmaildir+gmail:archive")))
+      (mail-tests--parsing (list (concat root "archive/cur/a") (concat root "archive/cur/b"))
+          (list (concat root "archive/cur/a") (concat root "inbox/cur/a2")
+                (concat root "archive/cur/b") (concat root "github/cur/b2"))
+          '((query . "from:x") (raw . t) (limit . 500))
+        (expect parsed :to-equal (concat root "inbox/cur/a2\n" root "github/cur/b2\n"))
+        ;; the second run names every copy of the same newest 500
+        (expect runs :to-equal '("--config=/config/file search --output=files --limit=500 from:x")))))
+  (it "keeps the first run's hits when the second run fails"
+    (let ((firsts (list "/store/archive/cur/a")))
+      (mail-tests--parsing firsts nil '((query . "from:x") (raw . t))
+        (expect parsed :to-match "\\`/store/archive/cur/a\n"))))
+  (it "leaves a thread search alone, which asks for every copy already"
+    (mail-tests--parsing (list "/store/archive/cur/a" "/store/inbox/cur/a2") (list "/x")
+        '((query . "id:a") (thread . t))
+      (expect parsed :to-match "\\`/store/archive/cur/a\n/store/inbox/cur/a2\n")
+      (expect runs :to-be nil))))

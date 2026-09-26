@@ -132,6 +132,7 @@ nearly always find the same messages, so only the first stays."
   "ARGS for the notmuch that `gnus-search' runs, after its config switch."
   (cons (format "--config=%s" gnus-search-notmuch-config-file) args))
 
+;;;###autoload
 (defun count-mail (queries)
   "How many messages notmuch finds for each of QUERIES, from one process."
   (with-temp-buffer
@@ -200,7 +201,8 @@ Inbox, archive, sent and trash are left out: every message sits in one."
 ;;;###autoload
 (defun search-mail-like-this (&optional edit)
   "Search all mail for messages like the one on screen, picked from a list.
-With EDIT, the picked query goes to the minibuffer first."
+With EDIT, the picked query goes to the minibuffer first, and the number
+of newest matches to show is asked for too."
   (interactive "P" gnus-summary-mode mail-thread-mode gnus-article-mode)
   (let* ((candidates (similar-mail-queries (similar-mail-message)))
          (choices (useful-mail-queries candidates
@@ -208,6 +210,8 @@ With EDIT, the picked query goes to the minibuffer first."
     (unless choices
       (user-error "No other mail is like this message"))
     (let ((query (read-similar-mail-query choices)))
-      (search-mail (if edit (read-string "Search mail: " query) query)))))
+      (if edit
+          (search-mail (read-string "Search mail: " query) (read-mail-search-limit))
+        (search-mail query)))))
 
 ;;; similar.el ends here

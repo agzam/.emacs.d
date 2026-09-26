@@ -7,10 +7,14 @@
                                   "helper.el")))
 (require 'buttercup)
 
+(defvar mail-inbox-group "nnmaildir+gmail:inbox")
 (defvar mail-trash-group "nnmaildir+gmail:trash")
 (defvar mail-archive-group "nnmaildir+gmail:archive")
 
 (load-module-file "modules/email/autoload/marks.el")
+
+(defvar marks-tests-inbox nil
+  "(MESSAGE-ID . ARTICLE) of each message the stand-in inbox holds.")
 
 (defun marks-tests-header (number)
   "Header of the article NUMBER."
@@ -28,7 +32,8 @@
   "Insert a summary line and its Gnus data for each (ARTICLE LEVEL) in LINES."
   (dolist (line lines)
     (pcase-let ((`(,article ,level) line))
-      (push (gnus-data-make article gnus-read-mark (1+ (point)) nil level)
+      (push (gnus-data-make article gnus-read-mark (1+ (point))
+                            (marks-tests-header article) level)
             gnus-newsgroup-data)
       (insert (propertize (format "%s%d\n" (make-string (* 2 level) ?\s) article)
                           'gnus-number article))))
@@ -49,10 +54,11 @@ list; every other mark takes it out of both."
 
 (defmacro marks-tests-in-summary (lines &rest body)
   "Run BODY in a stand-in summary of LINES, point on the first.
-Each line is (ARTICLE LEVEL).  Gnus finds lines, threads and the next
-message through its own data; only the redraw of a line and the mark
-Gnus sets are stubbed, and logged.  The mark stub keeps the unread and
-tick lists the way Gnus does."
+Each line is (ARTICLE LEVEL), and article N's Message-ID is <N@x>.  Gnus
+finds lines, threads and the next message through its own data; only
+the redraw of a line and the mark Gnus sets are stubbed, and logged.
+The mark stub keeps the unread and tick lists the way Gnus does, and the
+inbox holds what `marks-tests-inbox' says."
   (declare (indent 1))
   `(with-temp-buffer
      (setq marks-tests-redrawn nil
@@ -68,7 +74,12 @@ tick lists the way Gnus does."
        (cl-letf (((symbol-function 'gnus-summary-recenter) #'ignore)
                  ((symbol-function 'mail-mark-redraw)
                   (lambda (article) (push article marks-tests-redrawn)))
-                 ((symbol-function 'gnus-summary-mark-article) #'marks-tests-set-mark))
+                 ((symbol-function 'gnus-summary-mark-article) #'marks-tests-set-mark)
+                 ((symbol-function 'gnus-nnselect-group-p)
+                  (lambda (group) (string-prefix-p "nnselect:" group)))
+                 ((symbol-function 'inbox-articles-by-id)
+                  (lambda (ids)
+                    (seq-filter (lambda (copy) (member (car copy) ids)) marks-tests-inbox))))
          ,@body))))
 
 (defun marks-tests-select (from to)
@@ -235,22 +246,34 @@ of the line after the last before a command runs."
         (mail-mark-for-deletion))
       (expect mail-marks :to-equal '((2 . delete)))
       (expect (gnus-summary-article-number) :to-be 3)))
-  (it "refuse to archive out of the trash, where dropping the file deletes for good"
-    (marks-tests-in-summary '((7 0) (8 0))
-      (let ((gnus-newsgroup-name mail-trash-group))
-        (expect (mail-mark-for-archive) :to-throw 'user-error)
-        (expect mail-marks :to-be nil)
-        (mail-mark-for-deletion)
-        (expect mail-marks :to-equal '((7 . delete))))))
-  (it "refuse to archive out of All Mail, which holds every message already"
-    ;; what Gmail does with a message expunged from All Mail is unverified
+  (it "archive in any group only a message the inbox holds"
+    ;; Gmail's archive takes the Inbox label and nothing else
+    (marks-tests-in-summary '((7 0) (8 0) (9 0))
+      (let ((gnus-newsgroup-name "nnmaildir+gmail:github")
+            (marks-tests-inbox '(("<8@x>" . 108)))
+            said)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (format &rest args) (setq said (apply #'format format args)))))
+          (marks-tests-select 7 9)
+          (mail-mark-for-archive))
+        (expect mail-marks :to-equal '((8 . archive)))
+        (expect said :to-equal "2 not in the inbox, left alone"))))
+  (it "refuse to archive when none of the messages is in the inbox"
     (marks-tests-in-summary '((7 0) (8 1) (9 0))
-      (let ((gnus-newsgroup-name mail-archive-group))
-        (expect (mail-mark-for-archive) :to-throw 'user-error)
-        (expect (mail-mark-thread-for-archive) :to-throw 'user-error)
-        (expect mail-marks :to-be nil)
-        (mail-mark-for-deletion)
-        (expect mail-marks :to-equal '((7 . delete)))))))
+      (dolist (group (list mail-trash-group mail-archive-group "nnselect:search"))
+        (let ((gnus-newsgroup-name group))
+          (expect (mail-mark-for-archive) :to-throw 'user-error '("Not in the inbox"))
+          (expect (mail-mark-thread-for-archive) :to-throw 'user-error)))
+      (expect mail-marks :to-be nil)
+      (let ((gnus-newsgroup-name mail-trash-group))
+        (mail-mark-for-deletion))
+      (expect mail-marks :to-equal '((7 . delete)))))
+  (it "archive every message of the inbox summary without asking where it is"
+    (marks-tests-in-summary '((7 0))
+      (cl-letf (((symbol-function 'inbox-articles-by-id)
+                 (lambda (&rest _) (error "The inbox summary shows the inbox"))))
+        (mail-mark-for-archive))
+      (expect mail-marks :to-equal '((7 . archive))))))
 
 (describe "mail-unmark"
   (it "takes the message at point out of the queue, marks it unread, redraws it and moves on"
@@ -457,8 +480,8 @@ of the line after the last before a command runs."
 
 (defmacro marks-tests-with-execute-stubs (&rest body)
   "Run BODY with the Gnus commands `mail-execute-marks' wraps stubbed.
-Each stub logs the process mark it found, so a spec can tell which
-articles each verb reached."
+Each stub logs what it was asked, the process mark included, so a spec
+can tell which articles each verb reached."
   (declare (indent 0))
   `(progn
      (setq marks-tests-executed nil)
@@ -472,35 +495,86 @@ articles each verb reached."
                         marks-tests-executed)))
                ((symbol-function 'gnus-summary-limit-to-marks)
                 (lambda (marks &optional reverse)
-                  (push (list 'limit marks reverse) marks-tests-executed))))
+                  (push (list 'limit marks reverse) marks-tests-executed)))
+               ((symbol-function 'gnus-request-expire-articles)
+                (lambda (articles group force)
+                  (push (list 'expire group articles force) marks-tests-executed)
+                  nil))
+               ((symbol-function 'refresh-mail-group)
+                (lambda (group) (push (list 'refresh group) marks-tests-executed)))
+               ((symbol-function 'gnus-group-update-group) #'ignore)
+               ((symbol-function 'drop-gone-articles)
+                (lambda (group articles)
+                  (push (list 'drop group articles) marks-tests-executed)))
+               ((symbol-function 'mail-mark-redraw)
+                (lambda (article) (push (list 'redraw article) marks-tests-executed))))
        ,@body)))
 
+(defun marks-tests-steps ()
+  "What the stubs were asked, in order, the drops sorted by group."
+  (let* ((steps (reverse marks-tests-executed))
+         (drops (sort (seq-filter (lambda (step) (eq (car step) 'drop)) steps)
+                      (lambda (a b) (string< (cadr a) (cadr b))))))
+    (mapcar (lambda (step) (if (eq (car step) 'drop) (pop drops) step)) steps)))
+
 (describe "mail-execute-marks"
-  (it "moves the deletions into the trash group and deletes the archives' files"
-    (with-temp-buffer
+  (it "moves the deletions into the trash and deletes the archives' inbox files"
+    (marks-tests-in-summary '((2 0) (4 0) (9 0))
       (setq-local mail-marks '((9 . delete) (2 . archive) (4 . delete)))
       (marks-tests-with-execute-stubs
         (mail-execute-marks))
       (expect (nreverse marks-tests-executed)
               :to-equal `((move ,mail-trash-group (4 9) nil)
                           (delete (2) nil)
+                          (drop ,mail-inbox-group (4 9 2))
                           (limit (,gnus-canceled-mark) reverse)))))
+  (it "in a label, archives by deleting the inbox copy and keeps the label's line"
+    ;; the message keeps every label, this one included
+    (marks-tests-in-summary '((2 0) (4 0) (9 0))
+      (let ((gnus-newsgroup-name "nnmaildir+gmail:github")
+            (marks-tests-inbox '(("<2@x>" . 102) ("<9@x>" . 109))))
+        (setq-local mail-marks '((2 . archive) (4 . delete) (9 . delete)))
+        (marks-tests-with-execute-stubs
+          (mail-execute-marks))
+        (expect (marks-tests-steps)
+                :to-equal `((move ,mail-trash-group (4 9) nil)
+                            (expire ,mail-inbox-group (102 109) t)
+                            (refresh ,mail-inbox-group)
+                            (drop "nnmaildir+gmail:github" (4 9))
+                            (drop ,mail-inbox-group (102 109))
+                            (redraw 2)
+                            (limit (,gnus-canceled-mark) reverse))))))
+  (it "in search results, acts on an inbox hit through the summary and drops it from the inbox's"
+    (marks-tests-in-summary '((1 0) (2 0) (3 0))
+      (let ((gnus-newsgroup-name "nnselect:search")
+            (gnus-newsgroup-selection [["nnmaildir+gmail:inbox" 11 100]
+                                       ["nnmaildir+gmail:inbox" 12 100]
+                                       ["nnmaildir+gmail:github" 5 100]])
+            (marks-tests-inbox '(("<1@x>" . 11) ("<2@x>" . 12))))
+        (setq-local mail-marks '((1 . archive) (2 . delete) (3 . delete)))
+        (marks-tests-with-execute-stubs
+          (mail-execute-marks))
+        (expect (marks-tests-steps)
+                :to-equal `((move ,mail-trash-group (2 3) nil)
+                            (delete (1) nil)
+                            (drop "nnmaildir+gmail:github" (5))
+                            (drop ,mail-inbox-group (12 11))
+                            (limit (,gnus-canceled-mark) reverse))))))
   (it "empties the queue"
-    (with-temp-buffer
+    (marks-tests-in-summary '((9 0))
       (setq-local mail-marks '((9 . delete)))
       (marks-tests-with-execute-stubs
         (mail-execute-marks))
       (expect mail-marks :to-be nil)))
   (it "calls only the command a verb needs"
-    (with-temp-buffer
+    (marks-tests-in-summary '((2 0))
       (setq-local mail-marks '((2 . archive)))
       (marks-tests-with-execute-stubs
         (mail-execute-marks))
-      (expect (mapcar #'car marks-tests-executed) :to-have-same-items-as '(delete limit))))
+      (expect (mapcar #'car marks-tests-executed) :to-have-same-items-as '(delete drop limit))))
   (it "ignores an active region, which would otherwise win over the process mark"
-    (with-temp-buffer
+    (marks-tests-in-summary '((1 0) (9 0))
       (setq-local mail-marks '((9 . delete)))
-      (insert "one\ntwo\n")
       (set-mark (point-min))
       (goto-char (point-max))
       (expect mark-active :to-be-truthy)
@@ -512,5 +586,192 @@ articles each verb reached."
       (marks-tests-with-execute-stubs
         (expect (mail-execute-marks) :to-throw 'user-error))
       (expect marks-tests-executed :to-be nil))))
+
+(describe "inbox-articles-by-id"
+  (it "reads the inbox first and answers the inbox article of each message it holds"
+    (let ((nntp-server-buffer (generate-new-buffer " *marks-tests nntp*"))
+          activated asked)
+      (unwind-protect
+          (cl-letf (((symbol-function 'gnus-activate-group)
+                     (lambda (&rest args) (setq activated args)))
+                    ((symbol-function 'gnus-retrieve-headers)
+                     (lambda (ids group &rest _)
+                       (setq asked (list ids group))
+                       (with-current-buffer nntp-server-buffer
+                         (erase-buffer)
+                         (insert "102\tsubject\tann@x\tMon, 21 Sep 2026 10:00:00 +0000\t<2@x>\t\t0\t0\n"))
+                       'nov)))
+            (expect (inbox-articles-by-id '("<2@x>" "<3@x>")) :to-equal '(("<2@x>" . 102)))
+            (expect activated :to-equal (list mail-inbox-group 'scan))
+            (expect asked :to-equal (list '("<2@x>" "<3@x>") mail-inbox-group)))
+        (kill-buffer nntp-server-buffer))))
+  (it "asks nothing for no messages"
+    (cl-letf (((symbol-function 'gnus-retrieve-headers) (lambda (&rest _) (error "Asked"))))
+      (expect (inbox-articles-by-id nil) :to-be nil))))
+
+(describe "mail-inbox-copies"
+  (it "pairs each article with its message's inbox article, leaving out the rest"
+    (marks-tests-in-summary '((1 0) (2 0) (3 0))
+      (let ((gnus-newsgroup-name "nnmaildir+gmail:github")
+            (marks-tests-inbox '(("<3@x>" . 13) ("<1@x>" . 11))))
+        (expect (mail-inbox-copies '(1 2 3)) :to-equal '((1 . 11) (3 . 13))))))
+  (it "takes the inbox summary's articles as their own copies"
+    (marks-tests-in-summary '((1 0))
+      (expect (mail-inbox-copies '(1)) :to-equal '((1 . 1))))))
+
+(describe "mail-article-group and mail-article-number"
+  (it "answer the group and number a search result's file has"
+    (marks-tests-in-summary '((1 0) (2 0))
+      (let ((gnus-newsgroup-name "nnselect:search")
+            (gnus-newsgroup-selection [["nnmaildir+gmail:inbox" 11 100]
+                                       ["nnmaildir+gmail:github" 5 100]]))
+        (expect (mapcar #'mail-article-group '(1 2))
+                :to-equal '("nnmaildir+gmail:inbox" "nnmaildir+gmail:github"))
+        (expect (mapcar #'mail-article-number '(1 2)) :to-equal '(11 5)))))
+  (it "answer the summary's own group and number elsewhere"
+    (marks-tests-in-summary '((1 0))
+      (expect (mail-article-group 1) :to-equal "nnmaildir+gmail:inbox")
+      (expect (mail-article-number 1) :to-be 1))))
+
+(describe "drop-gone-articles"
+  (it "cancels the articles in the group's open summary and limits them out"
+    (let ((inbox (get-buffer-create "*Summary nnmaildir+gmail:inbox*"))
+          canceled limited)
+      (unwind-protect
+          (progn
+            (with-current-buffer inbox
+              (setq-local gnus-newsgroup-data
+                          (list (gnus-data-make 11 gnus-read-mark 1 nil 0)
+                                (gnus-data-make 12 gnus-read-mark 2 nil 0))))
+            (cl-letf (((symbol-function 'gnus-summary-mark-article)
+                       (lambda (article mark &rest _)
+                         (push (list (buffer-name) article mark) canceled)))
+                      ((symbol-function 'gnus-summary-limit-to-marks)
+                       (lambda (marks &optional reverse)
+                         (setq limited (list (buffer-name) marks reverse)))))
+              (with-temp-buffer
+                (drop-gone-articles mail-inbox-group '(12 99))))
+            (expect canceled :to-equal `(("*Summary nnmaildir+gmail:inbox*" 12 ,gnus-canceled-mark)))
+            (expect limited :to-equal `("*Summary nnmaildir+gmail:inbox*"
+                                        (,gnus-canceled-mark) reverse)))
+        (kill-buffer inbox))))
+  (it "leaves alone the summary it is called from"
+    (let ((inbox (get-buffer-create "*Summary nnmaildir+gmail:inbox*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'gnus-summary-limit-to-marks)
+                     (lambda (&rest _) (error "Limited its own summary"))))
+            (with-current-buffer inbox
+              (expect (drop-gone-articles mail-inbox-group '(12)) :to-be nil)))
+        (kill-buffer inbox)))))
+
+(describe "quit-mail-summary"
+  :var (asked executed exited)
+  (before-each
+    (setq asked nil executed nil exited nil)
+    (spy-on 'mail-execute-marks :and-call-fake (lambda () (setq executed t)))
+    (spy-on 'gnus-summary-exit :and-call-fake (lambda (&rest _) (setq exited t))))
+
+  (it "leaves at once when nothing is queued"
+    (spy-on 'y-or-n-p)
+    (with-temp-buffer
+      (quit-mail-summary))
+    (expect 'y-or-n-p :not :to-have-been-called)
+    (expect (list executed exited) :to-equal '(nil t)))
+  (it "asks, runs the queue and leaves on yes"
+    (spy-on 'y-or-n-p :and-call-fake (lambda (prompt) (setq asked prompt) t))
+    (with-temp-buffer
+      (setq-local mail-marks '((1 . delete) (2 . delete) (3 . archive)))
+      (quit-mail-summary))
+    (expect asked :to-equal "Run 2 deletions and 1 archive first? ")
+    (expect (list executed exited) :to-equal '(t t)))
+  (it "drops the queue and leaves on no"
+    (spy-on 'y-or-n-p :and-return-value nil)
+    (with-temp-buffer
+      (setq-local mail-marks '((1 . archive)))
+      (quit-mail-summary))
+    (expect (list executed exited) :to-equal '(nil t)))
+  (it "stays on C-g"
+    (spy-on 'y-or-n-p :and-call-fake (lambda (&rest _) (signal 'quit nil)))
+    (with-temp-buffer
+      (setq-local mail-marks '((1 . delete)))
+      (expect (condition-case nil
+                  (progn (quit-mail-summary) 'left)
+                (quit 'stayed))
+              :to-be 'stayed))
+    (expect (list executed exited) :to-equal '(nil nil))))
+
+(describe "mail-queue-description"
+  (it "counts each verb in words"
+    (with-temp-buffer
+      (setq-local mail-marks '((1 . delete)))
+      (expect (mail-queue-description) :to-equal "1 deletion")
+      (setq-local mail-marks '((1 . archive) (2 . archive)))
+      (expect (mail-queue-description) :to-equal "2 archives"))))
+
+(describe "note-search-entry-marks-h"
+  (it "notes a search summary's unread and starred articles as it opens"
+    (marks-tests-in-summary '((1 0) (2 0))
+      (let ((gnus-newsgroup-name "nnselect:search"))
+        (setq gnus-newsgroup-unreads (list 1)
+              gnus-newsgroup-marked (list 2))
+        (note-search-entry-marks-h)
+        ;; the note is a copy, which marking later leaves alone
+        (setcar gnus-newsgroup-unreads 9)
+        (expect mail-entry-marks :to-equal '((1) . (2))))))
+  (it "notes nothing for a label"
+    (marks-tests-in-summary '((1 0))
+      (note-search-entry-marks-h)
+      (expect mail-entry-marks :to-be nil))))
+
+(describe "mail-set-read-and-star"
+  (it "gives the article the read and star state asked for, keeping the other"
+    (marks-tests-in-summary '((1 0) (2 0))
+      (setq gnus-newsgroup-unreads (list 1 2)
+            gnus-newsgroup-marked (list 2))
+      (mail-set-read-and-star 1 nil t)
+      (mail-set-read-and-star 2 nil t)
+      (expect gnus-newsgroup-unreads :to-be nil)
+      (expect gnus-newsgroup-marked :to-equal '(1 2))))
+  (it "passes over an article the summary does not hold"
+    (marks-tests-in-summary '((1 0))
+      (mail-set-read-and-star 7 nil t)
+      (expect marks-tests-marked :to-be nil))))
+
+(describe "carry-search-marks-h"
+  (it "gives the open summaries what the search changed, and nothing else"
+    ;; the inbox summary under a search would write its older state back
+    (let ((inbox (get-buffer-create "*Summary nnmaildir+gmail:inbox*"))
+          carried)
+      (unwind-protect
+          (marks-tests-in-summary '((1 0) (2 0) (3 0))
+            (let ((gnus-newsgroup-name "nnselect:search")
+                  (gnus-newsgroup-selection [["nnmaildir+gmail:inbox" 11 100]
+                                             ["nnmaildir+gmail:inbox" 12 100]
+                                             ["nnmaildir+gmail:github" 5 100]])
+                  (gnus-newsgroup-articles (list 1 2 3)))
+              (setq-local mail-entry-marks (cons (list 1 2) nil))
+              ;; read 1, left 2 alone, starred 3
+              (setq gnus-newsgroup-unreads (list 2)
+                    gnus-newsgroup-marked (list 3))
+              (cl-letf (((symbol-function 'mail-set-read-and-star)
+                         (lambda (&rest args) (push (cons (buffer-name) args) carried))))
+                (carry-search-marks-h))))
+        (kill-buffer inbox))
+      ;; github has no open summary
+      (expect carried :to-equal '(("*Summary nnmaildir+gmail:inbox*" 11 nil nil)))))
+  (it "carries nothing when the search is left without saving"
+    (let ((inbox (get-buffer-create "*Summary nnmaildir+gmail:inbox*")))
+      (unwind-protect
+          (marks-tests-in-summary '((1 0))
+            (let ((gnus-newsgroup-name "nnselect:search")
+                  (gnus-newsgroup-selection [["nnmaildir+gmail:inbox" 11 100]])
+                  (gnus-newsgroup-articles (list 1))
+                  (gnus-group-is-exiting-without-update-p t))
+              ;; read 1, which the inbox summary would learn on a saving exit
+              (setq-local mail-entry-marks (cons (list 1) nil))
+              (spy-on 'mail-set-read-and-star)
+              (carry-search-marks-h)
+              (expect 'mail-set-read-and-star :not :to-have-been-called)))
+        (kill-buffer inbox)))))
 
 ;;; marks-tests.el ends here
