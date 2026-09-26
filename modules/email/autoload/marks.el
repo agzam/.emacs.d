@@ -4,15 +4,10 @@
 ;; acts on the message at point, or on each one the active region
 ;; touches, and moves point to the message below them.
 ;;
-;; Deletion and archive are deferred: one key queues, one takes back,
-;; one executes the whole queue.  The queue is a table of this module's
-;; own, not a Gnus mark: every Gnus mark but unread, ticked and dormant
-;; counts as read, so a queued message would reach Gmail as seen at
-;; summary exit even when nothing was executed, and the process mark
-;; cannot tell delete from archive.  Delete moves the file into the trash
-;; group, which Gmail shows as Trash; archive deletes the file from the
-;; label group at hand, which drops that label and keeps the All Mail
-;; copy.  Read and star are Gnus's own marks, toggled independently.
+;; Delete and archive are queued, then run by one key.  The queue is
+;; this module's own table: a Gnus mark would count as read and reach
+;; Gmail as seen.  Delete moves the file to trash; archive removes it
+;; from the current label, keeping the All Mail copy.
 ;;; Code:
 
 (require 'dired)
@@ -105,13 +100,19 @@ Reading the region deactivates it, which also ends evil's visual state."
       (mail-mark-redraw article))))
 
 (defun mail-queue (verb &optional whole-threads)
-  "Queue the message at point, or the region's, under VERB; nil unqueues.
-WHOLE-THREADS extends that to every message of their threads.  Point
-moves to the message below."
+  "Queue the message at point, or the region's, under VERB.
+A nil VERB takes them out of the queue and marks them unread, the way
+Gnus's own mark clearing does; a star stays.  WHOLE-THREADS extends
+that to every message of their threads.  Point moves to the message
+below."
   (let* ((covered (mail-articles-at-point-or-region))
          (articles (if whole-threads
                        (mail-whole-threads covered)
                      (mail-real-articles covered))))
+    (unless verb
+      (save-excursion
+        (dolist (article articles)
+          (mail-mark-keeping-star article gnus-unread-mark))))
     (mail-mark-articles articles verb)
     (mail-move-below (if whole-threads articles covered))))
 
@@ -129,7 +130,8 @@ moves to the message below."
 
 ;;;###autoload
 (defun mail-unmark ()
-  "Take the message at point, or the region's, out of the queue."
+  "Mark the message at point, or the region's, unread and out of the queue.
+A star stays."
   (interactive nil gnus-summary-mode)
   (mail-queue nil))
 
@@ -147,7 +149,8 @@ moves to the message below."
 
 ;;;###autoload
 (defun mail-unmark-thread ()
-  "Take the thread at point, or each one in the region, out of the queue."
+  "Mark the thread at point, or each in the region, unread and out of the queue.
+Stars stay."
   (interactive nil gnus-summary-mode)
   (mail-queue nil t))
 
