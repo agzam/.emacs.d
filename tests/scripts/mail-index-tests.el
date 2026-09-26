@@ -41,6 +41,19 @@
                 (cons file (aref (read (current-buffer)) 1))))
             (directory-files nov nil "\\`[^.]"))))
 
+(defun mail-index-tests--by-number (store group)
+  "File prefixes of GROUP's messages under STORE, in article-number order."
+  (mapcar #'car (sort (mail-index-tests--numbers store group)
+                      (lambda (a b) (< (cdr a) (cdr b))))))
+
+(defun mail-index-tests--arrive (store group i time)
+  "Date message I of GROUP under STORE at TIME, as mbsync's CopyArrivalDate does."
+  (let ((prefix (format "170000000%d.%d.fixture" i i)))
+    (dolist (sub '("cur" "new"))
+      (dolist (file (directory-files (expand-file-name (concat group "/" sub) store) t
+                                     (concat "\\`" (regexp-quote prefix))))
+        (set-file-times file time)))))
+
 (defun mail-index-tests--lowest (store group &optional except)
   "The (FILE-PREFIX . ARTICLE-NUMBER) with the lowest number in GROUP under STORE.
 EXCEPT names a prefix to leave out: a scan does not remove the overview
@@ -119,6 +132,33 @@ of a message that is gone."
             (expect (seq-take (car (mail-index-build store '("inbox") t)) 4)
                     :to-equal '("inbox" 1 0 1))
             (expect (file-exists-p (expand-file-name "1700000000.0.fixture" tick)) :to-be t))
+        (delete-directory store t)))))
+
+(describe "mail-index-build numbering"
+  ;; mbsync names a file after its download and dates it by Gmail's
+  ;; arrival, so a backfill downloads the oldest mail last
+  (it "numbers messages by arrival date, not by download order"
+    (let ((store (mail-index-tests--store '("archive" . 3))))
+      (unwind-protect
+          (progn
+            (dotimes (i 3)
+              (mail-index-tests--arrive store "archive" i (- 1700000000 (* i 86400))))
+            (mail-index-build store '("archive") t)
+            (expect (mail-index-tests--by-number store "archive")
+                    :to-equal '("1700000002.2.fixture" "1700000001.1.fixture"
+                                "1700000000.0.fixture")))
+        (delete-directory store t))))
+
+  (it "keeps the download order between messages that arrived together"
+    (let ((store (mail-index-tests--store '("archive" . 3))))
+      (unwind-protect
+          (progn
+            (dotimes (i 3)
+              (mail-index-tests--arrive store "archive" i 1700000000))
+            (mail-index-build store '("archive") t)
+            (expect (mail-index-tests--by-number store "archive")
+                    :to-equal '("1700000000.0.fixture" "1700000001.1.fixture"
+                                "1700000002.2.fixture")))
         (delete-directory store t)))))
 
 ;;; mail-index-tests.el ends here
