@@ -112,6 +112,10 @@
   :config
   (add-hook 'gnus-group-mode-hook #'gnus-topic-mode)
   (add-hook 'gnus-started-hook #'subscribe-mail-groups)
+  ;; the start reads no maildir (`defer-mail-server-scan-a'); the
+  ;; routine groups follow on timer turns, a label subscribed just now
+  ;; among them
+  (add-hook 'gnus-started-hook #'queue-mail-refresh 90)
 
   (defun bind-mail-keys (mode &rest _)
     "Bind this module's keys on the Gnus maps when MODE is gnus.
@@ -174,8 +178,9 @@ are applied again from `evil-collection-setup-hook'."
               :desc "date"    "d" #'sort-mail-by-date
               :desc "author"  "a" #'sort-mail-by-author
               :desc "subject" "s" #'sort-mail-by-subject)))
-      ;; gR is gnus-group-get-new-news, a server-wide nnmaildir scan; gr
-      ;; stays Gnus's own per-group rescan, which is already cheap
+      ;; gR reads the routine groups before it returns, where
+      ;; evil-collection's gnus-group-get-new-news leaves them to timer
+      ;; turns; gr stays Gnus's own per-group rescan
       (map! :map gnus-group-mode-map
             :n "gR" #'refresh-mail-groups
             (:localleader
@@ -256,6 +261,17 @@ columns would go to the window left of Gnus."
   :config
   (add-to-list 'gnus-treatment-function-alist
                '(mail-treat-quotes highlight-mail-quotes) t))
+
+(use-package nnmaildir
+  :ensure nil
+  :defer t
+  :config
+  ;; a scan of the whole server reads every label in the main thread, so
+  ;; each group is read on its own when something needs it
+  (advice-add 'nnmaildir-request-scan :around #'defer-mail-server-scan-a)
+  (advice-add 'nnmaildir-request-group :around #'scan-unknown-mail-group-a)
+  (advice-add 'nnmaildir-request-accept-article :around #'scan-unknown-mail-group-a)
+  (advice-add 'nnmaildir-base-name-to-article-number :around #'scan-mail-group-on-miss-a))
 
 (use-package gnus-search
   :ensure nil

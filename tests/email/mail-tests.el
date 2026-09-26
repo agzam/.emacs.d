@@ -119,6 +119,123 @@ from the server-wide scan that froze the frame."
                             (refresh "nnmaildir+gmail:sent")
                             (redraw "nnmaildir+gmail:sent")))))))
 
+(describe "queue-mail-refresh"
+  (it "queues the routine groups, the inbox first, for one timer turn"
+    (let ((mail-refresh-queue nil)
+          (mail-refresh-timer nil)
+          (turns nil))
+      (cl-letf (((symbol-function 'scanned-mail-groups)
+                 (lambda () (list "nnmaildir+gmail:sent" "nnmaildir+gmail:inbox"
+                                  "nnmaildir+gmail:job")))
+                ((symbol-function 'run-with-timer)
+                 (lambda (secs repeat fn) (push (list secs repeat fn) turns) (timer-create))))
+        (queue-mail-refresh)
+        (expect mail-refresh-queue
+                :to-equal '("nnmaildir+gmail:inbox" "nnmaildir+gmail:sent"
+                            "nnmaildir+gmail:job"))
+        (expect turns :to-equal '((0 nil refresh-next-mail-group)))
+        ;; a start asks twice, once per form of the server's method
+        (queue-mail-refresh)
+        (expect (length turns) :to-equal 1)))))
+
+(defmacro mail-tests--with-turn-stubs (calls alive &rest body)
+  "Run BODY with a turn's dependencies logging into CALLS, Gnus ALIVE or not."
+  (declare (indent 2))
+  `(cl-letf (((symbol-function 'gnus-alive-p) (lambda () ,alive))
+             ((symbol-function 'run-with-timer)
+              (lambda (&rest _) (push 'next-turn ,calls) (timer-create)))
+             ((symbol-function 'refresh-mail-group)
+              (lambda (g) (push (list 'refresh g) ,calls)))
+             ((symbol-function 'gnus-group-update-group)
+              (lambda (g &rest _) (push (list 'redraw g) ,calls))))
+     ,@body))
+
+(describe "refresh-next-mail-group"
+  (it "sets the next turn, then reads one group and redraws its line"
+    (let ((mail-refresh-queue (list "nnmaildir+gmail:inbox" "nnmaildir+gmail:sent"))
+          (mail-refresh-timer nil)
+          (calls nil))
+      (mail-tests--with-turn-stubs calls t
+        (refresh-next-mail-group))
+      ;; set first, so a group that fails to read leaves the rest running
+      (expect (nreverse calls)
+              :to-equal '(next-turn
+                          (refresh "nnmaildir+gmail:inbox")
+                          (redraw "nnmaildir+gmail:inbox")))
+      (expect mail-refresh-queue :to-equal '("nnmaildir+gmail:sent"))
+      (expect (timerp mail-refresh-timer) :to-be t)))
+  (it "sets no turn after the last group"
+    (let ((mail-refresh-queue (list "nnmaildir+gmail:sent"))
+          (mail-refresh-timer (timer-create))
+          (calls nil))
+      (mail-tests--with-turn-stubs calls t
+        (refresh-next-mail-group))
+      (expect (nreverse calls)
+              :to-equal '((refresh "nnmaildir+gmail:sent") (redraw "nnmaildir+gmail:sent")))
+      (expect mail-refresh-queue :to-be nil)
+      (expect mail-refresh-timer :to-be nil)))
+  (it "reads nothing once Gnus has gone"
+    (let ((mail-refresh-queue (list "nnmaildir+gmail:inbox"))
+          (mail-refresh-timer nil)
+          (calls nil))
+      (mail-tests--with-turn-stubs calls nil
+        (refresh-next-mail-group))
+      (expect calls :to-be nil)
+      (expect mail-refresh-timer :to-be nil))))
+
+(describe "defer-mail-server-scan-a"
+  (it "passes the scan of one group through"
+    (let (calls)
+      (cl-letf (((symbol-function 'queue-mail-refresh) (lambda () (push 'queue calls))))
+        (expect (defer-mail-server-scan-a
+                 (lambda (group server) (push (list 'scan group server) calls) 'scanned)
+                 "inbox" "gmail")
+                :to-be 'scanned))
+      (expect calls :to-equal '((scan "inbox" "gmail")))))
+  (it "queues the routine groups instead of scanning the whole server"
+    (let (calls)
+      (cl-letf (((symbol-function 'queue-mail-refresh) (lambda () (push 'queue calls))))
+        (expect (defer-mail-server-scan-a (lambda (&rest args) (push (cons 'scan args) calls)))
+                :to-be t))
+      (expect calls :to-equal '(queue)))))
+
+(describe "scan-mail-group-on-miss-a"
+  (it "answers a hit without reading the group"
+    (let (scans)
+      (cl-letf (((symbol-function 'nnmaildir-request-scan)
+                 (lambda (&rest args) (push args scans))))
+        (expect (scan-mail-group-on-miss-a (lambda (&rest _) 7) "1700.1.host" "inbox" "gmail")
+                :to-equal 7))
+      (expect scans :to-be nil)))
+  (it "reads the group on a miss and asks again"
+    ;; notmuch answers from the archive, which no start reads
+    (let ((read nil) (scans nil))
+      (cl-letf (((symbol-function 'nnmaildir-request-scan)
+                 (lambda (&rest args) (push args scans) (setq read t))))
+        (expect (scan-mail-group-on-miss-a (lambda (&rest _) (and read 23195))
+                                           "1700.1.host" "archive" "gmail")
+                :to-equal 23195))
+      (expect scans :to-equal '(("archive" "gmail"))))))
+
+(describe "scan-unknown-mail-group-a"
+  (it "answers for a group nnmaildir knows without reading it again"
+    (let (scans)
+      (cl-letf (((symbol-function 'nnmaildir-request-scan)
+                 (lambda (&rest args) (push args scans))))
+        (expect (scan-unknown-mail-group-a (lambda (&rest _) t) "inbox" "gmail" nil nil)
+                :to-be t))
+      (expect scans :to-be nil)))
+  (it "reads a group nnmaildir refused, then asks again with every argument"
+    (let ((read nil) (scans nil) (asked nil))
+      (cl-letf (((symbol-function 'nnmaildir-request-scan)
+                 (lambda (&rest args) (push args scans) (setq read t))))
+        (expect (scan-unknown-mail-group-a
+                 (lambda (&rest args) (push args asked) read)
+                 "emacs" "gmail" t)
+                :to-be t))
+      (expect scans :to-equal '(("emacs" "gmail")))
+      (expect asked :to-equal '(("emacs" "gmail" t) ("emacs" "gmail" t))))))
+
 (describe "defer-bulk-mail-groups"
   (it "moves a subscribed bulk group one level above the activate level"
     (let* ((gnus-activate-level 3)

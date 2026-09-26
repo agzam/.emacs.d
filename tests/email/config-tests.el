@@ -499,6 +499,46 @@ window and deletes the summary's."
     (require 'gnus)
     (expect (<= (1+ gnus-activate-level) gnus-level-subscribed) :to-be t)))
 
+(describe "email module startup"
+  (it "reads each maildir group on its own, never the whole store at once"
+    (require 'nnmaildir)
+    (unwind-protect
+        (progn
+          (dolist (form (email-tests--config-forms 'nnmaildir))
+            (eval form t))
+          (expect (advice-member-p #'defer-mail-server-scan-a 'nnmaildir-request-scan)
+                  :to-be-truthy)
+          ;; entering a label, and filing a copy or a moved message into one
+          (expect (advice-member-p #'scan-unknown-mail-group-a 'nnmaildir-request-group)
+                  :to-be-truthy)
+          (expect (advice-member-p #'scan-unknown-mail-group-a
+                                   'nnmaildir-request-accept-article)
+                  :to-be-truthy)
+          (expect (advice-member-p #'scan-mail-group-on-miss-a
+                                   'nnmaildir-base-name-to-article-number)
+                  :to-be-truthy))
+      (advice-remove 'nnmaildir-request-scan #'defer-mail-server-scan-a)
+      (advice-remove 'nnmaildir-request-group #'scan-unknown-mail-group-a)
+      (advice-remove 'nnmaildir-request-accept-article #'scan-unknown-mail-group-a)
+      (advice-remove 'nnmaildir-base-name-to-article-number #'scan-mail-group-on-miss-a)))
+  (it "queues the routine groups once Gnus has started, after the subscriptions"
+    ;; a label subscribed at this start is queued with the others
+    (require 'gnus)
+    (let ((gnus-started-hook nil))
+      (dolist (form (email-tests--config-forms 'gnus))
+        (when (and (eq (car-safe form) 'add-hook)
+                   (equal (cadr form) ''gnus-started-hook))
+          (eval form t)))
+      (expect gnus-started-hook :to-equal '(subscribe-mail-groups queue-mail-refresh))))
+  (it "loads the advice and the hook function before any command of their file ran"
+    (with-temp-buffer
+      (insert-file-contents
+       (expand-file-name "modules/email/autoload/mail.el" test-config-root))
+      (dolist (fn '(defer-mail-server-scan-a scan-mail-group-on-miss-a
+                    scan-unknown-mail-group-a queue-mail-refresh))
+        (expect (buffer-string)
+                :to-match (format "^;;;###autoload\n(defun %s " fn))))))
+
 (describe "email module quarantine"
   (before-all
     (require 'gnus)
