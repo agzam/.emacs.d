@@ -204,10 +204,15 @@ The select call is what creates the article buffer, without which
 (defvar mail-search-limit 500
   "How many of the newest matches `search-mail' shows unless asked for more.")
 
+(defvar mail-search-limit-max 2000
+  "Most matches `search-mail' shows; Gnus draws the whole summary in one step.")
+
 ;;;###autoload
 (defun read-mail-search-limit ()
-  "Ask how many of the newest matches a search shows; 0 shows them all."
-  (read-number "Show how many of the newest matches (0 for all): " mail-search-limit))
+  "Ask how many of the newest matches a search shows."
+  (read-number (format "Show how many of the newest matches (up to %d): "
+                       mail-search-limit-max)
+               mail-search-limit))
 
 (defun notmuch-query-text (query)
   "QUERY without the keys gnus-search takes out of it, such as limit:N."
@@ -216,28 +221,31 @@ The select call is what creates the article buffer, without which
 ;;;###autoload
 (defun search-mail (query &optional limit)
   "Read an ephemeral group of the newest Gmail messages matching notmuch QUERY.
-LIMIT caps how many, `mail-search-limit' by default, and 0 lifts the cap;
-a prefix argument asks for it."
+LIMIT caps how many, `mail-search-limit' by default; 0 or a count past
+`mail-search-limit-max' gives that maximum.  A prefix argument asks for LIMIT."
   (interactive (list (read-string "Search mail: ")
                      (and current-prefix-arg (read-mail-search-limit))))
   (unless (gnus-alive-p)
     (gnus))
   ;; mbsync creates a group dir the moment a label appears
   (subscribe-mail-groups)
-  (let* ((limit (or limit mail-search-limit))
+  (let* ((limit (cond ((null limit) mail-search-limit)
+                      ((<= 1 limit mail-search-limit-max) limit)
+                      (t mail-search-limit-max)))
          ;; the cap replaces Gnus's question of how many to show
          (gnus-large-ephemeral-newsgroup nil)
          (group (gnus-group-read-ephemeral-search-group
-                 t `((search-query-spec . ((query . ,query) (raw . t)
-                                           ,@(and (< 0 limit) `((limit . ,limit)))))
+                 t `((search-query-spec . ((query . ,query) (raw . t) (limit . ,limit)))
                      (search-group-spec . (("nnmaildir:gmail")))))))
-    (when-let* (((< 0 limit))
-                (group)
+    (when-let* ((group)
                 (shown (with-current-buffer (gnus-summary-buffer-name group)
                          (length gnus-newsgroup-articles)))
                 ((<= limit shown)))
-      (message "The newest %d of %d matches; a prefix argument shows more"
-               shown (car (count-mail (list (notmuch-query-text query))))))))
+      (message "The newest %d of %d matches; %s"
+               shown (car (count-mail (list (notmuch-query-text query))))
+               (if (< limit mail-search-limit-max)
+                   (format "a prefix argument shows up to %d" mail-search-limit-max)
+                 "narrow the query to reach older ones")))))
 
 (defun mail-copy-rank (file root)
   "Rank of FILE, one copy of a message in the store at ROOT; the lowest shows.
