@@ -2,6 +2,7 @@
 
 (require 'gnus)
 (require 'gnus-group)
+(require 'gnus-start)
 (require 'gnus-search)
 (require 'gnus-sum)
 (require 'nnmaildir)
@@ -48,10 +49,16 @@
 ;;; Navigation
 
 (defun subscribe-mail-group (group)
-  "Subscribe GROUP unless the newsrc already lists it."
+  "Subscribe GROUP unless the newsrc already lists it.
+Gnus resolves a server it has not opened to a bare method and keeps that
+in the newsrc, dropping what `gnus-secondary-select-methods' defines."
   (unless (gnus-group-entry group)
     (with-current-buffer gnus-group-buffer
-      (gnus-subscribe-newsgroup group))))
+      (let ((gnus-override-subscribe-method
+             (seq-find (lambda (method)
+                         (equal (gnus-method-to-server method) (gnus-group-server group)))
+                       gnus-secondary-select-methods)))
+        (gnus-subscribe-newsgroup group)))))
 
 ;;;###autoload
 (defun maildir-groups ()

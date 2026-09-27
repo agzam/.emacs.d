@@ -10,6 +10,7 @@
 ;; each spec binds these, so a suite loaded later still sees config.el's
 (defvar mail-topics)
 (defvar mail-bulk-groups)
+(defvar mail-remote-backends)
 
 (load-module-file "modules/email/autoload/groups.el")
 
@@ -40,9 +41,9 @@
 
 (defun groups-tests-method (group)
   "The select method GROUP's name says it lives on."
-  (if (string-prefix-p "nntp+" group)
-      '(nntp "news.gmane.io")
-    '(nnmaildir "gmail")))
+  (cond ((string-prefix-p "nntp+" group) '(nntp "news.gmane.io"))
+        ((string-prefix-p "nnatom+" group) '(nnatom "www.reddit.com/r/emacs/new/.rss"))
+        (t '(nnmaildir "gmail"))))
 
 (describe "gnus-user-format-function-C"
   (it "draws the description mail-topics gives the group of the line"
@@ -370,15 +371,37 @@ alist has Gnus, Gmail and Lists."
                                         "gwene.com.reddit.r.planetemacs 0000006587 0000000003 m\n"))
       (expect (symbol-function 'nntp-request-list) :to-be original))))
 
+(describe "read-atom-feed"
+  (it "has curl fetch the feed for nnatom, under its own User-Agent"
+    ;; Reddit answers url.el with 403 Blocked, whatever its agent
+    (let (seen)
+      (cl-letf (((symbol-function 'nnatom--read-feed)
+                 (lambda (feed group)
+                   (setq seen (list feed group mm-url-use-external mm-url-program
+                                    mm-url-arguments))
+                   'parsed)))
+        (expect (read-atom-feed "www.reddit.com/r/emacs/new/.rss" nil) :to-be 'parsed))
+      (pcase-let ((`(,feed ,group ,external ,program ,args) seen))
+        (expect (list feed group external program)
+                :to-equal '("www.reddit.com/r/emacs/new/.rss" nil t "curl"))
+        (expect (cadr (member "--user-agent" args)) :to-equal feed-user-agent)
+        ;; a 403 page would parse as a feed of nothing
+        (expect (member "--fail" args) :to-be-truthy)
+        (expect (member "--max-time" args) :to-be-truthy)))))
+
 (describe "defer-news-group-h"
-  (it "moves a news group subscribed just now above the routine scan"
-    (let ((gnus-activate-level 3) calls)
+  (it "moves a news group or a feed subscribed just now above the routine scan"
+    ;; nnatom fetches the feed whenever Gnus activates the group
+    (let ((gnus-activate-level 3) (mail-remote-backends '(nntp nnatom)) calls)
       (cl-letf (((symbol-function 'gnus-find-method-for-group) #'groups-tests-method)
                 ((symbol-function 'gnus-group-level) (lambda (_) 3))
                 ((symbol-function 'gnus-group-change-level)
                  (lambda (&rest args) (push args calls))))
         (defer-news-group-h "nntp+news.gmane.io:gwene.com.reddit.emacs")
+        (defer-news-group-h "nnatom+www.reddit.com/r/emacs/new/.rss:r/emacs")
         (defer-news-group-h "nnmaildir+gmail:job"))
-      (expect calls :to-equal '(("nntp+news.gmane.io:gwene.com.reddit.emacs" 4 3))))))
+      (expect (nreverse calls)
+              :to-equal '(("nntp+news.gmane.io:gwene.com.reddit.emacs" 4 3)
+                          ("nnatom+www.reddit.com/r/emacs/new/.rss:r/emacs" 4 3))))))
 
 ;;; groups-tests.el ends here

@@ -12,7 +12,8 @@
 (defvar mail-inbox-group "nnmaildir+gmail:inbox")
 (defvar mail-trash-group "nnmaildir+gmail:trash")
 (defvar mail-archive-group "nnmaildir+gmail:archive")
-(defvar mail-groups '("nnmaildir+gmail:inbox" "nntp+news.gmane.io:gmane.emacs.devel"))
+(defvar mail-groups '("nnmaildir+gmail:inbox" "nntp+news.gmane.io:gmane.emacs.devel"
+                      "nnatom+www.reddit.com/r/emacs/new/.rss:r/emacs"))
 (defvar mail-bulk-groups
   '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs" "nnmaildir+gmail:org-mode"
     "nnmaildir+gmail:new" "nntp+news.gmane.io:gmane.emacs.devel"))
@@ -296,6 +297,7 @@ from the server-wide scan that froze the frame."
     (let ((calls nil)
           (deferred nil)
           (gmail-maildir (make-temp-file "mail-tests-maildir" t))
+          (mail-groups '("nnmaildir+gmail:inbox" "nntp+news.gmane.io:gmane.emacs.devel"))
           (gnus-newsrc-hashtb (make-hash-table :test #'equal))
           (gnus-group-buffer " *mail-tests group*"))
       (puthash "nnmaildir+gmail:inbox" '(entry (info)) gnus-newsrc-hashtb)
@@ -320,6 +322,25 @@ from the server-wide scan that froze the frame."
               (expect deferred :to-be t))
           (kill-buffer gnus-group-buffer)
           (delete-directory gmail-maildir t))))))
+
+(describe "subscribe-mail-group"
+  (it "subscribes with the method gnus-secondary-select-methods defines for the server"
+    ;; Gnus resolves a server it has not opened to its bare method, and
+    ;; the group would lose the server's definitions for good
+    (let ((gnus-secondary-select-methods
+           '((nnmaildir "gmail" (directory "/mail/"))
+             (nnatom "www.example.org/feed" (nnatom-read-feed-function ignore))))
+          (gnus-newsrc-hashtb (make-hash-table :test #'equal))
+          (gnus-group-buffer " *mail-tests group*")
+          (used 'none))
+      (with-current-buffer (get-buffer-create gnus-group-buffer)
+        (unwind-protect
+            (cl-letf (((symbol-function 'gnus-subscribe-newsgroup)
+                       (lambda (&rest _) (setq used gnus-override-subscribe-method))))
+              (subscribe-mail-group "nnatom+www.example.org/feed:r/emacs")
+              (expect used :to-equal
+                      '(nnatom "www.example.org/feed" (nnatom-read-feed-function ignore))))
+          (kill-buffer gnus-group-buffer))))))
 
 (describe "open-mail-inbox"
   (it "starts Gnus, subscribes the inbox once, rescans it, then reads it"
