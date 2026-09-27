@@ -252,10 +252,10 @@ With OUTPUT nil, count --batch answers 2, 3, ... for its queries."
     (spy-on 'count-mail :and-call-fake (lambda (queries) (number-sequence 2 (1+ (length queries)))))
     (spy-on 'read-similar-mail-query :and-call-fake #'caar)
     (spy-on 'read-string :and-call-fake (lambda (_prompt initial) (concat initial " and tag:unread")))
-    (spy-on 'read-mail-search-limit :and-return-value 0)
+    (spy-on 'read-mail-search-limit :and-return-value 800)
     (search-mail-like-this t)
     (expect searched :to-equal "from:\"bob@acme.com\" or to:\"bob@acme.com\" and tag:unread")
-    (expect shown :to-be 0))
+    (expect shown :to-be 800))
   (it "says so when no query finds other mail"
     (spy-on 'count-mail :and-call-fake (lambda (queries) (make-list (length queries) 1)))
     (spy-on 'read-similar-mail-query)

@@ -498,12 +498,13 @@ would have been bounded by in `large'."
     (mail-tests--searching 3
       (search-mail "List:x")
       (expect (alist-get 'limit (cdr (assq 'search-query-spec captured))) :to-equal 500)))
-  (it "takes the number of matches it is given, and every match for 0"
+  (it "takes the number of matches it is given, up to the most it ever shows"
+    ;; Gnus draws a summary in one step: 33533 lines took 10.9 s
     (mail-tests--searching 3
-      (search-mail "List:x" 50)
-      (expect (alist-get 'limit (cdr (assq 'search-query-spec captured))) :to-equal 50)
-      (search-mail "List:x" 0)
-      (expect (assq 'limit (cdr (assq 'search-query-spec captured))) :to-be nil)))
+      (dolist (asked '((50 . 50) (2000 . 2000) (5000 . 2000) (0 . 2000)))
+        (search-mail "List:x" (car asked))
+        (expect (alist-get 'limit (cdr (assq 'search-query-spec captured)))
+                :to-equal (cdr asked)))))
   (it "never lets Gnus ask how many articles to show"
     (mail-tests--searching 3
       (search-mail "List:x")
@@ -511,10 +512,10 @@ would have been bounded by in `large'."
   (it "asks for the number of matches on a prefix argument"
     (mail-tests--searching 3
       (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "List:x"))
-                ((symbol-function 'read-number) (lambda (&rest _) 0)))
+                ((symbol-function 'read-number) (lambda (&rest _) 800)))
         (let ((current-prefix-arg '(4)))
           (call-interactively #'search-mail)))
-      (expect (assq 'limit (cdr (assq 'search-query-spec captured))) :to-be nil)))
+      (expect (alist-get 'limit (cdr (assq 'search-query-spec captured))) :to-equal 800)))
   (it "says how many match in all when the cap cut the result"
     (let (said counted)
       (mail-tests--searching 500
@@ -524,7 +525,17 @@ would have been bounded by in `large'."
                    (lambda (format &rest args) (setq said (apply #'format format args)))))
           (search-mail "limit:700 List:x" 500)))
       (expect counted :to-equal '("List:x"))
-      (expect said :to-equal "The newest 500 of 33492 matches; a prefix argument shows more")))
+      (expect said :to-equal
+              "The newest 500 of 33492 matches; a prefix argument shows up to 2000")))
+  (it "sends the query on to narrow down once the most it shows is cut"
+    (let (said)
+      (mail-tests--searching 2000
+        (cl-letf (((symbol-function 'count-mail) (lambda (_) '(33492)))
+                  ((symbol-function 'message)
+                   (lambda (format &rest args) (setq said (apply #'format format args)))))
+          (search-mail "List:x" 0)))
+      (expect said :to-equal
+              "The newest 2000 of 33492 matches; narrow the query to reach older ones")))
   (it "counts nothing when every match is shown"
     (let (counted)
       (mail-tests--searching 12
