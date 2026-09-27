@@ -533,16 +533,6 @@ would have been bounded by in `large'."
           (search-mail "List:x" 0)))
       (expect counted :to-be nil))))
 
-(describe "retrieve-search-hit-headers"
-  (it "asks for the hits' headers and no older ones"
-    ;; the labels' gnus-fetch-old-headers makes nnmaildir answer with
-    ;; every header of the group, which a search then throws away
-    (let (asked)
-      (cl-letf (((symbol-function 'gnus-retrieve-headers)
-                 (lambda (&rest args) (setq asked args) 'nov)))
-        (expect (retrieve-search-hit-headers '(3 9) "nnmaildir+gmail:archive") :to-be 'nov))
-      (expect asked :to-equal '((3 9) "nnmaildir+gmail:archive" nil)))))
-
 (describe "message-copies"
   (it "splits every copy notmuch named into one list per message"
     (expect (message-copies '("a1" "a2" "b1" "c1" "c2" "c3") '("a1" "b1" "c1"))

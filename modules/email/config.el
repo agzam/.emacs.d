@@ -118,17 +118,14 @@ not name stay where they were moved.")
         gnus-message-archive-group "nnmaildir+gmail:sent"
         gnus-gcc-mark-as-read t
         gnus-posting-styles '((".*" (name user-full-name) (address mail-from-address)))
-        ;; the last matching entry wins for each parameter.  A real
-        ;; parameter is a dotted pair - `gnus-group-find-parameter'
-        ;; drops an entry whose cdr is a list.  A two-element entry
-        ;; instead sets that variable buffer-locally and evaluates the
-        ;; value, hence the quote.  nnmaildir evaluates its own
-        ;; parameters too, so expire-age needs one as well.
+        ;; the last matching entry wins.  `gnus-group-find-parameter'
+        ;; drops an entry whose cdr is a list, so a parameter is a dotted
+        ;; pair, and a two-element entry sets a variable buffer-locally.
+        ;; nnmaildir evaluates its own parameters, hence the quote.
         gnus-parameters
         '(;; nnmaildir deletes expired files, and mbsync would push that
           ;; to Gmail as an archive or an unlabel
-          ("\\`nnmaildir\\+gmail:" (expire-age . 'never) (display . all)
-           (gnus-fetch-old-headers 'some))
+          ("\\`nnmaildir\\+gmail:" (expire-age . 'never) (display . all))
           ;; the archive holds everything ever received; show the newest
           ;; slice instead of prompting for a count
           ("\\`nnmaildir\\+gmail:archive\\'" (display . 200))
@@ -358,14 +355,6 @@ columns would go to the window left of Gnus."
   ;; a hit is the copy in the inbox when there is one, so marks and
   ;; moves in search results reach what the inbox shows
   (advice-add 'gnus-search-indexed-parse-output :around #'search-likeliest-copies-a))
-
-(use-package nnselect
-  :ensure nil
-  :defer t
-  :init
-  ;; a search keeps only its hits, and the labels' old headers would make
-  ;; nnmaildir read every header of the archive for each search
-  (setq nnselect-retrieve-headers-override-function #'retrieve-search-hit-headers))
 
 (use-package message
   :ensure nil

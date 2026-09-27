@@ -66,10 +66,6 @@ in this process, which the mail suite performs."
     (expect (alist-get 'nnmaildir gnus-search-default-engines) :to-be 'gnus-search-notmuch)
     (expect gnus-search-notmuch-remove-prefix :to-equal gmail-maildir)
     (expect gnus-refer-thread-use-search :to-be t))
-  (it "reads only the hits' headers for a search, never a label's older ones"
-    ;; the labels' gnus-fetch-old-headers made nnmaildir hand every
-    ;; search every header of All Mail
-    (expect nnselect-retrieve-headers-override-function :to-be 'retrieve-search-hit-headers))
   (it "hands the search parser each message's inbox copy"
     (require 'gnus-search)
     (unwind-protect
@@ -101,11 +97,15 @@ in this process, which the mail suite performs."
   (it "shows read mail in every nnmaildir group"
     (email-tests--with-empty-newsrc
       (expect (gnus-group-find-parameter "nnmaildir+gmail:inbox" 'display) :to-be 'all)))
-  (it "threads with old headers in every nnmaildir group"
-    (let ((general (assoc "\\`nnmaildir\\+gmail:" gnus-parameters)))
-      ;; a two-element entry sets the variable buffer-locally and
-      ;; evaluates the value, so the value has to be quoted
-      (expect (eval (nth 1 (assq 'gnus-fetch-old-headers general)) t) :to-be 'some)))
+  (it "fetches no older headers in any group, a search's hits included"
+    ;; nnmaildir answers old headers with every header of the group, and
+    ;; nnselect asks each hit's group for its own value
+    (require 'gnus-sum)
+    (email-tests--with-empty-newsrc
+      (dolist (group '("nnmaildir+gmail:inbox" "nnmaildir+gmail:emacs"
+                       "nnmaildir+gmail:archive"))
+        (expect (gnus-group-find-parameter group 'gnus-fetch-old-headers t) :to-be nil)))
+    (expect (default-value 'gnus-fetch-old-headers) :to-be nil))
   (it "shows the archive as a newest slice, overriding the general entry"
     (email-tests--with-empty-newsrc
       (expect (gnus-group-find-parameter "nnmaildir+gmail:archive" 'display) :to-equal 200)))
@@ -491,8 +491,7 @@ window and deletes the summary's."
                      ("mail.el" sort-mail-by-date sort-mail-by-author
                       sort-mail-by-subject toggle-mail-thread-fold
                       ;; a search, an advice or a sibling file calls these
-                      search-likeliest-copies-a retrieve-search-hit-headers
-                      read-mail-search-limit refresh-mail-group
+                      search-likeliest-copies-a read-mail-search-limit refresh-mail-group
                       keep-flags-set-elsewhere-a maildir-groups)
                      ;; the first group line draws through the format function
                      ("groups.el" gnus-user-format-function-C apply-mail-topics

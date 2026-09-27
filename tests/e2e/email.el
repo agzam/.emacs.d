@@ -573,9 +573,21 @@ An untimed `read-event' is idle, and a timer ends it."
                           (eq called 'routine-groups)
                           :got (format "%s" called)))
                 ;; RET from the group buffer is the path the `display'
-                ;; parameter governs; without it only unread mail shows
-                (gnus-group-jump-to-group "nnmaildir+gmail:inbox")
-                (execute-kbd-macro (kbd "RET"))
+                ;; parameter governs; without it only unread mail shows.
+                ;; Asked for old headers, nnmaildir would hand over every
+                ;; header of the group on each entry
+                (let* ((fetch-olds nil)
+                       (note (lambda (_articles &optional _group _server fetch-old)
+                               (push fetch-old fetch-olds))))
+                  (advice-add 'nnmaildir-retrieve-headers :before note)
+                  (unwind-protect
+                      (progn
+                        (gnus-group-jump-to-group "nnmaildir+gmail:inbox")
+                        (execute-kbd-macro (kbd "RET")))
+                    (advice-remove 'nnmaildir-retrieve-headers note))
+                  (record "entering a group asks nnmaildir for no older headers"
+                          (and fetch-olds (seq-every-p #'null fetch-olds))
+                          :got (format "%S" fetch-olds)))
                 (record "RET on the group line shows read mail too"
                         (and (derived-mode-p 'gnus-summary-mode)
                              (= 5 (length gnus-newsgroup-headers)))
