@@ -5,9 +5,12 @@
 (require 'gnus-topic)
 (require 'gnus-srvr)
 (require 'nntp)
+(require 'nnatom)
+(require 'mm-url)
 
 (defvar mail-topics)
 (defvar mail-bulk-groups)
+(defvar mail-remote-backends)
 (defvar gnus-tmp-group)
 
 ;;; Lines
@@ -190,11 +193,26 @@ The whole list of news.gmane.io takes about 18 s.  In the browse buffer
                  t))))
     (gnus-browse-foreign-server method)))
 
+;;; Feeds
+
+(defvar feed-user-agent "emacs:gnus-nnatom:32.0 (personal feed reader)"
+  "User-Agent `read-atom-feed' sends; Reddit blocks generic ones.")
+
+;;;###autoload
+(defun read-atom-feed (feed group)
+  "Read GROUP of Atom FEED the way nnatom does, fetched by curl.
+Reddit answers url.el with 403 Blocked, whatever its User-Agent."
+  (let ((mm-url-use-external t)
+        (mm-url-program "curl")
+        (mm-url-arguments (list "--silent" "--fail" "--location" "--max-time" "20"
+                                "--user-agent" feed-user-agent)))
+    (nnatom--read-feed feed group)))
+
 ;;;###autoload
 (defun defer-news-group-h (group)
-  "Put GROUP, subscribed just now, above `gnus-activate-level' if it is news.
-Gnus would otherwise ask its server for it at every start."
-  (when (eq (car (gnus-find-method-for-group group)) 'nntp)
+  "Put GROUP, subscribed just now, above `gnus-activate-level' if it is remote.
+A news group or a web feed would otherwise be fetched at every start."
+  (when (memq (car (gnus-find-method-for-group group)) mail-remote-backends)
     (gnus-group-change-level group (1+ gnus-activate-level) (gnus-group-level group))))
 
 ;;; groups.el ends here

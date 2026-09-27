@@ -46,6 +46,18 @@ in this process, which the mail suite performs."
       (expect (assq 'get-new-mail (cddr server)) :to-equal '(get-new-mail nil))))
   (it "reads the lists from gmane"
     (expect (assq 'nntp gnus-secondary-select-methods) :to-equal '(nntp "news.gmane.io")))
+  (it "reads every new r/emacs post from Reddit's feed, into a group named r/emacs"
+    ;; nnatom names the group after the feed's title otherwise
+    (require 'gnus)
+    (let* ((server (assq 'nnatom gnus-secondary-select-methods))
+           (title (cadr (assq 'nnatom-read-title-function (cddr server)))))
+      (expect (cadr server) :to-equal "www.reddit.com/r/emacs/new/.rss")
+      (expect (funcall title '(feed nil (title nil "newest submissions : emacs")))
+              :to-equal "r/emacs")
+      ;; Reddit answers url.el with 403 Blocked
+      (expect (cadr (assq 'nnatom-read-feed-function (cddr server))) :to-be 'read-atom-feed)
+      (expect (gnus-group-prefixed-name "r/emacs" server)
+              :to-equal (car (last mail-groups)))))
   (it "never scans gmane for new groups or saves its killed list"
     (expect gnus-check-new-newsgroups :to-be nil)
     (expect gnus-save-killed-list :to-be nil)
@@ -484,7 +496,8 @@ window and deletes the summary's."
                       keep-flags-set-elsewhere-a maildir-groups)
                      ;; the first group line draws through the format function
                      ("groups.el" gnus-user-format-function-C apply-mail-topics
-                      add-mail-group browse-news-groups defer-news-group-h)
+                      add-mail-group browse-news-groups defer-news-group-h
+                      read-atom-feed)
                      ("marks.el" mail-mark-thread-read quit-mail-summary
                       note-entry-marks-h carry-search-marks-h
                       activate-search-hit-groups-h keep-newer-read-marks-a
@@ -566,9 +579,10 @@ window and deletes the summary's."
               :to-match "^;;;###autoload\n(defun mail-keep-star-on-read-h "))))
 
 (describe "email module subscriptions"
-  (it "subscribes the inbox and emacs-devel on startup"
+  (it "subscribes the inbox, emacs-devel and r/emacs on startup"
     (expect mail-groups :to-equal
-            '("nnmaildir+gmail:inbox" "nntp+news.gmane.io:gmane.emacs.devel"))
+            '("nnmaildir+gmail:inbox" "nntp+news.gmane.io:gmane.emacs.devel"
+              "nnatom+www.reddit.com/r/emacs/new/.rss:r/emacs"))
     (expect (member mail-inbox-group mail-groups) :to-be-truthy)))
 
 (describe "email module group buffer"

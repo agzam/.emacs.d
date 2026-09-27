@@ -30,8 +30,12 @@
 (defvar mail-archive-group "nnmaildir+gmail:archive"
   "Group mbsync mirrors from Gmail's All Mail, where archived mail lives.")
 
-(defvar mail-groups (list mail-inbox-group "nntp+news.gmane.io:gmane.emacs.devel")
+(defvar mail-groups (list mail-inbox-group "nntp+news.gmane.io:gmane.emacs.devel"
+                          "nnatom+www.reddit.com/r/emacs/new/.rss:r/emacs")
   "Groups Gnus subscribes to on startup, on top of every maildir group.")
+
+(defvar mail-remote-backends '(nntp nnatom)
+  "Back ends whose groups cost a round trip to a server to read.")
 
 (defvar mail-bulk-groups
   '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs" "nnmaildir+gmail:org-mode"
@@ -56,6 +60,7 @@
     ("Lists"
      ("nntp+news.gmane.io:gmane.emacs.devel" . "emacs-devel over NNTP")
      ("nnmaildir+gmail:emacs" . "emacs-devel, delivered to Gmail")
+     ("nnatom+www.reddit.com/r/emacs/new/.rss:r/emacs" . "Reddit, every new post")
      ("nnmaildir+gmail:org-mode" . "emacs-orgmode")
      ("nnmaildir+gmail:clojure" . "Clojure groups, Clojurists Together")
      ("nnmaildir+gmail:new" . "Old label, nothing since 2024-11")))
@@ -74,7 +79,12 @@ not name stay where they were moved.")
   (setq gnus-select-method '(nnnil "")
         gnus-secondary-select-methods
         `((nnmaildir "gmail" (directory ,gmail-maildir) (get-new-mail nil))
-          (nntp "news.gmane.io"))
+          (nntp "news.gmane.io")
+          ;; the feed's own title, "newest submissions : emacs", would
+          ;; name the group
+          (nnatom "www.reddit.com/r/emacs/new/.rss"
+                  (nnatom-read-title-function ,(lambda (_) "r/emacs"))
+                  (nnatom-read-feed-function read-atom-feed)))
         ;; gmane carries tens of thousands of groups; scanning for new
         ;; ones or saving the killed list makes every startup crawl
         gnus-check-new-newsgroups nil

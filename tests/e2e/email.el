@@ -72,6 +72,27 @@ SUBJECT, ID, DATE and REFERENCES fill the headers."
             "\n"
             "body of " subject "\n")))
 
+(defun email-e2e--write-feed (file posts)
+  "Write to FILE an Atom feed shaped like Reddit's, holding POSTS.
+Each post is (ID TITLE HOUR), published on 26 Sep 2026 at HOUR."
+  (with-temp-file file
+    (insert "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            "<feed xmlns=\"http://www.w3.org/2005/Atom\">\n"
+            "<title>newest submissions : emacs</title>\n"
+            "<id>/r/emacs/new/.rss</id>\n"
+            "<updated>2026-09-27T02:40:47+00:00</updated>\n")
+    (pcase-dolist (`(,id ,title ,hour) posts)
+      (insert "<entry>\n"
+              "<author><name>/u/alice</name></author>\n"
+              "<id>t3_" id "</id>\n"
+              "<title>" title "</title>\n"
+              "<link href=\"https://www.reddit.com/r/emacs/comments/" id "/\"/>\n"
+              "<published>2026-09-26T" hour ":00:00+00:00</published>\n"
+              "<updated>2026-09-26T" hour ":00:00+00:00</updated>\n"
+              "<content type=\"html\">&lt;p&gt;body of the " id " post&lt;/p&gt;</content>\n"
+              "</entry>\n"))
+    (insert "</feed>\n")))
+
 (defun email-e2e--article (subject)
   "Number of the article with SUBJECT in the current summary."
   (mail-header-number
@@ -125,18 +146,24 @@ An untimed `read-event' is idle, and a timer ends it."
          ;; what the %uS column draws on a starred message
          (star (string #x2217))
          (results '())
+         ;; r/emacs's feed as a file, read by the same nnatom method
+         ;; the module gives Reddit's
+         (feed (expand-file-name "r-emacs.atom" e2e-work-dir))
+         (feed-group (concat "nnatom+" feed ":r/emacs"))
          ;; gnus-started-hook subscribes every group under this root;
-         ;; mail-groups would add gmane, and CI has no news server
+         ;; the module's mail-groups would add gmane and Reddit, which
+         ;; CI cannot reach
          (gmail-maildir root)
-         (mail-groups nil)
+         (mail-groups (list feed-group))
          ;; html and moved are left out; trash and labelled start empty
-         (mail-topics '(("Gmail" ("nnmaildir+gmail:inbox" . "Inbox")
+         (mail-topics `(("Gmail" ("nnmaildir+gmail:inbox" . "Inbox")
                          ("nnmaildir+gmail:archive" . "All Mail")
                          ("nnmaildir+gmail:trash" . "Trash"))
                         ("Labels" ("nnmaildir+gmail:starred" . "Read and star apart")
                          ("nnmaildir+gmail:labelled"))
                         ("Lists" ("nnmaildir+gmail:lists" . "A list thread")
-                         ("nnmaildir+gmail:emacs" . "emacs-devel"))))
+                         ("nnmaildir+gmail:emacs" . "emacs-devel")
+                         (,feed-group . "Reddit, every new post"))))
          ;; moved sits with the bulk groups, so , m files into a group
          ;; nnmaildir has not read this session
          (mail-bulk-groups '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs"
@@ -145,7 +172,9 @@ An untimed `read-event' is idle, and a timer ends it."
          (gnus-search-notmuch-remove-prefix root)
          (gnus-search-engine-instance-alist nil)
          (gnus-secondary-select-methods
-          `((nnmaildir "gmail" (directory ,root) (get-new-mail nil))))
+          `((nnmaildir "gmail" (directory ,root) (get-new-mail nil))
+            (nnatom ,feed (nnatom-read-title-function ,(lambda (_) "r/emacs"))
+                    (nnatom-read-feed-function read-atom-feed))))
          (gnus-startup-file (expand-file-name "newsrc" e2e-work-dir))
          (gnus-init-file (expand-file-name "gnus-init" e2e-work-dir))
          (gnus-directory (expand-file-name "news/" e2e-work-dir))
@@ -155,6 +184,8 @@ An untimed `read-event' is idle, and a timer ends it."
     (dolist (dir (list inbox trash html starred lists moved labelled archive emacs))
       (dolist (sub '("cur" "new" "tmp"))
         (make-directory (expand-file-name sub dir) t)))
+    (email-e2e--write-feed feed '(("first" "First fixture post" "10")
+                                  ("second" "Second fixture post" "11")))
     (email-e2e--write-list-message (expand-file-name "cur/1700000031.31.fixture:2,S" emacs)
                                    "Eli <eli@example.com>" "emacs-devel post" "devel-post"
                                    "Sun, 20 Sep 2026 10:00:00 +0000")
@@ -425,7 +456,7 @@ An untimed `read-event' is idle, and a timer ends it."
                        (inbox (nth 2 (assoc "nnmaildir+gmail:inbox" groups))))
                   (record "the start puts each group mail-topics names under its topic, in order"
                           (equal layout
-                                 '("Gnus" ("nnmaildir+gmail:moved" . "Gnus")
+                                 `("Gnus" ("nnmaildir+gmail:moved" . "Gnus")
                                    "Gmail" ("nnmaildir+gmail:inbox" . "Gmail")
                                    ("nnmaildir+gmail:archive" . "Gmail")
                                    ("nnmaildir+gmail:trash" . "Gmail")
@@ -433,6 +464,7 @@ An untimed `read-event' is idle, and a timer ends it."
                                    ("nnmaildir+gmail:labelled" . "Labels")
                                    "Lists" ("nnmaildir+gmail:lists" . "Lists")
                                    ("nnmaildir+gmail:emacs" . "Lists")
+                                   (,feed-group . "Lists")
                                    "misc"))
                           :got (format "%S" layout))
                   (record "a group line shows the bare name and the description mail-topics gives"
@@ -447,7 +479,29 @@ An untimed `read-event' is idle, and a timer ends it."
                           :got (format "labelled %S, html %S: %S"
                                        (gnus-group-unread "nnmaildir+gmail:labelled")
                                        (gnus-group-unread "nnmaildir+gmail:html")
-                                       (mapcar #'car groups))))
+                                       (mapcar #'car groups)))
+                  ;; a start that fetched the feed would wait on Reddit
+                  (record "a feed in mail-groups is subscribed above the routine scan, and no start fetches it"
+                          (and (eql (gnus-group-level feed-group) (1+ gnus-activate-level))
+                               (null (gnus-active feed-group)))
+                          :got (format "level %S, active %S"
+                                       (gnus-group-level feed-group) (gnus-active feed-group)))
+                  (let ((line (nth 2 (assoc feed-group groups))))
+                    (record "the feed's line reads r/emacs and its description"
+                            (and line (string-match-p "\\` +\\* +r/emacs +Reddit, every new post\\'"
+                                                      line))
+                            :got (format "%S" line))))
+                (gnus-group-jump-to-group feed-group)
+                (execute-kbd-macro (kbd "RET"))
+                (record "RET on the feed's line shows its posts"
+                        (and (derived-mode-p 'gnus-summary-mode)
+                             (equal (sort (mapcar #'mail-header-subject gnus-newsgroup-headers)
+                                          #'string<)
+                                    '("First fixture post" "Second fixture post")))
+                        :got (format "%s: %S" major-mode
+                                     (mapcar #'mail-header-subject gnus-newsgroup-headers)))
+                (when (derived-mode-p 'gnus-summary-mode)
+                  (gnus-summary-exit-no-update))
                 ;; the stand-in notmuch answers with the archive's copy
                 (search-mail "archived")
                 (record "a search hit in a group no start read opens in the search summary"
@@ -1668,6 +1722,9 @@ An untimed `read-event' is idle, and a timer ends it."
             (when-let* ((summary (get-buffer name)))
               (with-current-buffer summary
                 (gnus-summary-exit-no-update))))
+          (when-let* ((summary (get-buffer (gnus-summary-buffer-name feed-group))))
+            (with-current-buffer summary
+              (gnus-summary-exit-no-update)))
           (with-current-buffer gnus-group-buffer
             (gnus-group-exit)))
         (when-let* ((beside (get-buffer "*beside*")))
