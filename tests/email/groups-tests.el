@@ -371,23 +371,130 @@ alist has Gnus, Gmail and Lists."
                                         "gwene.com.reddit.r.planetemacs 0000006587 0000000003 m\n"))
       (expect (symbol-function 'nntp-request-list) :to-be original))))
 
+(defconst groups-tests-feed "www.example.org/r/emacs/new/.rss"
+  "An nnatom server address shaped like Reddit's.")
+
+(defmacro groups-tests--with-feeds (&rest body)
+  "Run BODY with one feed method and an empty `feed-directory'."
+  (declare (indent 0))
+  `(let ((feed-directory (file-name-as-directory (make-temp-file "feeds" t)))
+         (gnus-secondary-select-methods `((nnmaildir "gmail") (nnatom ,groups-tests-feed))))
+     (unwind-protect (progn ,@body)
+       (delete-directory feed-directory t))))
+
+(defun groups-tests-fetch-stub (exit)
+  "A stand-in for curl that writes \"fresh\" to its --output and exits EXIT."
+  (let ((script (make-temp-file "curl" nil nil
+                                (concat "#!/bin/sh\n"
+                                        "while [ $# -gt 0 ]; do [ \"$1\" = --output ] && out=$2; shift; done\n"
+                                        "printf fresh > \"$out\"\n"
+                                        (format "exit %d\n" exit)))))
+    (set-file-modes script #o755)
+    script))
+
 (describe "read-atom-feed"
-  (it "has curl fetch the feed for nnatom, under its own User-Agent"
-    ;; Reddit answers url.el with 403 Blocked, whatever its agent
-    (let (seen)
-      (cl-letf (((symbol-function 'nnatom--read-feed)
-                 (lambda (feed group)
-                   (setq seen (list feed group mm-url-use-external mm-url-program
-                                    mm-url-arguments))
-                   'parsed)))
-        (expect (read-atom-feed "www.reddit.com/r/emacs/new/.rss" nil) :to-be 'parsed))
-      (pcase-let ((`(,feed ,group ,external ,program ,args) seen))
-        (expect (list feed group external program)
-                :to-equal '("www.reddit.com/r/emacs/new/.rss" nil t "curl"))
-        (expect (cadr (member "--user-agent" args)) :to-equal feed-user-agent)
-        ;; a 403 page would parse as a feed of nothing
-        (expect (member "--fail" args) :to-be-truthy)
-        (expect (member "--max-time" args) :to-be-truthy)))))
+  (it "reads a feed from its downloaded copy, and nothing without one"
+    ;; the network would hold Emacs until the server answers
+    (groups-tests--with-feeds
+      (let (read)
+        (cl-letf (((symbol-function 'nnatom--read-feed)
+                   (lambda (file group) (setq read (list file group)) 'parsed)))
+          (expect (read-atom-feed groups-tests-feed "r/emacs") :to-be nil)
+          (expect read :to-be nil)
+          (write-region "<feed/>" nil (feed-file groups-tests-feed))
+          (expect (read-atom-feed groups-tests-feed "r/emacs") :to-be 'parsed))
+        (expect read :to-equal (list (feed-file groups-tests-feed) "r/emacs"))))))
+
+(describe "fetch-feeds"
+  (it "downloads each feed in the background, under its own User-Agent"
+    (groups-tests--with-feeds
+      (let (made)
+        (cl-letf (((symbol-function 'make-process)
+                   (lambda (&rest args) (push args made) 'process)))
+          (fetch-feeds))
+        (expect (length made) :to-equal 1)
+        (let ((command (plist-get (car made) :command)))
+          (expect (car command) :to-equal feed-fetch-program)
+          (expect (car (last command)) :to-equal (concat "https://" groups-tests-feed))
+          (expect (cadr (member "--user-agent" command)) :to-equal feed-user-agent)
+          ;; a 403 page would replace the feed with nothing
+          (expect (member "--fail" command) :to-be-truthy)
+          (expect (file-name-directory (cadr (member "--output" command)))
+                  :to-equal feed-directory)))))
+  (it "saves a finished download as the feed and reads its groups again"
+    (groups-tests--with-feeds
+      (let ((feed-fetch-program (groups-tests-fetch-stub 0))
+            (gnus-group-list (list (concat "nnatom+" groups-tests-feed ":r/emacs")
+                                   "nnmaildir+gmail:inbox"))
+            read)
+        (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
+                  ((symbol-function 'refresh-mail-group) (lambda (group) (push group read)))
+                  ((symbol-function 'gnus-group-update-group) #'ignore))
+          (fetch-feeds)
+          (with-timeout (5)
+            (while (not read)
+              (accept-process-output nil 0.05))))
+        (delete-file feed-fetch-program)
+        (expect read :to-equal (list (concat "nnatom+" groups-tests-feed ":r/emacs")))
+        (expect (with-temp-buffer
+                  (insert-file-contents (feed-file groups-tests-feed))
+                  (buffer-string))
+                :to-equal "fresh"))))
+  (it "keeps the saved feed and says so when a download fails"
+    (groups-tests--with-feeds
+      (let ((feed-fetch-program (groups-tests-fetch-stub 22))
+            said)
+        (write-region "saved" nil (feed-file groups-tests-feed))
+        (cl-letf (((symbol-function 'message)
+                   (lambda (format &rest args) (setq said (apply #'format format args)))))
+          (fetch-feeds)
+          (with-timeout (5)
+            (while (not said)
+              (accept-process-output nil 0.05))))
+        (delete-file feed-fetch-program)
+        (expect said :to-match "not fetched")
+        (expect (with-temp-buffer
+                  (insert-file-contents (feed-file groups-tests-feed))
+                  (buffer-string))
+                :to-equal "saved")
+        ;; the failed download's part file is gone too
+        (expect (directory-files feed-directory nil "\\`part-") :to-be nil)))))
+
+(describe "start-feed-fetches"
+  (it "downloads at once only a feed whose copy is missing or old, then every interval"
+    (groups-tests--with-feeds
+      (let ((feed-fetch-timer nil) fetched)
+        (cl-letf (((symbol-function 'fetch-feeds) (lambda (&rest args) (push args fetched))))
+          (unwind-protect
+              (progn
+                (start-feed-fetches)
+                (expect fetched :to-equal `(((,(cadr gnus-secondary-select-methods)))))
+                (setq fetched nil)
+                (write-region "<feed/>" nil (feed-file groups-tests-feed))
+                (start-feed-fetches)
+                (expect fetched :to-be nil)
+                (set-file-times (feed-file groups-tests-feed)
+                                (time-subtract nil (* 2 feed-fetch-interval)))
+                (start-feed-fetches)
+                (expect (length fetched) :to-equal 1)
+                (expect (timerp feed-fetch-timer) :to-be t)
+                (expect (seq-count (lambda (timer)
+                                     (eq (timer--function timer) #'fetch-feeds-while-gnus-runs))
+                                   timer-list)
+                        :to-equal 1))
+            (when (timerp feed-fetch-timer)
+              (cancel-timer feed-fetch-timer)))))))
+  (it "stops downloading once Gnus is gone"
+    (let ((feed-fetch-timer (run-with-timer 3600 3600 #'ignore)) fetched)
+      (cl-letf (((symbol-function 'fetch-feeds) (lambda (&rest _) (setq fetched t))))
+        (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t)))
+          (fetch-feeds-while-gnus-runs))
+        (expect fetched :to-be t)
+        (cl-letf (((symbol-function 'gnus-alive-p) (lambda () nil)))
+          (let ((timer feed-fetch-timer))
+            (fetch-feeds-while-gnus-runs)
+            (expect feed-fetch-timer :to-be nil)
+            (expect (memq timer timer-list) :to-be nil)))))))
 
 (describe "defer-news-group-h"
   (it "moves a news group or a feed subscribed just now above the routine scan"

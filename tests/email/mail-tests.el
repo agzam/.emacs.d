@@ -55,6 +55,16 @@ Returns the hashtable; the caller binds `gnus-group-list' itself."
   (it "runs the full sync on request"
     (expect (mail-sync-command t) :to-equal '("mail-sync" "full"))))
 
+(describe "sync-mail"
+  (it "starts the mail sync and the feed downloads, both in the background"
+    (let (made fetched)
+      (cl-letf (((symbol-function 'make-process)
+                 (lambda (&rest args) (push (plist-get args :command) made) 'process))
+                ((symbol-function 'fetch-feeds) (lambda (&rest _) (setq fetched t))))
+        (sync-mail))
+      (expect made :to-equal '(("mail-sync" "sync")))
+      (expect fetched :to-be t))))
+
 (defmacro mail-tests--with-sentinel-stubs (code calls &rest body)
   "Run BODY with the sentinel's dependencies stubbed, PROC exiting with CODE.
 Every refresh path logs into CALLS, so a spec can tell the scoped refresh

@@ -17,6 +17,10 @@
 (require 'gnus-start)
 (require 'gnus-sum)
 (require 'gnus-search)
+;; the feed variables live in an autoload file no key has loaded yet
+(defvar feed-directory)
+(defvar feed-fetch-program)
+(defvar feed-fetch-timer)
 
 (defun email-e2e--write-message (file from subject id &optional date references xref body)
   "Write a minimal RFC 822 message to FILE.
@@ -146,10 +150,16 @@ An untimed `read-event' is idle, and a timer ends it."
          ;; what the %uS column draws on a starred message
          (star (string #x2217))
          (results '())
-         ;; r/emacs's feed as a file, read by the same nnatom method
-         ;; the module gives Reddit's
+         ;; r/emacs through the same nnatom method the module gives
+         ;; Reddit's feed, downloaded by a curl stand-in that waits for
+         ;; go, then delivers served
          (feed (expand-file-name "r-emacs.atom" e2e-work-dir))
          (feed-group (concat "nnatom+" feed ":r/emacs"))
+         (feed-directory (expand-file-name "feeds/" e2e-work-dir))
+         (feed-fetch-program (expand-file-name "curl" e2e-work-dir))
+         (served (expand-file-name "served.atom" e2e-work-dir))
+         (go (expand-file-name "go" e2e-work-dir))
+         (mail-sync-program "true")
          ;; gnus-started-hook subscribes every group under this root;
          ;; the module's mail-groups would add gmane and Reddit, which
          ;; CI cannot reach
@@ -184,8 +194,14 @@ An untimed `read-event' is idle, and a timer ends it."
     (dolist (dir (list inbox trash html starred lists moved labelled archive emacs))
       (dolist (sub '("cur" "new" "tmp"))
         (make-directory (expand-file-name sub dir) t)))
-    (email-e2e--write-feed feed '(("first" "First fixture post" "10")
-                                  ("second" "Second fixture post" "11")))
+    (email-e2e--write-feed served '(("first" "First fixture post" "10")
+                                    ("second" "Second fixture post" "11")))
+    (with-temp-file feed-fetch-program
+      (insert "#!/bin/sh\n"
+              "while [ $# -gt 0 ]; do [ \"$1\" = --output ] && out=$2; shift; done\n"
+              "while [ ! -f '" go "' ]; do sleep 0.05; done\n"
+              "cp '" served "' \"$out\"\n"))
+    (set-file-modes feed-fetch-program #o755)
     (email-e2e--write-list-message (expand-file-name "cur/1700000031.31.fixture:2,S" emacs)
                                    "Eli <eli@example.com>" "emacs-devel post" "devel-post"
                                    "Sun, 20 Sep 2026 10:00:00 +0000")
@@ -286,6 +302,12 @@ An untimed `read-event' is idle, and a timer ends it."
     (cl-flet ((record (label ok &rest kv)
                 (push (append (list :label (format "email: %s" label) :ok ok) kv)
                       results))
+              ;; a feed download the curl stand-in still holds
+              (feed-downloading ()
+                (seq-some (lambda (process)
+                            (and (string-prefix-p "feed " (process-name process))
+                                 (process-live-p process)))
+                          (process-list)))
               ;; the groups nnmaildir has read this session
               (read-groups ()
                 (when-let* ((server (alist-get "gmail" nnmaildir--servers nil nil #'equal)))
@@ -480,17 +502,27 @@ An untimed `read-event' is idle, and a timer ends it."
                                        (gnus-group-unread "nnmaildir+gmail:labelled")
                                        (gnus-group-unread "nnmaildir+gmail:html")
                                        (mapcar #'car groups)))
-                  ;; a start that fetched the feed would wait on Reddit
-                  (record "a feed in mail-groups is subscribed above the routine scan, and no start fetches it"
+                  ;; the stand-in holds the start's download, so the group
+                  ;; is still unread while the start goes on
+                  (record "the start downloads the feed without waiting for it"
                           (and (eql (gnus-group-level feed-group) (1+ gnus-activate-level))
+                               (feed-downloading)
                                (null (gnus-active feed-group)))
-                          :got (format "level %S, active %S"
-                                       (gnus-group-level feed-group) (gnus-active feed-group)))
+                          :got (format "level %S, downloading %S, active %S"
+                                       (gnus-group-level feed-group) (feed-downloading)
+                                       (gnus-active feed-group)))
                   (let ((line (nth 2 (assoc feed-group groups))))
                     (record "the feed's line reads r/emacs and its description"
                             (and line (string-match-p "\\` +\\* +r/emacs +Reddit, every new post\\'"
                                                       line))
                             :got (format "%S" line))))
+                (write-region "" nil go)
+                (with-timeout (10)
+                  (while (not (gnus-active feed-group))
+                    (accept-process-output nil 0.05)))
+                (record "the finished download reads the feed's group"
+                        (eql (gnus-group-unread feed-group) 2)
+                        :got (format "unread %S" (gnus-group-unread feed-group)))
                 (gnus-group-jump-to-group feed-group)
                 (execute-kbd-macro (kbd "RET"))
                 (record "RET on the feed's line shows its posts"
@@ -502,6 +534,24 @@ An untimed `read-event' is idle, and a timer ends it."
                                      (mapcar #'mail-header-subject gnus-newsgroup-headers)))
                 (when (derived-mode-p 'gnus-summary-mode)
                   (gnus-summary-exit-no-update))
+                ;; , u downloads the feed again and returns before it arrives
+                (delete-file go)
+                (email-e2e--write-feed served '(("first" "First fixture post" "10")
+                                                ("second" "Second fixture post" "11")
+                                                ("third" "Third fixture post" "12")))
+                (let ((start (float-time)))
+                  (execute-kbd-macro (kbd ", u"))
+                  (record ", u returns while the feed is still downloading"
+                          (and (< (- (float-time) start) 0.5) (feed-downloading))
+                          :got (format "%.2f s, downloading %S"
+                                       (- (float-time) start) (feed-downloading))))
+                (write-region "" nil go)
+                (with-timeout (10)
+                  (while (not (eql (gnus-group-unread feed-group) 3))
+                    (accept-process-output nil 0.05)))
+                (record ", u's download counts the feed's new post"
+                        (eql (gnus-group-unread feed-group) 3)
+                        :got (format "unread %S" (gnus-group-unread feed-group)))
                 ;; the stand-in notmuch answers with the archive's copy
                 (search-mail "archived")
                 (record "a search hit in a group no start read opens in the search summary"
@@ -1721,6 +1771,13 @@ An untimed `read-event' is idle, and a timer ends it."
         ;; SPC l t G on a running Gnus queues refresh turns
         (when (timerp (bound-and-true-p mail-refresh-timer))
           (cancel-timer mail-refresh-timer))
+        ;; a feed download left waiting for go, and the periodic one
+        (dolist (process (process-list))
+          (when (string-prefix-p "feed " (process-name process))
+            (delete-process process)))
+        (when (timerp (bound-and-true-p feed-fetch-timer))
+          (cancel-timer feed-fetch-timer)
+          (setq feed-fetch-timer nil))
         (when (gnus-alive-p)
           ;; a search summary a case left behind, which returns to the
           ;; summary it was opened from
