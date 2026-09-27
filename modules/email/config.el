@@ -38,6 +38,32 @@
     "nnmaildir+gmail:new" "nntp+news.gmane.io:gmane.emacs.devel")
   "Groups no sync rescans: tens of thousands of files, or an NNTP round trip.")
 
+(defvar mail-topics
+  '(("Gmail"
+     ("nnmaildir+gmail:inbox" . "Inbox")
+     ("nnmaildir+gmail:sent" . "Sent Mail")
+     ("nnmaildir+gmail:archive" . "All Mail, archived mail included")
+     ("nnmaildir+gmail:trash" . "Trash, emptied by Gmail after 30 days"))
+    ("Labels"
+     ("nnmaildir+gmail:kids" . "School: Frisco ISD, Panther Creek")
+     ("nnmaildir+gmail:job" . "Recruiters and interviews")
+     ("nnmaildir+gmail:money" . "Receipts, banks, bills")
+     ("nnmaildir+gmail:github" . "GitHub notifications")
+     ("nnmaildir+gmail:friends" . "Friends and family")
+     ("nnmaildir+gmail:Health" . "Doctors, pharmacy")
+     ("nnmaildir+gmail:forwarded")
+     ("nnmaildir+gmail:subscriptions"))
+    ("Lists"
+     ("nntp+news.gmane.io:gmane.emacs.devel" . "emacs-devel over NNTP")
+     ("nnmaildir+gmail:emacs" . "emacs-devel, delivered to Gmail")
+     ("nnmaildir+gmail:org-mode" . "emacs-orgmode")
+     ("nnmaildir+gmail:clojure" . "Clojure groups, Clojurists Together")
+     ("nnmaildir+gmail:new" . "Old label, nothing since 2024-11")))
+  "Topics under Gnus's root topic, in order: (TOPIC (GROUP . DESCRIPTION)...).
+Every start puts these groups back into their topic, in this order, and
+they are listed even with nothing unread.  Groups and topics this does
+not name stay where they were moved.")
+
 (defvar mail-treat-quotes t
   "Treatment condition for `highlight-mail-quotes', like the gnus-treat ones.")
 
@@ -72,6 +98,8 @@
         ;; derives nil and answering a gmane thread takes no confirmation
         gnus-novice-user nil
         gnus-use-full-window nil
+        ;; the bare name, then what `mail-topics' says the group holds
+        gnus-group-line-format "%M%S%p%P%5y %B%(%-18G%) %uC\n"
         gnus-suppress-duplicates t
         gnus-refer-thread-use-search t
         ;; entering a group must not open (and mark read) its first article
@@ -112,10 +140,14 @@
   :config
   (add-hook 'gnus-group-mode-hook #'gnus-topic-mode)
   (add-hook 'gnus-started-hook #'subscribe-mail-groups)
+  ;; topics are newsrc state, so config applies over it at every start,
+  ;; once the subscriptions exist
+  (add-hook 'gnus-started-hook #'apply-mail-topics 50)
   ;; the start reads no maildir (`defer-mail-server-scan-a'); the
   ;; routine groups follow on timer turns, a label subscribed just now
   ;; among them
   (add-hook 'gnus-started-hook #'queue-mail-refresh 90)
+  (add-hook 'gnus-subscribe-newsgroup-functions #'defer-news-group-h)
 
   (defun bind-mail-keys (mode &rest _)
     "Bind this module's keys on the Gnus maps when MODE is gnus.
@@ -191,7 +223,15 @@ are applied again from `evil-collection-setup-hook'."
              :desc "sync"            "u" #'sync-mail
              :desc "search all mail" "/" #'search-mail
              :desc "new message"     "c" #'compose-new-mail
-             :desc "inbox"           "i" #'open-mail-inbox))))
+             :desc "inbox"           "i" #'open-mail-inbox
+             :desc "add group"       "a" #'add-mail-group
+             :desc "unsubscribe"     "d" #'gnus-group-unsubscribe
+             :desc "move to topic"   "m" #'gnus-topic-move-group
+             :desc "browse news"     "b" #'browse-news-groups
+             (:prefix ("t" . "topic")
+              :desc "new"    "n" #'gnus-topic-create-topic
+              :desc "rename" "r" #'gnus-topic-rename
+              :desc "delete" "d" #'gnus-topic-delete)))))
 
   (bind-mail-keys 'gnus)
   (add-hook 'evil-collection-setup-hook #'bind-mail-keys)

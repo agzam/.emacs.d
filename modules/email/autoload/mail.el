@@ -53,6 +53,7 @@
     (with-current-buffer gnus-group-buffer
       (gnus-subscribe-newsgroup group))))
 
+;;;###autoload
 (defun maildir-groups ()
   "Every nnmaildir group the mbsync store holds, one per Gmail label."
   (when (file-directory-p gmail-maildir)
