@@ -239,13 +239,6 @@ a prefix argument asks for it."
       (message "The newest %d of %d matches; a prefix argument shows more"
                shown (car (count-mail (list (notmuch-query-text query))))))))
 
-;;;###autoload
-(defun retrieve-search-hit-headers (articles group)
-  "Headers of ARTICLES in GROUP for a search group, and no others.
-A label asks for the older headers that complete its threads, and nnmaildir
-then answers with every header of the group; a search keeps only its hits."
-  (gnus-retrieve-headers articles group nil))
-
 (defun mail-copy-rank (file root)
   "Rank of FILE, one copy of a message in the store at ROOT; the lowest shows.
 The inbox copy wins, so search results act on what the inbox shows.  A
