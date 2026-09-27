@@ -36,7 +36,8 @@
 
 ;;;###autoload
 (defun sync-mail (&optional full)
-  "Sync mail with Gmail in the background; with FULL, every tier at once."
+  "Sync mail with Gmail and download the feeds, in the background.
+With FULL, the mail sync runs every tier at once."
   (interactive "P")
   (let ((buf (get-buffer-create " *mail-sync*")))
     (with-current-buffer buf
@@ -44,7 +45,8 @@
     (make-process :name "mail-sync"
                   :buffer buf
                   :command (mail-sync-command full)
-                  :sentinel #'mail-sync-sentinel)))
+                  :sentinel #'mail-sync-sentinel))
+  (fetch-feeds))
 
 ;;; Navigation
 

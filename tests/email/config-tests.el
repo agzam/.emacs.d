@@ -496,7 +496,7 @@ window and deletes the summary's."
                      ;; the first group line draws through the format function
                      ("groups.el" gnus-user-format-function-C apply-mail-topics
                       add-mail-group browse-news-groups defer-news-group-h
-                      read-atom-feed)
+                      read-atom-feed fetch-feeds start-feed-fetches)
                      ("marks.el" mail-mark-thread-read quit-mail-summary
                       note-entry-marks-h carry-search-marks-h
                       activate-search-hit-groups-h keep-newer-read-marks-a
@@ -673,7 +673,8 @@ window and deletes the summary's."
                    (equal (cadr form) ''gnus-started-hook))
           (eval form t)))
       (expect gnus-started-hook
-              :to-equal '(subscribe-mail-groups apply-mail-topics queue-mail-refresh))))
+              :to-equal '(subscribe-mail-groups apply-mail-topics queue-mail-refresh
+                          start-feed-fetches))))
   (it "loads the advice and the hook function before any command of their file ran"
     (with-temp-buffer
       (insert-file-contents

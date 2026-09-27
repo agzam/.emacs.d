@@ -154,6 +154,9 @@ not name stay where they were moved.")
   ;; routine groups follow on timer turns, a label subscribed just now
   ;; among them
   (add-hook 'gnus-started-hook #'queue-mail-refresh 90)
+  ;; a feed is read from its downloaded copy, so a group never waits on
+  ;; the network; the download itself runs in the background
+  (add-hook 'gnus-started-hook #'start-feed-fetches 95)
   (add-hook 'gnus-subscribe-newsgroup-functions #'defer-news-group-h)
 
   (defun bind-mail-keys (mode &rest _)
