@@ -129,6 +129,14 @@ An untimed `read-event' is idle, and a timer ends it."
          ;; mail-groups would add gmane, and CI has no news server
          (gmail-maildir root)
          (mail-groups nil)
+         ;; html and moved are left out; trash and labelled start empty
+         (mail-topics '(("Gmail" ("nnmaildir+gmail:inbox" . "Inbox")
+                         ("nnmaildir+gmail:archive" . "All Mail")
+                         ("nnmaildir+gmail:trash" . "Trash"))
+                        ("Labels" ("nnmaildir+gmail:starred" . "Read and star apart")
+                         ("nnmaildir+gmail:labelled"))
+                        ("Lists" ("nnmaildir+gmail:lists" . "A list thread")
+                         ("nnmaildir+gmail:emacs" . "emacs-devel"))))
          ;; moved sits with the bulk groups, so , m files into a group
          ;; nnmaildir has not read this session
          (mail-bulk-groups '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs"
@@ -251,6 +259,21 @@ An untimed `read-event' is idle, and a timer ends it."
               (read-groups ()
                 (when-let* ((server (alist-get "gmail" nnmaildir--servers nil nil #'equal)))
                   (sort (hash-table-keys (nnmaildir--srv-groups server)) #'string<)))
+              ;; the group buffer from the top: a topic line as its name,
+              ;; a group line as (GROUP TOPIC TEXT)
+              (group-lines ()
+                (with-current-buffer gnus-group-buffer
+                  (save-excursion
+                    (goto-char (point-min))
+                    (let (lines)
+                      (while (not (eobp))
+                        (push (or (gnus-group-topic-name)
+                                  (list (gnus-group-group-name) (gnus-current-topic)
+                                        (buffer-substring-no-properties
+                                         (line-beginning-position) (line-end-position))))
+                              lines)
+                        (forward-line))
+                      (nreverse lines)))))
               (open-subjects ()
                 (mapcar (lambda (message)
                           (mail-header-subject (mail-thread-message-header message)))
@@ -390,6 +413,41 @@ An untimed `read-event' is idle, and a timer ends it."
                         :got (format "inbox %S, archive %S"
                                      (gnus-group-unread "nnmaildir+gmail:inbox")
                                      (gnus-group-unread "nnmaildir+gmail:archive")))
+                ;; what the group buffer lists once the turns have read
+                ;; the routine groups
+                (with-current-buffer gnus-group-buffer
+                  (gnus-group-list-groups))
+                (let* ((lines (group-lines))
+                       (layout (mapcar (lambda (line)
+                                         (if (stringp line) line (cons (car line) (cadr line))))
+                                       lines))
+                       (groups (seq-remove #'stringp lines))
+                       (inbox (nth 2 (assoc "nnmaildir+gmail:inbox" groups))))
+                  (record "the start puts each group mail-topics names under its topic, in order"
+                          (equal layout
+                                 '("Gnus" ("nnmaildir+gmail:moved" . "Gnus")
+                                   "Gmail" ("nnmaildir+gmail:inbox" . "Gmail")
+                                   ("nnmaildir+gmail:archive" . "Gmail")
+                                   ("nnmaildir+gmail:trash" . "Gmail")
+                                   "Labels" ("nnmaildir+gmail:starred" . "Labels")
+                                   ("nnmaildir+gmail:labelled" . "Labels")
+                                   "Lists" ("nnmaildir+gmail:lists" . "Lists")
+                                   ("nnmaildir+gmail:emacs" . "Lists")
+                                   "misc"))
+                          :got (format "%S" layout))
+                  (record "a group line shows the bare name and the description mail-topics gives"
+                          (and inbox (string-match-p "\\` +2 +inbox +Inbox\\'" inbox))
+                          :got (format "%S" inbox))
+                  ;; html's two messages are read, and labelled holds none
+                  (record "a group mail-topics names is listed with nothing unread, another is not"
+                          (and (eql (gnus-group-unread "nnmaildir+gmail:labelled") 0)
+                               (assoc "nnmaildir+gmail:labelled" groups)
+                               (eql (gnus-group-unread "nnmaildir+gmail:html") 0)
+                               (not (assoc "nnmaildir+gmail:html" groups)))
+                          :got (format "labelled %S, html %S: %S"
+                                       (gnus-group-unread "nnmaildir+gmail:labelled")
+                                       (gnus-group-unread "nnmaildir+gmail:html")
+                                       (mapcar #'car groups))))
                 ;; the stand-in notmuch answers with the archive's copy
                 (search-mail "archived")
                 (record "a search hit in a group no start read opens in the search summary"
@@ -1513,7 +1571,71 @@ An untimed `read-event' is idle, and a timer ends it."
                             (and (equal (flags-of inbox "twin-late") "S")
                                  (equal (flags-of inbox "twin-fresh") "S"))
                             :got (format "late %S, fresh %S"
-                                         (where "twin-late") (where "twin-fresh"))))))
+                                         (where "twin-late") (where "twin-fresh")))))
+                ;; the group buffer's own localleader over topics and
+                ;; subscriptions; moved is a group mail-topics leaves out
+                (delete-other-windows)
+                (switch-to-buffer gnus-group-buffer)
+                (gnus-group-list-groups)
+                (gnus-group-jump-to-group "nnmaildir+gmail:moved")
+                (execute-kbd-macro (kbd ", m Labels RET"))
+                (gnus-group-jump-to-group "nnmaildir+gmail:inbox")
+                (execute-kbd-macro (kbd ", m Lists RET"))
+                (record ", m moves the group at point into another topic"
+                        (equal (list (gnus-group-topic "nnmaildir+gmail:moved")
+                                     (gnus-group-topic "nnmaildir+gmail:inbox"))
+                               '("Labels" "Lists"))
+                        :got (format "%S" gnus-topic-alist))
+                ;; what every start runs
+                (apply-mail-topics)
+                (record "the next start takes back a group mail-topics names, and keeps one it leaves out"
+                        (and (equal (cdr (assoc "Gmail" gnus-topic-alist))
+                                    '("nnmaildir+gmail:inbox" "nnmaildir+gmail:archive"
+                                      "nnmaildir+gmail:trash"))
+                             (equal (cdr (assoc "Labels" gnus-topic-alist))
+                                    '("nnmaildir+gmail:starred" "nnmaildir+gmail:labelled"
+                                      "nnmaildir+gmail:moved")))
+                        :got (format "%S" gnus-topic-alist))
+                (gnus-group-jump-to-group "nnmaildir+gmail:moved")
+                (execute-kbd-macro (kbd ", t n Scratch RET"))
+                (record ", t n makes a topic under the one at point"
+                        (equal (gnus-topic-parent-topic "Scratch") "Labels")
+                        :got (format "%S" gnus-topic-topology))
+                ;; the prompt starts from the old name
+                (gnus-topic-goto-topic "Scratch")
+                (execute-kbd-macro (kbd ", t r Later RET"))
+                (record ", t r renames the topic at point"
+                        (and (gnus-topic-find-topology "ScratchLater")
+                             (not (gnus-topic-find-topology "Scratch")))
+                        :got (format "%S" gnus-topic-topology))
+                (gnus-topic-goto-topic "ScratchLater")
+                (execute-kbd-macro (kbd ", t d"))
+                (record ", t d deletes the empty topic at point"
+                        (not (gnus-topic-find-topology "ScratchLater"))
+                        :got (format "%S" gnus-topic-topology))
+                (gnus-group-jump-to-group "nnmaildir+gmail:moved")
+                (execute-kbd-macro (kbd ", d"))
+                (record ", d unsubscribes the group at point"
+                        (< gnus-level-subscribed (gnus-group-level "nnmaildir+gmail:moved"))
+                        :got (format "level %S" (gnus-group-level "nnmaildir+gmail:moved")))
+                ;; the line point is on decides the topic
+                (gnus-group-jump-to-group "nnmaildir+gmail:lists")
+                (execute-kbd-macro (kbd ", a moved RET moved RET"))
+                (record ", a subscribes a label found by a word of its name, into the topic at point"
+                        (and (<= (gnus-group-level "nnmaildir+gmail:moved") gnus-level-subscribed)
+                             (equal (gnus-group-topic "nnmaildir+gmail:moved") "Lists")
+                             (equal (gnus-group-group-name) "nnmaildir+gmail:moved"))
+                        :got (format "level %S in %S, point on %S"
+                                     (gnus-group-level "nnmaildir+gmail:moved")
+                                     (gnus-group-topic "nnmaildir+gmail:moved")
+                                     (gnus-group-group-name)))
+                ;; the fixture has no news server
+                (let ((said (condition-case err
+                                (progn (execute-kbd-macro (kbd ", b")) :browsed)
+                              (user-error (cadr err)))))
+                  (record ", b browses the groups of a news server, and says when there is none"
+                          (equal said "No news server")
+                          :got (format "%S" said))))
             (error (record "flow signalled" nil :err e)))
         (when (buffer-live-p reply)
           (with-current-buffer reply

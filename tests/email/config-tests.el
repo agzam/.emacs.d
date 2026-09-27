@@ -299,11 +299,22 @@ KEYS holds a prefix's key and the key under it apart by a space, as
       (expect (assoc "g" leader) :to-be nil)))
 
   (it "gives the group buffer the summary's sync, search and new message keys"
-    (expect (email-tests--localleader-pairs config 'gnus-group-mode-map)
-            :to-equal '(("u" function sync-mail)
-                        ("/" function search-mail)
-                        ("c" function compose-new-mail)
-                        ("i" function open-mail-inbox))))
+    (let ((leader (email-tests--localleader-pairs config 'gnus-group-mode-map)))
+      (expect (mapcar (lambda (keys) (cdr (assoc keys leader))) '("u" "/" "c" "i"))
+              :to-equal '((function sync-mail) (function search-mail)
+                          (function compose-new-mail) (function open-mail-inbox)))))
+
+  (it "adds, drops, moves and browses groups, and edits topics, from the group buffer"
+    (let ((leader (email-tests--localleader-pairs config 'gnus-group-mode-map)))
+      (expect (mapcar (lambda (keys) (assoc keys leader))
+                      '("a" "d" "m" "b" "t n" "t r" "t d"))
+              :to-equal '(("a" function add-mail-group)
+                          ("d" function gnus-group-unsubscribe)
+                          ("m" function gnus-topic-move-group)
+                          ("b" function browse-news-groups)
+                          ("t n" function gnus-topic-create-topic)
+                          ("t r" function gnus-topic-rename)
+                          ("t d" function gnus-topic-delete)))))
 
   (it "refreshes the routine groups from the group buffer's gR"
     ;; gR is gnus-group-get-new-news, which asks nnmaildir for a
@@ -470,7 +481,10 @@ window and deletes the summary's."
                       ;; a search, an advice or a sibling file calls these
                       search-likeliest-copies-a retrieve-search-hit-headers
                       read-mail-search-limit refresh-mail-group
-                      keep-flags-set-elsewhere-a)
+                      keep-flags-set-elsewhere-a maildir-groups)
+                     ;; the first group line draws through the format function
+                     ("groups.el" gnus-user-format-function-C apply-mail-topics
+                      add-mail-group browse-news-groups defer-news-group-h)
                      ("marks.el" mail-mark-thread-read quit-mail-summary
                       note-entry-marks-h carry-search-marks-h
                       activate-search-hit-groups-h keep-newer-read-marks-a
@@ -557,6 +571,32 @@ window and deletes the summary's."
             '("nnmaildir+gmail:inbox" "nntp+news.gmane.io:gmane.emacs.devel"))
     (expect (member mail-inbox-group mail-groups) :to-be-truthy)))
 
+(describe "email module group buffer"
+  (it "draws each group by its bare name and the description mail-topics gives it"
+    ;; %g draws nnmaildir+gmail:inbox, and %C reads a comment from the
+    ;; newsrc only, never from config
+    (expect gnus-group-line-format :to-match "%(%-18G%) %uC\n\\'")
+    (expect (string-match-p "%g\\|%C" gnus-group-line-format) :to-be nil))
+  (it "names each group once, under three topics, the startup subscriptions among them"
+    (let ((groups (mapcan (lambda (topic) (mapcar #'car (cdr topic))) mail-topics)))
+      (expect (mapcar #'car mail-topics) :to-equal '("Gmail" "Labels" "Lists"))
+      (expect (length groups) :to-equal (length (seq-uniq groups)))
+      (dolist (group mail-groups)
+        (expect (member group groups) :to-be-truthy))
+      (dolist (entry (mapcan (lambda (topic) (copy-sequence (cdr topic))) mail-topics))
+        (expect (and (stringp (car entry))
+                     (or (null (cdr entry)) (stringp (cdr entry))))
+                :to-be t))))
+  (it "keeps a news group subscribed in the browse buffer out of the startup scan"
+    ;; every start would ask its server for it otherwise
+    (require 'gnus-start)
+    (let ((gnus-subscribe-newsgroup-functions nil))
+      (dolist (form (email-tests--config-forms 'gnus))
+        (when (and (eq (car-safe form) 'add-hook)
+                   (equal (cadr form) ''gnus-subscribe-newsgroup-functions))
+          (eval form t)))
+      (expect gnus-subscribe-newsgroup-functions :to-equal '(defer-news-group-h)))))
+
 (describe "email module scan scope"
   (it "scans no further than a fresh subscription's level"
     ;; a scan reads every message it has no overview for, so the level
@@ -619,7 +659,8 @@ window and deletes the summary's."
         (when (and (eq (car-safe form) 'add-hook)
                    (equal (cadr form) ''gnus-started-hook))
           (eval form t)))
-      (expect gnus-started-hook :to-equal '(subscribe-mail-groups queue-mail-refresh))))
+      (expect gnus-started-hook
+              :to-equal '(subscribe-mail-groups apply-mail-topics queue-mail-refresh))))
   (it "loads the advice and the hook function before any command of their file ran"
     (with-temp-buffer
       (insert-file-contents
