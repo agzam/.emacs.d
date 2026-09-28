@@ -13,6 +13,7 @@
 (defvar mail-remote-backends)
 
 (load-module-file "modules/email/autoload/groups.el")
+(load-module-file "modules/email/autoload/news.el")
 
 ;; bound by the group buffer around each line it draws
 (defvar gnus-tmp-group)
@@ -43,6 +44,7 @@
   "The select method GROUP's name says it lives on."
   (cond ((string-prefix-p "nntp+" group) '(nntp "news.gmane.io"))
         ((string-prefix-p "nnatom+" group) '(nnatom "www.reddit.com/r/emacs/new/.rss"))
+        ((string-prefix-p "nnmaildir+news:" group) '(nnmaildir "news"))
         (t '(nnmaildir "gmail"))))
 
 (describe "gnus-user-format-function-C"
@@ -178,103 +180,62 @@
       (put-group-in-topic "b" "Lists")
       (expect gnus-topic-alist :to-equal '(("Gnus" "a") ("Later" "c") ("Lists" "d" "b"))))))
 
-(describe "words-wildmat"
-  (it "asks for the names holding the words in order"
-    (expect (words-wildmat "reddit emacs") :to-equal "*reddit*emacs*")
-    (expect (words-wildmat "  emacs ") :to-equal "*emacs*")))
-
-(describe "words-regexp"
-  (it "matches the names holding the words in order, and only those"
-    (expect "gwene.com.reddit.emacs" :to-match (words-regexp "reddit emacs"))
-    (expect (string-match-p (words-regexp "emacs reddit") "gwene.com.reddit.emacs") :to-be nil)
-    (expect (string-match-p (words-regexp "a.b") "axb") :to-be nil)))
-
-(defconst groups-tests-active
-  (concat "215 Newsgroups in form \"group high low status\"\r\n"
-          "gwene.com.reddit.emacs 0000025996 0000000001 m\r\n"
-          "gwene.com.reddit.r.planetemacs 0000006587 0000000003 m\r\n"
-          ".\r\n")
-  "What news.gmane.io answers to LIST ACTIVE *reddit*emacs*, cut to two groups.")
-
-(defmacro groups-tests-with-server (asked &rest body)
-  "Run BODY against a stand-in news server that logs each wildmat into ASKED."
-  (declare (indent 1))
-  `(let ((nntp-server-buffer (get-buffer-create " *groups-tests nntp*")))
-     (unwind-protect
-         (cl-letf (((symbol-function 'gnus-check-server) (lambda (&rest _) t))
-                   ((symbol-function 'nntp-list-active-group)
-                    (lambda (pattern &optional server)
-                      (push (list pattern server) ,asked)
-                      (with-current-buffer nntp-server-buffer
-                        (erase-buffer)
-                        (insert groups-tests-active))
-                      t)))
-           ,@body)
-       (kill-buffer nntp-server-buffer))))
-
-(describe "news-groups-matching"
-  (it "asks the server for the names holding the words and counts each group's articles"
-    (let (asked)
-      (groups-tests-with-server asked
-        (expect (news-groups-matching "reddit emacs" '(nntp "news.gmane.io"))
-                :to-equal '(("nntp+news.gmane.io:gwene.com.reddit.emacs" . 25996)
-                            ("nntp+news.gmane.io:gwene.com.reddit.r.planetemacs" . 6585))))
-      (expect asked :to-equal '(("*reddit*emacs*" "news.gmane.io")))))
-  (it "answers nothing when the server cannot be reached"
-    (cl-letf (((symbol-function 'gnus-check-server) #'ignore)
-              ((symbol-function 'nntp-list-active-group)
-               (lambda (&rest _) (error "Asked a server that is down"))))
-      (expect (news-groups-matching "emacs" '(nntp "news.gmane.io")) :to-be nil))))
-
-(defmacro groups-tests-reading (levels picked &rest body)
-  "Run BODY with group LEVELS, labels in the store and news groups stood in.
+(defmacro groups-tests-reading (levels active picked &rest body)
+  "Run BODY with group LEVELS, labels in the store and ACTIVE as the news list.
 LEVELS is an alist of (GROUP . LEVEL); any other group reads as killed.
-The completion prompt answers with the first candidate into PICKED, as
-\(PICK COLLECTION ANNOTATION), and the words asked for are \"emacs\"."
-  (declare (indent 2))
-  `(let ((gnus-secondary-select-methods '((nnmaildir "gmail") (nntp "news.gmane.io"))))
-     (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "emacs"))
-               ((symbol-function 'maildir-groups)
-                (lambda () '("nnmaildir+gmail:emacs" "nnmaildir+gmail:inbox"
-                             "nnmaildir+gmail:org-mode")))
-               ((symbol-function 'news-groups-matching)
-                (lambda (words method)
-                  (when (equal (list words method) '("emacs" (nntp "news.gmane.io")))
-                    '(("nntp+news.gmane.io:gmane.emacs.devel" . 346572)
-                      ("nntp+news.gmane.io:gwene.com.reddit.emacs" . 25996)))))
-               ((symbol-function 'gnus-group-level)
-                (lambda (group) (alist-get group ,levels 9 nil #'equal)))
-               ((symbol-function 'completing-read)
-                (lambda (_prompt collection &rest _)
-                  (let ((pick (caar collection)))
-                    (setq ,picked (list pick collection
-                                        (plist-get completion-extra-properties
-                                                   :annotation-function)))
-                    pick))))
-       ,@body)))
+ACTIVE is what `news-active-groups' answers.  The completion prompt
+answers with the first candidate into PICKED, as (PICK COLLECTION
+ANNOTATION PROMPT)."
+  (declare (indent 3))
+  `(cl-letf (((symbol-function 'maildir-groups)
+              (lambda () '("nnmaildir+gmail:emacs" "nnmaildir+gmail:inbox")))
+             ((symbol-function 'news-active-groups) (lambda () ,active))
+             ((symbol-function 'gnus-group-level)
+              (lambda (group) (alist-get group ,levels 9 nil #'equal)))
+             ((symbol-function 'completing-read)
+              (lambda (prompt collection &rest _)
+                (let ((pick (caar collection)))
+                  (setq ,picked (list pick collection
+                                      (plist-get completion-extra-properties
+                                                 :annotation-function)
+                                      prompt))
+                  pick))))
+     ,@body))
+
+(defconst groups-tests-news-list
+  '(("nnmaildir+news:gmane.emacs.devel" . 346572)
+    ("nnmaildir+news:gmane.emacs.help" . 25996))
+  "Two groups of the news server's list, as `news-active-groups' gives them.")
 
 (describe "read-group-to-add"
-  (it "offers the labels and news groups holding the words that are not subscribed"
+  (it "offers every unsubscribed label and news group, the news groups with their size"
     (let (picked)
       (groups-tests-reading '(("nnmaildir+gmail:emacs" . 6)
                               ("nnmaildir+gmail:inbox" . 3)
-                              ("nntp+news.gmane.io:gmane.emacs.devel" . 4))
-          picked
+                              ("nnmaildir+news:gmane.emacs.devel" . 4))
+          groups-tests-news-list picked
         (expect (read-group-to-add) :to-equal "nnmaildir+gmail:emacs"))
-      (pcase-let ((`(,_ ,collection ,annotate) picked))
-        ;; inbox is subscribed and its name does not hold the word;
-        ;; org-mode's name does not hold it either, gmane is subscribed
+      (pcase-let ((`(,_ ,collection ,annotate ,prompt) picked))
+        ;; inbox and emacs-devel are subscribed
         (expect (mapcar #'car collection)
-                :to-equal '("nnmaildir+gmail:emacs" "nntp+news.gmane.io:gwene.com.reddit.emacs"))
+                :to-equal '("nnmaildir+gmail:emacs" "nnmaildir+news:gmane.emacs.help"))
         (expect (funcall annotate "nnmaildir+gmail:emacs") :to-equal "  label")
-        (expect (funcall annotate "nntp+news.gmane.io:gwene.com.reddit.emacs")
-                :to-equal "  25996 articles"))))
-  (it "says so when nothing unsubscribed holds the words"
+        (expect (funcall annotate "nnmaildir+news:gmane.emacs.help")
+                :to-equal "  25996 articles")
+        (expect prompt :to-equal "Add group: "))))
+  (it "offers the labels alone until a news fetch saved the server's list, and says so"
+    (let (picked)
+      (groups-tests-reading '(("nnmaildir+gmail:inbox" . 3)) nil picked
+        (read-group-to-add))
+      (expect (mapcar #'car (nth 1 picked)) :to-equal '("nnmaildir+gmail:emacs"))
+      (expect (nth 3 picked) :to-match "news groups arrive with the next news fetch")))
+  (it "says so when every group is subscribed"
     (let (picked)
       (groups-tests-reading '(("nnmaildir+gmail:emacs" . 4)
-                              ("nntp+news.gmane.io:gmane.emacs.devel" . 4)
-                              ("nntp+news.gmane.io:gwene.com.reddit.emacs" . 3))
-          picked
+                              ("nnmaildir+gmail:inbox" . 3)
+                              ("nnmaildir+news:gmane.emacs.devel" . 4)
+                              ("nnmaildir+news:gmane.emacs.help" . 3))
+          groups-tests-news-list picked
         (expect (read-group-to-add) :to-throw 'user-error))
       (expect picked :to-be nil))))
 
@@ -299,7 +260,10 @@ alist has Gnus, Gmail and Lists."
                 (lambda (group) (push (list 'read group) ,calls)))
                ((symbol-function 'apply-mail-topics) (lambda () (push 'arranged ,calls)))
                ((symbol-function 'gnus-group-jump-to-group)
-                (lambda (group &rest _) (push (list 'goto group) ,calls))))
+                (lambda (group &rest _) (push (list 'goto group) ,calls)))
+               ((symbol-function 'make-news-folder)
+                (lambda (group) (push (list 'folder group) ,calls)))
+               ((symbol-function 'fetch-news) (lambda () (push 'fetch ,calls))))
        ,@body)))
 
 (describe "add-mail-group"
@@ -315,8 +279,18 @@ alist has Gnus, Gmail and Lists."
         (expect gnus-topic-alist
                 :to-equal '(("Gnus") ("Gmail" "nnmaildir+gmail:inbox")
                             ("Lists" "nnmaildir+gmail:emacs" "nnmaildir+gmail:job"))))))
-  (it "subscribes a news group above the routine scan, reading nothing"
-    ;; a news group in the routine scan costs every start a round trip
+  (it "subscribes a news group above the routine scan, makes its folder and fetches it"
+    ;; every start would read a year of the list otherwise
+    (let (calls)
+      (groups-tests-adding 9 calls
+        (add-mail-group "nnmaildir+news:gmane.emacs.help")
+        (expect (nreverse calls)
+                :to-equal '((folder "nnmaildir+news:gmane.emacs.help")
+                            (level "nnmaildir+news:gmane.emacs.help" 4 9)
+                            arranged
+                            (goto "nnmaildir+news:gmane.emacs.help")
+                            fetch)))))
+  (it "subscribes a group of a remote server above the routine scan, reading nothing"
     (let (calls)
       (groups-tests-adding 9 calls
         (add-mail-group "nntp+news.gmane.io:gwene.com.reddit.emacs")
@@ -335,41 +309,6 @@ alist has Gnus, Gmail and Lists."
       (groups-tests-adding 6 calls
         (add-mail-group "nnmaildir+gmail:emacs")
         (expect (car (last calls)) :to-equal '(level "nnmaildir+gmail:emacs" 3 6))))))
-
-(describe "read-news-server"
-  (it "takes the only news server without asking"
-    (let ((gnus-secondary-select-methods '((nnmaildir "gmail") (nntp "news.gmane.io"))))
-      (cl-letf (((symbol-function 'completing-read)
-                 (lambda (&rest _) (error "Asked with one server"))))
-        (expect (read-news-server) :to-equal '(nntp "news.gmane.io")))))
-  (it "asks which one when there are several"
-    (let ((gnus-secondary-select-methods '((nntp "news.gmane.io") (nntp "news.example.org"))))
-      (cl-letf (((symbol-function 'completing-read)
-                 (lambda (_prompt servers &rest _) (cadr servers))))
-        (expect (read-news-server) :to-equal '(nntp "news.example.org")))))
-  (it "says so when there is none"
-    (let ((gnus-secondary-select-methods '((nnmaildir "gmail"))))
-      (expect (read-news-server) :to-throw 'user-error))))
-
-(describe "browse-news-groups"
-  (it "browses only the groups holding the words, and restores the full list after"
-    (let ((original (symbol-function 'nntp-request-list))
-          asked browsed listing)
-      (groups-tests-with-server asked
-        (cl-letf (((symbol-function 'gnus-browse-foreign-server)
-                   (lambda (method &rest _)
-                     (setq browsed method)
-                     ;; what the browse reads its list through
-                     (when (nntp-request-list "news.gmane.io")
-                       (setq listing (with-current-buffer nntp-server-buffer
-                                       (buffer-string)))))))
-          (browse-news-groups '(nntp "news.gmane.io") "reddit emacs")))
-      (expect browsed :to-equal '(nntp "news.gmane.io"))
-      (expect asked :to-equal '(("*reddit*emacs*" "news.gmane.io")))
-      ;; the list the browse buffer parses, without NNTP's status line and end
-      (expect listing :to-equal (concat "gwene.com.reddit.emacs 0000025996 0000000001 m\n"
-                                        "gwene.com.reddit.r.planetemacs 0000006587 0000000003 m\n"))
-      (expect (symbol-function 'nntp-request-list) :to-be original))))
 
 (defconst groups-tests-feed "www.example.org/r/emacs/new/.rss"
   "An nnatom server address shaped like Reddit's.")
@@ -506,9 +445,12 @@ alist has Gnus, Gmail and Lists."
                  (lambda (&rest args) (push args calls))))
         (defer-news-group-h "nntp+news.gmane.io:gwene.com.reddit.emacs")
         (defer-news-group-h "nnatom+www.reddit.com/r/emacs/new/.rss:r/emacs")
+        ;; a year of a list, read at every start otherwise
+        (defer-news-group-h "nnmaildir+news:gmane.emacs.help")
         (defer-news-group-h "nnmaildir+gmail:job"))
       (expect (nreverse calls)
               :to-equal '(("nntp+news.gmane.io:gwene.com.reddit.emacs" 4 3)
-                          ("nnatom+www.reddit.com/r/emacs/new/.rss:r/emacs" 4 3))))))
+                          ("nnatom+www.reddit.com/r/emacs/new/.rss:r/emacs" 4 3)
+                          ("nnmaildir+news:gmane.emacs.help" 4 3))))))
 
 ;;; groups-tests.el ends here

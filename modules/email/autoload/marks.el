@@ -325,12 +325,15 @@ Read and unread stay as they were."
 (defun mail-execute-marks ()
   "Run the queue: deletions go to the trash, archives leave the inbox.
 A message's inbox copy goes either way, whichever copy this summary
-shows, and an archive keeps every label.  Gnus's commands act on the
-process mark, so the queue is lent to it; cancelled lines leave the view."
+shows, and an archive keeps every label.  A news post is deleted where
+it lies.  Gnus's commands act on the process mark, lent the queue."
   (interactive nil gnus-summary-mode)
   (unless mail-marks
     (user-error "Nothing is marked"))
-  (let* ((deletes (mail-marked-articles 'delete))
+  (let* ((news-p (lambda (article) (news-group-p (mail-article-group article))))
+         ;; Gmail never sees a news post, so none goes to the trash
+         (posts (seq-filter news-p (mail-marked-articles 'delete)))
+         (deletes (seq-remove news-p (mail-marked-articles 'delete)))
          (archives (mail-marked-articles 'archive))
          (inbox-p (lambda (article)
                     (equal (mail-article-group article) mail-inbox-group)))
@@ -344,15 +347,15 @@ process mark, so the queue is lent to it; cancelled lines leave the view."
                           #'<))
          (gone (mapcar (lambda (article)
                          (cons (mail-article-group article) (mail-article-number article)))
-                       (append deletes here)))
+                       (append deletes here posts)))
          ;; an active region would win over the process mark
          (mark-active nil)
          (gnus-newsgroup-process-stack nil))
     (when deletes
       (let ((gnus-newsgroup-processable deletes))
         (gnus-summary-move-article nil mail-trash-group)))
-    (when here
-      (let ((gnus-newsgroup-processable here))
+    (when (or here posts)
+      (let ((gnus-newsgroup-processable (sort (append here posts) #'<)))
         (gnus-summary-delete-article)))
     (when elsewhere
       (gnus-request-expire-articles elsewhere mail-inbox-group t)
@@ -369,7 +372,8 @@ process mark, so the queue is lent to it; cancelled lines leave the view."
     (save-excursion
       (mapc #'mail-mark-redraw (seq-difference archives here)))
     (gnus-summary-limit-to-marks (list gnus-canceled-mark) 'reverse)
-    (message "Trashed %d, archived %d" (length deletes) (length archives))))
+    (message "Trashed %d, archived %d%s" (length deletes) (length archives)
+             (if posts (format ", deleted %d news posts" (length posts)) ""))))
 
 (defun mail-queue-description ()
   "The queue in words, such as \"2 deletions and 1 archive\"."

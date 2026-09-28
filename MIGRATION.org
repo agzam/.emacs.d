@@ -2027,8 +2027,9 @@ fennel map! waits on lua), expreg Clojure section + org-cliplink restored.
 ** DONE email (replaces notmuch)
 Not a port: the notmuch-over-lieer module is dropped for Gnus over an
 mbsync-synced Gmail maildir (labels = nnmaildir groups, notmuch only as
-the gnus-search index, gmane over NNTP for the lists, smtpmail as
-agzam.ibragimov with a Gcc copy into the synced sent folder).  Built-in
+the gnus-search index, gmane's lists fetched over NNTP by a batch Emacs
+into a local maildir, smtpmail as agzam.ibragimov with a Gcc copy into
+the synced sent folder).  Built-in
 packages only, so no elpaca recipe; Gnus and message state quarantined
 under .local/state/{gnus,mail}.  Kept from the old module: open in
 Gmail, open in list archive, on-demand sync, inbox entry point.  The

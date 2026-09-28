@@ -44,8 +44,16 @@ in this process, which the mail suite performs."
       (expect (cadr server) :to-equal "gmail")
       (expect (cadr (assq 'directory (cddr server))) :to-equal gmail-maildir)
       (expect (assq 'get-new-mail (cddr server)) :to-equal '(get-new-mail nil))))
-  (it "reads the lists from gmane"
-    (expect (assq 'nntp gnus-secondary-select-methods) :to-equal '(nntp "news.gmane.io")))
+  (it "reads the news groups from the store a batch Emacs fills, never over NNTP"
+    ;; Gnus waits for an NNTP server's greeting in the main thread
+    (let ((server (seq-find (lambda (method) (equal (cadr method) "news"))
+                            gnus-secondary-select-methods)))
+      (expect (car server) :to-be 'nnmaildir)
+      (expect (cadr (assq 'directory (cddr server))) :to-equal news-maildir)
+      (expect (assq 'get-new-mail (cddr server)) :to-equal '(get-new-mail nil)))
+    (expect news-maildir :to-equal (expand-file-name "~/.mail/news/"))
+    (expect news-server :to-equal "news.gmane.io")
+    (expect (assq 'nntp gnus-secondary-select-methods) :to-be nil))
   (it "reads every new r/emacs post from Reddit's feed, into a group named r/emacs"
     ;; nnatom names the group after the feed's title otherwise
     (require 'gnus)
@@ -58,7 +66,7 @@ in this process, which the mail suite performs."
       (expect (cadr (assq 'nnatom-read-feed-function (cddr server))) :to-be 'read-atom-feed)
       (expect (gnus-group-prefixed-name "r/emacs" server)
               :to-equal (car (last mail-groups)))))
-  (it "never scans gmane for new groups or saves its killed list"
+  (it "never asks a server for new groups or saves the killed list"
     (expect gnus-check-new-newsgroups :to-be nil)
     (expect gnus-save-killed-list :to-be nil)
     (expect gnus-agent :to-be nil))
@@ -66,6 +74,15 @@ in this process, which the mail suite performs."
     (expect (alist-get 'nnmaildir gnus-search-default-engines) :to-be 'gnus-search-notmuch)
     (expect gnus-search-notmuch-remove-prefix :to-equal gmail-maildir)
     (expect gnus-refer-thread-use-search :to-be t))
+  (it "maps a news hit's path back to its group under the news store"
+    ;; notmuch indexes both stores from ~/.mail
+    (require 'gnus-search)
+    (let ((gnus-search-engine-instance-alist nil)
+          (gnus-server-method-cache nil))
+      (expect (slot-value (gnus-search-server-to-engine "nnmaildir:news") 'remove-prefix)
+              :to-equal news-maildir)
+      (expect (slot-value (gnus-search-server-to-engine "nnmaildir:gmail") 'remove-prefix)
+              :to-equal gmail-maildir)))
   (it "hands the search parser each message's inbox copy"
     (require 'gnus-search)
     (unwind-protect
@@ -109,9 +126,22 @@ in this process, which the mail suite performs."
   (it "shows the archive as a newest slice, overriding the general entry"
     (email-tests--with-empty-newsrc
       (expect (gnus-group-find-parameter "nnmaildir+gmail:archive" 'display) :to-equal 200)))
-  (it "scores gmane groups"
-    (let ((gmane (assoc "\\`nntp\\+news\\.gmane\\.io:" gnus-parameters)))
-      (expect (eval (nth 1 (assq 'gnus-use-scoring gmane)) t) :to-be t))))
+  (it "shows a news group's newest 500 posts, read and unread"
+    (email-tests--with-empty-newsrc
+      (expect (gnus-group-find-parameter "nnmaildir+news:gmane.emacs.devel" 'display)
+              :to-equal 500)
+      (expect (gnus-group-find-parameter "nnmaildir+gmail:inbox" 'display) :to-be 'all)))
+  (it "posts a followup from a news group to the server it came from"
+    (require 'gnus-msg)
+    (email-tests--with-empty-newsrc
+      (let ((gnus-server-method-cache nil))
+        (expect (gnus-post-method nil "nnmaildir+news:gmane.emacs.devel")
+                :to-equal '(nntp "news.gmane.io")))))
+  (it "scores news groups"
+    (email-tests--with-empty-newsrc
+      (expect (gnus-group-find-parameter "nnmaildir+news:gmane.emacs.devel"
+                                         'gnus-use-scoring t)
+              :to-equal '(t)))))
 
 (describe "email module prompts"
   (it "reads a leftover dribble instead of asking about it on startup"
@@ -316,17 +346,19 @@ KEYS holds a prefix's key and the key under it apart by a space, as
               :to-equal '((function sync-mail) (function search-mail)
                           (function compose-new-mail) (function open-mail-inbox)))))
 
-  (it "adds, drops, moves and browses groups, and edits topics, from the group buffer"
+  (it "adds, drops and moves groups, and edits topics, from the group buffer"
     (let ((leader (email-tests--localleader-pairs config 'gnus-group-mode-map)))
       (expect (mapcar (lambda (keys) (assoc keys leader))
-                      '("a" "d" "m" "b" "t n" "t r" "t d"))
+                      '("a" "d" "m" "t n" "t r" "t d"))
               :to-equal '(("a" function add-mail-group)
                           ("d" function gnus-group-unsubscribe)
                           ("m" function gnus-topic-move-group)
-                          ("b" function browse-news-groups)
                           ("t n" function gnus-topic-create-topic)
                           ("t r" function gnus-topic-rename)
-                          ("t d" function gnus-topic-delete)))))
+                          ("t d" function gnus-topic-delete)))
+      ;; browsing a news server would open NNTP; , a completes over the
+      ;; group list a news fetch saved
+      (expect (assoc "b" leader) :to-be nil)))
 
   (it "refreshes the routine groups from the group buffer's gR"
     ;; gR is gnus-group-get-new-news, which asks nnmaildir for a
@@ -495,12 +527,16 @@ window and deletes the summary's."
                       keep-flags-set-elsewhere-a maildir-groups)
                      ;; the first group line draws through the format function
                      ("groups.el" gnus-user-format-function-C apply-mail-topics
-                      add-mail-group browse-news-groups defer-news-group-h
+                      add-mail-group defer-news-group-h
                       read-atom-feed fetch-feeds start-feed-fetches)
                      ("marks.el" mail-mark-thread-read quit-mail-summary
                       note-entry-marks-h carry-search-marks-h
                       activate-search-hit-groups-h keep-newer-read-marks-a
                       keep-group-changes-h keep-search-group-changes-h)
+                     ;; a timer, a hook or a sibling file calls these
+                     ("news.el" fetch-news fetch-stale-news start-news-fetch-timer
+                      ensure-news-folders news-group-p make-news-folder news-active-groups
+                      merge-news-flags-a)
                      ("similar.el" count-mail)))
       (with-temp-buffer
         (insert-file-contents
@@ -580,7 +616,7 @@ window and deletes the summary's."
 (describe "email module subscriptions"
   (it "subscribes the inbox, emacs-devel and r/emacs on startup"
     (expect mail-groups :to-equal
-            '("nnmaildir+gmail:inbox" "nntp+news.gmane.io:gmane.emacs.devel"
+            '("nnmaildir+gmail:inbox" "nnmaildir+news:gmane.emacs.devel"
               "nnatom+www.reddit.com/r/emacs/new/.rss:r/emacs"))
     (expect (member mail-inbox-group mail-groups) :to-be-truthy)))
 
@@ -600,8 +636,8 @@ window and deletes the summary's."
         (expect (and (stringp (car entry))
                      (or (null (cdr entry)) (stringp (cdr entry))))
                 :to-be t))))
-  (it "keeps a news group subscribed in the browse buffer out of the startup scan"
-    ;; every start would ask its server for it otherwise
+  (it "keeps a news group or a feed Gnus subscribes out of the startup scan"
+    ;; every start would read a year of the list or fetch the feed otherwise
     (require 'gnus-start)
     (let ((gnus-subscribe-newsgroup-functions nil))
       (dolist (form (email-tests--config-forms 'gnus))
@@ -622,7 +658,7 @@ window and deletes the summary's."
     (expect mail-bulk-groups :to-have-same-items-as
             '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs"
               "nnmaildir+gmail:org-mode" "nnmaildir+gmail:new"
-              "nntp+news.gmane.io:gmane.emacs.devel")))
+              "nnmaildir+news:gmane.emacs.devel")))
   (it "leaves every bulk group inside the group buffer's list level"
     (require 'gnus)
     (expect (<= (1+ gnus-activate-level) gnus-level-subscribed) :to-be t)))
@@ -649,7 +685,29 @@ window and deletes the summary's."
       (advice-remove 'nnmaildir-request-group #'scan-unknown-mail-group-a)
       (advice-remove 'nnmaildir-request-accept-article #'scan-unknown-mail-group-a)
       (advice-remove 'nnmaildir-base-name-to-article-number #'scan-mail-group-on-miss-a)
-      (advice-remove 'nnmaildir--article-set-flags #'keep-flags-set-elsewhere-a)))
+      (advice-remove 'nnmaildir--article-set-flags #'keep-flags-set-elsewhere-a)
+      (advice-remove 'nnmaildir-request-group #'merge-news-flags-a)))
+  (it "merges a news group's flags when an entry first reads it, around that read"
+    ;; a plain entry keeps the newsrc's read marks, and a fetch delivers
+    ;; older posts read
+    (require 'nnmaildir)
+    (unwind-protect
+        (progn
+          (dolist (form (email-tests--config-forms 'nnmaildir))
+            (eval form t))
+          (expect (advice-member-p #'merge-news-flags-a 'nnmaildir-request-group)
+                  :to-be-truthy)
+          ;; the outermost advice runs after the read it wraps
+          (let (outer)
+            (advice-mapc (lambda (fn _) (unless outer (setq outer fn)))
+                         'nnmaildir-request-group)
+            (expect outer :to-be 'merge-news-flags-a)))
+      (advice-remove 'nnmaildir-request-scan #'defer-mail-server-scan-a)
+      (advice-remove 'nnmaildir-request-group #'scan-unknown-mail-group-a)
+      (advice-remove 'nnmaildir-request-accept-article #'scan-unknown-mail-group-a)
+      (advice-remove 'nnmaildir-base-name-to-article-number #'scan-mail-group-on-miss-a)
+      (advice-remove 'nnmaildir--article-set-flags #'keep-flags-set-elsewhere-a)
+      (advice-remove 'nnmaildir-request-group #'merge-news-flags-a)))
   (it "saves a flag over the flags the file has now, not the ones nnmaildir read"
     ;; mbsync renames the file when the phone changes a flag
     (require 'nnmaildir)
@@ -663,7 +721,8 @@ window and deletes the summary's."
       (advice-remove 'nnmaildir-request-group #'scan-unknown-mail-group-a)
       (advice-remove 'nnmaildir-request-accept-article #'scan-unknown-mail-group-a)
       (advice-remove 'nnmaildir-base-name-to-article-number #'scan-mail-group-on-miss-a)
-      (advice-remove 'nnmaildir--article-set-flags #'keep-flags-set-elsewhere-a)))
+      (advice-remove 'nnmaildir--article-set-flags #'keep-flags-set-elsewhere-a)
+      (advice-remove 'nnmaildir-request-group #'merge-news-flags-a)))
   (it "queues the routine groups once Gnus has started, after the subscriptions"
     ;; a label subscribed at this start is queued with the others
     (require 'gnus)
@@ -674,7 +733,18 @@ window and deletes the summary's."
           (eval form t)))
       (expect gnus-started-hook
               :to-equal '(subscribe-mail-groups apply-mail-topics queue-mail-refresh
-                          start-feed-fetches))))
+                          start-feed-fetches fetch-stale-news))))
+  (it "creates the news store before Gnus opens its server"
+    ;; Gnus gives up on a server whose directory is missing
+    (require 'gnus-start)
+    (let ((gnus-before-startup-hook nil))
+      (dolist (form (email-tests--config-forms 'gnus))
+        (when (and (eq (car-safe form) 'add-hook)
+                   (equal (cadr form) ''gnus-before-startup-hook))
+          (eval form t)))
+      (expect gnus-before-startup-hook :to-equal '(ensure-news-folders))))
+  (it "fetches news while Emacs runs, whether Gnus runs or not"
+    (expect (memq #'start-news-fetch-timer emacs-startup-hook) :to-be-truthy))
   (it "loads the advice and the hook function before any command of their file ran"
     (with-temp-buffer
       (insert-file-contents

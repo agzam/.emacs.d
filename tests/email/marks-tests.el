@@ -12,6 +12,7 @@
 (defvar mail-archive-group "nnmaildir+gmail:archive")
 
 (load-module-file "modules/email/autoload/marks.el")
+(load-module-file "modules/email/autoload/news.el")
 
 (defvar marks-tests-inbox nil
   "(MESSAGE-ID . ARTICLE) of each message the stand-in inbox holds.")
@@ -559,6 +560,33 @@ can tell which articles each verb reached."
                             (delete (1) nil)
                             (drop "nnmaildir+gmail:github" (5))
                             (drop ,mail-inbox-group (12 11))
+                            (limit (,gnus-canceled-mark) reverse))))))
+  (it "in a news group, deletes the posts where they lie and leaves Gmail alone"
+    ;; the trash would upload them to Gmail, and the inbox copy of a
+    ;; post that also came by mail is the inbox's business
+    (marks-tests-in-summary '((4 0) (9 0))
+      (let ((gnus-newsgroup-name "nnmaildir+news:gmane.test")
+            (marks-tests-inbox '(("<9@x>" . 109))))
+        (setq-local mail-marks '((4 . delete) (9 . delete)))
+        (marks-tests-with-execute-stubs
+          (mail-execute-marks))
+        (expect (marks-tests-steps)
+                :to-equal `((delete (4 9) nil)
+                            (drop "nnmaildir+news:gmane.test" (4 9))
+                            (limit (,gnus-canceled-mark) reverse))))))
+  (it "in search results, deletes a news hit where it lies and trashes a mail hit"
+    (marks-tests-in-summary '((1 0) (2 0))
+      (let ((gnus-newsgroup-name "nnselect:search")
+            (gnus-newsgroup-selection [["nnmaildir+news:gmane.test" 7 100]
+                                       ["nnmaildir+gmail:github" 5 100]]))
+        (setq-local mail-marks '((1 . delete) (2 . delete)))
+        (marks-tests-with-execute-stubs
+          (mail-execute-marks))
+        (expect (marks-tests-steps)
+                :to-equal `((move ,mail-trash-group (2) nil)
+                            (delete (1) nil)
+                            (drop "nnmaildir+gmail:github" (5))
+                            (drop "nnmaildir+news:gmane.test" (7))
                             (limit (,gnus-canceled-mark) reverse))))))
   (it "empties the queue"
     (marks-tests-in-summary '((9 0))
