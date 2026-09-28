@@ -128,6 +128,7 @@
 (after! info
   (map! :map Info-mode-map
         :n "C-j" #'Info-goto-node
+        :n "q" #'Info-up
         :n "^" #'Info-up
         :n "H" #'Info-history-back
         :n "L" #'Info-history-forward

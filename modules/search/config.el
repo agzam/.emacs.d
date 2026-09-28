@@ -100,7 +100,11 @@
 ;; through consult-zoxide-read
 (use-package consult-zoxide
   :ensure (consult-zoxide :host github :repo "agzam/consult-zoxide.el")
-  :defer t)
+  :defer t
+  :init
+  ;; the package registers into neither on its own
+  (after! embark (consult-zoxide-embark-register))
+  (after! consult-dir (consult-zoxide-consult-dir-register)))
 
 ;; relocated home from the root layer (was pulled ahead for SPC h h)
 (use-package consult-symbol
