@@ -8,17 +8,19 @@
 (require 'buttercup)
 
 (defvar gmail-maildir "/nonexistent-mail-tests/")
+(defvar news-maildir "/nonexistent-mail-tests-news/")
 (defvar mail-sync-program "mail-sync")
 (defvar mail-inbox-group "nnmaildir+gmail:inbox")
 (defvar mail-trash-group "nnmaildir+gmail:trash")
 (defvar mail-archive-group "nnmaildir+gmail:archive")
-(defvar mail-groups '("nnmaildir+gmail:inbox" "nntp+news.gmane.io:gmane.emacs.devel"
+(defvar mail-groups '("nnmaildir+gmail:inbox" "nnmaildir+news:gmane.emacs.devel"
                       "nnatom+www.reddit.com/r/emacs/new/.rss:r/emacs"))
 (defvar mail-bulk-groups
   '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs" "nnmaildir+gmail:org-mode"
-    "nnmaildir+gmail:new" "nntp+news.gmane.io:gmane.emacs.devel"))
+    "nnmaildir+gmail:new" "nnmaildir+news:gmane.emacs.devel"))
 
 (load-module-file "modules/email/autoload/mail.el")
+(load-module-file "modules/email/autoload/news.el")
 
 (defun mail-tests--newsrc (specs)
   "Newsrc hashtable and group list for SPECS, each (GROUP LEVEL METHOD).
@@ -56,14 +58,15 @@ Returns the hashtable; the caller binds `gnus-group-list' itself."
     (expect (mail-sync-command t) :to-equal '("mail-sync" "full"))))
 
 (describe "sync-mail"
-  (it "starts the mail sync and the feed downloads, both in the background"
+  (it "starts the mail sync, the news fetch and the feed downloads, all in the background"
     (let (made fetched)
       (cl-letf (((symbol-function 'make-process)
                  (lambda (&rest args) (push (plist-get args :command) made) 'process))
-                ((symbol-function 'fetch-feeds) (lambda (&rest _) (setq fetched t))))
+                ((symbol-function 'fetch-news) (lambda (&rest _) (push 'news fetched)))
+                ((symbol-function 'fetch-feeds) (lambda (&rest _) (push 'feeds fetched))))
         (sync-mail))
       (expect made :to-equal '(("mail-sync" "sync")))
-      (expect fetched :to-be t))))
+      (expect fetched :to-have-same-items-as '(news feeds)))))
 
 (defmacro mail-tests--with-sentinel-stubs (code calls &rest body)
   "Run BODY with the sentinel's dependencies stubbed, PROC exiting with CODE.
@@ -495,11 +498,16 @@ would have been bounded by in `large'."
        (kill-buffer summary))))
 
 (describe "search-mail"
-  (it "hands the raw notmuch query to an ephemeral search over the gmail server"
+  (it "hands the raw notmuch query to an ephemeral search over every maildir server"
+    ;; notmuch indexes the Gmail store and the news store alike
     (mail-tests--searching 3
-      (search-mail "from:someone subject:hello")
+      (let ((gnus-secondary-select-methods
+             '((nnmaildir "gmail" (directory "/mail/gmail/"))
+               (nnmaildir "news" (directory "/mail/news/"))
+               (nnatom "www.example.org/feed"))))
+        (search-mail "from:someone subject:hello"))
       (expect (cdr (assq 'search-group-spec captured))
-              :to-equal '(("nnmaildir:gmail")))
+              :to-equal '(("nnmaildir:gmail") ("nnmaildir:news")))
       (expect (alist-get 'query (cdr (assq 'search-query-spec captured)))
               :to-equal "from:someone subject:hello")
       (expect (alist-get 'raw (cdr (assq 'search-query-spec captured))) :to-be t)))
@@ -571,14 +579,22 @@ would have been bounded by in `large'."
       (write-region "" nil path nil 'silent))))
 
 (defmacro mail-tests--in-store (files &rest body)
-  "Run BODY with `root' naming a temporary mail store that holds FILES."
+  "Run BODY with `root' naming a temporary Gmail store that holds FILES.
+`news-root' names the news store beside it; both are the module's stores."
   (declare (indent 1))
-  `(let ((root (file-name-as-directory (make-temp-file "mail-store" t))))
+  `(let* ((parent (make-temp-file "mail-store" t))
+          (root (file-name-as-directory (expand-file-name "gmail" parent)))
+          (news-root (file-name-as-directory (expand-file-name "news" parent)))
+          (gmail-maildir root)
+          (news-maildir news-root))
+     (ignore news-root)
      (unwind-protect
          (progn
+           (make-directory root)
+           (make-directory news-root)
            (mail-tests--fill-store root ,files)
            ,@body)
-       (delete-directory root t))))
+       (delete-directory parent t))))
 
 (defun mail-tests--in (root &rest files)
   "FILES, named relative to the store at ROOT, as absolute names."
@@ -587,42 +603,52 @@ would have been bounded by in `large'."
 (describe "likeliest-copy"
   (it "takes the inbox copy over any other"
     (mail-tests--in-store '("archive/cur/1" "github/cur/2" "inbox/cur/3")
-      (expect (likeliest-copy (mail-tests--in root "archive/cur/1" "github/cur/2" "inbox/cur/3")
-                              root)
+      (expect (likeliest-copy (mail-tests--in root "archive/cur/1" "github/cur/2" "inbox/cur/3"))
               :to-equal (concat root "inbox/cur/3"))))
   (it "takes a label read at startup over All Mail, and All Mail over a list label"
     (mail-tests--in-store '("archive/cur/1" "github/new/2" "emacs/new/3" "archive/cur/4")
-      (expect (likeliest-copy (mail-tests--in root "archive/cur/1" "github/new/2") root)
+      (expect (likeliest-copy (mail-tests--in root "archive/cur/1" "github/new/2"))
               :to-equal (concat root "github/new/2"))
-      (expect (likeliest-copy (mail-tests--in root "emacs/new/3" "archive/cur/4") root)
+      (expect (likeliest-copy (mail-tests--in root "emacs/new/3" "archive/cur/4"))
               :to-equal (concat root "archive/cur/4"))))
+  (it "takes a list's news copy over All Mail's, and the inbox copy over the news copy"
+    ;; the list is read in the news group now; mail sent to the reader
+    ;; himself stays the inbox's
+    (mail-tests--in-store '("archive/cur/1" "emacs/cur/2" "inbox/cur/3")
+      (mail-tests--fill-store news-root '("gmane.test/cur/1" "gmane.test/cur/3"))
+      (expect (likeliest-copy (list (concat root "archive/cur/1") (concat root "emacs/cur/2")
+                                    (concat news-root "gmane.test/cur/1")))
+              :to-equal (concat news-root "gmane.test/cur/1"))
+      (expect (likeliest-copy (list (concat news-root "gmane.test/cur/3")
+                                    (concat root "inbox/cur/3")))
+              :to-equal (concat root "inbox/cur/3"))))
   (it "takes the trash copy last"
     (mail-tests--in-store '("trash/cur/1" "emacs/cur/2")
-      (expect (likeliest-copy (mail-tests--in root "trash/cur/1" "emacs/cur/2") root)
+      (expect (likeliest-copy (mail-tests--in root "trash/cur/1" "emacs/cur/2"))
               :to-equal (concat root "emacs/cur/2"))))
   (it "keeps notmuch's order between copies of one rank"
     (mail-tests--in-store '("github/cur/1" "job/cur/2")
-      (expect (likeliest-copy (mail-tests--in root "github/cur/1" "job/cur/2") root)
+      (expect (likeliest-copy (mail-tests--in root "github/cur/1" "job/cur/2"))
               :to-equal (concat root "github/cur/1"))))
   (it "takes a copy under the name Gnus gave it after notmuch indexed it"
     ;; a scan moves new mail into cur/, and a saved flag renames the file
     (mail-tests--in-store '("archive/new/1:2," "inbox/cur/2:2,S")
-      (expect (likeliest-copy (mail-tests--in root "archive/new/1:2," "inbox/new/2:2,") root)
+      (expect (likeliest-copy (mail-tests--in root "archive/new/1:2," "inbox/new/2:2,"))
               :to-equal (concat root "inbox/cur/2:2,S"))))
   (it "passes over a copy that is gone"
     (mail-tests--in-store '("archive/cur/1:2,S" "inbox/cur/other:2,")
-      (expect (likeliest-copy (mail-tests--in root "archive/cur/1:2,S" "inbox/cur/2:2,S") root)
+      (expect (likeliest-copy (mail-tests--in root "archive/cur/1:2,S" "inbox/cur/2:2,S"))
               :to-equal (concat root "archive/cur/1:2,S"))))
   (it "answers nil when every copy is gone"
     (mail-tests--in-store '("archive/cur/other:2," "inbox/cur/other:2,")
-      (expect (likeliest-copy (mail-tests--in root "archive/cur/1:2," "inbox/cur/2:2,") root)
+      (expect (likeliest-copy (mail-tests--in root "archive/cur/1:2," "inbox/cur/2:2,"))
               :to-be nil)))
   (it "reads a cur/ once for every copy one search looks up in it"
     (mail-tests--in-store '("inbox/cur/1:2,S" "inbox/cur/2:2,S")
       (let ((listings (make-hash-table :test #'equal)))
         (spy-on 'maildir-file-names :and-call-through)
-        (expect (list (likeliest-copy (mail-tests--in root "inbox/new/1:2,") root listings)
-                      (likeliest-copy (mail-tests--in root "inbox/new/2:2,") root listings))
+        (expect (list (likeliest-copy (mail-tests--in root "inbox/new/1:2,") listings)
+                      (likeliest-copy (mail-tests--in root "inbox/new/2:2,") listings))
                 :to-equal (mail-tests--in root "inbox/cur/1:2,S" "inbox/cur/2:2,S"))
         (expect (spy-calls-count 'maildir-file-names) :to-be 1)))))
 
@@ -647,6 +673,8 @@ notmuch's arguments in `runs'."
   (declare (indent 4))
   `(let* ((dir (make-temp-file "mail-tests" t))
           (root (file-name-as-directory dir))
+          (gmail-maildir root)
+          (news-maildir (file-name-as-directory (make-temp-file "mail-tests-news" t)))
           (gnus-search-notmuch-config-file "/config/file")
           (engine (make-instance 'gnus-search-notmuch
                                  :program (mail-tests--notmuch dir ,all)
@@ -665,7 +693,8 @@ notmuch's arguments in `runs'."
                              (split-string (buffer-string) "\n" t))))
            ,@body)
        (kill-buffer (slot-value engine 'proc-buffer))
-       (delete-directory dir t))))
+       (delete-directory dir t)
+       (delete-directory news-maildir t))))
 
 (describe "search-likeliest-copies-a"
   (it "hands the parser each message's inbox copy in place of All Mail's"
@@ -696,14 +725,66 @@ notmuch's arguments in `runs'."
           '((query . "from:x") (raw . t))
         (expect parsed :to-equal (concat root "inbox/cur/a2:2,S\n" root "archive/cur/c:2,S\n")))))
   (it "keeps the first run's hits when the second run fails"
-    (let ((firsts (list "/store/archive/cur/a")))
-      (mail-tests--parsing nil firsts nil '((query . "from:x") (raw . t))
-        (expect parsed :to-match "\\`/store/archive/cur/a\n"))))
-  (it "leaves a thread search alone, which asks for every copy already"
-    (mail-tests--parsing nil (list "/store/archive/cur/a" "/store/inbox/cur/a2") (list "/x")
+    (mail-tests--parsing nil (list (concat root "archive/cur/a")) nil
+        '((query . "from:x") (raw . t))
+      (expect parsed :to-equal (concat root "archive/cur/a\n"))))
+  (it "passes a thread search's copies on as they are, and runs notmuch no more"
+    (mail-tests--parsing nil (list (concat root "archive/cur/a") (concat root "inbox/cur/a2"))
+        (list "/x")
         '((query . "id:a") (thread . t))
-      (expect parsed :to-match "\\`/store/archive/cur/a\n/store/inbox/cur/a2\n")
+      (expect parsed :to-equal (concat root "archive/cur/a\n" root "inbox/cur/a2\n"))
       (expect runs :to-be nil))))
+
+(defun mail-tests--parse-in (engine-root firsts all query)
+  "What the likeliest-copy advice hands the parser of an engine over ENGINE-ROOT.
+FIRSTS is the first notmuch run's output and ALL the second's, for QUERY."
+  (let* ((dir (make-temp-file "mail-tests-notmuch" t))
+         (engine (make-instance 'gnus-search-notmuch
+                                :program (mail-tests--notmuch dir all)
+                                :remove-prefix engine-root))
+         parsed)
+    (unwind-protect
+        (with-current-buffer (slot-value engine 'proc-buffer)
+          (insert (mapconcat (lambda (file) (concat file "\n")) firsts ""))
+          (search-likeliest-copies-a (lambda (&rest _) (setq parsed (buffer-string)))
+                                     engine "nnmaildir:any" query)
+          parsed)
+      (kill-buffer (slot-value engine 'proc-buffer))
+      (delete-directory dir t))))
+
+(describe "search-likeliest-copies-a over two stores"
+  (it "shows each message once, from the store of its likeliest copy"
+    ;; each server's engine sees what notmuch finds in both stores
+    (let ((mail-inbox-group "nnmaildir+gmail:inbox")
+          (mail-archive-group "nnmaildir+gmail:archive")
+          (mail-trash-group "nnmaildir+gmail:trash")
+          (mail-bulk-groups '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs")))
+      (mail-tests--in-store '("archive/cur/a" "emacs/cur/a2" "inbox/cur/b" "archive/cur/b2")
+        (mail-tests--fill-store news-root '("gmane.test/cur/a3" "gmane.test/cur/b3"
+                                            "gmane.test/cur/c"))
+        (let ((firsts (list (concat root "archive/cur/a") (concat news-root "gmane.test/cur/b3")
+                            (concat news-root "gmane.test/cur/c")))
+              (all (list (concat root "archive/cur/a") (concat root "emacs/cur/a2")
+                         (concat news-root "gmane.test/cur/a3")
+                         (concat news-root "gmane.test/cur/b3") (concat root "inbox/cur/b")
+                         (concat root "archive/cur/b2")
+                         (concat news-root "gmane.test/cur/c")))
+              (query '((query . "List:x") (raw . t))))
+          (expect (mail-tests--parse-in root firsts all query)
+                  :to-equal (concat root "inbox/cur/b\n"))
+          (expect (mail-tests--parse-in news-root firsts all query)
+                  :to-equal (concat news-root "gmane.test/cur/a3\n"
+                                    news-root "gmane.test/cur/c\n"))))))
+  (it "keeps a thread search to the engine's own store"
+    ;; the other store's paths would name no group of this server
+    (mail-tests--in-store '("inbox/cur/a")
+      (mail-tests--fill-store news-root '("gmane.test/cur/a2"))
+      (let ((firsts (list (concat root "inbox/cur/a") (concat news-root "gmane.test/cur/a2")))
+            (query '((query . "id:a") (thread . t))))
+        (expect (mail-tests--parse-in root firsts nil query)
+                :to-equal (concat root "inbox/cur/a\n"))
+        (expect (mail-tests--parse-in news-root firsts nil query)
+                :to-equal (concat news-root "gmane.test/cur/a2\n"))))))
 
 (describe "rebase-mail-flags"
   (it "applies what Gnus changed to the flags the file has now"

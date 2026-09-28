@@ -17,10 +17,15 @@
 (require 'gnus-start)
 (require 'gnus-sum)
 (require 'gnus-search)
-;; the feed variables live in an autoload file no key has loaded yet
+;; the feed and news variables live in autoload files no key has loaded yet
 (defvar feed-directory)
 (defvar feed-fetch-program)
 (defvar feed-fetch-timer)
+(defvar news-active-file)
+(defvar news-fetch-directory)
+(defvar news-fetch-script)
+(defvar news-fetch-process)
+(defvar news-fetched-at)
 
 (defun email-e2e--write-message (file from subject id &optional date references xref body)
   "Write a minimal RFC 822 message to FILE.
@@ -69,6 +74,19 @@ SUBJECT, ID, DATE and REFERENCES fill the headers."
             "Cc: Carol <carol@example.com>, Dan <dan@example.com>\n"
             "List-Id: \"Emacs development discussions.\" <emacs-devel.gnu.org>\n"
             "List-Post: <mailto:emacs-devel@gnu.org>\n"
+            "Subject: " subject "\n"
+            "Date: " date "\n"
+            "Message-ID: <" id "@fixture.example>\n"
+            (if references (concat "References: " references "\n") "")
+            "\n"
+            "body of " subject "\n")))
+
+(defun email-e2e--write-news-post (file subject id date &optional references flags)
+  "Write to FILE a post of gmane.test with SUBJECT, ID, DATE and REFERENCES.
+FLAGS, when given, ends the name as a maildir suffix."
+  (with-temp-file (if flags (concat file ":2," flags) file)
+    (insert "From: Eli <eli@example.com>\n"
+            "Newsgroups: gmane.test\n"
             "Subject: " subject "\n"
             "Date: " date "\n"
             "Message-ID: <" id "@fixture.example>\n"
@@ -159,12 +177,26 @@ An untimed `read-event' is idle, and a timer ends it."
          (feed-fetch-program (expand-file-name "curl" e2e-work-dir))
          (served (expand-file-name "served.atom" e2e-work-dir))
          (go (expand-file-name "go" e2e-work-dir))
+         ;; a news group in a store of its own, which a stand-in for the
+         ;; batch fetch fills from news-outbox/ once news-go exists
+         (news-root (expand-file-name "news/" e2e-work-dir))
+         (news-group "nnmaildir+news:gmane.test")
+         (news-dir (expand-file-name "gmane.test/" news-root))
+         (news-outbox (expand-file-name "news-outbox/" e2e-work-dir))
+         (news-go (expand-file-name "news-go" e2e-work-dir))
+         (news-maildir news-root)
+         (news-server "news.example.org")
+         (news-active-file (expand-file-name "news-active" e2e-work-dir))
+         (news-fetch-directory (expand-file-name "news-fetch/" e2e-work-dir))
+         (news-fetch-script (expand-file-name "news-fetch.el" e2e-work-dir))
+         (news-fetch-process nil)
+         (news-fetched-at nil)
          (mail-sync-program "true")
          ;; gnus-started-hook subscribes every group under this root;
          ;; the module's mail-groups would add gmane and Reddit, which
          ;; CI cannot reach
          (gmail-maildir root)
-         (mail-groups (list feed-group))
+         (mail-groups (list feed-group news-group))
          ;; html and moved are left out; trash and labelled start empty
          (mail-topics `(("Gmail" ("nnmaildir+gmail:inbox" . "Inbox")
                          ("nnmaildir+gmail:archive" . "All Mail")
@@ -173,7 +205,8 @@ An untimed `read-event' is idle, and a timer ends it."
                          ("nnmaildir+gmail:labelled"))
                         ("Lists" ("nnmaildir+gmail:lists" . "A list thread")
                          ("nnmaildir+gmail:emacs" . "emacs-devel")
-                         (,feed-group . "Reddit, every new post"))))
+                         (,feed-group . "Reddit, every new post")
+                         (,news-group . "A news group"))))
          ;; moved sits with the bulk groups, so , m files into a group
          ;; nnmaildir has not read this session
          (mail-bulk-groups '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs"
@@ -183,6 +216,8 @@ An untimed `read-event' is idle, and a timer ends it."
          (gnus-search-engine-instance-alist nil)
          (gnus-secondary-select-methods
           `((nnmaildir "gmail" (directory ,root) (get-new-mail nil))
+            (nnmaildir "news" (directory ,news-root) (get-new-mail nil)
+                       (gnus-search-engine gnus-search-notmuch (remove-prefix ,news-root)))
             (nnatom ,feed (nnatom-read-title-function ,(lambda (_) "r/emacs"))
                     (nnatom-read-feed-function read-atom-feed))))
          (gnus-startup-file (expand-file-name "newsrc" e2e-work-dir))
@@ -202,6 +237,34 @@ An untimed `read-event' is idle, and a timer ends it."
               "while [ ! -f '" go "' ]; do sleep 0.05; done\n"
               "cp '" served "' \"$out\"\n"))
     (set-file-modes feed-fetch-program #o755)
+    ;; the store holds a read post and an unread answer; the stand-in
+    ;; for the batch fetch delivers what news-outbox/ holds
+    (dolist (sub '("cur" "new" "tmp"))
+      (make-directory (expand-file-name sub news-dir) t))
+    (make-directory news-outbox t)
+    (email-e2e--write-news-post (expand-file-name "cur/1700000040.40.fixture" news-dir)
+                                "news post one" "news-one" "Fri, 25 Sep 2026 10:00:00 +0000"
+                                nil "S")
+    (email-e2e--write-news-post (expand-file-name "cur/1700000041.41.fixture" news-dir)
+                                "news post two" "news-two" "Sat, 26 Sep 2026 10:00:00 +0000"
+                                "<news-one@fixture.example>" "")
+    (email-e2e--write-news-post (expand-file-name "1700000042.42.fixture" news-outbox)
+                                "news post three" "news-three" "Sun, 27 Sep 2026 10:00:00 +0000"
+                                "<news-one@fixture.example> <news-two@fixture.example>")
+    ;; what a fetch saves of the server's group list
+    (write-region (concat "gmane.test 0000000003 0000000001 y\n"
+                          "gmane.other 0000000005 0000000001 y\n")
+                  nil news-active-file)
+    (with-temp-file news-fetch-script
+      (prin1 `(defun news-fetch-main (store _active _server)
+                (while (not (file-exists-p ,news-go))
+                  (sleep-for 0.05))
+                (dolist (file (directory-files ,news-outbox t "\\`[^.]"))
+                  (rename-file file (expand-file-name
+                                     (concat "gmane.test/new/" (file-name-nondirectory file))
+                                     store)))
+                (kill-emacs 0))
+             (current-buffer)))
     (email-e2e--write-list-message (expand-file-name "cur/1700000031.31.fixture:2,S" emacs)
                                    "Eli <eli@example.com>" "emacs-devel post" "devel-post"
                                    "Sun, 20 Sep 2026 10:00:00 +0000")
@@ -487,6 +550,7 @@ An untimed `read-event' is idle, and a timer ends it."
                                    "Lists" ("nnmaildir+gmail:lists" . "Lists")
                                    ("nnmaildir+gmail:emacs" . "Lists")
                                    (,feed-group . "Lists")
+                                   (,news-group . "Lists")
                                    "misc"))
                           :got (format "%S" layout))
                   (record "a group line shows the bare name and the description mail-topics gives"
@@ -515,7 +579,16 @@ An untimed `read-event' is idle, and a timer ends it."
                     (record "the feed's line reads r/emacs and its description"
                             (and line (string-match-p "\\` +\\* +r/emacs +Reddit, every new post\\'"
                                                       line))
-                            :got (format "%S" line))))
+                            :got (format "%S" line)))
+                  ;; the stand-in holds the start's fetch too, and the
+                  ;; start reads no news group
+                  (record "the start fetches news without waiting for it"
+                          (and (process-live-p news-fetch-process)
+                               (eql (gnus-group-level news-group) (1+ gnus-activate-level))
+                               (null (gnus-active news-group)))
+                          :got (format "fetching %S, level %S, active %S"
+                                       (process-live-p news-fetch-process)
+                                       (gnus-group-level news-group) (gnus-active news-group))))
                 (write-region "" nil go)
                 (with-timeout (10)
                   (while (not (gnus-active feed-group))
@@ -552,6 +625,61 @@ An untimed `read-event' is idle, and a timer ends it."
                 (record ", u's download counts the feed's new post"
                         (eql (gnus-group-unread feed-group) 3)
                         :got (format "unread %S" (gnus-group-unread feed-group)))
+                ;; a news group shows its newest posts, read ones included
+                (gnus-group-jump-to-group news-group)
+                (execute-kbd-macro (kbd "RET"))
+                (record "RET on the news group shows its newest posts, the read ones too"
+                        (and (derived-mode-p 'gnus-summary-mode)
+                             (equal (sort (mapcar #'mail-header-subject gnus-newsgroup-headers)
+                                          #'string<)
+                                    '("news post one" "news post two")))
+                        :got (format "%s: %S" major-mode
+                                     (mapcar #'mail-header-subject gnus-newsgroup-headers)))
+                ;; the first entry reads the flags a fetch delivered
+                (record "the first entry into the news group shows a post the fetch delivered read as read"
+                        (and (derived-mode-p 'gnus-summary-mode)
+                             (equal (mapcar (lambda (article)
+                                              (mail-header-subject
+                                               (gnus-summary-article-header article)))
+                                            gnus-newsgroup-unreads)
+                                    '("news post two")))
+                        :got (format "unread %S"
+                                     (and (derived-mode-p 'gnus-summary-mode)
+                                          (mapcar (lambda (article)
+                                                    (mail-header-subject
+                                                     (gnus-summary-article-header article)))
+                                                  gnus-newsgroup-unreads))))
+                (when (derived-mode-p 'gnus-summary-mode)
+                  (gnus-summary-exit-no-update))
+                ;; the start's fetch delivers once go exists, into a
+                ;; group Gnus read, so its line counts the new post
+                (write-region "" nil news-go)
+                (with-timeout (15)
+                  (while (not (eql (gnus-group-unread news-group) 2))
+                    (accept-process-output nil 0.05)))
+                (record "a finished fetch brings its posts into the news group Gnus read"
+                        (eql (gnus-group-unread news-group) 2)
+                        :got (format "unread %S, fetching %S" (gnus-group-unread news-group)
+                                     (process-live-p news-fetch-process)))
+                ;; , u fetches news again and returns before it arrives
+                (delete-file news-go)
+                (email-e2e--write-news-post (expand-file-name "1700000043.43.fixture" news-outbox)
+                                            "news post four" "news-four"
+                                            "Sun, 27 Sep 2026 12:00:00 +0000")
+                (let ((start (float-time)))
+                  (execute-kbd-macro (kbd ", u"))
+                  (record ", u returns while news is still being fetched"
+                          (and (< (- (float-time) start) 0.5)
+                               (process-live-p news-fetch-process))
+                          :got (format "%.2f s, fetching %S" (- (float-time) start)
+                                       (process-live-p news-fetch-process))))
+                (write-region "" nil news-go)
+                (with-timeout (15)
+                  (while (not (eql (gnus-group-unread news-group) 3))
+                    (accept-process-output nil 0.05)))
+                (record ", u's fetch counts the news group's new post"
+                        (eql (gnus-group-unread news-group) 3)
+                        :got (format "unread %S" (gnus-group-unread news-group)))
                 ;; the stand-in notmuch answers with the archive's copy
                 (search-mail "archived")
                 (record "a search hit in a group no start read opens in the search summary"
@@ -576,6 +704,39 @@ An untimed `read-event' is idle, and a timer ends it."
                         :got (format "%s: %S" major-mode
                                      (mapcar #'mail-header-subject gnus-newsgroup-headers)))
                 (gnus-summary-exit-no-update)
+                ;; a list post held in All Mail and in the news store;
+                ;; notmuch names All Mail's copy first
+                (let ((copies (list (expand-file-name "cur/1700000044.44.archive" archive)
+                                    (expand-file-name "cur/1700000044.44.news" news-dir))))
+                  (dolist (copy copies)
+                    (email-e2e--write-news-post copy "news twin" "news-twin"
+                                                "Sun, 27 Sep 2026 13:00:00 +0000" nil "S"))
+                  (with-temp-file (expand-file-name "news-twin" hits)
+                    (insert (mapconcat (lambda (copy) (concat copy ":2,S\n")) copies ""))))
+                (search-mail "news-twin")
+                (let ((groups (and (derived-mode-p 'gnus-summary-mode)
+                                   (mapcar (lambda (article) (nnselect-article-group article))
+                                           gnus-newsgroup-articles))))
+                  (record "a search shows a message both stores hold once, in the news group"
+                          (equal groups (list news-group))
+                          :got (format "%s: %S" major-mode groups)))
+                (when (derived-mode-p 'gnus-summary-mode)
+                  (gnus-summary-exit-no-update))
+                ;; Gmail never sees a news post, so none goes to the trash
+                (let ((trashed (messages-in trash)))
+                  (gnus-group-jump-to-group news-group)
+                  (execute-kbd-macro (kbd "RET"))
+                  (gnus-summary-goto-subject (email-e2e--article "news post two"))
+                  (execute-kbd-macro (kbd "dx"))
+                  (let ((left (message-ids (messages-in news-dir))))
+                    (record "d x in a news group deletes the post's file and trashes nothing"
+                            (and (not (member "<news-two@fixture.example>" left))
+                                 (member "<news-one@fixture.example>" left)
+                                 (equal (messages-in trash) trashed))
+                            :got (format "news %S, trash %d before and %d after" left
+                                         (length trashed) (length (messages-in trash))))))
+                (when (derived-mode-p 'gnus-summary-mode)
+                  (gnus-summary-exit-no-update))
                 (open-mail-inbox)
                 (record "opens the inbox summary"
                         (and (derived-mode-p 'gnus-summary-mode)
@@ -1736,7 +1897,7 @@ An untimed `read-event' is idle, and a timer ends it."
                         :got (format "level %S" (gnus-group-level "nnmaildir+gmail:moved")))
                 ;; the line point is on decides the topic
                 (gnus-group-jump-to-group "nnmaildir+gmail:lists")
-                (execute-kbd-macro (kbd ", a moved RET moved RET"))
+                (execute-kbd-macro (kbd ", a moved RET"))
                 (record ", a subscribes a label found by a word of its name, into the topic at point"
                         (and (<= (gnus-group-level "nnmaildir+gmail:moved") gnus-level-subscribed)
                              (equal (gnus-group-topic "nnmaildir+gmail:moved") "Lists")
@@ -1745,13 +1906,22 @@ An untimed `read-event' is idle, and a timer ends it."
                                      (gnus-group-level "nnmaildir+gmail:moved")
                                      (gnus-group-topic "nnmaildir+gmail:moved")
                                      (gnus-group-group-name)))
-                ;; the fixture has no news server
-                (let ((said (condition-case err
-                                (progn (execute-kbd-macro (kbd ", b")) :browsed)
-                              (user-error (cadr err)))))
-                  (record ", b browses the groups of a news server, and says when there is none"
-                          (equal said "No news server")
-                          :got (format "%S" said))))
+                ;; the saved group list offers gmane.other; the stand-in
+                ;; holds the fetch that subscribing starts
+                (delete-file news-go)
+                (gnus-group-jump-to-group "nnmaildir+gmail:lists")
+                (execute-kbd-macro (kbd ", a gmane.other RET"))
+                (let ((other "nnmaildir+news:gmane.other"))
+                  (record ", a subscribes a news group of the saved list, makes its folder and fetches"
+                          (and (eql (gnus-group-level other) (1+ gnus-activate-level))
+                               (equal (gnus-group-topic other) "Lists")
+                               (file-directory-p (expand-file-name "gmane.other/cur" news-root))
+                               (process-live-p news-fetch-process))
+                          :got (format "level %S in %S, folder %S, fetching %S"
+                                       (gnus-group-level other) (gnus-group-topic other)
+                                       (file-directory-p
+                                        (expand-file-name "gmane.other/cur" news-root))
+                                       (process-live-p news-fetch-process)))))
             (error (record "flow signalled" nil :err e)))
         (when (buffer-live-p reply)
           (with-current-buffer reply
@@ -1771,9 +1941,11 @@ An untimed `read-event' is idle, and a timer ends it."
         ;; SPC l t G on a running Gnus queues refresh turns
         (when (timerp (bound-and-true-p mail-refresh-timer))
           (cancel-timer mail-refresh-timer))
-        ;; a feed download left waiting for go, and the periodic one
+        ;; a feed download or a news fetch left waiting for go, and the
+        ;; periodic download
         (dolist (process (process-list))
-          (when (string-prefix-p "feed " (process-name process))
+          (when (or (string-prefix-p "feed " (process-name process))
+                    (string-prefix-p "news-fetch" (process-name process)))
             (delete-process process)))
         (when (timerp (bound-and-true-p feed-fetch-timer))
           (cancel-timer feed-fetch-timer)
@@ -1791,9 +1963,10 @@ An untimed `read-event' is idle, and a timer ends it."
             (when-let* ((summary (get-buffer name)))
               (with-current-buffer summary
                 (gnus-summary-exit-no-update))))
-          (when-let* ((summary (get-buffer (gnus-summary-buffer-name feed-group))))
-            (with-current-buffer summary
-              (gnus-summary-exit-no-update)))
+          (dolist (group (list feed-group news-group))
+            (when-let* ((summary (get-buffer (gnus-summary-buffer-name group))))
+              (with-current-buffer summary
+                (gnus-summary-exit-no-update))))
           (with-current-buffer gnus-group-buffer
             (gnus-group-exit)))
         (when-let* ((beside (get-buffer "*beside*")))

@@ -9,6 +9,7 @@
 (require 'url-util)
 
 (defvar gmail-maildir)
+(defvar news-maildir)
 (defvar mail-sync-program)
 (defvar mail-inbox-group)
 (defvar mail-trash-group)
@@ -36,7 +37,7 @@
 
 ;;;###autoload
 (defun sync-mail (&optional full)
-  "Sync mail with Gmail and download the feeds, in the background.
+  "Sync mail with Gmail, fetch the news and the feeds, all in the background.
 With FULL, the mail sync runs every tier at once."
   (interactive "P")
   (let ((buf (get-buffer-create " *mail-sync*")))
@@ -46,6 +47,7 @@ With FULL, the mail sync runs every tier at once."
                   :buffer buf
                   :command (mail-sync-command full)
                   :sentinel #'mail-sync-sentinel))
+  (fetch-news)
   (fetch-feeds))
 
 ;;; Navigation
@@ -216,6 +218,12 @@ The select call is what creates the article buffer, without which
                        mail-search-limit-max)
                mail-search-limit))
 
+(defun mail-search-servers ()
+  "Every nnmaildir server, as a search's group spec names them."
+  (mapcar (lambda (method) (list (gnus-method-to-server method)))
+          (seq-filter (lambda (method) (eq (car method) 'nnmaildir))
+                      gnus-secondary-select-methods)))
+
 (defun notmuch-query-text (query)
   "QUERY without the keys gnus-search takes out of it, such as limit:N."
   (alist-get 'query (gnus-search-prepare-query `((query . ,query) (raw . t)))))
@@ -238,7 +246,7 @@ LIMIT caps how many, `mail-search-limit' by default; 0 or a count past
          (gnus-large-ephemeral-newsgroup nil)
          (group (gnus-group-read-ephemeral-search-group
                  t `((search-query-spec . ((query . ,query) (raw . t) (limit . ,limit)))
-                     (search-group-spec . (("nnmaildir:gmail")))))))
+                     (search-group-spec . ,(mail-search-servers))))))
     (when-let* ((group)
                 (shown (with-current-buffer (gnus-summary-buffer-name group)
                          (length gnus-newsgroup-articles)))
@@ -249,16 +257,28 @@ LIMIT caps how many, `mail-search-limit' by default; 0 or a count past
                    (format "a prefix argument shows up to %d" mail-search-limit-max)
                  "narrow the query to reach older ones")))))
 
-(defun mail-copy-rank (file root)
-  "Rank of FILE, one copy of a message in the store at ROOT; the lowest shows.
+(defun mail-file-group (file)
+  "Group of FILE, a message file in the Gmail store or the news store, or nil."
+  (seq-some (pcase-lambda (`(,root . ,prefix))
+              (when (string-prefix-p root file)
+                (concat prefix (car (split-string (substring file (length root)) "/")))))
+            (list (cons (file-name-as-directory (expand-file-name gmail-maildir))
+                        "nnmaildir+gmail:")
+                  (cons (file-name-as-directory (expand-file-name news-maildir))
+                        "nnmaildir+news:"))))
+
+(defun mail-copy-rank (file)
+  "Rank of FILE, one copy of a message; the lowest shows.
 The inbox copy wins, so search results act on what the inbox shows.  A
-label read at startup comes next, then All Mail, the list labels, trash."
-  (let ((group (concat "nnmaildir+gmail:"
-                       (car (split-string (string-remove-prefix root file) "/")))))
+label read at startup comes next, then the news store, All Mail, the
+list labels and trash."
+  (let ((group (mail-file-group file)))
     (cond ((equal group mail-inbox-group) 0)
-          ((equal group mail-trash-group) 4)
-          ((equal group mail-archive-group) 2)
-          ((member group mail-bulk-groups) 3)
+          ((null group) 6)
+          ((equal group mail-trash-group) 5)
+          ((news-group-p group) 2)
+          ((equal group mail-archive-group) 3)
+          ((member group mail-bulk-groups) 4)
           (t 1))))
 
 (defun message-copies (files firsts)
@@ -295,42 +315,51 @@ directories read so far, each by `maildir-file-names'."
                (with-memoization (gethash cur listings)
                  (maildir-file-names cur))))))
 
-(defun likeliest-copy (copies root &optional listings)
-  "The one of COPIES, a message's files in the store at ROOT, a search shows.
+(defun likeliest-copy (copies &optional listings)
+  "The one of COPIES, a message's files, a search shows.
 A copy counts under the name it has now, and not at all once it is gone.
 LISTINGS caches directory reads across the messages of one search."
   (let ((listings (or listings (make-hash-table :test #'equal))))
     (seq-some (lambda (file) (current-mail-file file listings))
-              (seq-sort-by (lambda (file) (mail-copy-rank file root)) #'< copies))))
+              (seq-sort-by #'mail-copy-rank #'< copies))))
 
 (defun notmuch-files (text)
   "The file names in TEXT, notmuch's output, without the lines around them."
   (seq-filter #'file-name-absolute-p (split-string text "\n" t)))
 
+(defun likeliest-copies (engine query groups firsts)
+  "Each message's likeliest copy, for FIRSTS, the files ENGINE found for QUERY.
+GROUPS are the search's groups.  nil when notmuch fails to name every copy."
+  (let* ((args (remove "--duplicate=1"
+                       (gnus-search-indexed-search-command
+                        engine (gnus-search-make-query-string engine query) query groups)))
+         (files (with-temp-buffer
+                  (apply #'call-process (slot-value engine 'program) nil '(t nil) nil args)
+                  (notmuch-files (buffer-string))))
+         (listings (make-hash-table :test #'equal)))
+    (when files
+      (seq-keep (lambda (copies) (likeliest-copy copies listings))
+                (message-copies files firsts)))))
+
 ;;;###autoload
 (defun search-likeliest-copies-a (fn engine server query &optional groups)
   "Call FN with ENGINE, SERVER, QUERY and GROUPS on each hit's likeliest copy.
 notmuch answers with one copy per message, nearly always All Mail's, so
-marks and moves in search results would miss the inbox."
-  (when (and (object-of-class-p engine 'gnus-search-notmuch)
-             (not (alist-get 'thread query)))
-    (let* ((firsts (notmuch-files (buffer-string)))
-           (root (file-name-as-directory
+marks and moves in search results would miss the inbox.  Each server
+keeps the copies in its own store, so a message shows once."
+  (when (object-of-class-p engine 'gnus-search-notmuch)
+    (let* ((root (file-name-as-directory
                   (expand-file-name (slot-value engine 'remove-prefix))))
-           (args (remove "--duplicate=1"
-                         (gnus-search-indexed-search-command
-                          engine (gnus-search-make-query-string engine query)
-                          query groups)))
-           (files (with-temp-buffer
-                    (apply #'call-process (slot-value engine 'program) nil '(t nil) nil args)
-                    (notmuch-files (buffer-string)))))
-      ;; no files means the second run failed; the first run's hits stand
-      (when files
-        (erase-buffer)
-        (let ((listings (make-hash-table :test #'equal)))
-          (dolist (copies (message-copies files firsts))
-            (when-let* ((copy (likeliest-copy copies root listings)))
-              (insert copy "\n")))))))
+           (firsts (notmuch-files (buffer-string)))
+           ;; a thread search asks for every copy already; a failed
+           ;; second run leaves the first run's hits
+           (hits (or (unless (alist-get 'thread query)
+                       (likeliest-copies engine query groups firsts))
+                     firsts)))
+      (erase-buffer)
+      (dolist (file hits)
+        (when (string-prefix-p root file)
+          (insert file "\n")))))
   (funcall fn engine server query groups))
 
 ;;; Flags set elsewhere

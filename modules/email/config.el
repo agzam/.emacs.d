@@ -2,7 +2,7 @@
 ;;; Commentary:
 ;; Gnus over a maildir that mbsync mirrors from Gmail: every label is an
 ;; nnmaildir group, notmuch is only the search index behind gnus-search,
-;; and gmane over NNTP serves the mailing lists.  Outgoing mail always
+;; and a batch Emacs fetches gmane's lists into a maildir.  Outgoing mail always
 ;; leaves as agzam.ibragimov - sending it through the to.plotnick account
 ;; with that address as an alias stamps "sent on behalf" - and a Gcc copy
 ;; lands in the synced sent folder so threads in the mirrored store keep
@@ -11,6 +11,12 @@
 
 (defvar gmail-maildir (expand-file-name "~/.mail/gmail/")
   "Maildir root mbsync keeps in sync with Gmail; each label is a subdir.")
+
+(defvar news-maildir (expand-file-name "~/.mail/news/")
+  "Maildir root the news fetch fills; each news group is a subdir of its name.")
+
+(defvar news-server "news.gmane.io"
+  "NNTP server the news groups are fetched from.")
 
 (defvar mail-from-address "agzam.ibragimov@gmail.com"
   "Address every outgoing message is sent from.")
@@ -30,7 +36,7 @@
 (defvar mail-archive-group "nnmaildir+gmail:archive"
   "Group mbsync mirrors from Gmail's All Mail, where archived mail lives.")
 
-(defvar mail-groups (list mail-inbox-group "nntp+news.gmane.io:gmane.emacs.devel"
+(defvar mail-groups (list mail-inbox-group "nnmaildir+news:gmane.emacs.devel"
                           "nnatom+www.reddit.com/r/emacs/new/.rss:r/emacs")
   "Groups Gnus subscribes to on startup, on top of every maildir group.")
 
@@ -39,8 +45,8 @@
 
 (defvar mail-bulk-groups
   '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs" "nnmaildir+gmail:org-mode"
-    "nnmaildir+gmail:new" "nntp+news.gmane.io:gmane.emacs.devel")
-  "Groups no sync rescans: tens of thousands of files, or an NNTP round trip.")
+    "nnmaildir+gmail:new" "nnmaildir+news:gmane.emacs.devel")
+  "Groups no sync rescans: tens of thousands of files each.")
 
 (defvar mail-topics
   '(("Gmail"
@@ -58,7 +64,7 @@
      ("nnmaildir+gmail:forwarded")
      ("nnmaildir+gmail:subscriptions"))
     ("Lists"
-     ("nntp+news.gmane.io:gmane.emacs.devel" . "emacs-devel over NNTP")
+     ("nnmaildir+news:gmane.emacs.devel" . "emacs-devel, fetched from gmane")
      ("nnmaildir+gmail:emacs" . "emacs-devel, delivered to Gmail")
      ("nnatom+www.reddit.com/r/emacs/new/.rss:r/emacs" . "Reddit, every new post")
      ("nnmaildir+gmail:org-mode" . "emacs-orgmode")
@@ -72,6 +78,9 @@ not name stay where they were moved.")
 (defvar mail-treat-quotes t
   "Treatment condition for `highlight-mail-quotes', like the gnus-treat ones.")
 
+;; the news store fills while Emacs runs, whether Gnus runs or not
+(add-hook 'emacs-startup-hook #'start-news-fetch-timer)
+
 (use-package gnus
   :ensure nil
   :defer t
@@ -79,14 +88,16 @@ not name stay where they were moved.")
   (setq gnus-select-method '(nnnil "")
         gnus-secondary-select-methods
         `((nnmaildir "gmail" (directory ,gmail-maildir) (get-new-mail nil))
-          (nntp "news.gmane.io")
+          ;; a search names a hit's group by its path under remove-prefix
+          (nnmaildir "news" (directory ,news-maildir) (get-new-mail nil)
+                     (gnus-search-engine gnus-search-notmuch (remove-prefix ,news-maildir)))
           ;; the feed's own title, "newest submissions : emacs", would
           ;; name the group
           (nnatom "www.reddit.com/r/emacs/new/.rss"
                   (nnatom-read-title-function ,(lambda (_) "r/emacs"))
                   (nnatom-read-feed-function read-atom-feed)))
-        ;; gmane carries tens of thousands of groups; scanning for new
-        ;; ones or saving the killed list makes every startup crawl
+        ;; asked for new groups, nnmaildir registers every label it has
+        ;; not read, and such a label then opens empty
         gnus-check-new-newsgroups nil
         gnus-save-killed-list nil
         gnus-read-active-file 'some
@@ -123,13 +134,15 @@ not name stay where they were moved.")
         ;; pair, and a two-element entry sets a variable buffer-locally.
         ;; nnmaildir evaluates its own parameters, hence the quote.
         gnus-parameters
-        '(;; nnmaildir deletes expired files, and mbsync would push that
+        `(;; nnmaildir deletes expired files, and mbsync would push that
           ;; to Gmail as an archive or an unlabel
           ("\\`nnmaildir\\+gmail:" (expire-age . 'never) (display . all))
           ;; the archive holds everything ever received; show the newest
           ;; slice instead of prompting for a count
           ("\\`nnmaildir\\+gmail:archive\\'" (display . 200))
-          ("\\`nntp\\+news\\.gmane\\.io:" (gnus-use-scoring t)))
+          ;; a year of a list; a followup posts to the server it came from
+          ("\\`nnmaildir\\+news:" (display . 500) (gnus-use-scoring t)
+           (post-method nntp ,news-server)))
         ;; the function already puts the newest thread first; (not ...)
         ;; would sort oldest first
         gnus-thread-sort-functions '(gnus-thread-sort-by-most-recent-date)
@@ -157,6 +170,10 @@ not name stay where they were moved.")
   ;; a feed is read from its downloaded copy, so a group never waits on
   ;; the network; the download itself runs in the background
   (add-hook 'gnus-started-hook #'start-feed-fetches 95)
+  ;; the news store is filled the same way, by a batch Emacs
+  (add-hook 'gnus-started-hook #'fetch-stale-news 95)
+  ;; Gnus gives up on a server whose directory is missing
+  (add-hook 'gnus-before-startup-hook #'ensure-news-folders)
   (add-hook 'gnus-subscribe-newsgroup-functions #'defer-news-group-h)
 
   (defun bind-mail-keys (mode &rest _)
@@ -237,7 +254,6 @@ are applied again from `evil-collection-setup-hook'."
              :desc "add group"       "a" #'add-mail-group
              :desc "unsubscribe"     "d" #'gnus-group-unsubscribe
              :desc "move to topic"   "m" #'gnus-topic-move-group
-             :desc "browse news"     "b" #'browse-news-groups
              (:prefix ("t" . "topic")
               :desc "new"    "n" #'gnus-topic-create-topic
               :desc "rename" "r" #'gnus-topic-rename
@@ -342,7 +358,10 @@ columns would go to the window left of Gnus."
   (advice-add 'nnmaildir-request-accept-article :around #'scan-unknown-mail-group-a)
   (advice-add 'nnmaildir-base-name-to-article-number :around #'scan-mail-group-on-miss-a)
   ;; a flag Gnus saves would drop the flags the phone changed on that file
-  (advice-add 'nnmaildir--article-set-flags :around #'keep-flags-set-elsewhere-a))
+  (advice-add 'nnmaildir--article-set-flags :around #'keep-flags-set-elsewhere-a)
+  ;; around the read above, so a news group's first entry sees the posts
+  ;; a fetch delivered read
+  (advice-add 'nnmaildir-request-group :around #'merge-news-flags-a))
 
 (use-package gnus-search
   :ensure nil

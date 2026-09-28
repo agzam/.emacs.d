@@ -3,8 +3,6 @@
 (require 'gnus)
 (require 'gnus-group)
 (require 'gnus-topic)
-(require 'gnus-srvr)
-(require 'nntp)
 (require 'nnatom)
 
 (defvar doom-cache-dir)
@@ -93,69 +91,51 @@ ahead of any other; every other topic loses only the groups TOPICS names."
 
 ;;; Finding groups
 
-(defun words-wildmat (words)
-  "NNTP wildmat for the names holding WORDS, in order."
-  (concat "*" (string-join (split-string words) "*") "*"))
-
-(defun words-regexp (words)
-  "Regexp for the names holding WORDS, in order."
-  (mapconcat #'regexp-quote (split-string words) ".*"))
-
-(defun news-servers ()
-  "The NNTP servers among `gnus-secondary-select-methods'."
-  (seq-filter (lambda (method) (eq (car method) 'nntp)) gnus-secondary-select-methods))
-
-(defun news-groups-matching (words method)
-  "Groups on news server METHOD whose names hold WORDS, as (GROUP . ARTICLES)."
-  (when (and (gnus-check-server method)
-             (nntp-list-active-group (words-wildmat words) (cadr method)))
-    (with-current-buffer nntp-server-buffer
-      (goto-char (point-min))
-      (let (groups)
-        (while (re-search-forward "^\\([^ \n]+\\) +\\([0-9]+\\) +\\([0-9]+\\)" nil t)
-          (push (cons (gnus-group-prefixed-name (match-string 1) method)
-                      (- (1+ (string-to-number (match-string 2)))
-                         (string-to-number (match-string 3))))
-                groups))
-        (nreverse groups)))))
-
 (defun unsubscribed-p (group)
   "Non-nil when GROUP is not subscribed."
   (< gnus-level-subscribed (gnus-group-level group)))
 
+(defun groups-to-add ()
+  "Unsubscribed labels and news groups as (GROUP . ARTICLES), a label's nil."
+  (seq-filter (lambda (candidate) (unsubscribed-p (car candidate)))
+              (append (mapcar #'list (maildir-groups)) (news-active-groups))))
+
 (defun read-group-to-add ()
-  "Read an unsubscribed label or news group whose name holds the words typed."
-  (let* ((words (read-string "Add groups matching: "))
-         (regexp (words-regexp words))
-         (candidates
-          (seq-filter
-           (lambda (candidate) (unsubscribed-p (car candidate)))
-           (append (mapcar #'list
-                           (seq-filter (lambda (group)
-                                         (string-match-p regexp (gnus-group-real-name group)))
-                                       (maildir-groups)))
-                   (mapcan (lambda (method) (news-groups-matching words method))
-                           (news-servers)))))
+  "Read an unsubscribed label or news group.
+The news groups are the server's list as the last news fetch saved it."
+  (let* ((candidates (groups-to-add))
+         (articles (make-hash-table :test #'equal :size (length candidates)))
          (completion-extra-properties
           (list :annotation-function
                 (lambda (group)
-                  (if-let* ((articles (cdr (assoc group candidates))))
-                      (format "  %d articles" articles)
+                  (if-let* ((count (gethash group articles)))
+                      (format "  %d articles" count)
                     "  label")))))
     (unless candidates
-      (user-error "No group to add matches \"%s\"" words))
-    (completing-read "Add group: " candidates nil t)))
+      (user-error "No group to add"))
+    (pcase-dolist (`(,group . ,count) candidates)
+      (when count
+        (puthash group count articles)))
+    (completing-read (if (news-active-groups)
+                         "Add group: "
+                       "Add label (news groups arrive with the next news fetch): ")
+                     candidates nil t)))
 
 ;;; Commands
 
 ;;;###autoload
 (defun add-mail-group (group)
   "Subscribe to GROUP, a label or a news group, into the topic at point.
-A news group or a bulk label sits above the routine scan."
+A news group or a bulk label sits above the routine scan, and a news
+group gets its folder, which a news fetch starts filling right away."
   (interactive (list (read-group-to-add)) gnus-group-mode)
   (let* ((topic (gnus-current-topic))
-         (label (eq (car (gnus-find-method-for-group group)) 'nnmaildir))
-         (routine (and label (not (member group mail-bulk-groups)))))
+         (news (news-group-p group))
+         (routine (and (not news)
+                       (eq (car (gnus-find-method-for-group group)) 'nnmaildir)
+                       (not (member group mail-bulk-groups)))))
+    (when news
+      (make-news-folder group))
     (gnus-group-change-level group
                              (if routine gnus-level-default-subscribed
                                (1+ gnus-activate-level))
@@ -166,32 +146,9 @@ A news group or a bulk label sits above the routine scan."
       (refresh-mail-group group))
     (apply-mail-topics)
     ;; shows the line even when the group would not be listed
-    (gnus-group-jump-to-group group)))
-
-(defun read-news-server ()
-  "The news server to browse, asked for only when there are several."
-  (let ((servers (news-servers)))
-    (cond ((cdr servers)
-           (gnus-server-to-method
-            (completing-read "Browse news server: "
-                             (mapcar #'gnus-method-to-server servers) nil t)))
-          (servers (car servers))
-          (t (user-error "No news server")))))
-
-;;;###autoload
-(defun browse-news-groups (method words)
-  "Browse the groups on news server METHOD whose names hold WORDS.
-The whole list of news.gmane.io takes about 18 s.  In the browse buffer
-`u' subscribes and `q' returns to the group buffer."
-  (interactive (list (read-news-server) (read-string "Browse news groups matching: "))
-               gnus-group-mode)
-  (cl-letf (((symbol-function 'nntp-request-list)
-             (lambda (&optional server)
-               (when (nntp-list-active-group (words-wildmat words) server)
-                 (with-current-buffer nntp-server-buffer
-                   (nntp-decode-text))
-                 t))))
-    (gnus-browse-foreign-server method)))
+    (gnus-group-jump-to-group group)
+    (when news
+      (fetch-news))))
 
 ;;; Feeds
 
@@ -288,8 +245,9 @@ Each download replaces the saved copy, and its groups are read again."
 ;;;###autoload
 (defun defer-news-group-h (group)
   "Put GROUP, subscribed just now, above `gnus-activate-level' if it is remote.
-A news group or a web feed would otherwise be fetched at every start."
-  (when (memq (car (gnus-find-method-for-group group)) mail-remote-backends)
+Every start would read a year of a news group or fetch a web feed."
+  (when (or (news-group-p group)
+            (memq (car (gnus-find-method-for-group group)) mail-remote-backends))
     (gnus-group-change-level group (1+ gnus-activate-level) (gnus-group-level group))))
 
 ;;; groups.el ends here
