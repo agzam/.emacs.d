@@ -799,3 +799,39 @@ window and deletes the summary's."
                    smtpmail-queue-dir))
       (expect (expand-file-name (symbol-value var)) :to-match
               (concat "\\`" (regexp-quote (expand-file-name test-sandbox-dir)))))))
+
+(describe "email module recipients"
+  (before-all
+    (require 'message)
+    (require 'mailabbrev))
+  (it "completes To, Cc, Bcc and Reply-To from the notmuch addresses, and leaves From alone"
+    (let ((message-completion-alist message-completion-alist)
+          (message-mode-hook nil))
+      (dolist (form (email-tests--config-forms 'message))
+        (eval form t))
+      (cl-letf (((symbol-function 'complete-mail-address)
+                 (lambda () (list (point) (point) 'mail-addresses))))
+        (with-temp-buffer
+          (insert "From: Ag <agzam.ibragimov@gmail.com>\nTo: nat\nCc: \nBcc: x\n"
+                  "Reply-To: y\nSubject: hi\n--text follows this line--\nbody nat\n")
+          (cl-flet ((table-at (text)
+                      (goto-char (point-min))
+                      (search-forward text)
+                      (nth 2 (message-completion-function))))
+            (dolist (header '("To: nat" "Cc: " "Bcc: x" "Reply-To: y"))
+              (expect (table-at header) :to-be 'mail-addresses))
+            (dolist (elsewhere '("From: Ag" "Subject: hi" "body nat"))
+              (expect (table-at elsewhere) :not :to-be 'mail-addresses)))))))
+  (it "reads the addresses when a message buffer opens"
+    (let ((message-completion-alist message-completion-alist)
+          (message-mode-hook nil))
+      (dolist (form (email-tests--config-forms 'message))
+        (eval form t))
+      (expect (memq 'prepare-mail-addresses-h message-mode-hook) :to-be-truthy)))
+  (it "autoloads what the message buffer calls"
+    ;; the first message buffer calls them before addresses.el has loaded
+    (with-temp-buffer
+      (insert-file-contents
+       (expand-file-name "modules/email/autoload/addresses.el" test-config-root))
+      (dolist (fn '(complete-mail-address prepare-mail-addresses-h))
+        (expect (buffer-string) :to-match (format "^;;;###autoload\n(defun %s " fn))))))

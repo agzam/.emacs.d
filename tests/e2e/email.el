@@ -26,6 +26,8 @@
 (defvar news-fetch-script)
 (defvar news-fetch-process)
 (defvar news-fetched-at)
+(defvar mail-address-file)
+(defvar mail-addresses-read-at)
 
 (defun email-e2e--write-message (file from subject id &optional date references xref body)
   "Write a minimal RFC 822 message to FILE.
@@ -192,6 +194,9 @@ An untimed `read-event' is idle, and a timer ends it."
          (news-fetch-process nil)
          (news-fetched-at nil)
          (mail-sync-program "true")
+         ;; a reply reads no notmuch and writes no saved addresses
+         (mail-address-file (expand-file-name "mail-addresses.eld" e2e-work-dir))
+         (mail-addresses-read-at (float-time))
          ;; gnus-started-hook subscribes every group under this root;
          ;; the module's mail-groups would add gmane and Reddit, which
          ;; CI cannot reach
