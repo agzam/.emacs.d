@@ -910,6 +910,37 @@ An untimed `read-event' is idle, and a timer ends it."
                                               (point-min) (point-max)))
                              (equal (subject-at-point) "release plan"))
                         :got (format "%S open" (open-subjects)))
+                ;; the stand-in notmuch answers the query with Bob's
+                ;; message, after the key has returned
+                (with-temp-file (expand-file-name "(from:bob)" hits)
+                  (insert "id:plan-bob@fixture.example\n"))
+                (execute-kbd-macro (kbd ", n from:bob RET"))
+                (let ((waited (process-live-p mail-thread-filter-process)))
+                  (with-timeout (5)
+                    (while mail-thread-filter-process
+                      (accept-process-output nil 0.05)))
+                  (record ", n hides the messages a notmuch query does not match"
+                          (and (equal (mapcar (lambda (message)
+                                                (mail-header-subject
+                                                 (mail-thread-message-header message)))
+                                              (mail-thread-shown-messages))
+                                      '("Re: release plan (Bob)"))
+                               ;; what redisplay skips: the first message's line
+                               (invisible-p (mail-thread-message-marker (car mail-thread-messages)))
+                               (equal (subject-at-point) "Re: release plan (Bob)")
+                               (string-suffix-p "1 of 3 shown: from:bob" header-line-format))
+                          :got (format "answered after the key %S, shown %S, at %S, %S" waited
+                                       (mapcar (lambda (message)
+                                                 (mail-header-subject
+                                                  (mail-thread-message-header message)))
+                                               (mail-thread-shown-messages))
+                                       (subject-at-point) header-line-format)))
+                (execute-kbd-macro (kbd ", n RET"))
+                (record ", n with an empty query shows every message again"
+                        (and (= 3 (length (mail-thread-shown-messages)))
+                             (string-suffix-p "3 messages" header-line-format))
+                        :got (format "%d shown, %S" (length (mail-thread-shown-messages))
+                                     header-line-format))
                 (execute-kbd-macro "q")
                 (record "q returns to the summary it came from"
                         (eq (window-buffer (selected-window))
