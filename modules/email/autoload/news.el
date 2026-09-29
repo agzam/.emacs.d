@@ -10,6 +10,7 @@
 (defvar news-maildir)
 (defvar news-server)
 (defvar mail-groups)
+(defvar mail-load-running)
 
 (defvar news-fetch-script (expand-file-name "scripts/news-fetch.el" doom-emacs-dir)
   "Batch script that fills `news-maildir' from `news-server'.")
@@ -57,25 +58,6 @@ The news server of Gnus fails for the session when its store is missing."
   (make-directory news-maildir t)
   (mapc #'make-news-folder (seq-filter #'news-group-p mail-groups)))
 
-(defun read-news-groups ()
-  "News groups nnmaildir has read this session."
-  (when-let* ((server (alist-get "news" nnmaildir--servers nil nil #'equal))
-              (groups (nnmaildir--srv-groups server)))
-    (mapcar (lambda (name) (concat news-group-prefix name)) (hash-table-keys groups))))
-
-;;;###autoload
-(defun merge-news-flags-a (fn group &optional server &rest args)
-  "Call FN on GROUP, SERVER and ARGS, merging the flags of a news group it read.
-A plain entry keeps the read marks the newsrc had, and a fetch delivers
-older posts read, so they would show unread."
-  (let ((known (and (equal server "news") (nnmaildir--prepare server group))))
-    (prog1 (apply fn group server args)
-      (when-let* (((equal server "news"))
-                  ((not known))
-                  ((nnmaildir--prepare server group))
-                  (info (gnus-get-info (concat news-group-prefix group))))
-        (gnus-request-update-info info (gnus-find-method-for-group (gnus-info-group info)))))))
-
 ;;; The server's group list
 
 (defvar news-active-cache nil
@@ -113,26 +95,29 @@ older posts read, so they would show unread."
                          (expand-file-name news-maildir) news-active-file news-server)))
 
 (defun news-fetch-sentinel (process event)
-  "Refresh the news groups Gnus read once PROCESS ended with EVENT.
-A group Gnus has not read would be read whole here; its entry reads it.
-A failed fetch refreshes them too, for the posts it delivered first."
+  "Read the news groups again in the background once PROCESS ended with EVENT.
+A failed fetch reads them too, for the posts it delivered first."
   (when (memq (process-status process) '(exit signal))
     (when (gnus-alive-p)
-      (dolist (group (read-news-groups))
-        (refresh-mail-group group)
-        (gnus-group-update-group group t)))
+      (load-mail-groups (seq-filter #'news-group-p gnus-group-list)))
     (if (and (eq (process-status process) 'exit)
              (zerop (process-exit-status process)))
         (setq news-fetched-at (float-time))
       (message "News fetch failed: %s (see %s)"
                (string-trim event) (buffer-name (process-buffer process))))))
 
+(defvar news-fetch-pending nil
+  "Non-nil when a fetch waits for the mail load reading a news group.")
+
 ;;;###autoload
 (defun fetch-news ()
   "Fetch every news group into `news-maildir' in the background.
-Nothing starts while a fetch runs."
+Nothing starts while a fetch runs, and a batch reading a news group
+starts it when done: both would number the posts it delivers."
   (interactive)
-  (unless (process-live-p news-fetch-process)
+  (setq news-fetch-pending
+        (and (seq-some #'news-group-p (bound-and-true-p mail-load-running)) t))
+  (unless (or news-fetch-pending (process-live-p news-fetch-process))
     (ensure-news-folders)
     ;; the TLS checks save what they saw there, and fail the connection
     ;; when they cannot

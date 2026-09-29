@@ -12,6 +12,8 @@
 (defvar mail-bulk-groups)
 (defvar mail-remote-backends)
 
+(load-module-file "scripts/mail-load.el")
+(load-module-file "modules/email/autoload/load.el")
 (load-module-file "modules/email/autoload/groups.el")
 (load-module-file "modules/email/autoload/news.el")
 
@@ -256,8 +258,8 @@ alist has Gnus, Gmail and Lists."
                   (push (list 'level group level old) ,calls)
                   ;; Gnus files a new group into the topic at point
                   (nconc (assoc "Gnus" gnus-topic-alist) (list group))))
-               ((symbol-function 'refresh-mail-group)
-                (lambda (group) (push (list 'read group) ,calls)))
+               ((symbol-function 'load-mail-groups)
+                (lambda (groups &optional first) (push (list 'read (car groups) first) ,calls)))
                ((symbol-function 'apply-mail-topics) (lambda () (push 'arranged ,calls)))
                ((symbol-function 'gnus-group-jump-to-group)
                 (lambda (group &rest _) (push (list 'goto group) ,calls)))
@@ -273,13 +275,13 @@ alist has Gnus, Gmail and Lists."
         (add-mail-group "nnmaildir+gmail:job")
         (expect (nreverse calls)
                 :to-equal '((level "nnmaildir+gmail:job" 3 9)
-                            (read "nnmaildir+gmail:job")
+                            (read "nnmaildir+gmail:job" t)
                             arranged
                             (goto "nnmaildir+gmail:job")))
         (expect gnus-topic-alist
                 :to-equal '(("Gnus") ("Gmail" "nnmaildir+gmail:inbox")
                             ("Lists" "nnmaildir+gmail:emacs" "nnmaildir+gmail:job"))))))
-  (it "subscribes a news group above the routine scan, makes its folder and fetches it"
+  (it "subscribes a news group above the routine scan, makes its folder, reads and fetches it"
     ;; every start would read a year of the list otherwise
     (let (calls)
       (groups-tests-adding 9 calls
@@ -287,6 +289,7 @@ alist has Gnus, Gmail and Lists."
         (expect (nreverse calls)
                 :to-equal '((folder "nnmaildir+news:gmane.emacs.help")
                             (level "nnmaildir+news:gmane.emacs.help" 4 9)
+                            (read "nnmaildir+news:gmane.emacs.help" t)
                             arranged
                             (goto "nnmaildir+news:gmane.emacs.help")
                             fetch)))))
@@ -298,12 +301,12 @@ alist has Gnus, Gmail and Lists."
                 :to-equal '((level "nntp+news.gmane.io:gwene.com.reddit.emacs" 4 9)
                             arranged
                             (goto "nntp+news.gmane.io:gwene.com.reddit.emacs"))))))
-  (it "keeps a bulk label out of the routine scan"
+  (it "keeps a bulk label out of the routine scan, and reads it in the background"
     (let (calls)
       (groups-tests-adding 6 calls
         (add-mail-group "nnmaildir+gmail:archive")
         (expect (car (last calls)) :to-equal '(level "nnmaildir+gmail:archive" 4 6))
-        (expect (assq 'read calls) :to-be nil))))
+        (expect (assq 'read calls) :to-equal '(read "nnmaildir+gmail:archive" t)))))
   (it "raises an unsubscribed group from the level it has"
     (let (calls)
       (groups-tests-adding 6 calls

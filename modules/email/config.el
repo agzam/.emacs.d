@@ -163,10 +163,13 @@ not name stay where they were moved.")
   ;; topics are newsrc state, so config applies over it at every start,
   ;; once the subscriptions exist
   (add-hook 'gnus-started-hook #'apply-mail-topics 50)
-  ;; the start reads no maildir (`defer-mail-server-scan-a'); the
-  ;; routine groups follow on timer turns, a label subscribed just now
-  ;; among them
-  (add-hook 'gnus-started-hook #'queue-mail-refresh 90)
+  ;; the start reads no maildir (`defer-mail-server-scan-a'); a batch
+  ;; Emacs reads every group, and the session builds each from its table
+  ;; a slice at a time
+  (add-hook 'gnus-started-hook #'load-all-mail-groups 90)
+  (add-hook 'gnus-exit-gnus-hook #'stop-mail-load)
+  ;; entering a group or searching needs the groups nnmaildir holds
+  (advice-add 'gnus-group-read-ephemeral-search-group :around #'wait-for-mail-loads-a)
   ;; a feed is read from its downloaded copy, so a group never waits on
   ;; the network; the download itself runs in the background
   (add-hook 'gnus-started-hook #'start-feed-fetches 95)
@@ -242,9 +245,8 @@ are applied again from `evil-collection-setup-hook'."
               :desc "date"    "d" #'sort-mail-by-date
               :desc "author"  "a" #'sort-mail-by-author
               :desc "subject" "s" #'sort-mail-by-subject)))
-      ;; gR reads the routine groups before it returns, where
-      ;; evil-collection's gnus-group-get-new-news leaves them to timer
-      ;; turns; gr stays Gnus's own per-group rescan
+      ;; gR reads the routine groups again in the background, as a sync
+      ;; does; gr stays Gnus's own per-group rescan
       (map! :map gnus-group-mode-map
             :n "gR" #'refresh-mail-groups
             (:localleader
@@ -333,7 +335,11 @@ columns would go to the window left of Gnus."
   ;; and it would undo what a refresh brought from the phone meanwhile;
   ;; a label saves before the prepare-exit hook runs, a search after it
   (add-hook 'gnus-exit-group-hook #'keep-group-changes-h)
-  (add-hook 'gnus-summary-prepare-exit-hook #'keep-search-group-changes-h))
+  (add-hook 'gnus-summary-prepare-exit-hook #'keep-search-group-changes-h)
+  ;; a group still loading opens once its table is applied, and a thread
+  ;; search waits for every group, like any search
+  (advice-add 'gnus-summary-read-group :around #'wait-for-mail-group-a)
+  (advice-add 'gnus-summary-refer-thread :around #'wait-for-mail-loads-a))
 
 (use-package gnus-art
   :ensure nil
@@ -360,14 +366,12 @@ columns would go to the window left of Gnus."
   ;; a scan of the whole server reads every label in the main thread, so
   ;; each group is read on its own when something needs it
   (advice-add 'nnmaildir-request-scan :around #'defer-mail-server-scan-a)
-  (advice-add 'nnmaildir-request-group :around #'scan-unknown-mail-group-a)
-  (advice-add 'nnmaildir-request-accept-article :around #'scan-unknown-mail-group-a)
+  ;; until a group's table is applied, nnmaildir refuses it
+  (advice-add 'nnmaildir-request-group :around #'refuse-unloaded-mail-group-a)
+  (advice-add 'nnmaildir-request-accept-article :around #'refuse-unloaded-mail-group-a)
   (advice-add 'nnmaildir-base-name-to-article-number :around #'scan-mail-group-on-miss-a)
   ;; a flag Gnus saves would drop the flags the phone changed on that file
-  (advice-add 'nnmaildir--article-set-flags :around #'keep-flags-set-elsewhere-a)
-  ;; around the read above, so a news group's first entry sees the posts
-  ;; a fetch delivered read
-  (advice-add 'nnmaildir-request-group :around #'merge-news-flags-a))
+  (advice-add 'nnmaildir--article-set-flags :around #'keep-flags-set-elsewhere-a))
 
 (use-package gnus-search
   :ensure nil
