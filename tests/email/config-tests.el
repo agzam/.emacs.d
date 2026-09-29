@@ -296,6 +296,17 @@ KEYS holds a prefix's key and the key under it apart by a space, as
     (expect (cdr (assoc "n" (email-tests--localleader-pairs config 'mail-thread-mode-map)))
             :to-equal '(function mail-thread-filter)))
 
+  (it "leaves mail on , q from the group buffer and wherever a message is read"
+    (dolist (map '(gnus-group-mode-map gnus-summary-mode-map gnus-article-mode-map
+                   mail-thread-mode-map))
+      (expect (cdr (assoc "q" (email-tests--localleader-pairs config map)))
+              :to-equal '(function quit-mail)))
+    ;; a key calls it before its file has loaded
+    (with-temp-buffer
+      (insert-file-contents
+       (expand-file-name "modules/email/autoload/quit.el" test-config-root))
+      (expect (buffer-string) :to-match "^;;;###autoload\n(defun quit-mail ")))
+
   (it "answers and opens the same way wherever a message is read"
     (dolist (map '(gnus-summary-mode-map gnus-article-mode-map mail-thread-mode-map))
       (let ((pairs (mapcan #'map-form-key-pairs (map-form-groups config map)))
