@@ -275,6 +275,8 @@ are applied again from `evil-collection-setup-hook'."
         :n "]]" #'mail-thread-next-message
         :n "[[" #'mail-thread-previous-message
         :n "q" #'mail-thread-quit
+        ;; the summary's , n narrows as well
+        (:localleader :desc "narrow to a query" "n" #'mail-thread-filter)
         ;; the summary's mark keys, on the message at point or its
         ;; thread; the summary beside the view draws the marks
         :n "d" (cmd! (run-in-mail-summary #'mail-mark-for-deletion t))

@@ -629,3 +629,137 @@ is the only treatment."
         (compose-new-mail))
       (expect (nreverse calls)
               :to-equal '(group-mail (gnus-summary-mail-other-window nil))))))
+
+(defun thread-tests-notmuch (output &optional delay status)
+  "Stand-in notmuch printing OUTPUT after DELAY seconds, then exiting STATUS."
+  (let ((script (make-temp-file "thread-tests-notmuch")))
+    (with-temp-file script
+      (insert "#!/bin/sh\n"
+              (if delay (format "sleep %s\n" delay) "")
+              "printf '" output "'\n"
+              (format "exit %d\n" (or status 0))))
+    (set-file-modes script #o755)
+    script))
+
+(defun thread-tests-shown ()
+  "Articles the filter leaves on show."
+  (mapcar #'mail-thread-message-article (mail-thread-shown-messages)))
+
+(defun thread-tests-wait-for (process)
+  "Wait until PROCESS has exited and its sentinel has run."
+  (with-timeout (5 (error "The stand-in notmuch never answered"))
+    (while (buffer-live-p (process-buffer process))
+      (accept-process-output nil 0.05))))
+
+(describe "mail-thread-filter"
+  (it "asks notmuch which of the thread's messages match, each Message-ID quoted"
+    ;; an unquoted id holding + or = matches other messages
+    (thread-tests-with-buffer 10 nil
+      (let ((gnus-search-notmuch-config-file "/notmuch/config"))
+        (expect (mail-thread-filter-args "from:bob")
+                :to-equal '("--config=/notmuch/config" "search" "--output=messages"
+                            "(id:\"1@x\" or id:\"2@x\" or id:\"3@x\")" "and" "(from:bob)")))))
+  (it "hides the messages notmuch does not match, and counts the rest in the header line"
+    (thread-tests-with-buffer 10 nil
+      (mail-thread-hide-unmatched "from:bob" '("2@x"))
+      (expect (thread-tests-shown) :to-equal '(11))
+      (expect header-line-format :to-equal "Plan   1 of 3 shown: from:bob")
+      ;; the entry's line and its rendered body both go
+      (let ((entry (thread-tests-message 10)))
+        (expect (invisible-p (mail-thread-message-marker entry)) :to-be-truthy)
+        (expect (invisible-p (1- (mail-thread-body-end entry))) :to-be-truthy))
+      (expect (invisible-p (mail-thread-message-marker (thread-tests-message 11)))
+              :not :to-be-truthy)))
+  (it "keeps every message when notmuch matches none"
+    (thread-tests-with-buffer 10 nil
+      (spy-on 'message)
+      (mail-thread-hide-unmatched "from:zed" nil)
+      (expect (thread-tests-shown) :to-equal '(10 11 12))
+      (expect header-line-format :to-equal "Plan   3 messages")
+      (expect 'message :to-have-been-called-with
+              "Nothing in this thread matches %s" "from:zed")))
+  (it "shows every message again on an empty query, folded as before"
+    (thread-tests-with-buffer 10 nil
+      (mail-thread-collapse (thread-tests-message 10))
+      (mail-thread-hide-unmatched "from:bob" '("2@x"))
+      (mail-thread-filter "")
+      (expect (thread-tests-shown) :to-equal '(10 11 12))
+      (expect (mail-thread-rendered-p (thread-tests-message 10)) :to-be-truthy)
+      (expect (thread-tests-open-articles) :to-be nil)
+      (expect header-line-format :to-equal "Plan   3 messages")))
+  (it "moves between the messages on show only"
+    (thread-tests-with-buffer 10 nil
+      (mail-thread-hide-unmatched "from:ann" '("1@x" "3@x"))
+      (mail-thread-goto-message (thread-tests-message 10))
+      (mail-thread-next-message)
+      (expect (mail-thread-message-article (mail-thread-message-at-point)) :to-equal 12)
+      (mail-thread-previous-message)
+      (expect (mail-thread-message-article (mail-thread-message-at-point)) :to-equal 10)))
+  (it "takes a point in hidden text for the message shown above it, or the first"
+    ;; the cursor of a point there shows at the end of that message
+    (thread-tests-with-buffer 10 nil
+      (mail-thread-hide-unmatched "from:ann" '("1@x" "3@x"))
+      (goto-char (mail-thread-message-marker (thread-tests-message 11)))
+      (expect (mail-thread-message-article (mail-thread-message-at-point)) :to-equal 10)
+      (mail-thread-hide-unmatched "subject:budget" '("3@x"))
+      (goto-char (point-min))
+      (expect (mail-thread-message-article (mail-thread-message-at-point)) :to-equal 12)))
+  (it "moves point off a message it hides, to the next one on show"
+    (thread-tests-with-buffer 10 nil
+      (goto-char (mail-thread-message-marker (thread-tests-message 11)))
+      (mail-thread-hide-unmatched "from:ann" '("1@x" "3@x"))
+      (expect (point)
+              :to-equal (marker-position (mail-thread-message-marker (thread-tests-message 12))))))
+  (it "leaves a hidden unread message unrendered and unread until the filter goes"
+    ;; a render marks the message read
+    (thread-tests-with-buffer 10 '(11 12)
+      (mail-thread-hide-unmatched "from:ann" '("1@x" "3@x"))
+      (thread-tests-fill)
+      (expect thread-tests-rendered :to-equal '(12 10))
+      (expect thread-tests-marked :to-equal '(12 10))
+      (expect (thread-tests-waiting) :to-equal '(11))
+      (expect (thread-tests-timer-active-p mail-thread-fill-timer) :to-be t)
+      (mail-thread-filter "")
+      (mail-thread-fill (current-buffer) mail-thread-fill-timer)
+      (expect thread-tests-rendered :to-equal '(11 12 10))
+      (expect (thread-tests-waiting) :to-be nil)))
+  (it "returns before notmuch answers, and hides once it does"
+    (thread-tests-with-buffer 10 nil
+      (let ((gnus-search-notmuch-program (thread-tests-notmuch "id:2@x\\n" 0.3)))
+        (unwind-protect
+            (let ((process (progn (mail-thread-filter "from:bob")
+                                  mail-thread-filter-process)))
+              (expect (process-live-p process) :to-be-truthy)
+              (expect (thread-tests-shown) :to-equal '(10 11 12))
+              (thread-tests-wait-for process)
+              (expect (thread-tests-shown) :to-equal '(11))
+              (expect mail-thread-filter-process :to-be nil))
+          (delete-file gnus-search-notmuch-program)))))
+  (it "drops an answer for a thread the buffer no longer shows"
+    (thread-tests-with-buffer 10 nil
+      (let ((gnus-search-notmuch-program (thread-tests-notmuch "id:2@x\\n" 0.3)))
+        (unwind-protect
+            (let ((process (progn (mail-thread-filter "from:bob")
+                                  mail-thread-filter-process)))
+              ;; what open-mail-thread does before it builds the next one
+              (let ((inhibit-read-only t))
+                (erase-buffer)
+                (remove-overlays))
+              (mail-thread-mode)
+              (setq mail-thread-group "nnmaildir+gmail:inbox"
+                    mail-thread-summary-buffer summary)
+              (mail-thread-build thread-tests-entries 12 nil)
+              (thread-tests-wait-for process)
+              (expect (thread-tests-shown) :to-equal '(10 11 12)))
+          (delete-file gnus-search-notmuch-program)))))
+  (it "hides nothing when notmuch fails"
+    (thread-tests-with-buffer 10 nil
+      (let ((gnus-search-notmuch-program (thread-tests-notmuch "" nil 1)))
+        (unwind-protect
+            (let ((process (progn (mail-thread-filter "from:bob")
+                                  mail-thread-filter-process)))
+              (spy-on 'message)
+              (thread-tests-wait-for process)
+              (expect (thread-tests-shown) :to-equal '(10 11 12))
+              (expect 'message :to-have-been-called-with "notmuch could not filter the thread"))
+          (delete-file gnus-search-notmuch-program))))))

@@ -15,6 +15,7 @@
 (require 'cl-lib)
 (require 'gnus)
 (require 'gnus-art)
+(require 'gnus-search)
 (require 'gnus-sum)
 (require 'gnus-util)
 (require 'mm-decode)
@@ -44,6 +45,12 @@
 
 (defvar mail-thread-fill-delay 0.1
   "Seconds of idleness before the fill renders the next waiting body.")
+
+(defvar-local mail-thread-filter-query nil
+  "Query the thread is filtered by, nil while every message shows.")
+
+(defvar-local mail-thread-filter-process nil
+  "The notmuch process answering the latest filter query.")
 
 ;;; Reading the thread out of the summary
 
@@ -197,6 +204,111 @@ on the next message stays there while a body lands above it."
           (let ((gnus-current-article article))
             (run-hooks 'gnus-mark-article-hook)))))))
 
+;;; Filtering by a notmuch query
+
+(defun mail-thread-hidden-p (message)
+  "Non-nil when the filter hides MESSAGE."
+  (seq-some (lambda (overlay) (overlay-get overlay 'mail-thread-hidden))
+            (overlays-at (mail-thread-message-marker message))))
+
+(defun mail-thread-shown-messages ()
+  "Messages the filter leaves on show, oldest first."
+  (seq-remove #'mail-thread-hidden-p mail-thread-messages))
+
+(defun mail-thread-message-id (message)
+  "MESSAGE's Message-ID without its angle brackets."
+  (string-trim (mail-header-id (mail-thread-message-header message)) "<" ">"))
+
+(defun mail-thread-filter-args (query)
+  "Arguments for notmuch to list which of the thread's messages match QUERY."
+  ;; an unquoted id holding + or = matches other messages
+  (list (format "--config=%s" gnus-search-notmuch-config-file)
+        "search" "--output=messages"
+        (format "(%s)" (mapconcat (lambda (message)
+                                    (format "id:\"%s\"" (string-replace
+                                                         "\"" "\"\""
+                                                         (mail-thread-message-id message))))
+                                  mail-thread-messages " or "))
+        "and" (format "(%s)" query)))
+
+(defun mail-thread-update-header-line ()
+  "Show the thread's subject and how many of its messages are on show."
+  (let ((subject (mail-thread-subject
+                  (mail-thread-message-header (car mail-thread-messages))))
+        (total (length mail-thread-messages)))
+    (setq-local header-line-format
+                (string-replace
+                 "%" "%%"
+                 (if mail-thread-filter-query
+                     (format "%s   %d of %d shown: %s" subject
+                             (length (mail-thread-shown-messages)) total
+                             mail-thread-filter-query)
+                   (format "%s   %d messages" subject total))))))
+
+(defun mail-thread-show-all ()
+  "Show every message of the thread again."
+  (remove-overlays (point-min) (point-max) 'mail-thread-hidden t)
+  (setq mail-thread-filter-query nil)
+  (mail-thread-update-header-line))
+
+(defun mail-thread-hide-unmatched (query ids)
+  "Hide the messages whose Message-ID is not among IDS, notmuch's answer to QUERY.
+When none of them matches, every message stays.  Point on a message
+that goes moves to the next one shown, or the last."
+  (if (not (seq-some (lambda (message) (member (mail-thread-message-id message) ids))
+                     mail-thread-messages))
+      (message "Nothing in this thread matches %s" query)
+    (mail-thread-show-all)
+    (let ((here (seq-find (lambda (message) (<= (mail-thread-message-marker message) (point)))
+                          (reverse mail-thread-messages))))
+      (dolist (message mail-thread-messages)
+        (unless (member (mail-thread-message-id message) ids)
+          (let ((overlay (make-overlay (mail-thread-message-marker message)
+                                       (mail-thread-body-end message))))
+            (overlay-put overlay 'invisible t)
+            (overlay-put overlay 'mail-thread-hidden t))))
+      (setq mail-thread-filter-query query)
+      (mail-thread-update-header-line)
+      (when (and here (mail-thread-hidden-p here))
+        (mail-thread-goto-message
+         (or (seq-find (lambda (message) (not (mail-thread-hidden-p message)))
+                       (cdr (memq here mail-thread-messages)))
+             (car (last (mail-thread-shown-messages)))))))))
+
+(defun mail-thread-filter-answered (thread process query)
+  "Apply PROCESS's answer to QUERY in THREAD, unless a newer filter replaced it."
+  (when (and (buffer-live-p thread)
+             (eq process (buffer-local-value 'mail-thread-filter-process thread)))
+    (let ((ids (with-current-buffer (process-buffer process)
+                 (goto-char (point-min))
+                 (let (ids)
+                   (while (re-search-forward "^id:\\(.+\\)$" nil t)
+                     (push (match-string 1) ids))
+                   ids))))
+      ;; the thread's own window, so point and the recentering land there
+      (with-selected-window (or (get-buffer-window thread) (selected-window))
+        (with-current-buffer thread
+          (setq mail-thread-filter-process nil)
+          (if (and (eq (process-status process) 'exit)
+                   (eql 0 (process-exit-status process)))
+              (mail-thread-hide-unmatched query ids)
+            (message "notmuch could not filter the thread")))))))
+
+(defun mail-thread-start-filter (query)
+  "Ask notmuch which of the thread's messages QUERY matches."
+  (let ((thread (current-buffer)))
+    (setq mail-thread-filter-process
+          (make-process
+           :name "mail-thread-filter"
+           :buffer (generate-new-buffer " *mail thread filter*")
+           :noquery t
+           :command (cons gnus-search-notmuch-program (mail-thread-filter-args query))
+           :sentinel (lambda (process _event)
+                       (unless (process-live-p process)
+                         (unwind-protect
+                             (mail-thread-filter-answered thread process query)
+                           (kill-buffer (process-buffer process)))))))))
+
 ;;; Filling in unread bodies
 
 (defun mail-thread-fill-order (entry)
@@ -211,12 +323,14 @@ then the ones before it, nearest first.  Without ENTRY, top to bottom."
 
 (defun mail-thread-next-waiting ()
   "Waiting message to render next: the one at point, else the first in line.
-Messages an unfold rendered meanwhile leave the queue."
+Messages an unfold rendered meanwhile leave the queue, and the ones the
+filter hides wait until it goes, since a render marks them read."
   (setq mail-thread-waiting (seq-remove #'mail-thread-rendered-p mail-thread-waiting))
   (let ((here (mail-thread-message-at-point)))
     (if (memq here mail-thread-waiting)
         here
-      (car mail-thread-waiting))))
+      (seq-find (lambda (message) (not (mail-thread-hidden-p message)))
+                mail-thread-waiting))))
 
 (defun mail-thread-fill (buffer timer)
   "Render BUFFER's waiting messages until input arrives.
@@ -260,9 +374,11 @@ gone or holds another."
 ;;; Commands
 
 (defun mail-thread-message-at-point ()
-  "Message point is inside."
-  (let (found)
-    (dolist (message mail-thread-messages found)
+  "Message point is inside; in a hidden one, the shown message above it.
+The cursor of a point in hidden text shows at the end of that message."
+  (let ((shown (mail-thread-shown-messages))
+        found)
+    (dolist (message shown (or found (car shown)))
       (when (<= (mail-thread-message-marker message) (point))
         (setq found message)))))
 
@@ -272,12 +388,12 @@ gone or holds another."
   (when (get-buffer-window) (recenter 0)))
 
 (defun mail-thread-move (count)
-  "Move COUNT messages forward, or backward when COUNT is negative."
-  (let* ((current (mail-thread-message-at-point))
-         (index (+ (seq-position mail-thread-messages current) count)))
+  "Move COUNT shown messages forward, or backward when COUNT is negative."
+  (let* ((shown (mail-thread-shown-messages))
+         (index (+ (seq-position shown (mail-thread-message-at-point)) count)))
     (cond ((< index 0) (user-error "First message"))
-          ((<= (length mail-thread-messages) index) (user-error "Last message"))
-          (t (mail-thread-goto-message (nth index mail-thread-messages))))))
+          ((<= (length shown) index) (user-error "Last message"))
+          (t (mail-thread-goto-message (nth index shown))))))
 
 (defun mail-thread-next-message (&optional count)
   "Move to the COUNTth next message."
@@ -297,6 +413,18 @@ gone or holds another."
         (mail-thread-collapse message)
       (mail-thread-expand message))
     (goto-char (mail-thread-message-marker message))))
+
+(defun mail-thread-filter (query)
+  "Show only the messages of this thread that notmuch QUERY matches.
+An empty QUERY shows every message again.  notmuch answers in the
+background, and the filter lands when it does."
+  (interactive (list (read-string "Filter thread (empty for all): ")) mail-thread-mode)
+  (when (process-live-p mail-thread-filter-process)
+    (delete-process mail-thread-filter-process))
+  (setq mail-thread-filter-process nil)
+  (if (string-blank-p query)
+      (mail-thread-show-all)
+    (mail-thread-start-filter query)))
 
 (defun mail-thread-quit ()
   "Leave the thread, giving its window back to the summary."
@@ -338,8 +466,6 @@ those wait in `mail-thread-waiting' for the fill, the rest stay a line."
   (let ((subject (mail-thread-subject (cdar entries)))
         (inhibit-read-only t)
         messages shown)
-    (setq-local header-line-format
-                (format "%s   %d messages" subject (length entries)))
     (pcase-dolist (`(,article . ,header) entries)
       (let ((message (mail-thread-message-create
                       :article article :header header
@@ -358,6 +484,7 @@ those wait in `mail-thread-waiting' for the fill, the rest stay a line."
                                (lambda (message)
                                  (memq (mail-thread-message-article message) unreads))
                                (mail-thread-fill-order shown)))
+    (mail-thread-update-header-line)
     (set-buffer-modified-p nil)))
 
 ;;;###autoload

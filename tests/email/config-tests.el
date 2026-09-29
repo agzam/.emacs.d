@@ -292,6 +292,10 @@ KEYS holds a prefix's key and the key under it apart by a space, as
       ;; executing would delete the messages the view shows
       (expect (assoc "x" pairs) :to-be nil)))
 
+  (it "narrows the thread buffer to a query on , n, as the summary narrows on it"
+    (expect (cdr (assoc "n" (email-tests--localleader-pairs config 'mail-thread-mode-map)))
+            :to-equal '(function mail-thread-filter)))
+
   (it "answers and opens the same way wherever a message is read"
     (dolist (map '(gnus-summary-mode-map gnus-article-mode-map mail-thread-mode-map))
       (let ((pairs (mapcan #'map-form-key-pairs (map-form-groups config map)))
