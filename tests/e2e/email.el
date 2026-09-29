@@ -17,6 +17,8 @@
 (require 'gnus-start)
 (require 'gnus-sum)
 (require 'gnus-search)
+;; , q's case moves the drafts folder by binding these
+(require 'nndraft)
 ;; the feed and news variables live in autoload files no key has loaded yet
 (defvar feed-directory)
 (defvar feed-fetch-program)
@@ -2007,7 +2009,51 @@ An untimed `read-event' is idle, and a timer ends it."
                                        (gnus-group-level other) (gnus-group-topic other)
                                        (file-directory-p
                                         (expand-file-name "gmane.other/cur" news-root))
-                                       (process-live-p news-fetch-process)))))
+                                       (process-live-p news-fetch-process))))
+                ;; , q leaves mail: an unsent reply goes to the drafts, the
+                ;; summary closes the way q closes it, and Gnus exits.  The
+                ;; drafts server is open by now, so binding its folder moves it
+                (let* ((drafts (file-name-as-directory (expand-file-name "drafts" e2e-work-dir)))
+                       (nndraft-directory drafts)
+                       (nnmh-directory drafts)
+                       (nndraft-current-group nil))
+                  (make-directory (expand-file-name "drafts" drafts) t)
+                  (delete-other-windows)
+                  (switch-to-buffer gnus-group-buffer)
+                  (gnus-group-jump-to-group "nnmaildir+gmail:inbox")
+                  (execute-kbd-macro (kbd "RET"))
+                  (let ((summary (current-buffer)))
+                    (goto-char (point-min))
+                    (execute-kbd-macro (kbd "RET"))
+                    (execute-kbd-macro "r")
+                    (let ((composed (derived-mode-p 'message-mode))
+                          start elapsed)
+                      (goto-char (point-max))
+                      (insert "a reply left unsent")
+                      (switch-to-buffer summary)
+                      (setq start (float-time))
+                      (execute-kbd-macro (kbd ", q"))
+                      (setq elapsed (- (float-time) start))
+                      (let ((left (seq-filter (lambda (buffer)
+                                                (with-current-buffer buffer
+                                                  (derived-mode-p '(gnus-group-mode gnus-summary-mode
+                                                                    gnus-article-mode mail-thread-mode
+                                                                    message-mode))))
+                                              (buffer-list)))
+                            (saved (directory-files (expand-file-name "drafts" drafts) t
+                                                    "\\`[0-9]+\\'")))
+                        (record ", q saves the unsent reply as a draft, then leaves no Gnus buffer behind"
+                                (and composed
+                                     (not (gnus-alive-p))
+                                     (null left)
+                                     (= 1 (length saved))
+                                     (string-match-p "a reply left unsent"
+                                                     (with-temp-buffer
+                                                       (insert-file-contents (car saved))
+                                                       (buffer-string)))
+                                     (< elapsed 0.5))
+                                :got (format "composed %S, alive %S, left %S, drafts %S, %.2f s"
+                                             composed (gnus-alive-p) left saved elapsed)))))))
             (error (record "flow signalled" nil :err e)))
         (when (buffer-live-p reply)
           (with-current-buffer reply

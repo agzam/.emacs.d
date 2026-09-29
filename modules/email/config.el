@@ -195,6 +195,7 @@ are applied again from `evil-collection-setup-hook'."
              :desc "search like this" "?" #'search-mail-like-this
              :desc "new message"      "c" #'compose-new-mail
              :desc "forward"          "f" #'forward-mail
+             :desc "quit mail"        "q" #'quit-mail
              (:prefix ("r" . "reply")
               :desc "to the list only" "l" #'reply-to-list
               :desc "on the newsgroup" "n" #'follow-up-on-newsgroup)
@@ -251,6 +252,7 @@ are applied again from `evil-collection-setup-hook'."
              :desc "search all mail" "/" #'search-mail
              :desc "new message"     "c" #'compose-new-mail
              :desc "inbox"           "i" #'open-mail-inbox
+             :desc "quit mail"       "q" #'quit-mail
              :desc "add group"       "a" #'add-mail-group
              :desc "unsubscribe"     "d" #'gnus-group-unsubscribe
              :desc "move to topic"   "m" #'gnus-topic-move-group
