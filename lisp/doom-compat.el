@@ -79,10 +79,11 @@
       eca-server-install-path (concat doom-data-dir "eca/eca")
       eca-server-version-file-path (concat doom-data-dir "eca/eca-version")
       ;; search module: tldr pages default under user-emacs-directory;
-      ;; slacko's extracted-token cache defaults there too (secret-bearing -
-      ;; ai-module token-cache precedent)
+      ;; so do slacko's extracted-token cache (secret-bearing - ai-module
+      ;; token-cache precedent) and its workspace emoji images
       tldr-directory-path (concat doom-cache-dir "tldr/")
       slacko-creds-gpg-file (concat doom-cache-dir "slacko-creds.gpg")
+      slacko-emoji-cache-directory (concat doom-cache-dir "slacko-emoji/")
       ;; tab-bar module: desktop files live with the rest of the session
       ;; state (the module presets desktop-dirname to match)
       desktop-path (list doom-state-dir)
