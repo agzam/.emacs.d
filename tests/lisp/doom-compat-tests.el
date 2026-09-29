@@ -43,7 +43,10 @@
     ;; raw treesit-install-language-grammar ignores treesit-extra-load-path;
     ;; its non-interactive default out-dir is the car of this history list.
     (expect (car treesit--install-language-grammar-out-dir-history)
-            :to-equal (car treesit-extra-load-path))))
+            :to-equal (car treesit-extra-load-path)))
+  (it "keeps slacko's workspace emoji images in the cache dir"
+    (expect (file-in-directory-p slacko-emoji-cache-directory doom-cache-dir)
+            :to-be-truthy)))
 
 (describe "switch-frame hook machinery"
   (it "defines the debounced trigger and its hook"
