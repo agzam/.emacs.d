@@ -11,6 +11,7 @@
 (defvar news-maildir)
 (defvar news-server)
 (defvar mail-groups)
+(defvar mail-load-running)
 
 (load-module-file "modules/email/autoload/news.el")
 ;; nnmaildir's header parser reads a decoder variable gnus-sum defines
@@ -26,6 +27,8 @@
           (news-server "news.example.org")
           (mail-groups '("nnmaildir+gmail:inbox" "nnmaildir+news:gmane.test"))
           (news-fetch-process nil)
+          (news-fetch-pending nil)
+          (mail-load-running nil)
           (news-fetched-at nil))
      (unwind-protect (progn ,@body)
        (when (process-live-p news-fetch-process)
@@ -82,70 +85,6 @@ It records its arguments and whether its input ended in ROOT/ran."
       ;; a second call finds everything in place
       (ensure-news-folders)
       (expect (directory-files news-maildir nil "\\`[^.]") :to-equal '("gmane.test")))))
-
-(describe "read-news-groups"
-  (it "names the news groups nnmaildir has read this session, and nothing without one"
-    (let ((nnmaildir--servers nil))
-      (expect (read-news-groups) :to-be nil)
-      (let ((server (make-nnmaildir--srv :address "news" :groups (make-hash-table :test #'equal))))
-        (setf (alist-get "news" nnmaildir--servers nil nil #'equal) server)
-        (puthash "gmane.test" 'group (nnmaildir--srv-groups server))
-        (expect (read-news-groups) :to-equal '("nnmaildir+news:gmane.test"))))))
-
-(defmacro news-tests--with-news-server (files &rest body)
-  "Run BODY with nnmaildir serving `news-maildir' as server news.
-FILES, relative to the store, are written first; a newsrc knows
-gmane.test and nothing else."
-  (declare (indent 1))
-  `(news-tests--with-store
-     (let* ((method `(nnmaildir "news" (directory ,news-maildir) (get-new-mail nil)))
-            (gnus-secondary-select-methods (list method))
-            (gnus-server-method-cache nil)
-            (gnus-newsrc-hashtb (make-hash-table :test #'equal))
-            (info (gnus-info-make "nnmaildir+news:gmane.test" 4 nil nil method)))
-       (puthash "nnmaildir+news:gmane.test" (list nil info) gnus-newsrc-hashtb)
-       (dolist (sub '("cur" "new" "tmp"))
-         (make-directory (expand-file-name (concat "gmane.test/" sub) news-maildir) t))
-       (dolist (file ,files)
-         (with-temp-file (expand-file-name file news-maildir)
-           (insert "From: Ann <ann@example.com>\nSubject: " file
-                   "\nMessage-ID: <" (md5 file) "@test>\n\nbody\n")))
-       ;; a Gnus start makes the buffer nnmaildir answers requests in
-       (nnheader-init-server-buffer)
-       (unwind-protect
-           (progn
-             (nnmaildir-open-server "news" (cddr method))
-             ,@body)
-         (setf (alist-get "news" nnmaildir--servers nil 'remove #'equal) nil)
-         (setq nnmaildir--cur-server nil)))))
-
-(defun news-tests--read-group (group server &rest args)
-  "Read GROUP on SERVER the way a first entry does: scan it, then ask for it.
-ARGS go to the request."
-  (nnmaildir-request-scan group server)
-  (apply #'nnmaildir-request-group group server args))
-
-(describe "merge-news-flags-a"
-  (it "merges the flags of a news group an entry reads for the first time"
-    ;; the fetch delivered the older post read
-    (news-tests--with-news-server '("gmane.test/cur/1.old:2,S" "gmane.test/cur/2.new:2,")
-      (expect (merge-news-flags-a #'news-tests--read-group "gmane.test" "news") :to-be t)
-      (let ((read (gnus-info-read info)))
-        (expect (range-member-p (nnmaildir-base-name-to-article-number "1.old" "gmane.test" "news")
-                                read)
-                :to-be t)
-        (expect (range-member-p (nnmaildir-base-name-to-article-number "2.new" "gmane.test" "news")
-                                read)
-                :to-be nil))))
-  (it "leaves a group it read before alone, and every group of another server"
-    (news-tests--with-news-server '("gmane.test/cur/1.old:2,S")
-      (let (merged)
-        (cl-letf (((symbol-function 'gnus-request-update-info)
-                   (lambda (&rest args) (push args merged))))
-          (news-tests--read-group "gmane.test" "news")
-          (merge-news-flags-a #'news-tests--read-group "gmane.test" "news")
-          (merge-news-flags-a #'ignore "inbox" "gmail"))
-        (expect merged :to-be nil)))))
 
 (describe "news-active-groups"
   (it "reads the saved group list once per change, each group with its article count"
@@ -211,37 +150,50 @@ ARGS go to the request."
           (expect args :to-equal (list news-maildir news-active-file "news.example.org"))
           (expect eof :to-be t))))))
 
+(describe "fetch-news while a news group loads"
+  (it "waits for the batch reading it, which starts the fetch when done"
+    ;; both would number the posts the fetch delivers
+    (news-tests--with-store
+      (let ((mail-load-running (list "nnmaildir+gmail:inbox" "nnmaildir+news:gmane.test")))
+        (fetch-news)
+        (expect news-fetch-process :to-be nil)
+        (expect news-fetch-pending :to-be t))
+      (let ((mail-load-running (list "nnmaildir+gmail:inbox"))
+            (made nil))
+        (cl-letf (((symbol-function 'make-process) (lambda (&rest _) (setq made t) 'fetch))
+                  ((symbol-function 'process-send-eof) #'ignore))
+          (fetch-news))
+        (expect made :to-be t)
+        (expect news-fetch-pending :to-be nil)))))
+
 (describe "news-fetch-sentinel"
-  (it "refreshes the news groups Gnus read once a fetch ends well, and no other"
-    ;; a group Gnus has not read would be read whole in the sentinel
+  (it "reads every news group again in the background once a fetch ends well"
     (news-tests--with-store
       (let* ((root (file-name-directory (directory-file-name news-maildir)))
              (news-fetch-script (news-tests--stand-in root 0))
-             refreshed)
+             (gnus-group-list '("nnmaildir+gmail:inbox" "nnmaildir+news:gmane.test"))
+             asked)
         (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
-                  ((symbol-function 'read-news-groups) (lambda () '("nnmaildir+news:gmane.test")))
-                  ((symbol-function 'refresh-mail-group) (lambda (group) (push group refreshed)))
-                  ((symbol-function 'gnus-group-update-group) #'ignore))
+                  ((symbol-function 'load-mail-groups) (lambda (&rest args) (push args asked))))
           (write-region "" nil (expand-file-name "go" root))
           (fetch-news)
           (news-tests--wait-exit))
-        (expect refreshed :to-equal '("nnmaildir+news:gmane.test"))
+        (expect asked :to-equal '((("nnmaildir+news:gmane.test"))))
         (expect (numberp news-fetched-at) :to-be t))))
-  (it "says a fetch failed, and still refreshes for the posts it delivered first"
+  (it "says a fetch failed, and still reads for the posts it delivered first"
     (news-tests--with-store
       (let* ((root (file-name-directory (directory-file-name news-maildir)))
              (news-fetch-script (news-tests--stand-in root 1))
-             refreshed said)
+             (gnus-group-list '("nnmaildir+news:gmane.test"))
+             asked said)
         (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
-                  ((symbol-function 'read-news-groups) (lambda () '("nnmaildir+news:gmane.test")))
-                  ((symbol-function 'refresh-mail-group) (lambda (group) (push group refreshed)))
-                  ((symbol-function 'gnus-group-update-group) #'ignore)
+                  ((symbol-function 'load-mail-groups) (lambda (&rest args) (push args asked)))
                   ((symbol-function 'message)
                    (lambda (format &rest args) (setq said (apply #'format format args)))))
           (write-region "" nil (expand-file-name "go" root))
           (fetch-news)
           (news-tests--wait-exit))
-        (expect refreshed :to-equal '("nnmaildir+news:gmane.test"))
+        (expect asked :to-equal '((("nnmaildir+news:gmane.test"))))
         (expect said :to-match "News fetch failed")
         (expect news-fetched-at :to-be nil)))))
 

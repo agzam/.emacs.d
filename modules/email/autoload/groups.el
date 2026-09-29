@@ -142,8 +142,8 @@ group gets its folder, which a news fetch starts filling right away."
                              (gnus-group-level group))
     (when topic
       (put-group-in-topic group topic))
-    (when routine
-      (refresh-mail-group group))
+    (when (maildir-group-p group)
+      (load-mail-groups (list group) t))
     (apply-mail-topics)
     ;; shows the line even when the group would not be listed
     (gnus-group-jump-to-group group)

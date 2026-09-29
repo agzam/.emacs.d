@@ -28,6 +28,10 @@
 (defvar news-fetch-script)
 (defvar news-fetch-process)
 (defvar news-fetched-at)
+(defvar mail-load-script)
+(defvar mail-load-directory)
+(defvar mail-table-directory)
+(defvar mail-load-waiters)
 (defvar mail-address-file)
 (defvar mail-addresses-read-at)
 
@@ -195,6 +199,12 @@ An untimed `read-event' is idle, and a timer ends it."
          (news-fetch-script (expand-file-name "news-fetch.el" e2e-work-dir))
          (news-fetch-process nil)
          (news-fetched-at nil)
+         ;; the real batch reads the groups, held back while load-hold
+         ;; exists, and saves its tables here
+         (load-hold (expand-file-name "load-hold" e2e-work-dir))
+         (mail-load-script (expand-file-name "mail-load.el" e2e-work-dir))
+         (mail-load-directory (expand-file-name "mail-load/" e2e-work-dir))
+         (mail-table-directory (expand-file-name "mail-tables/" e2e-work-dir))
          (mail-sync-program "true")
          ;; a reply reads no notmuch and writes no saved addresses
          (mail-address-file (expand-file-name "mail-addresses.eld" e2e-work-dir))
@@ -272,6 +282,18 @@ An untimed `read-event' is idle, and a timer ends it."
                                      store)))
                 (kill-emacs 0))
              (current-buffer)))
+    ;; the real batch reader, which waits while load-hold exists
+    (with-temp-file mail-load-script
+      (insert ";; -*- lexical-binding: t; -*-\n")
+      (prin1 `(progn
+                (load ,(expand-file-name "scripts/mail-load.el" doom-emacs-dir) nil t)
+                (advice-add 'mail-load-main :before
+                            (lambda (&rest _)
+                              (while (file-exists-p ,load-hold)
+                                (sleep-for 0.05)))))
+             (current-buffer)))
+    ;; the start's batch waits, so the flow acts on groups still loading
+    (write-region "" nil load-hold)
     (email-e2e--write-list-message (expand-file-name "cur/1700000031.31.fixture:2,S" emacs)
                                    "Eli <eli@example.com>" "emacs-devel post" "devel-post"
                                    "Sun, 20 Sep 2026 10:00:00 +0000")
@@ -378,6 +400,29 @@ An untimed `read-event' is idle, and a timer ends it."
                             (and (string-prefix-p "feed " (process-name process))
                                  (process-live-p process)))
                           (process-list)))
+              ;; what pressing KEYS says, which the echo area no longer
+              ;; holds once the macro returns
+              (saying (keys)
+                (let* ((said nil)
+                       (note (lambda (format &rest args)
+                               (when format
+                                 (push (apply #'format-message format args) said)))))
+                  (advice-add 'message :before note)
+                  (unwind-protect (execute-kbd-macro (kbd keys))
+                    (advice-remove 'message note))
+                  (nreverse said)))
+              ;; every load done, and the work that waited on one; the
+              ;; loader yields to input, and a terminal answer the boot
+              ;; left unread would hold it back
+              (loads-done (&optional seconds)
+                (with-timeout ((or seconds 30) nil)
+                  (while (or (mail-load-busy-p) mail-load-waiters)
+                    (discard-input)
+                    (accept-process-output nil 0.05)))
+                ;; work that waited ran in a timer, which keeps the
+                ;; flow's buffer; the window shows what it opened
+                (set-buffer (window-buffer (selected-window)))
+                (not (or (mail-load-busy-p) mail-load-waiters)))
               ;; the groups nnmaildir has read this session
               (read-groups ()
                 (when-let* ((server (alist-get "gmail" nnmaildir--servers nil nil #'equal)))
@@ -533,28 +578,50 @@ An untimed `read-event' is idle, and a timer ends it."
           (condition-case e
               (progn
                 (discard-input)
-                ;; the start reads no maildir: the routine groups follow on
-                ;; timer turns, and nothing reads the bulk ones
+                ;; the start reads no maildir: a batch Emacs reads every
+                ;; group, held back while load-hold exists
                 (gnus)
                 (record "gnus shows the group buffer before reading any maildir"
                         (and (gnus-alive-p) (null (read-groups)))
                         :got (format "alive %s, read %S" (gnus-alive-p) (read-groups)))
-                ;; the turns run on plain timers, which a timed wait
-                ;; serves; `email-e2e--idle' would leave Emacs idle, and
-                ;; the thread fill's cases below need it busy
-                (with-timeout (10)
-                  (while (or mail-refresh-queue (timerp mail-refresh-timer))
-                    (accept-process-output nil 0.05)))
-                (record "the routine groups are read on timer turns after the start"
+                (gnus-group-jump-to-group "nnmaildir+gmail:emacs")
+                (let* ((start (float-time))
+                       (said (saying "RET")))
+                  (record "RET on a group still loading returns at once, saying it loads"
+                          (and (< (- (float-time) start) 0.5)
+                               (derived-mode-p 'gnus-group-mode)
+                               (seq-some (lambda (line)
+                                           (string-match-p
+                                            "\\`Loading .* to open emacs\\.\\.\\.\\'" line))
+                                         said))
+                          :got (format "%.2f s, %s, %S" (- (float-time) start) major-mode said)))
+                ;; loads run on plain timers and a process filter, which a
+                ;; timed wait serves; `email-e2e--idle' would leave Emacs
+                ;; idle, and the thread fill's cases below need it busy
+                (delete-file load-hold)
+                (loads-done)
+                (record "the group opens once its load is done, Gnus still on screen"
+                        (and (derived-mode-p 'gnus-summary-mode)
+                             (equal gnus-newsgroup-name "nnmaildir+gmail:emacs"))
+                        :got (format "%s in %s" major-mode gnus-newsgroup-name))
+                (when (derived-mode-p 'gnus-summary-mode)
+                  (gnus-summary-exit-no-update))
+                (record "every maildir group is read in the background after the start"
                         (equal (read-groups)
-                               '("html" "inbox" "labelled" "lists" "starred" "trash"))
+                               '("archive" "emacs" "html" "inbox" "labelled" "lists" "moved"
+                                 "starred" "trash"))
                         :got (format "%S" (read-groups)))
-                (record "a routine group's line counts its unread mail, a bulk group's line does not"
+                (record "each group's line counts its unread mail once it is read"
                         (and (eql (gnus-group-unread "nnmaildir+gmail:inbox") 2)
-                             (not (numberp (gnus-group-unread "nnmaildir+gmail:archive"))))
+                             (eql (gnus-group-unread "nnmaildir+gmail:archive") 0))
                         :got (format "inbox %S, archive %S"
                                      (gnus-group-unread "nnmaildir+gmail:inbox")
                                      (gnus-group-unread "nnmaildir+gmail:archive")))
+                (record "the batch saves a table of each group it reads"
+                        (file-exists-p (expand-file-name "gmail/archive" mail-table-directory))
+                        :got (format "%S" (and (file-directory-p mail-table-directory)
+                                               (directory-files-recursively
+                                                mail-table-directory ""))))
                 ;; what the group buffer lists once the turns have read
                 ;; the routine groups
                 (with-current-buffer gnus-group-buffer
@@ -566,8 +633,9 @@ An untimed `read-event' is idle, and a timer ends it."
                        (groups (seq-remove #'stringp lines))
                        (inbox (nth 2 (assoc "nnmaildir+gmail:inbox" groups))))
                   (record "the start puts each group mail-topics names under its topic, in order"
+                          ;; moved, read empty like html, is left out too
                           (equal layout
-                                 `("Gnus" ("nnmaildir+gmail:moved" . "Gnus")
+                                 `("Gnus"
                                    "Gmail" ("nnmaildir+gmail:inbox" . "Gmail")
                                    ("nnmaildir+gmail:archive" . "Gmail")
                                    ("nnmaildir+gmail:trash" . "Gmail")
@@ -606,12 +674,12 @@ An untimed `read-event' is idle, and a timer ends it."
                             (and line (string-match-p "\\` +\\* +r/emacs +Reddit, every new post\\'"
                                                       line))
                             :got (format "%S" line)))
-                  ;; the stand-in holds the start's fetch too, and the
-                  ;; start reads no news group
-                  (record "the start fetches news without waiting for it"
+                  ;; the stand-in holds the start's fetch too, which waits
+                  ;; for the batch that read the news group
+                  (record "the start fetches news without waiting for it, once its group is read"
                           (and (process-live-p news-fetch-process)
                                (eql (gnus-group-level news-group) (1+ gnus-activate-level))
-                               (null (gnus-active news-group)))
+                               (gnus-active news-group))
                           :got (format "fetching %S, level %S, active %S"
                                        (process-live-p news-fetch-process)
                                        (gnus-group-level news-group) (gnus-active news-group))))
@@ -706,24 +774,28 @@ An untimed `read-event' is idle, and a timer ends it."
                 (record ", u's fetch counts the news group's new post"
                         (eql (gnus-group-unread news-group) 3)
                         :got (format "unread %S" (gnus-group-unread news-group)))
-                ;; the stand-in notmuch answers with the archive's copy
+                ;; the stand-in notmuch answers with the archive's copy,
+                ;; and a hit maps to its group only once that group loaded
+                (write-region "" nil load-hold)
+                (load-mail-groups (list "nnmaildir+gmail:archive"))
                 (search-mail "archived")
-                (record "a search hit in a group no start read opens in the search summary"
+                (record "a search while a group loads opens nothing yet"
+                        (derived-mode-p 'gnus-group-mode)
+                        :got (format "%s" major-mode))
+                (delete-file load-hold)
+                (loads-done)
+                (record "the search opens its hit once the load is done"
                         (and (derived-mode-p 'gnus-summary-mode)
                              (equal (mapcar #'mail-header-subject gnus-newsgroup-headers)
                                     '("archived")))
                         :got (format "%s: %S" major-mode
                                      (mapcar #'mail-header-subject gnus-newsgroup-headers)))
-                (gnus-summary-exit-no-update)
-                (record "the search reads the archive and no other bulk group"
-                        (and (member "archive" (read-groups))
-                             (not (member "emacs" (read-groups)))
-                             (not (member "moved" (read-groups))))
-                        :got (format "%S" (read-groups)))
+                (when (derived-mode-p 'gnus-summary-mode)
+                  (gnus-summary-exit-no-update))
                 ;; entering a label is where Gnus asks nnmaildir for it
                 (gnus-group-jump-to-group "nnmaildir+gmail:emacs")
                 (execute-kbd-macro (kbd "RET"))
-                (record "RET on a bulk group's line reads the group and shows its mail"
+                (record "RET on a bulk group's line shows its mail"
                         (and (derived-mode-p 'gnus-summary-mode)
                              (equal (mapcar #'mail-header-subject gnus-newsgroup-headers)
                                     '("emacs-devel post")))
@@ -763,7 +835,17 @@ An untimed `read-event' is idle, and a timer ends it."
                                          (length trashed) (length (messages-in trash))))))
                 (when (derived-mode-p 'gnus-summary-mode)
                   (gnus-summary-exit-no-update))
-                (open-mail-inbox)
+                ;; the inbox opens once its fresh read lands
+                (write-region "" nil load-hold)
+                (let ((start (float-time)))
+                  (open-mail-inbox)
+                  (record "open-mail-inbox returns at once and opens nothing before the inbox is read"
+                          (and (< (- (float-time) start) 0.5)
+                               (not (get-buffer "*Summary nnmaildir+gmail:inbox*")))
+                          :got (format "%.2f s, %S" (- (float-time) start)
+                                       (get-buffer "*Summary nnmaildir+gmail:inbox*"))))
+                (delete-file load-hold)
+                (loads-done)
                 (record "opens the inbox summary"
                         (and (derived-mode-p 'gnus-summary-mode)
                              (equal gnus-newsgroup-name "nnmaildir+gmail:inbox"))
@@ -1296,10 +1378,10 @@ An untimed `read-event' is idle, and a timer ends it."
                 ;; label gets one action, and q saves them all
                 (delete-other-windows)
                 (switch-to-buffer gnus-group-buffer)
-                ;; the label was subscribed after startup merged the
-                ;; maildir flags, so only a refresh merges them, the one
-                ;; every sync runs
+                ;; gR reads the routine groups again in the background,
+                ;; as every sync does
                 (execute-kbd-macro (kbd "gR"))
+                (loads-done)
                 (gnus-group-jump-to-group "nnmaildir+gmail:starred")
                 (execute-kbd-macro (kbd "RET"))
                 (let ((summary (current-buffer))
@@ -1369,6 +1451,7 @@ An untimed `read-event' is idle, and a timer ends it."
                 (delete-other-windows)
                 (switch-to-buffer gnus-group-buffer)
                 (execute-kbd-macro (kbd "gR"))
+                (loads-done)
                 (gnus-group-jump-to-group "nnmaildir+gmail:lists")
                 (execute-kbd-macro (kbd "RET"))
                 (let ((summary (current-buffer))
@@ -1765,6 +1848,7 @@ An untimed `read-event' is idle, and a timer ends it."
                                                  ("phone-search" "")))
                     (twin id flags))
                   (execute-kbd-macro (kbd "gR"))
+                  (loads-done)
                   (search-for "twin-read")
                   (record "a search hit is the inbox copy when the inbox holds the message"
                           (and (derived-mode-p 'gnus-summary-mode)
@@ -1847,6 +1931,7 @@ An untimed `read-event' is idle, and a timer ends it."
                   ;; a search opened from the inbox summary, which stays
                   ;; open under it and writes its own state on exit
                   (open-mail-inbox)
+                  (loads-done)
                   (let ((summary (current-buffer))
                         (carry (email-e2e--article "twin-carry"))
                         (drop (email-e2e--article "twin-drop")))
@@ -1999,6 +2084,8 @@ An untimed `read-event' is idle, and a timer ends it."
                 (delete-file news-go)
                 (gnus-group-jump-to-group "nnmaildir+gmail:lists")
                 (execute-kbd-macro (kbd ", a gmane.other RET"))
+                ;; the fetch waits for the batch reading the new group
+                (loads-done)
                 (let ((other "nnmaildir+news:gmane.other"))
                   (record ", a subscribes a news group of the saved list, makes its folder and fetches"
                           (and (eql (gnus-group-level other) (1+ gnus-activate-level))
@@ -2010,6 +2097,34 @@ An untimed `read-event' is idle, and a timer ends it."
                                        (file-directory-p
                                         (expand-file-name "gmane.other/cur" news-root))
                                        (process-live-p news-fetch-process))))
+                ;; a label that appeared after the start, its batch held
+                (let ((fresh (expand-file-name "fresh/" root)))
+                  (dolist (sub '("cur" "new" "tmp"))
+                    (make-directory (expand-file-name sub fresh) t))
+                  (write-region "" nil load-hold)
+                  ;; what a search does first
+                  (subscribe-mail-groups)
+                  (load-unloaded-mail-groups)
+                  (gnus-group-jump-to-group "nnmaildir+gmail:lists")
+                  (execute-kbd-macro (kbd "RET"))
+                  (gnus-summary-goto-subject (email-e2e--article "list plan"))
+                  (let ((said (cl-letf (((symbol-function 'gnus-read-move-group-name)
+                                         (lambda (&rest _) "nnmaildir+gmail:fresh")))
+                                (saying ", m"))))
+                    (record ", m into a label still loading moves nothing and says why"
+                            (and (null (messages-in fresh))
+                                 (member "<list-plan@fixture.example>"
+                                         (message-ids (messages-in lists)))
+                                 (seq-some (lambda (line) (string-match-p "still loading" line))
+                                           said))
+                            :got (format "fresh %S, said %S" (messages-in fresh) said)))
+                  (when (derived-mode-p 'gnus-summary-mode)
+                    (gnus-summary-exit-no-update))
+                  (delete-file load-hold)
+                  (loads-done)
+                  (record "a label that appeared after the start loads once its batch runs"
+                          (member "fresh" (read-groups))
+                          :got (format "%S" (read-groups))))
                 ;; , q leaves mail: an unsent reply goes to the drafts, the
                 ;; summary closes the way q closes it, and Gnus exits.  The
                 ;; drafts server is open by now, so binding its folder moves it
@@ -2070,9 +2185,11 @@ An untimed `read-event' is idle, and a timer ends it."
         (when-let* ((name (bound-and-true-p mail-thread-buffer-name))
                     (thread (get-buffer name)))
           (kill-buffer thread))
-        ;; SPC l t G on a running Gnus queues refresh turns
-        (when (timerp (bound-and-true-p mail-refresh-timer))
-          (cancel-timer mail-refresh-timer))
+        ;; a batch left reading, and the work waiting on it
+        (when (fboundp 'stop-mail-load)
+          (stop-mail-load))
+        (when (file-exists-p load-hold)
+          (delete-file load-hold))
         ;; a feed download or a news fetch left waiting for go, and the
         ;; periodic download
         (dolist (process (process-list))

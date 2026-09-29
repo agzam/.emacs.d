@@ -19,6 +19,8 @@
   '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs" "nnmaildir+gmail:org-mode"
     "nnmaildir+gmail:new" "nnmaildir+news:gmane.emacs.devel"))
 
+(load-module-file "scripts/mail-load.el")
+(load-module-file "modules/email/autoload/load.el")
 (load-module-file "modules/email/autoload/mail.el")
 (load-module-file "modules/email/autoload/news.el")
 
@@ -123,100 +125,64 @@ from the server-wide scan that froze the frame."
               :to-equal '("nnmaildir+gmail:inbox" "nnmaildir+gmail:sent")))))
 
 (describe "refresh-mail-groups"
-  (it "rescans each group by name and redraws its line"
-    (let (calls)
+  (it "reads the routine groups again in the background"
+    (let (asked)
       (cl-letf (((symbol-function 'scanned-mail-groups)
                  (lambda () '("nnmaildir+gmail:inbox" "nnmaildir+gmail:sent")))
-                ((symbol-function 'refresh-mail-group)
-                 (lambda (g) (push (list 'refresh g) calls)))
-                ((symbol-function 'gnus-group-update-group)
-                 (lambda (g &rest _) (push (list 'redraw g) calls))))
-        (refresh-mail-groups)
-        (expect (nreverse calls)
-                :to-equal '((refresh "nnmaildir+gmail:inbox")
-                            (redraw "nnmaildir+gmail:inbox")
-                            (refresh "nnmaildir+gmail:sent")
-                            (redraw "nnmaildir+gmail:sent")))))))
+                ((symbol-function 'load-mail-groups)
+                 (lambda (&rest args) (push args asked))))
+        (refresh-mail-groups))
+      (expect asked :to-equal '((("nnmaildir+gmail:inbox" "nnmaildir+gmail:sent")))))))
 
-(describe "queue-mail-refresh"
-  (it "queues the routine groups, the inbox first, for one timer turn"
-    (let ((mail-refresh-queue nil)
-          (mail-refresh-timer nil)
-          (turns nil))
-      (cl-letf (((symbol-function 'scanned-mail-groups)
-                 (lambda () (list "nnmaildir+gmail:sent" "nnmaildir+gmail:inbox"
-                                  "nnmaildir+gmail:job")))
-                ((symbol-function 'run-with-timer)
-                 (lambda (secs repeat fn) (push (list secs repeat fn) turns) (timer-create))))
-        (queue-mail-refresh)
-        (expect mail-refresh-queue
-                :to-equal '("nnmaildir+gmail:inbox" "nnmaildir+gmail:sent"
-                            "nnmaildir+gmail:job"))
-        (expect turns :to-equal '((0 nil refresh-next-mail-group)))
-        ;; a start asks twice, once per form of the server's method
-        (queue-mail-refresh)
-        (expect (length turns) :to-equal 1)))))
-
-(defmacro mail-tests--with-turn-stubs (calls alive &rest body)
-  "Run BODY with a turn's dependencies logging into CALLS, Gnus ALIVE or not."
-  (declare (indent 2))
-  `(cl-letf (((symbol-function 'gnus-alive-p) (lambda () ,alive))
-             ((symbol-function 'run-with-timer)
-              (lambda (&rest _) (push 'next-turn ,calls) (timer-create)))
-             ((symbol-function 'refresh-mail-group)
-              (lambda (g) (push (list 'refresh g) ,calls)))
-             ((symbol-function 'gnus-group-update-group)
-              (lambda (g &rest _) (push (list 'redraw g) ,calls))))
+(defmacro mail-tests--with-scan-stubs (calls loaded reading &rest body)
+  "Run BODY with the group LOADED or not and READING by a batch or not.
+Scans, loads and refreshes log into CALLS."
+  (declare (indent 3))
+  `(cl-letf (((symbol-function 'mail-group-loaded-p) (lambda (_) ,loaded))
+             ((symbol-function 'mail-group-reading-p) (lambda (_) ,reading))
+             ((symbol-function 'load-mail-groups)
+              (lambda (&rest args) (push (cons 'load args) ,calls)))
+             ((symbol-function 'refresh-mail-groups) (lambda () (push 'refresh ,calls))))
      ,@body))
 
-(describe "refresh-next-mail-group"
-  (it "sets the next turn, then reads one group and redraws its line"
-    (let ((mail-refresh-queue (list "nnmaildir+gmail:inbox" "nnmaildir+gmail:sent"))
-          (mail-refresh-timer nil)
-          (calls nil))
-      (mail-tests--with-turn-stubs calls t
-        (refresh-next-mail-group))
-      ;; set first, so a group that fails to read leaves the rest running
-      (expect (nreverse calls)
-              :to-equal '(next-turn
-                          (refresh "nnmaildir+gmail:inbox")
-                          (redraw "nnmaildir+gmail:inbox")))
-      (expect mail-refresh-queue :to-equal '("nnmaildir+gmail:sent"))
-      (expect (timerp mail-refresh-timer) :to-be t)))
-  (it "sets no turn after the last group"
-    (let ((mail-refresh-queue (list "nnmaildir+gmail:sent"))
-          (mail-refresh-timer (timer-create))
-          (calls nil))
-      (mail-tests--with-turn-stubs calls t
-        (refresh-next-mail-group))
-      (expect (nreverse calls)
-              :to-equal '((refresh "nnmaildir+gmail:sent") (redraw "nnmaildir+gmail:sent")))
-      (expect mail-refresh-queue :to-be nil)
-      (expect mail-refresh-timer :to-be nil)))
-  (it "reads nothing once Gnus has gone"
-    (let ((mail-refresh-queue (list "nnmaildir+gmail:inbox"))
-          (mail-refresh-timer nil)
-          (calls nil))
-      (mail-tests--with-turn-stubs calls nil
-        (refresh-next-mail-group))
-      (expect calls :to-be nil)
-      (expect mail-refresh-timer :to-be nil))))
-
 (describe "defer-mail-server-scan-a"
-  (it "passes the scan of one group through"
+  (it "scans a group nnmaildir holds"
     (let (calls)
-      (cl-letf (((symbol-function 'queue-mail-refresh) (lambda () (push 'queue calls))))
+      (mail-tests--with-scan-stubs calls t nil
         (expect (defer-mail-server-scan-a
                  (lambda (group server) (push (list 'scan group server) calls) 'scanned)
                  "inbox" "gmail")
                 :to-be 'scanned))
       (expect calls :to-equal '((scan "inbox" "gmail")))))
-  (it "queues the routine groups instead of scanning the whole server"
+  (it "loads a group nnmaildir lacks instead of reading it whole here"
     (let (calls)
-      (cl-letf (((symbol-function 'queue-mail-refresh) (lambda () (push 'queue calls))))
+      (mail-tests--with-scan-stubs calls nil nil
+        (expect (defer-mail-server-scan-a (lambda (&rest args) (push (cons 'scan args) calls))
+                                          "emacs" "gmail")
+                :to-be t))
+      (expect calls :to-equal '((load ("nnmaildir+gmail:emacs") t)))))
+  (it "leaves a group alone that a batch reads now"
+    ;; both would number the same new files
+    (let (calls)
+      (mail-tests--with-scan-stubs calls t t
+        (expect (defer-mail-server-scan-a (lambda (&rest args) (push (cons 'scan args) calls))
+                                          "inbox" "gmail")
+                :to-be t))
+      (expect calls :to-be nil)))
+  (it "reads the routine groups again instead of scanning the whole server"
+    (let (calls)
+      (mail-tests--with-scan-stubs calls t nil
         (expect (defer-mail-server-scan-a (lambda (&rest args) (push (cons 'scan args) calls)))
                 :to-be t))
-      (expect calls :to-equal '(queue)))))
+      (expect calls :to-equal '(refresh))))
+  (it "registers no group when asked for new ones"
+    ;; nnmaildir would register every label unread, and it would open empty
+    (let (calls)
+      (mail-tests--with-scan-stubs calls t nil
+        (expect (defer-mail-server-scan-a (lambda (&rest args) (push (cons 'scan args) calls))
+                                          'find-new-groups "gmail")
+                :to-be t))
+      (expect calls :to-be nil))))
 
 (describe "scan-mail-group-on-miss-a"
   (it "answers a hit without reading the group"
@@ -226,42 +192,23 @@ from the server-wide scan that froze the frame."
         (expect (scan-mail-group-on-miss-a (lambda (&rest _) 7) "1700.1.host" "inbox" "gmail")
                 :to-equal 7))
       (expect scans :to-be nil)))
-  (it "reads the group on a miss and asks again"
-    ;; notmuch answers from the archive, which no start reads
+  (it "reads what arrived in a group nnmaildir holds on a miss, and asks again"
     (let ((read nil) (scans nil))
-      (cl-letf (((symbol-function 'nnmaildir-request-scan)
+      (cl-letf (((symbol-function 'mail-group-loaded-p) (lambda (_) t))
+                ((symbol-function 'nnmaildir-request-scan)
                  (lambda (&rest args) (push args scans) (setq read t))))
         (expect (scan-mail-group-on-miss-a (lambda (&rest _) (and read 23195))
                                            "1700.1.host" "archive" "gmail")
                 :to-equal 23195))
       (expect scans :to-equal '(("archive" "gmail")))))
-  (it "says why Emacs waits while it reads the group"
-    ;; the first search of a session reads All Mail, about ten seconds
-    (let (said)
-      (cl-letf (((symbol-function 'nnmaildir-request-scan) #'ignore)
-                ((symbol-function 'message)
-                 (lambda (format &rest args) (setq said (apply #'format format args)))))
-        (scan-mail-group-on-miss-a #'ignore "1700.1.host" "archive" "gmail"))
-      (expect said :to-equal "Reading archive for the search..."))))
-
-(describe "scan-unknown-mail-group-a"
-  (it "answers for a group nnmaildir knows without reading it again"
+  (it "drops a hit in a group still loading rather than read it whole"
     (let (scans)
-      (cl-letf (((symbol-function 'nnmaildir-request-scan)
+      (cl-letf (((symbol-function 'mail-group-loaded-p) #'ignore)
+                ((symbol-function 'nnmaildir-request-scan)
                  (lambda (&rest args) (push args scans))))
-        (expect (scan-unknown-mail-group-a (lambda (&rest _) t) "inbox" "gmail" nil nil)
-                :to-be t))
-      (expect scans :to-be nil)))
-  (it "reads a group nnmaildir refused, then asks again with every argument"
-    (let ((read nil) (scans nil) (asked nil))
-      (cl-letf (((symbol-function 'nnmaildir-request-scan)
-                 (lambda (&rest args) (push args scans) (setq read t))))
-        (expect (scan-unknown-mail-group-a
-                 (lambda (&rest args) (push args asked) read)
-                 "emacs" "gmail" t)
-                :to-be t))
-      (expect scans :to-equal '(("emacs" "gmail")))
-      (expect asked :to-equal '(("emacs" "gmail" t) ("emacs" "gmail" t))))))
+        (expect (scan-mail-group-on-miss-a #'ignore "1700.1.host" "archive" "gmail")
+                :to-be nil))
+      (expect scans :to-be nil))))
 
 (describe "defer-bulk-mail-groups"
   (it "moves a subscribed bulk group one level above the activate level"
@@ -290,17 +237,13 @@ from the server-wide scan that froze the frame."
       (expect changes :to-be nil))))
 
 (defmacro mail-tests--with-gnus-stubs (calls &rest body)
-  "Run BODY with the Gnus entry points stubbed to log into CALLS."
+  "Run BODY with the Gnus entry points and the loader stubbed to log into CALLS."
   (declare (indent 1))
   `(cl-letf (((symbol-function 'gnus-subscribe-newsgroup)
               (lambda (g &rest _) (push (list 'subscribe g) ,calls)))
              ((symbol-function 'gnus-find-method-for-group) (lambda (_) '(nnmaildir "gmail")))
-             ((symbol-function 'gnus-activate-group)
-              (lambda (g scan &rest _) (push (list 'activate g scan) ,calls)))
-             ((symbol-function 'gnus-request-update-info)
-              (lambda (&rest _) (push 'update-info ,calls)))
-             ((symbol-function 'gnus-get-unread-articles-in-group)
-              (lambda (&rest _) (push 'count-unread ,calls)))
+             ((symbol-function 'load-mail-groups)
+              (lambda (groups &optional first) (push (list 'load groups first) ,calls)))
              ((symbol-function 'gnus-summary-read-group)
               (lambda (g &rest _) (push (list 'read g) ,calls))))
      ,@body))
@@ -325,7 +268,9 @@ from the server-wide scan that froze the frame."
                          (lambda () (setq deferred t))))
                 (subscribe-mail-groups))
               ;; inbox is already in the newsrc, the dot-dir is not a group
-              (expect (sort (mapcar #'cadr (nreverse calls)) #'string<)
+              (expect (sort (mapcar #'cadr (seq-filter (lambda (call) (eq (car call) 'subscribe))
+                                                       calls))
+                            #'string<)
                       :to-equal '("nnmaildir+gmail:archive"
                                   "nnmaildir+gmail:emacs"
                                   "nnmaildir+gmail:sent"
@@ -355,38 +300,60 @@ from the server-wide scan that froze the frame."
                       '(nnatom "www.example.org/feed" (nnatom-read-feed-function ignore))))
           (kill-buffer gnus-group-buffer))))))
 
+(defmacro mail-tests--with-empty-loader (&rest body)
+  "Run BODY with nothing loading and nothing waiting."
+  (declare (indent 0))
+  `(let ((mail-load-queue nil)
+         (mail-load-running nil)
+         (mail-load-tables nil)
+         (mail-load-job nil)
+         (mail-load-waiters nil))
+     ,@body))
+
 (describe "open-mail-inbox"
-  (it "starts Gnus, subscribes the inbox once, rescans it, then reads it"
+  (it "starts Gnus, subscribes the inbox once, reads it afresh, then opens it"
     (let ((calls nil)
           (alive nil)
+          (loaded nil)
           (gnus-newsrc-hashtb (make-hash-table :test #'equal))
-          (gnus-active-hashtb (make-hash-table :test #'equal))
           (gnus-group-buffer " *mail-tests group*"))
       (with-current-buffer (get-buffer-create gnus-group-buffer)
         (unwind-protect
-            (cl-letf (((symbol-function 'gnus-alive-p) (lambda () alive))
-                      ((symbol-function 'gnus) (lambda (&rest _) (setq alive t) (push 'gnus calls))))
-              (mail-tests--with-gnus-stubs calls
-                (open-mail-inbox))
+            (mail-tests--with-empty-loader
+              (cl-letf (((symbol-function 'gnus-alive-p) (lambda () alive))
+                        ((symbol-function 'gnus) (lambda (&rest _) (setq alive t) (push 'gnus calls)))
+                        ((symbol-function 'mail-group-loaded-p) (lambda (_) loaded)))
+                (mail-tests--with-gnus-stubs calls
+                  (cl-letf (((symbol-function 'load-mail-groups)
+                             (lambda (groups &optional first)
+                               (push (list 'load groups first) calls)
+                               (setq mail-load-queue groups))))
+                    (open-mail-inbox)
+                    ;; nothing opens before the fresh read lands
+                    (expect (assq 'read calls) :to-be nil)
+                    (setq mail-load-queue nil
+                          loaded t)
+                    (mail-load-run-waiters))))
               (expect (nreverse calls)
                       :to-equal '(gnus
                                   (subscribe "nnmaildir+gmail:inbox")
-                                  (activate "nnmaildir+gmail:inbox" scan)
+                                  (load ("nnmaildir+gmail:inbox") t)
                                   (read "nnmaildir+gmail:inbox"))))
           (kill-buffer gnus-group-buffer)))))
-  (it "skips the subscription and merges the flags when the group is known"
+  (it "says so when the inbox did not load"
     (let ((calls nil)
-          (gnus-newsrc-hashtb (make-hash-table :test #'equal))
-          (gnus-active-hashtb (make-hash-table :test #'equal)))
+          (said nil)
+          (gnus-newsrc-hashtb (make-hash-table :test #'equal)))
       (puthash "nnmaildir+gmail:inbox" '(entry (info)) gnus-newsrc-hashtb)
-      (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t)))
-        (mail-tests--with-gnus-stubs calls
-          (open-mail-inbox))
-        (expect (nreverse calls)
-                :to-equal '((activate "nnmaildir+gmail:inbox" scan)
-                            update-info
-                            count-unread
-                            (read "nnmaildir+gmail:inbox")))))))
+      (mail-tests--with-empty-loader
+        (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
+                  ((symbol-function 'mail-group-loaded-p) #'ignore)
+                  ((symbol-function 'message)
+                   (lambda (fmt &rest args) (push (apply #'format fmt args) said))))
+          (mail-tests--with-gnus-stubs calls
+            (open-mail-inbox))))
+      (expect (assq 'read calls) :to-be nil)
+      (expect said :to-equal '("The inbox did not load")))))
 
 (describe "read-mail-article"
   (it "selects the article before asking for its buffer"
@@ -483,10 +450,13 @@ from the server-wide scan that froze the frame."
 The search specs land in `captured', and what Gnus's count question
 would have been bounded by in `large'."
   (declare (indent 1))
-  `(let (captured large (summary (get-buffer-create "*Summary nnselect:search-tests*")))
+  `(let (captured large (summary (get-buffer-create "*Summary nnselect:search-tests*"))
+                  (mail-load-queue nil) (mail-load-running nil) (mail-load-tables nil)
+                  (mail-load-job nil) (mail-load-waiters nil))
      (unwind-protect
          (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
                    ((symbol-function 'subscribe-mail-groups) #'ignore)
+                   ((symbol-function 'load-unloaded-mail-groups) #'ignore)
                    ((symbol-function 'gnus-group-read-ephemeral-search-group)
                     (lambda (_no-parse specs)
                       (setq captured specs
@@ -554,6 +524,22 @@ would have been bounded by in `large'."
           (search-mail "List:x" 0)))
       (expect said :to-equal
               "The newest 2000 of 33492 matches; narrow the query to reach older ones")))
+  (it "reads a label mbsync created since the start before it searches"
+    (let (asked)
+      (mail-tests--searching 3
+        (cl-letf (((symbol-function 'load-unloaded-mail-groups) (lambda () (push t asked))))
+          (search-mail "List:x")))
+      (expect asked :to-equal '(t))))
+  (it "waits while groups load, then searches with the same query and count"
+    ;; a hit maps to its group only once nnmaildir holds the group
+    (mail-tests--searching 3
+      (setq mail-load-running (list "nnmaildir+gmail:archive"))
+      (search-mail "List:x" 50)
+      (expect captured :to-be nil)
+      (setq mail-load-running nil)
+      (mail-load-run-waiters)
+      (expect (alist-get 'query (cdr (assq 'search-query-spec captured))) :to-equal "List:x")
+      (expect (alist-get 'limit (cdr (assq 'search-query-spec captured))) :to-equal 50)))
   (it "counts nothing when every match is shown"
     (let (counted)
       (mail-tests--searching 12

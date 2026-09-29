@@ -367,6 +367,12 @@ it lies.  Gnus's commands act on the process mark, lent the queue."
   (interactive nil gnus-summary-mode)
   (unless mail-marks
     (user-error "Nothing is marked"))
+  ;; the queue stays for a later x
+  (when (and (mail-marked-articles 'delete)
+             (not (mail-group-loaded-p mail-trash-group)))
+    (load-mail-groups (list mail-trash-group) t)
+    (user-error "%s is still loading; the queue stays"
+                (gnus-group-short-name mail-trash-group)))
   (let* ((news-p (lambda (article) (news-group-p (mail-article-group article))))
          ;; Gmail never sees a news post, so none goes to the trash
          (posts (seq-filter news-p (mail-marked-articles 'delete)))

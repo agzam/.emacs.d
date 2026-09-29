@@ -580,6 +580,8 @@ can tell which articles each verb reached."
                   nil))
                ((symbol-function 'refresh-mail-group)
                 (lambda (group) (push (list 'refresh group) marks-tests-executed)))
+               ;; the trash is loaded unless a spec says otherwise
+               ((symbol-function 'mail-group-loaded-p) (lambda (_) t))
                ((symbol-function 'gnus-group-update-group) #'ignore)
                ((symbol-function 'drop-gone-articles)
                 (lambda (group articles)
@@ -596,6 +598,19 @@ can tell which articles each verb reached."
     (mapcar (lambda (step) (if (eq (car step) 'drop) (pop drops) step)) steps)))
 
 (describe "mail-execute-marks"
+  (it "keeps the queue while the trash loads, and loads it first"
+    ;; nnmaildir would refuse every move into it
+    (marks-tests-in-summary '((2 0) (4 0))
+      (setq-local mail-marks '((4 . delete) (2 . archive)))
+      (marks-tests-with-execute-stubs
+        (let (asked)
+          (cl-letf (((symbol-function 'mail-group-loaded-p) #'ignore)
+                    ((symbol-function 'load-mail-groups)
+                     (lambda (&rest args) (push args asked))))
+            (expect (mail-execute-marks) :to-throw 'user-error '("trash is still loading; the queue stays")))
+          (expect asked :to-equal '((("nnmaildir+gmail:trash") t)))))
+      (expect marks-tests-executed :to-be nil)
+      (expect mail-marks :to-equal '((4 . delete) (2 . archive)))))
   (it "moves the deletions into the trash and deletes the archives' inbox files"
     (marks-tests-in-summary '((2 0) (4 0) (9 0))
       (setq-local mail-marks '((9 . delete) (2 . archive) (4 . delete)))

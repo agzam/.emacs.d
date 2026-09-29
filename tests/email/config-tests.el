@@ -550,8 +550,10 @@ window and deletes the summary's."
                       keep-group-changes-h keep-search-group-changes-h)
                      ;; a timer, a hook or a sibling file calls these
                      ("news.el" fetch-news fetch-stale-news start-news-fetch-timer
-                      ensure-news-folders news-group-p make-news-folder news-active-groups
-                      merge-news-flags-a)
+                      ensure-news-folders news-group-p make-news-folder news-active-groups)
+                     ("load.el" load-mail-groups maildir-group-p mail-group-loaded-p
+                      mail-group-pending-p mail-group-reading-p mail-load-busy-p
+                      mail-full-group-name wait-for-mail-load load-unloaded-mail-groups)
                      ("similar.el" count-mail)))
       (with-temp-buffer
         (insert-file-contents
@@ -564,7 +566,9 @@ window and deletes the summary's."
   ;; evaluating the gnus-sum forms advises Gnus for the rest of the run
   (after-each
     (remove-hook 'gnus-summary-mode-hook #'draw-mail-mark-symbols-h)
-    (advice-remove 'gnus-update-read-articles #'keep-newer-read-marks-a))
+    (advice-remove 'gnus-update-read-articles #'keep-newer-read-marks-a)
+    (advice-remove 'gnus-summary-read-group #'wait-for-mail-group-a)
+    (advice-remove 'gnus-summary-refer-thread #'wait-for-mail-loads-a))
 
   (it "draws the star in a summary column of its own"
     ;; Gnus's own column draws the tick on a read message only
@@ -696,8 +700,16 @@ window and deletes the summary's."
     (require 'gnus)
     (expect (<= (1+ gnus-activate-level) gnus-level-subscribed) :to-be t)))
 
+(defun email-tests--remove-nnmaildir-advice ()
+  "Take off the advice the nnmaildir config forms put on."
+  (advice-remove 'nnmaildir-request-scan #'defer-mail-server-scan-a)
+  (advice-remove 'nnmaildir-request-group #'refuse-unloaded-mail-group-a)
+  (advice-remove 'nnmaildir-request-accept-article #'refuse-unloaded-mail-group-a)
+  (advice-remove 'nnmaildir-base-name-to-article-number #'scan-mail-group-on-miss-a)
+  (advice-remove 'nnmaildir--article-set-flags #'keep-flags-set-elsewhere-a))
+
 (describe "email module startup"
-  (it "reads each maildir group on its own, never the whole store at once"
+  (it "reads no group whole in the main thread, and refuses one still loading"
     (require 'nnmaildir)
     (unwind-protect
         (progn
@@ -706,41 +718,15 @@ window and deletes the summary's."
           (expect (advice-member-p #'defer-mail-server-scan-a 'nnmaildir-request-scan)
                   :to-be-truthy)
           ;; entering a label, and filing a copy or a moved message into one
-          (expect (advice-member-p #'scan-unknown-mail-group-a 'nnmaildir-request-group)
+          (expect (advice-member-p #'refuse-unloaded-mail-group-a 'nnmaildir-request-group)
                   :to-be-truthy)
-          (expect (advice-member-p #'scan-unknown-mail-group-a
+          (expect (advice-member-p #'refuse-unloaded-mail-group-a
                                    'nnmaildir-request-accept-article)
                   :to-be-truthy)
           (expect (advice-member-p #'scan-mail-group-on-miss-a
                                    'nnmaildir-base-name-to-article-number)
                   :to-be-truthy))
-      (advice-remove 'nnmaildir-request-scan #'defer-mail-server-scan-a)
-      (advice-remove 'nnmaildir-request-group #'scan-unknown-mail-group-a)
-      (advice-remove 'nnmaildir-request-accept-article #'scan-unknown-mail-group-a)
-      (advice-remove 'nnmaildir-base-name-to-article-number #'scan-mail-group-on-miss-a)
-      (advice-remove 'nnmaildir--article-set-flags #'keep-flags-set-elsewhere-a)
-      (advice-remove 'nnmaildir-request-group #'merge-news-flags-a)))
-  (it "merges a news group's flags when an entry first reads it, around that read"
-    ;; a plain entry keeps the newsrc's read marks, and a fetch delivers
-    ;; older posts read
-    (require 'nnmaildir)
-    (unwind-protect
-        (progn
-          (dolist (form (email-tests--config-forms 'nnmaildir))
-            (eval form t))
-          (expect (advice-member-p #'merge-news-flags-a 'nnmaildir-request-group)
-                  :to-be-truthy)
-          ;; the outermost advice runs after the read it wraps
-          (let (outer)
-            (advice-mapc (lambda (fn _) (unless outer (setq outer fn)))
-                         'nnmaildir-request-group)
-            (expect outer :to-be 'merge-news-flags-a)))
-      (advice-remove 'nnmaildir-request-scan #'defer-mail-server-scan-a)
-      (advice-remove 'nnmaildir-request-group #'scan-unknown-mail-group-a)
-      (advice-remove 'nnmaildir-request-accept-article #'scan-unknown-mail-group-a)
-      (advice-remove 'nnmaildir-base-name-to-article-number #'scan-mail-group-on-miss-a)
-      (advice-remove 'nnmaildir--article-set-flags #'keep-flags-set-elsewhere-a)
-      (advice-remove 'nnmaildir-request-group #'merge-news-flags-a)))
+      (email-tests--remove-nnmaildir-advice)))
   (it "saves a flag over the flags the file has now, not the ones nnmaildir read"
     ;; mbsync renames the file when the phone changes a flag
     (require 'nnmaildir)
@@ -750,14 +736,9 @@ window and deletes the summary's."
             (eval form t))
           (expect (advice-member-p #'keep-flags-set-elsewhere-a 'nnmaildir--article-set-flags)
                   :to-be-truthy))
-      (advice-remove 'nnmaildir-request-scan #'defer-mail-server-scan-a)
-      (advice-remove 'nnmaildir-request-group #'scan-unknown-mail-group-a)
-      (advice-remove 'nnmaildir-request-accept-article #'scan-unknown-mail-group-a)
-      (advice-remove 'nnmaildir-base-name-to-article-number #'scan-mail-group-on-miss-a)
-      (advice-remove 'nnmaildir--article-set-flags #'keep-flags-set-elsewhere-a)
-      (advice-remove 'nnmaildir-request-group #'merge-news-flags-a)))
-  (it "queues the routine groups once Gnus has started, after the subscriptions"
-    ;; a label subscribed at this start is queued with the others
+      (email-tests--remove-nnmaildir-advice)))
+  (it "loads every group once Gnus has started, after the subscriptions"
+    ;; a label subscribed at this start loads with the others
     (require 'gnus)
     (let ((gnus-started-hook nil))
       (dolist (form (email-tests--config-forms 'gnus))
@@ -765,8 +746,41 @@ window and deletes the summary's."
                    (equal (cadr form) ''gnus-started-hook))
           (eval form t)))
       (expect gnus-started-hook
-              :to-equal '(subscribe-mail-groups apply-mail-topics queue-mail-refresh
+              :to-equal '(subscribe-mail-groups apply-mail-topics load-all-mail-groups
                           start-feed-fetches fetch-stale-news))))
+  (it "drops every load when Gnus leaves"
+    (require 'gnus)
+    (let ((gnus-exit-gnus-hook nil))
+      (dolist (form (email-tests--config-forms 'gnus))
+        (when (and (eq (car-safe form) 'add-hook)
+                   (equal (cadr form) ''gnus-exit-gnus-hook))
+          (eval form t)))
+      (expect gnus-exit-gnus-hook :to-equal '(stop-mail-load))))
+  (it "waits for loads before a search, a thread search or entering a group"
+    (require 'gnus-sum)
+    (let ((gnus-mark-article-hook nil)
+          (gnus-select-group-hook nil)
+          (gnus-summary-prepare-exit-hook nil)
+          (gnus-exit-group-hook nil))
+      (unwind-protect
+          (progn
+            (dolist (form (email-tests--config-forms 'gnus-sum))
+              (eval form t))
+            (dolist (form (email-tests--config-forms 'gnus))
+              (when (and (eq (car-safe form) 'advice-add)
+                         (equal (cadr form) ''gnus-group-read-ephemeral-search-group))
+                (eval form t)))
+            (expect (advice-member-p #'wait-for-mail-group-a 'gnus-summary-read-group)
+                    :to-be-truthy)
+            (expect (advice-member-p #'wait-for-mail-loads-a 'gnus-summary-refer-thread)
+                    :to-be-truthy)
+            (expect (advice-member-p #'wait-for-mail-loads-a
+                                     'gnus-group-read-ephemeral-search-group)
+                    :to-be-truthy))
+        (advice-remove 'gnus-update-read-articles #'keep-newer-read-marks-a)
+        (advice-remove 'gnus-summary-read-group #'wait-for-mail-group-a)
+        (advice-remove 'gnus-summary-refer-thread #'wait-for-mail-loads-a)
+        (advice-remove 'gnus-group-read-ephemeral-search-group #'wait-for-mail-loads-a))))
   (it "creates the news store before Gnus opens its server"
     ;; Gnus gives up on a server whose directory is missing
     (require 'gnus-start)
@@ -778,14 +792,17 @@ window and deletes the summary's."
       (expect gnus-before-startup-hook :to-equal '(ensure-news-folders))))
   (it "fetches news while Emacs runs, whether Gnus runs or not"
     (expect (memq #'start-news-fetch-timer emacs-startup-hook) :to-be-truthy))
-  (it "loads the advice and the hook function before any command of their file ran"
-    (with-temp-buffer
-      (insert-file-contents
-       (expand-file-name "modules/email/autoload/mail.el" test-config-root))
-      (dolist (fn '(defer-mail-server-scan-a scan-mail-group-on-miss-a
-                    scan-unknown-mail-group-a queue-mail-refresh))
-        (expect (buffer-string)
-                :to-match (format "^;;;###autoload\n(defun %s " fn))))))
+  (it "loads the advice and the hook functions before any command of their file ran"
+    (pcase-dolist (`(,file . ,fns)
+                   '(("mail.el" defer-mail-server-scan-a scan-mail-group-on-miss-a)
+                     ("load.el" refuse-unloaded-mail-group-a wait-for-mail-group-a
+                      wait-for-mail-loads-a load-all-mail-groups stop-mail-load)))
+      (with-temp-buffer
+        (insert-file-contents
+         (expand-file-name (concat "modules/email/autoload/" file) test-config-root))
+        (dolist (fn fns)
+          (expect (buffer-string)
+                  :to-match (format "^;;;###autoload\n(defun %s " fn)))))))
 
 (describe "email module quarantine"
   (before-all
