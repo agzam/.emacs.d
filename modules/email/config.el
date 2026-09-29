@@ -395,7 +395,13 @@ columns would go to the window left of Gnus."
         ;; the mail
         message-dont-reply-to-names (regexp-opt (list mail-from-address mail-inbox-address))
         message-citation-line-function #'message-insert-formatted-citation-line
-        message-citation-line-format "On %a, %b %d, %Y at %R, %N wrote:\n"))
+        message-citation-line-format "On %a, %b %d, %Y at %R, %N wrote:\n")
+  :config
+  ;; ahead of message.el's own entry, which covers From as well
+  (add-to-list 'message-completion-alist
+               '("^\\([^ :]*-\\)?\\(To\\|B?Cc\\|Reply-To\\|Mail-Followup-To\\|Mail-Copies-To\\):"
+                 . complete-mail-address))
+  (add-hook 'message-mode-hook #'prepare-mail-addresses-h))
 
 (use-package smtpmail
   :ensure nil
