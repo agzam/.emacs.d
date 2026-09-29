@@ -93,13 +93,13 @@ of the line after the last before a command runs."
   (forward-line 1))
 
 (describe "gnus-user-format-function-D"
-  (it "draws D for a queued deletion, A for a queued archive, a space otherwise"
+  (it "draws a cross for a queued deletion, a down arrow for an archive, a space otherwise"
     (with-temp-buffer
       (setq-local mail-marks '((1 . delete) (2 . archive)))
       (expect (mapcar (lambda (n) (substring-no-properties
                                    (gnus-user-format-function-D (marks-tests-header n))))
                       '(1 2 3))
-              :to-equal '("D" "A" " "))))
+              :to-equal '("×" "↓" " "))))
   (it "colours the glyph the way line highlighting preserves"
     ;; the highlight swaps the second face of a `gnus-face' run for the
     ;; line's face; a plain face property would be overwritten
@@ -127,6 +127,83 @@ of the line after the last before a command runs."
       (expect (get-text-property 0 'gnus-face glyph) :to-be t)
       (expect (get-text-property 0 'face glyph)
               :to-equal '(gnus-summary-normal-ticked default)))))
+
+(defmacro marks-tests-with-symbols (lines &rest body)
+  "Run BODY in a real summary of LINES, whose symbols jit-lock draws.
+Each line starts as the module's summary line does, with the queue, `%U'
+and `%R' columns; line N is article N, its data mark the `%U' letter."
+  (declare (indent 1))
+  `(with-temp-buffer
+     (gnus-summary-mode)
+     (setq gnus-summary-mark-positions '((unread . 1) (replied . 2))
+           gnus-newsgroup-data nil)
+     (draw-mail-mark-symbols-h)
+     (let ((inhibit-read-only t)
+           (number 0))
+       (dolist (line ,lines)
+         (setq number (1+ number))
+         (push (gnus-data-make number (aref line 1) (point) (marks-tests-header number) 0)
+               gnus-newsgroup-data)
+         (insert (propertize line 'gnus-number number) "\n")))
+     (setq gnus-newsgroup-data (nreverse gnus-newsgroup-data))
+     (goto-char (point-min))
+     ,@body))
+
+(defun marks-tests-shown ()
+  "The `%U' and `%R' columns of every line, as redisplay draws them."
+  (jit-lock-fontify-now)
+  (save-excursion
+    (goto-char (point-min))
+    (let (shown)
+      (while (not (eobp))
+        (push (mapcar (lambda (offset)
+                        (let ((pos (+ (point) offset)))
+                          (or (get-text-property pos 'display)
+                              (string (char-after pos)))))
+                      '(1 2))
+              shown)
+        (forward-line 1))
+      (nreverse shown))))
+
+(describe "draw-mail-mark-symbols"
+  (it "shows unread mail as a dot and every read state as a blank"
+    ;; a starred read message too: the star has a column of its own
+    (marks-tests-with-symbols
+        (mapcar (lambda (mark) (format " %c  subject" mark))
+                (list gnus-unread-mark gnus-read-mark gnus-del-mark gnus-ancient-mark
+                      gnus-ticked-mark gnus-killed-mark gnus-catchup-mark
+                      gnus-low-score-mark gnus-kill-file-mark gnus-duplicate-mark
+                      gnus-sparse-mark))
+      (expect (mapcar #'car (marks-tests-shown))
+              :to-equal (cons "●" (make-list 10 " ")))))
+  (it "keeps the letter of a rarer mark"
+    (marks-tests-with-symbols
+        (mapcar (lambda (mark) (format " %c  subject" mark))
+                (list gnus-dormant-mark gnus-expirable-mark gnus-spam-mark
+                      gnus-canceled-mark))
+      (expect (mapcar #'car (marks-tests-shown)) :to-equal '("?" "E" "$" "G"))))
+  (it "shows replied and forwarded as arrows, and the unseen dot as a blank"
+    ;; unseen is mail that arrived since the group was last entered,
+    ;; mail read elsewhere included
+    (marks-tests-with-symbols
+        (mapcar (lambda (mark) (format " %c%c subject" gnus-ancient-mark mark))
+                (list gnus-replied-mark gnus-forwarded-mark gnus-unseen-mark
+                      gnus-no-mark gnus-process-mark))
+      (expect (mapcar #'cadr (marks-tests-shown))
+              :to-equal (list "↩" "↪" " " " " (string gnus-process-mark)))))
+  (it "follows a mark Gnus replaces in place"
+    ;; Gnus copies the old letter's properties onto the new one
+    (marks-tests-with-symbols (list (format " %c%c subject" gnus-ancient-mark gnus-no-mark))
+      (marks-tests-shown)
+      (cl-letf (((symbol-function 'gnus-summary-update-line) #'ignore))
+        (gnus-summary-update-mark gnus-unread-mark 'unread)
+        (gnus-summary-update-mark gnus-replied-mark 'replied))
+      (expect (marks-tests-shown) :to-equal '(("●" "↩")))))
+  (it "leaves alone a column the line format lacks"
+    (marks-tests-with-symbols (list (format " %c%c subject" gnus-unread-mark gnus-replied-mark))
+      (setq gnus-summary-mark-positions '((unread . 1)))
+      (expect (marks-tests-shown)
+              :to-equal (list (list "●" (string gnus-replied-mark)))))))
 
 (describe "mail-mark-keeping-star"
   (it "gives an unstarred message the mark it is asked for"

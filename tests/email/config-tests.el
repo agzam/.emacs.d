@@ -548,6 +548,7 @@ window and deletes the summary's."
 (describe "email module stars"
   ;; evaluating the gnus-sum forms advises Gnus for the rest of the run
   (after-each
+    (remove-hook 'gnus-summary-mode-hook #'draw-mail-mark-symbols-h)
     (advice-remove 'gnus-update-read-articles #'keep-newer-read-marks-a))
 
   (it "draws the star in a summary column of its own"
@@ -611,7 +612,24 @@ window and deletes the summary's."
       (insert-file-contents
        (expand-file-name "modules/email/autoload/marks.el" test-config-root))
       (expect (buffer-string)
-              :to-match "^;;;###autoload\n(defun mail-keep-star-on-read-h "))))
+              :to-match "^;;;###autoload\n(defun mail-keep-star-on-read-h ")))
+  (it "shows the mark letters as symbols in every summary"
+    ;; Gnus reads an article's state back from its letter, so it stays
+    (require 'gnus-sum)
+    (let ((gnus-summary-mode-hook nil)
+          (gnus-mark-article-hook nil)
+          (gnus-select-group-hook nil)
+          (gnus-summary-prepare-exit-hook nil)
+          (gnus-exit-group-hook nil))
+      (dolist (form (email-tests--config-forms 'gnus-sum))
+        (eval form t))
+      (expect gnus-summary-mode-hook :to-equal '(draw-mail-mark-symbols-h)))
+    ;; the first summary comes before any command of marks.el has run
+    (with-temp-buffer
+      (insert-file-contents
+       (expand-file-name "modules/email/autoload/marks.el" test-config-root))
+      (expect (buffer-string)
+              :to-match "^;;;###autoload\n(defun draw-mail-mark-symbols-h "))))
 
 (describe "email module subscriptions"
   (it "subscribes the inbox, emacs-devel and r/emacs on startup"

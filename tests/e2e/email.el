@@ -426,6 +426,25 @@ An untimed `read-event' is idle, and a timer ends it."
                   (gnus-summary-goto-subject article)
                   (buffer-substring-no-properties (+ 3 (line-beginning-position))
                                                   (+ 4 (line-beginning-position)))))
+              ;; what the %U and %R letters of ARTICLE's line show as,
+              ;; once jit-lock has drawn the line
+              (mark-symbols (article)
+                (save-excursion
+                  (gnus-summary-goto-subject article)
+                  ;; jit-lock signals on a buffer it was never set up in
+                  (when jit-lock-mode
+                    (jit-lock-fontify-now (line-beginning-position) (line-end-position)))
+                  (mapcar (lambda (pos)
+                            (or (get-text-property pos 'display)
+                                (string (char-after pos))))
+                          (list (+ 1 (line-beginning-position))
+                                (+ 2 (line-beginning-position))))))
+              ;; the %U and %R letters themselves
+              (mark-letters (article)
+                (save-excursion
+                  (gnus-summary-goto-subject article)
+                  (buffer-substring-no-properties (+ 1 (line-beginning-position))
+                                                  (+ 3 (line-beginning-position)))))
               ;; the maildir flags of the message with ID, as nnmaildir
               ;; saved them
               (flags-of (dir id)
@@ -748,6 +767,18 @@ An untimed `read-event' is idle, and a timer ends it."
                         :got (format "%d headers, %d unread"
                                      (length gnus-newsgroup-headers)
                                      (length gnus-newsgroup-unreads)))
+                ;; Gnus keeps its letters, and jit-lock shows symbols over
+                ;; them; a first entry finds every message unseen
+                (let ((fresh (email-e2e--article "fresh"))
+                      (seen (email-e2e--article "seen")))
+                  (record "unread mail shows a dot, read mail and the unseen dot a blank"
+                          (and (equal (mark-symbols fresh) '("●" " "))
+                               (equal (mark-letters fresh) (string gnus-unread-mark gnus-unseen-mark))
+                               (equal (mark-symbols seen) '(" " " "))
+                               (equal (mark-letters seen) (string gnus-ancient-mark gnus-unseen-mark)))
+                          :got (format "fresh %S over %S, seen %S over %S"
+                                       (mark-symbols fresh) (mark-letters fresh)
+                                       (mark-symbols seen) (mark-letters seen))))
                 (gnus-summary-goto-subject (email-e2e--article "fresh"))
                 (execute-kbd-macro "r")
                 (setq reply (current-buffer))
@@ -940,12 +971,27 @@ An untimed `read-event' is idle, and a timer ends it."
                           :got (format "line starts %S, then %S, point on %S, below is %S"
                                        before (line-marks fresh)
                                        (gnus-summary-article-number) below))
+                  ;; Gnus replaces the letter in place, keeping the old
+                  ;; letter's properties
+                  (record "the dot comes back on a message ! marks unread"
+                          (equal (car (mark-symbols fresh)) "●")
+                          :got (format "%S over %S" (mark-symbols fresh) (mark-letters fresh)))
                   (execute-kbd-macro "k!")
                   (record "! on an unread message marks it read"
                           (and (equal (line-marks fresh) " r")
                                (eql (gnus-summary-article-number) below))
                           :got (format "line starts %S, point on %S"
                                        (line-marks fresh) (gnus-summary-article-number)))
+                  (record "the dot leaves a message ! marks read"
+                          (equal (car (mark-symbols fresh)) " ")
+                          :got (format "%S over %S" (mark-symbols fresh) (mark-letters fresh)))
+                  ;; what a sent reply does to the message it answers: the
+                  ;; line keeps its face, so only the letter is redrawn
+                  (let ((bob (email-e2e--article "Re: release plan (Bob)")))
+                    (save-excursion (gnus-summary-mark-article-as-replied bob))
+                    (record "a message marked replied shows the reply arrow"
+                            (equal (cadr (mark-symbols bob)) "↩")
+                            :got (format "%S over %S" (mark-symbols bob) (mark-letters bob))))
                   (execute-kbd-macro "k=")
                   (record "= stars the message and moves down"
                           (and (equal (line-marks fresh) " !")
@@ -1008,9 +1054,9 @@ An untimed `read-event' is idle, and a timer ends it."
                        (ann (car (last plan))))
                   (gnus-summary-goto-subject seen)
                   (execute-kbd-macro "d")
-                  (record "d queues the message at point for the trash, draws D and moves down"
+                  (record "d queues the message at point for the trash, draws a cross and moves down"
                           (and (eq (alist-get seen mail-marks) 'delete)
-                               (eq (aref (line-marks seen) 0) ?D)
+                               (eq (aref (line-marks seen) 0) ?×)
                                (eq (car-safe (line-face seen)) 'dired-flagged)
                                (eql (gnus-summary-article-number) below)
                                (= 5 (length (messages-in inbox))))
@@ -1068,7 +1114,11 @@ An untimed `read-event' is idle, and a timer ends it."
                   (record "A queues the whole thread at point for archive and moves below it"
                           (and (equal (mail-marked-articles 'archive) (sort (copy-sequence plan) #'<))
                                (eql (gnus-summary-article-number) (or (article-below ann) ann)))
-                          :got (format "%S, point on %S" mail-marks (gnus-summary-article-number))))
+                          :got (format "%S, point on %S" mail-marks (gnus-summary-article-number)))
+                  (record "a queued archive draws a down arrow on every line of the thread"
+                          (seq-every-p (lambda (article) (eq (aref (line-marks article) 0) ?↓))
+                                       plan)
+                          :got (format "%S" (mapcar #'line-marks plan))))
                 (execute-kbd-macro "x")
                 (record "x moves the queued deletion into the trash maildir"
                         (equal (message-ids (messages-in trash)) '("<seen@fixture.example>"))

@@ -31,14 +31,51 @@
   ;; line highlighting swaps the second face for the line's own where
   ;; `gnus-face' is set, and overwrites the property everywhere else
   (pcase verb
-    ('delete (propertize "D" 'face (list 'dired-flagged 'default) 'gnus-face t))
-    ('archive (propertize "A" 'face (list 'dired-marked 'default) 'gnus-face t))
+    ('delete (propertize "×" 'face (list 'dired-flagged 'default) 'gnus-face t))
+    ('archive (propertize "↓" 'face (list 'dired-marked 'default) 'gnus-face t))
     (_ " ")))
 
 ;;;###autoload
 (defun gnus-user-format-function-D (header)
   "The `%uD' summary column: the verb queued on HEADER's article, if any."
   (mail-mark-glyph (alist-get (mail-header-number header) mail-marks)))
+
+;; Gnus reads an article's state back from its `%U' letter, so the
+;; letters stay in the buffer and only show as symbols
+(defvar mail-mark-symbols
+  '((unread (gnus-unread-mark . "●")
+            (gnus-read-mark . " ") (gnus-del-mark . " ") (gnus-ancient-mark . " ")
+            (gnus-ticked-mark . " ") (gnus-killed-mark . " ") (gnus-catchup-mark . " ")
+            (gnus-low-score-mark . " ") (gnus-kill-file-mark . " ")
+            (gnus-duplicate-mark . " ") (gnus-sparse-mark . " "))
+    (replied (gnus-replied-mark . "↩") (gnus-forwarded-mark . "↪")
+             (gnus-unseen-mark . " ")))
+  "What each mark variable shows as, per column of `gnus-summary-mark-positions'.
+A mark left out shows as its letter.  The star has a column of its own,
+so a starred read message reads blank here.")
+
+(defun draw-mail-mark-symbols (start end)
+  "Show the mark letters of the summary lines from START to END as symbols.
+jit-lock calls this for what redisplay shows and again after a change,
+so a letter Gnus replaces in place gets its symbol too."
+  (save-excursion
+    (goto-char start)
+    (forward-line 0)
+    (while (< (point) end)
+      (pcase-dolist (`(,column . ,symbols) mail-mark-symbols)
+        (when-let* ((offset (alist-get column gnus-summary-mark-positions)))
+          (let* ((pos (+ (point) offset))
+                 (mark (char-after pos)))
+            (put-text-property
+             pos (1+ pos) 'display
+             (cdr (seq-find (lambda (entry) (eql mark (symbol-value (car entry))))
+                            symbols))))))
+      (forward-line 1))))
+
+;;;###autoload
+(defun draw-mail-mark-symbols-h ()
+  "Show this summary's mark letters as symbols from now on."
+  (jit-lock-register #'draw-mail-mark-symbols))
 
 ;;; What a command marks, and where point goes next
 

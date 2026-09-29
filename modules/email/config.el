@@ -310,6 +310,8 @@ columns would go to the window left of Gnus."
   :ensure nil
   :defer t
   :config
+  ;; the mark letters show as symbols (`mail-mark-symbols')
+  (add-hook 'gnus-summary-mode-hook #'draw-mail-mark-symbols-h)
   ;; ahead of Gnus's own function, which marks a starred unread message
   ;; read as it is displayed and drops the star with it
   (add-hook 'gnus-mark-article-hook #'mail-keep-star-on-read-h)
