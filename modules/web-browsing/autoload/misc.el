@@ -28,7 +28,7 @@ action, else the shared (nil-type) RET.  Plain ticket references
   "Always use default (external) browser."
   (interactive (browse-url-interactive-arg "URL: "))
   ;; eww resets browse-url-function, I don't want that; the handler lists
-  ;; win over it anyway, and code-review claims every github /pull/ url there
+  ;; win over it anyway, and forge claims the topic urls of repos it tracks
   (let ((browse-url-browser-function 'browse-url-default-browser)
         (browse-url-handlers nil)
         (browse-url-default-handlers nil))

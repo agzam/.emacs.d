@@ -322,6 +322,15 @@ GraphQL `errors' alist, which otherwise dies with `listp, http'."
   :ensure (code-review :host github :repo "ag91/code-review")
   :defer t
   :after (magit forge)
+  :preface
+  ;; GitHub PR links go to the browser; code-review opens on its own commands
+  ;; only.  Its browse-url handler comes from the package autoloads and again
+  ;; from code-review-browse.  :preface is the one part :after does not gate.
+  (after! browse-url
+    (setq browse-url-default-handlers
+          (rassq-delete-all 'code-review-browse-url browse-url-default-handlers)))
+  (after! code-review-browse
+    (code-review-browse-url-uninstall))
   :init
   ;; code-review-db-database-file lives in doom-compat.el's quarantine section
   (map! :map (magit-status-mode-map

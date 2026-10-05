@@ -1719,7 +1719,7 @@ key disposition under "Migration concluded" above.
     in, commands still error on let-plist/dash/org-cliplink/embark);
     dash-docs.el (package + network); bindings/config.el and
     lisp/doom-keybinds.el (need general at load time); git module config.el
-    plus gh-notify.el/code-review.el autoloads (bodies are pure
+    plus the gh-notify.el autoload (bodies are pure
     magit/forge/gh-notify plumbing - the live magit-status probe and the
     keydump :void-suffix walk cover them); org module config.el and the
     vulpea/roam-bound autoloads (vulpea-backlinks/forward-links, count

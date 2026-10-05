@@ -73,4 +73,35 @@
       (expect (car layout) :to-be nil)
       (expect (cdr layout) :to-equal '("o")))))
 
+(describe "code-review browse-url handler"
+  ;; the package registers it from its autoloads and again as
+  ;; code-review-browse loads; :init and :config wait for magit and forge
+  :var* ((form (cl-find-if (lambda (f)
+                             (and (eq (car-safe f) 'use-package)
+                                  (eq (cadr f) 'code-review)))
+                           (git-config-tests--top-level-forms)))
+         (preface (use-package-body-forms (cddr form) :preface))
+         (pr-handler '("\\`https?://github\\.com/[^/?#]+/[^/?#]+/pull/[0-9]+"
+                       . code-review-browse-url))
+         (mail-handler '("\\`mailto:" . browse-url--mailto)))
+
+  (before-all (require 'browse-url))
+
+  (it "drops the handler the package autoloads register"
+    (let ((browse-url-default-handlers (list pr-handler mail-handler))
+          (after-load-alist nil))
+      (dolist (f preface) (eval f t))
+      (expect browse-url-default-handlers :to-equal (list mail-handler))))
+
+  (it "uninstalls it again once code-review-browse has loaded"
+    (let ((browse-url-default-handlers (list mail-handler))
+          (after-load-alist nil)
+          (load-file-name nil))
+      (spy-on 'code-review-browse-url-uninstall)
+      (dolist (f preface) (eval f t))
+      (expect 'code-review-browse-url-uninstall :not :to-have-been-called)
+      ;; what `provide' runs; providing the feature for real would leak it
+      (mapc #'funcall (cdr (assq 'code-review-browse after-load-alist)))
+      (expect 'code-review-browse-url-uninstall :to-have-been-called))))
+
 ;;; tests/git/config-tests.el ends here
