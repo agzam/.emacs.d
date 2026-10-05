@@ -1163,6 +1163,51 @@ An untimed `read-event' is idle, and a timer ends it."
                   (record "= on a visual selection of starred messages unstars each, leaving it read"
                           (equal (mapcar #'line-marks (list fresh below)) '(" r" " r"))
                           :got (format "lines start %S" (mapcar #'line-marks (list fresh below)))))
+                (let* ((pair (sort (mapcar #'email-e2e--article '("fresh" "seen")) #'<))
+                       (bob (email-e2e--article "Re: release plan (Bob)")))
+                  (cl-flet ((mark-pair ()
+                              (dolist (article pair)
+                                (gnus-summary-goto-subject article)
+                                (execute-kbd-macro "m"))
+                              (gnus-summary-goto-subject bob))
+                            (unread (article)
+                              (and (memq article gnus-newsgroup-unreads) t))
+                            (secondary (article)
+                              (aref (mark-letters article) 1)))
+                    (mark-pair)
+                    (let ((drawn (mapcar #'secondary pair))
+                          (before (mapcar #'unread pair))
+                          (bob-before (unread bob)))
+                      (execute-kbd-macro "!")
+                      (record "! with messages marked toggles them instead of the one at point, and unmarks them"
+                              (and (equal drawn (list gnus-process-mark gnus-process-mark))
+                                   (equal (mapcar #'unread pair)
+                                          (make-list 2 (not (seq-some #'identity before))))
+                                   (eq (unread bob) bob-before)
+                                   (null gnus-newsgroup-processable)
+                                   (not (memq gnus-process-mark (mapcar #'secondary pair)))
+                                   (eql (gnus-summary-article-number) bob))
+                              :got (format "drawn %S, unread %S then %S, bob %S then %S, marked %S, point on %S"
+                                           drawn before (mapcar #'unread pair) bob-before (unread bob)
+                                           gnus-newsgroup-processable (gnus-summary-article-number))))
+                    (mark-pair)
+                    (execute-kbd-macro "d")
+                    (record "d with messages marked queues them for the trash, unmarks them and stays"
+                            (and (equal (mail-marked-articles 'delete) pair)
+                                 (null gnus-newsgroup-processable)
+                                 (eql (gnus-summary-article-number) bob))
+                            :got (format "%S, marked %S, point on %S" mail-marks
+                                         gnus-newsgroup-processable (gnus-summary-article-number)))
+                    (mark-pair)
+                    (execute-kbd-macro "u")
+                    (record "u with messages marked takes them out of the queue and marks them unread"
+                            (and (null mail-marks)
+                                 (equal (mapcar #'unread pair) '(t t))
+                                 (null gnus-newsgroup-processable)
+                                 (eql (gnus-summary-article-number) bob))
+                            :got (format "%S, unread %S, marked %S, point on %S" mail-marks
+                                         (mapcar #'unread pair) gnus-newsgroup-processable
+                                         (gnus-summary-article-number)))))
                 ;; deferred deletion and archive: nothing reaches the
                 ;; store until x
                 (let* ((seen (email-e2e--article "seen"))
@@ -1238,11 +1283,16 @@ An untimed `read-event' is idle, and a timer ends it."
                   (record "a queued archive draws a down arrow on every line of the thread"
                           (seq-every-p (lambda (article) (eq (aref (line-marks article) 0) ?↓))
                                        plan)
-                          :got (format "%S" (mapcar #'line-marks plan))))
+                          :got (format "%S" (mapcar #'line-marks plan)))
+                  (gnus-summary-goto-subject seen)
+                  (execute-kbd-macro "m"))
                 (execute-kbd-macro "x")
                 (record "x moves the queued deletion into the trash maildir"
                         (equal (message-ids (messages-in trash)) '("<seen@fixture.example>"))
                         :got (format "%S" (message-ids (messages-in trash))))
+                (record "x takes the mark off a marked message it sends away"
+                        (null gnus-newsgroup-processable)
+                        :got (format "%S" gnus-newsgroup-processable))
                 (record "x deletes the archived thread's files from the label"
                         (equal (message-ids (messages-in inbox)) '("<fresh@fixture.example>"))
                         :got (format "%S" (message-ids (messages-in inbox))))
@@ -1662,6 +1712,56 @@ An untimed `read-event' is idle, and a timer ends it."
                                      (string-match-p "dan@example\\.com" (field message :to))
                                      (string-match-p "^> body of Re: list plan" (field message :body)))
                                 :got (format "%S" message)))
+                      (at to-move)
+                      (execute-kbd-macro "m")
+                      (at plan)
+                      (execute-kbd-macro (kbd "RET"))
+                      (execute-kbd-macro (kbd "C-j"))
+                      (let ((message (composed "r"))
+                            (marked (with-current-buffer summary
+                                      (copy-sequence gnus-newsgroup-processable))))
+                        (record "r in the thread view answers the message at point, not the summary's marked one"
+                                (and (string-match-p "dan@example\\.com" (field message :to))
+                                     (string-match-p "^> body of Re: list plan" (field message :body))
+                                     (not (string-match-p "to move" (field message :body)))
+                                     (equal marked (list to-move)))
+                                :got (format "%S, marked %S" message marked)))
+                      (at plan)
+                      (execute-kbd-macro "M")
+                      (let ((after-m (copy-sequence gnus-newsgroup-processable)))
+                        (execute-kbd-macro (kbd ", * *"))
+                        (let ((all (sort (copy-sequence gnus-newsgroup-processable) #'<)))
+                          (execute-kbd-macro (kbd ", * u"))
+                          (record "M marks nothing, , * * marks every message and , * u unmarks them all"
+                                  (and (equal after-m (list to-move))
+                                       (equal all (sort (list plan answer to-move to-label) #'<))
+                                       (null gnus-newsgroup-processable)
+                                       (not (eq (key-binding "%") 'gnus-uu-mark-by-regexp)))
+                                  :got (format "M %S, , * * %S, , * u %S, %% runs %S"
+                                               after-m all gnus-newsgroup-processable
+                                               (key-binding "%")))))
+                      (cl-flet ((mark-both ()
+                                  (dolist (article (list to-move to-label))
+                                    (at article)
+                                    (execute-kbd-macro "m"))
+                                  (at plan)))
+                        (mark-both)
+                        (execute-kbd-macro (kbd ", *"))
+                        (let ((menu (with-current-buffer " *transient*"
+                                      (buffer-substring-no-properties (point-min) (point-max)))))
+                          (execute-kbd-macro "!")
+                          (record ", * names the marked messages, and ! there toggles them with point staying"
+                                  (and (string-match-p "Selected: 2 marked" menu)
+                                       (memq to-move gnus-newsgroup-unreads)
+                                       (memq to-label gnus-newsgroup-unreads)
+                                       (not (memq plan gnus-newsgroup-unreads))
+                                       (null gnus-newsgroup-processable)
+                                       (eql (gnus-summary-article-number) plan))
+                                  :got (format "%S, unread %S, marked %S, point on %S" menu
+                                               gnus-newsgroup-unreads gnus-newsgroup-processable
+                                               (gnus-summary-article-number))))
+                        (mark-both)
+                        (execute-kbd-macro (kbd ", * !")))
                       (at plan)
                       (execute-kbd-macro (kbd "RET"))
                       (let ((view (selected-window)))

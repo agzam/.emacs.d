@@ -537,10 +537,11 @@ the article on display in the article buffer."
         (t (cons (current-buffer) (gnus-summary-article-number)))))
 
 (defun mail-summary-call (article command)
-  "Call COMMAND in the current summary with point on ARTICLE."
+  "Call COMMAND in the current summary on ARTICLE, ignoring its marks."
   (unless (gnus-summary-goto-subject article nil t)
     (user-error "The summary no longer shows this message"))
-  (call-interactively command))
+  (let ((gnus-newsgroup-processable nil))
+    (call-interactively command)))
 
 ;;;###autoload
 (defun run-in-mail-summary (command &optional stay)

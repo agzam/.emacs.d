@@ -355,6 +355,15 @@ KEYS holds a prefix's key and the key under it apart by a space, as
       (expect (assoc "s" leader) :to-be nil)
       (expect (assoc "g" leader) :to-be nil)))
 
+  (it "marks in bulk only behind the summary's localleader"
+    (let ((leader (email-tests--localleader-pairs config 'gnus-summary-mode-map))
+          (pairs (mapcan #'map-form-key-pairs
+                         (map-form-groups config 'gnus-summary-mode-map)))
+          (states (email-tests--key-states config 'gnus-summary-mode-map)))
+      (expect (cdr (assoc "*" leader)) :to-equal '(function mail-selection-menu))
+      (expect (list (assoc "M" pairs) (assoc "%" pairs)) :to-equal '(("M") ("%")))
+      (expect (list (cdr (assoc "M" states)) (cdr (assoc "%" states))) :to-equal '(:n :n))))
+
   (it "gives the group buffer the summary's sync, search and new message keys"
     (let ((leader (email-tests--localleader-pairs config 'gnus-group-mode-map)))
       (expect (mapcar (lambda (keys) (cdr (assoc keys leader))) '("u" "/" "c" "i"))

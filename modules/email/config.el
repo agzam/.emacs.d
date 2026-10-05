@@ -222,6 +222,8 @@ are applied again from `evil-collection-setup-hook'."
             :nv "!" #'mail-toggle-read
             :nv "=" #'mail-toggle-star
             :n "x" #'mail-execute-marks
+            :n "M" nil
+            :n "%" nil
             ;; leaving would drop the queue unasked
             :n "q" #'quit-mail-summary
             :n "ZZ" #'quit-mail-summary
@@ -244,7 +246,8 @@ are applied again from `evil-collection-setup-hook'."
              (:prefix ("s" . "sort")
               :desc "date"    "d" #'sort-mail-by-date
               :desc "author"  "a" #'sort-mail-by-author
-              :desc "subject" "s" #'sort-mail-by-subject)))
+              :desc "subject" "s" #'sort-mail-by-subject)
+             :desc "marks"         "*" #'mail-selection-menu))
       ;; gR reads the routine groups again in the background, as a sync
       ;; does; gr stays Gnus's own per-group rescan
       (map! :map gnus-group-mode-map

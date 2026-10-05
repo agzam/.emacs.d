@@ -29,6 +29,9 @@
 (defvar marks-tests-marked nil
   "(ARTICLE . MARK) pairs Gnus was asked to set, newest first.")
 
+(defvar marks-tests-secondary nil
+  "Articles whose `%R' column was redrawn, newest first.")
+
 (defun marks-tests-insert-lines (lines)
   "Insert a summary line and its Gnus data for each (ARTICLE LEVEL) in LINES."
   (dolist (line lines)
@@ -57,24 +60,28 @@ list; every other mark takes it out of both."
   "Run BODY in a stand-in summary of LINES, point on the first.
 Each line is (ARTICLE LEVEL), and article N's Message-ID is <N@x>.  Gnus
 finds lines, threads and the next message through its own data; only
-the redraw of a line and the mark Gnus sets are stubbed, and logged.
+the redraws and the mark Gnus sets are stubbed, and logged.
 The mark stub keeps the unread and tick lists the way Gnus does, and the
 inbox holds what `marks-tests-inbox' says."
   (declare (indent 1))
   `(with-temp-buffer
      (setq marks-tests-redrawn nil
-           marks-tests-marked nil)
+           marks-tests-marked nil
+           marks-tests-secondary nil)
      (let ((gnus-newsgroup-name "nnmaildir+gmail:inbox")
            (gnus-newsgroup-data nil)
            (gnus-newsgroup-data-reverse nil)
            (gnus-newsgroup-sparse nil)
            (gnus-newsgroup-unreads nil)
            (gnus-newsgroup-marked nil)
+           (gnus-newsgroup-processable nil)
            (transient-mark-mode t))
        (marks-tests-insert-lines ,lines)
        (cl-letf (((symbol-function 'gnus-summary-recenter) #'ignore)
                  ((symbol-function 'mail-mark-redraw)
                   (lambda (article) (push article marks-tests-redrawn)))
+                 ((symbol-function 'gnus-summary-update-secondary-mark)
+                  (lambda (article) (push article marks-tests-secondary)))
                  ((symbol-function 'gnus-summary-mark-article) #'marks-tests-set-mark)
                  ((symbol-function 'gnus-nnselect-group-p)
                   (lambda (group) (string-prefix-p "nnselect:" group)))
@@ -546,6 +553,106 @@ and `%R' columns; line N is article N, its data mark the `%U' letter."
       (expect gnus-newsgroup-marked :to-equal '(1 2))
       (expect gnus-newsgroup-unreads :to-equal '(2)))))
 
+(describe "a mark command with messages marked"
+  (it "acts on the marked messages, not the one at point, and leaves point there"
+    (marks-tests-in-summary '((1 0) (2 0) (3 0) (4 0))
+      (setq gnus-newsgroup-unreads (list 1 2 3 4)
+            gnus-newsgroup-processable (list 3 1))
+      (gnus-summary-goto-subject 2)
+      (mail-toggle-read)
+      (expect gnus-newsgroup-unreads :to-equal '(2 4))
+      (expect (gnus-summary-article-number) :to-be 2)))
+  (it "takes the mark off each message it acted on and redraws its mark column"
+    (marks-tests-in-summary '((1 0) (2 0) (3 0))
+      (setq gnus-newsgroup-processable (list 3 1))
+      (mail-toggle-star)
+      (expect gnus-newsgroup-marked :to-equal '(1 3))
+      (expect gnus-newsgroup-processable :to-be nil)
+      (expect marks-tests-secondary :to-have-same-items-as '(1 3))))
+  (it "lets an active region win, and unmarks only the marked messages it covers"
+    (marks-tests-in-summary '((1 0) (2 0) (3 0) (4 0))
+      (setq gnus-newsgroup-unreads (list 1 2 3 4)
+            gnus-newsgroup-processable (list 3 1))
+      (marks-tests-select 2 3)
+      (mail-toggle-read)
+      (expect gnus-newsgroup-unreads :to-equal '(1 4))
+      (expect gnus-newsgroup-processable :to-equal '(1))
+      (expect (gnus-summary-article-number) :to-be 4)))
+  (it "leaves alone a marked message the summary does not show"
+    (marks-tests-in-summary '((1 0) (2 0) (3 0))
+      (setq gnus-newsgroup-unreads (list 1 2 3)
+            gnus-newsgroup-processable (list 9 3))
+      (mail-toggle-read)
+      (expect gnus-newsgroup-unreads :to-equal '(1 2))
+      (expect gnus-newsgroup-processable :to-equal '(9))))
+  (it "takes the message at point when no marked message is shown"
+    (marks-tests-in-summary '((1 0) (2 0))
+      (setq gnus-newsgroup-unreads (list 1 2)
+            gnus-newsgroup-processable (list 9))
+      (mail-toggle-read)
+      (expect gnus-newsgroup-unreads :to-equal '(2))
+      (expect (gnus-summary-article-number) :to-be 2)))
+  (it "queues the marked messages for the trash"
+    (marks-tests-in-summary '((1 0) (2 0) (3 0))
+      (setq gnus-newsgroup-processable (list 3 1))
+      (gnus-summary-goto-subject 2)
+      (mail-mark-for-deletion)
+      (expect mail-marks :to-have-same-items-as '((1 . delete) (3 . delete)))
+      (expect gnus-newsgroup-processable :to-be nil)
+      (expect (gnus-summary-article-number) :to-be 2)))
+  (it "takes the marked messages out of the queue and marks them unread"
+    (marks-tests-in-summary '((1 0) (2 0) (3 0))
+      (setq mail-marks (list (cons 1 'delete) (cons 2 'delete))
+            gnus-newsgroup-processable (list 1 3))
+      (mail-unmark)
+      (expect mail-marks :to-equal '((2 . delete)))
+      (expect gnus-newsgroup-unreads :to-equal '(1 3))
+      (expect gnus-newsgroup-processable :to-be nil)))
+  (it "takes every thread holding a marked message, and unmarks it"
+    (marks-tests-in-summary '((10 0) (11 1) (12 1) (20 0) (30 0) (31 1))
+      (setq gnus-newsgroup-unreads (list 10 11 12 20 30 31)
+            gnus-newsgroup-processable (list 31 11))
+      (gnus-summary-goto-subject 20)
+      (mail-mark-thread-read)
+      (expect gnus-newsgroup-unreads :to-equal '(20))
+      (expect gnus-newsgroup-processable :to-be nil)
+      (expect (gnus-summary-article-number) :to-be 20)
+      (mail-mark-thread-for-deletion)
+      (expect mail-marks :to-equal '((20 . delete)))))
+  (it "keeps the marks when the command refuses"
+    (marks-tests-in-summary '((7 0) (8 0))
+      (let ((gnus-newsgroup-name "nnmaildir+gmail:github"))
+        (setq gnus-newsgroup-processable (list 8 7))
+        (expect (mail-mark-for-archive) :to-throw 'user-error '("Not in the inbox"))
+        (expect gnus-newsgroup-processable :to-equal '(8 7))))))
+
+(describe "mail-selection-menu"
+  (it "marks in bulk and runs the mark keys' commands"
+    (dolist (pair '(("*" . gnus-uu-mark-buffer)
+                    ("u" . gnus-summary-unmark-all-processable)
+                    ("s" . gnus-uu-mark-by-regexp)
+                    ("!" . mail-toggle-read)
+                    ("=" . mail-toggle-star)
+                    ("d" . mail-mark-for-deletion)
+                    ("D" . mail-mark-thread-for-deletion)
+                    ("a" . mail-mark-for-archive)
+                    ("A" . mail-mark-thread-for-archive)
+                    ("x" . mail-execute-marks)))
+      (expect (plist-get (cdr (transient-get-suffix 'mail-selection-menu (car pair))) :command)
+              :to-be (cdr pair))))
+  (it "lays its keys out in columns of at most two rows"
+    (let ((group (car (aref (get 'mail-selection-menu 'transient--layout) 2))))
+      (expect (aref group 0) :to-be 'transient-columns)
+      (dolist (column (aref group 2))
+        (expect (length (aref column 2)) :to-be-less-than 3))))
+  (it "names what its commands act on: the region, else the marked messages, else point"
+    (marks-tests-in-summary '((1 0) (2 0) (3 0))
+      (expect (mail-selection-header) :to-equal "Selected: the message at point")
+      (setq gnus-newsgroup-processable (list 9 3 1))
+      (expect (mail-selection-header) :to-equal "Selected: 2 marked")
+      (marks-tests-select 1 2)
+      (expect (mail-selection-header) :to-equal "Selected: the region's messages"))))
+
 (describe "mail-marked-articles"
   (it "answers one verb's articles, lowest first"
     (with-temp-buffer
@@ -611,6 +718,14 @@ can tell which articles each verb reached."
           (expect asked :to-equal '((("nnmaildir+gmail:trash") t)))))
       (expect marks-tests-executed :to-be nil)
       (expect mail-marks :to-equal '((4 . delete) (2 . archive)))))
+  (it "drops the messages that left from the summary's process marks"
+    (marks-tests-in-summary '((2 0) (4 0) (7 0))
+      (setq-local mail-marks '((4 . delete) (2 . archive)))
+      (setq gnus-newsgroup-processable (list 7 4 2))
+      (marks-tests-with-execute-stubs
+        (mail-execute-marks))
+      (expect gnus-newsgroup-processable :to-equal '(7))
+      (expect (nth 2 (assq 'move marks-tests-executed)) :to-equal '(4))))
   (it "moves the deletions into the trash and deletes the archives' inbox files"
     (marks-tests-in-summary '((2 0) (4 0) (9 0))
       (setq-local mail-marks '((9 . delete) (2 . archive) (4 . delete)))

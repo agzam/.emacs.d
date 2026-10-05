@@ -1,13 +1,7 @@
 ;;; modules/email/autoload/marks.el -*- lexical-binding: t; -*-
 ;;; Commentary:
-;; Marking in the summary, the way Dired flags files: every mark command
-;; acts on the message at point, or on each one the active region
-;; touches, and moves point to the message below them.
-;;
-;; Delete and archive are queued, then run by one key; a Gnus mark would
-;; count as read and reach Gmail as seen.  Delete sends the message to
-;; the trash, archive takes it out of the inbox and keeps its labels, and
-;; either way its inbox copy goes at once, whatever this summary shows.
+;; Delete and archive wait in a queue for x: a Gnus mark would count as
+;; read and reach Gmail as seen.
 ;;; Code:
 
 (require 'dired)
@@ -17,6 +11,7 @@
 (require 'nnselect)
 (require 'range)
 (require 'seq)
+(require 'transient)
 
 (defvar mail-inbox-group)
 (defvar mail-trash-group)
@@ -117,6 +112,27 @@ Reading the region deactivates it, which also ends evil's visual state."
   (gnus-summary-goto-subject (car (last articles)) nil t)
   (gnus-summary-next-subject 1))
 
+(defun mail-process-marked ()
+  "Process-marked articles the summary shows, in the order they were marked."
+  (thread-last gnus-newsgroup-processable
+               reverse
+               (seq-filter #'gnus-data-find)))
+
+(defun mail-act-on-selection (action &optional whole-threads)
+  "Call ACTION with the region's articles, else the marked ones, else point's.
+WHOLE-THREADS passes their threads instead."
+  (let* ((marked (unless (use-region-p) (mail-process-marked)))
+         (covered (or marked (mail-articles-at-point-or-region)))
+         (articles (if whole-threads
+                       (mail-whole-threads covered)
+                     (mail-real-articles covered))))
+    (save-excursion
+      (funcall action articles)
+      (apply #'gnus-summary-remove-process-mark
+             (seq-intersection gnus-newsgroup-processable (append covered articles))))
+    (unless marked
+      (mail-move-below (if whole-threads articles covered)))))
+
 ;;; The copy in the inbox
 ;;
 ;; A message is one file per label it carries, and a search result is
@@ -203,57 +219,49 @@ Only a message in the inbox can be archived."
       (mail-mark-redraw article))))
 
 (defun mail-queue (verb &optional whole-threads)
-  "Queue the message at point, or the region's, under VERB.
-A nil VERB takes them out of the queue and marks them unread, the way
-Gnus's own mark clearing does; a star stays.  WHOLE-THREADS extends
-that to every message of their threads.  Point moves to the message
-below."
-  (let* ((covered (mail-articles-at-point-or-region))
-         (articles (if whole-threads
-                       (mail-whole-threads covered)
-                     (mail-real-articles covered))))
-    (unless verb
-      (save-excursion
-        (dolist (article articles)
-          (mail-mark-keeping-star article gnus-unread-mark))))
-    (mail-mark-articles articles verb)
-    (mail-move-below (if whole-threads articles covered))))
+  "Queue the selected messages under VERB; a nil VERB unqueues them as unread.
+WHOLE-THREADS takes their threads."
+  (mail-act-on-selection
+   (lambda (articles)
+     (unless verb
+       (dolist (article articles)
+         (mail-mark-keeping-star article gnus-unread-mark)))
+     (mail-mark-articles articles verb))
+   whole-threads))
 
 ;;;###autoload
 (defun mail-mark-for-deletion ()
-  "Queue the message at point, or the region's, for the trash."
+  "Queue the selected messages for the trash."
   (interactive nil gnus-summary-mode)
   (mail-queue 'delete))
 
 ;;;###autoload
 (defun mail-mark-for-archive ()
-  "Queue the message at point, or the region's, to leave this label."
+  "Queue the selected messages to leave the inbox."
   (interactive nil gnus-summary-mode)
   (mail-queue 'archive))
 
 ;;;###autoload
 (defun mail-unmark ()
-  "Mark the message at point, or the region's, unread and out of the queue.
-A star stays."
+  "Unqueue the selected messages and mark them unread, keeping stars."
   (interactive nil gnus-summary-mode)
   (mail-queue nil))
 
 ;;;###autoload
 (defun mail-mark-thread-for-deletion ()
-  "Queue the thread at point, or each one in the region, for the trash."
+  "Queue the threads of the selected messages for the trash."
   (interactive nil gnus-summary-mode)
   (mail-queue 'delete t))
 
 ;;;###autoload
 (defun mail-mark-thread-for-archive ()
-  "Queue the thread at point, or each one in the region, to leave this label."
+  "Queue the threads of the selected messages to leave the inbox."
   (interactive nil gnus-summary-mode)
   (mail-queue 'archive t))
 
 ;;;###autoload
 (defun mail-unmark-thread ()
-  "Mark the thread at point, or each in the region, unread and out of the queue.
-Stars stay."
+  "Unqueue the threads of the selected messages and mark them unread."
   (interactive nil gnus-summary-mode)
   (mail-queue nil t))
 
@@ -313,43 +321,35 @@ the unread mark on a starred unread article and drops the star."
 
 ;;;###autoload
 (defun mail-toggle-read ()
-  "Mark the message at point, or the region's, read; unread if all are read.
-A star stays either way."
+  "Mark the selected messages read, or unread when all are read."
   (interactive nil gnus-summary-mode)
-  (let* ((covered (mail-articles-at-point-or-region))
-         (articles (mail-real-articles covered))
-         (mark (if (seq-intersection articles gnus-newsgroup-unreads)
-                   gnus-del-mark
-                 gnus-unread-mark)))
-    (save-excursion
-      (dolist (article articles)
-        (mail-mark-keeping-star article mark)))
-    (mail-move-below covered)))
+  (mail-act-on-selection
+   (lambda (articles)
+     (let ((mark (if (seq-intersection articles gnus-newsgroup-unreads)
+                     gnus-del-mark
+                   gnus-unread-mark)))
+       (dolist (article articles)
+         (mail-mark-keeping-star article mark))))))
 
 ;;;###autoload
 (defun mail-mark-thread-read ()
-  "Mark the thread at point, or each one in the region, read.
-Stars stay, which Gnus's own `gnus-summary-kill-thread' drops.  Point
-moves below the threads."
+  "Mark the threads of the selected messages read, keeping stars."
   (interactive nil gnus-summary-mode)
-  (let ((articles (mail-whole-threads (mail-articles-at-point-or-region))))
-    (save-excursion
-      (dolist (article articles)
-        (mail-mark-keeping-star article gnus-del-mark)))
-    (mail-move-below articles)))
+  (mail-act-on-selection
+   (lambda (articles)
+     (dolist (article articles)
+       (mail-mark-keeping-star article gnus-del-mark)))
+   t))
 
 ;;;###autoload
 (defun mail-toggle-star ()
-  "Star the message at point, or the region's; unstar if all are starred.
-Read and unread stay as they were."
+  "Star the selected messages, or unstar them when all are starred."
   (interactive nil gnus-summary-mode)
-  (let* ((covered (mail-articles-at-point-or-region))
-         (articles (mail-real-articles covered))
-         (star (seq-difference articles gnus-newsgroup-marked)))
-    (save-excursion
-      (dolist (article articles)
-        (mail-set-star article star)))
-    (mail-move-below covered)))
+  (mail-act-on-selection
+   (lambda (articles)
+     (let ((star (seq-difference articles gnus-newsgroup-marked)))
+       (dolist (article articles)
+         (mail-set-star article star))))))
 
 ;;; Executing
 
@@ -400,6 +400,8 @@ it lies.  Gnus's commands act on the process mark, lent the queue."
     (when (or here posts)
       (let ((gnus-newsgroup-processable (sort (append here posts) #'<)))
         (gnus-summary-delete-article)))
+    (setq gnus-newsgroup-processable
+          (seq-difference gnus-newsgroup-processable (append deletes here posts)))
     (when elsewhere
       (gnus-request-expire-articles elsewhere mail-inbox-group t)
       (refresh-mail-group mail-inbox-group)
@@ -437,6 +439,35 @@ No drops the queue, and \\[keyboard-quit] stays in the summary."
              (y-or-n-p (format "Run %s first? " (mail-queue-description))))
     (mail-execute-marks))
   (gnus-summary-exit))
+
+;;; The menu
+
+(defun mail-selection-header ()
+  "What the menu's commands act on."
+  (cond ((use-region-p) "Selected: the region's messages")
+        ((when-let* ((marked (mail-process-marked)))
+           (format "Selected: %d marked" (length marked))))
+        (t "Selected: the message at point")))
+
+;;;###autoload
+(transient-define-prefix mail-selection-menu ()
+  "Mark messages, or act on the selected ones."
+  [["Mark"
+    ("*" "every message shown" gnus-uu-mark-buffer)
+    ("u" "unmark all" gnus-summary-unmark-all-processable)]
+   [""
+    ("s" "by subject" gnus-uu-mark-by-regexp)]
+   [:description mail-selection-header
+    ("!" "read / unread" mail-toggle-read)
+    ("=" "star / unstar" mail-toggle-star)]
+   [""
+    ("d" "trash" mail-mark-for-deletion)
+    ("D" "trash threads" mail-mark-thread-for-deletion)]
+   [""
+    ("a" "archive" mail-mark-for-archive)
+    ("A" "archive threads" mail-mark-thread-for-archive)]
+   [""
+    ("x" "run the queue" mail-execute-marks)]])
 
 ;;; A search and the summaries open under it
 

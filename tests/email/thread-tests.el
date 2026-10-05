@@ -525,6 +525,14 @@ is the only treatment."
   (push (list (current-buffer) (gnus-summary-article-number) (selected-window))
         thread-tests-calls))
 
+(defvar thread-tests-marks-seen nil
+  "The process marks `thread-tests-marks-probe' saw, newest first.")
+
+(defun thread-tests-marks-probe ()
+  "Log the process marks this command sees."
+  (interactive)
+  (push gnus-newsgroup-processable thread-tests-marks-seen))
+
 (describe "mail-on-screen"
   (it "answers the summary and the message at point in the thread view"
     (thread-tests-with-buffer 11 nil
@@ -586,6 +594,24 @@ is the only treatment."
       (gnus-summary-goto-subject 11)
       (run-in-mail-summary #'thread-tests-probe t)
       (expect (butlast (car thread-tests-calls)) :to-equal (list (current-buffer) 11))))
+  (it "keeps the summary's process marks out of a command run from the view"
+    (thread-tests-with-buffer 11 nil
+      (setq thread-tests-marks-seen nil)
+      (with-current-buffer summary
+        (setq-local gnus-newsgroup-processable (list 10)))
+      (goto-char (mail-thread-message-marker (thread-tests-message 12)))
+      (save-window-excursion
+        (run-in-mail-summary #'thread-tests-marks-probe t)
+        (run-in-mail-summary #'thread-tests-marks-probe))
+      (expect thread-tests-marks-seen :to-equal '(nil nil))
+      (expect (buffer-local-value 'gnus-newsgroup-processable summary) :to-equal '(10))))
+  (it "leaves the marks in force for a command run in the summary itself"
+    (with-temp-buffer
+      (thread-tests-summary-lines '(10 11))
+      (setq-local gnus-newsgroup-processable (list 10))
+      (setq thread-tests-marks-seen nil)
+      (run-in-mail-summary #'thread-tests-marks-probe t)
+      (expect thread-tests-marks-seen :to-equal '((10)))))
   (it "refuses when the summary is gone"
     (thread-tests-with-buffer 11 nil
       (kill-buffer summary)
