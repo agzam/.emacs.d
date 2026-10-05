@@ -74,34 +74,40 @@
       (expect (cdr layout) :to-equal '("o")))))
 
 (describe "code-review browse-url handler"
-  ;; the package registers it from its autoloads and again as
-  ;; code-review-browse loads; :init and :config wait for magit and forge
+  ;; the package autoloads register it at boot and on every live package
+  ;; update; :init and :config wait for magit and forge
   :var* ((form (cl-find-if (lambda (f)
                              (and (eq (car-safe f) 'use-package)
                                   (eq (cadr f) 'code-review)))
                            (git-config-tests--top-level-forms)))
          (preface (use-package-body-forms (cddr form) :preface))
+         (pr-url "https://github.com/agzam/foo/pull/12")
          (pr-handler '("\\`https?://github\\.com/[^/?#]+/[^/?#]+/pull/[0-9]+"
                        . code-review-browse-url))
          (mail-handler '("\\`mailto:" . browse-url--mailto)))
 
   (before-all (require 'browse-url))
 
-  (it "drops the handler the package autoloads register"
-    (let ((browse-url-default-handlers (list pr-handler mail-handler))
-          (after-load-alist nil))
-      (dolist (f preface) (eval f t))
-      (expect browse-url-default-handlers :to-equal (list mail-handler))))
+  (after-each
+    (advice-remove 'browse-url-select-handler
+                   'browse-url-select-handler-no-code-review-a))
 
-  (it "uninstalls it again once code-review-browse has loaded"
-    (let ((browse-url-default-handlers (list mail-handler))
-          (after-load-alist nil)
-          (load-file-name nil))
-      (spy-on 'code-review-browse-url-uninstall)
+  (it "keeps the handler registered at boot out of browse-url"
+    (let ((browse-url-default-handlers (list pr-handler mail-handler)))
       (dolist (f preface) (eval f t))
-      (expect 'code-review-browse-url-uninstall :not :to-have-been-called)
-      ;; what `provide' runs; providing the feature for real would leak it
-      (mapc #'funcall (cdr (assq 'code-review-browse after-load-alist)))
-      (expect 'code-review-browse-url-uninstall :to-have-been-called))))
+      (expect (browse-url-select-handler pr-url) :to-be nil)))
+
+  (it "keeps it out when a package update registers it again"
+    (let ((browse-url-default-handlers (list mail-handler)))
+      (dolist (f preface) (eval f t))
+      ;; what the package autoloads run once browse-url is loaded
+      (add-to-list 'browse-url-default-handlers pr-handler)
+      (expect (browse-url-select-handler pr-url) :to-be nil)))
+
+  (it "leaves the other handlers in place"
+    (let ((browse-url-default-handlers (list pr-handler mail-handler)))
+      (dolist (f preface) (eval f t))
+      (expect (browse-url-select-handler "mailto:someone@example.com")
+              :to-be 'browse-url--mailto))))
 
 ;;; tests/git/config-tests.el ends here

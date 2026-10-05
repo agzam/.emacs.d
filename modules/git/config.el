@@ -324,13 +324,14 @@ GraphQL `errors' alist, which otherwise dies with `listp, http'."
   :after (magit forge)
   :preface
   ;; GitHub PR links go to the browser; code-review opens on its own commands
-  ;; only.  Its browse-url handler comes from the package autoloads and again
-  ;; from code-review-browse.  :preface is the one part :after does not gate.
-  (after! browse-url
+  ;; only.  Its autoloads register a browse-url handler again on every live
+  ;; package update, so the handler goes at the point browse-url picks one.
+  ;; :preface is the one part :after does not gate.
+  (defadvice! browse-url-select-handler-no-code-review-a (&rest _)
+    "Drop code-review's GitHub PR handler before `browse-url' picks one."
+    :before #'browse-url-select-handler
     (setq browse-url-default-handlers
           (rassq-delete-all 'code-review-browse-url browse-url-default-handlers)))
-  (after! code-review-browse
-    (code-review-browse-url-uninstall))
   :init
   ;; code-review-db-database-file lives in doom-compat.el's quarantine section
   (map! :map (magit-status-mode-map
