@@ -49,12 +49,16 @@
   "Turn off `show-paren-mode' buffer-locally."
   (setq-local show-paren-mode nil))
 
+(setq show-paren-delay 0.05)
+
 (use-package smartparens
   :hook (doom-first-buffer . smartparens-global-mode)
   :commands (sp-pair sp-local-pair sp-with-modes sp-point-in-comment sp-point-in-string)
   :config
   ;; default pair rules for various languages
   (require 'smartparens-config)
+  ;; Lisp modes swap show-paren for show-pair (`disable-show-paren-mode-h')
+  (setopt sp-show-pair-delay show-paren-delay)
   ;; show-parens covers this faster and without overlay distraction
   (setopt sp-highlight-pair-overlay nil
           sp-highlight-wrap-overlay nil

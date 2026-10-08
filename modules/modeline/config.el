@@ -41,9 +41,6 @@
           mode-line-compact nil
           doom-modeline-height 1
           doom-modeline-bar-width 4)
-  ;; plain defvar (C source), not a defcustom - icon glyph churn stutters
-  ;; redisplay without it
-  (setq inhibit-compacting-font-caches t)
 
   (apply-custom-modeline)
 

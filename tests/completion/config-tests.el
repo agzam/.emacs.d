@@ -7,6 +7,7 @@
                                   "helper.el")))
 (require 'buttercup)
 (require 'cl-lib)
+(require 'thingatpt)
 
 (defun completion-config-tests--top-level-forms ()
   "Read every top-level form out of the completion module's config, in file order."
@@ -20,16 +21,20 @@
         (end-of-file nil))
       (nreverse forms))))
 
-(defun completion-config-tests--consult-settings ()
-  "Plist of everything the consult `use-package' form sets under `:config'."
-  (let ((consult (cl-find-if (lambda (f)
-                               (and (eq (car-safe f) 'use-package)
-                                    (eq (cadr f) 'consult)))
-                             (completion-config-tests--top-level-forms)))
+(defun completion-config-tests--settings (package)
+  "Plist of everything PACKAGE's `use-package' form sets under `:config'."
+  (let ((block (cl-find-if (lambda (f)
+                             (and (eq (car-safe f) 'use-package)
+                                  (eq (cadr f) package)))
+                           (completion-config-tests--top-level-forms)))
         settings)
-    (dolist (form (use-package-body-forms (cddr consult) :config) settings)
+    (dolist (form (use-package-body-forms (cddr block) :config) settings)
       (when (eq (car-safe form) 'setopt)
         (setq settings (append settings (cdr form)))))))
+
+(defun completion-config-tests--consult-settings ()
+  "Plist of everything the consult `use-package' form sets under `:config'."
+  (completion-config-tests--settings 'consult))
 
 (describe "consult async delays"
   ;; The delays gate how soon rg/fd spawn and how often results reach the UI.
@@ -51,5 +56,24 @@
   (it "debounces no longer than it throttles, so the throttle still caps spawns"
     (expect (funcall delay 'consult-async-input-debounce)
             :to-be-less-than (funcall delay 'consult-async-input-throttle))))
+
+(describe "yasnippet-capf search distance"
+  ;; completion-preview calls the capf on every keystroke; unbounded, its
+  ;; symbol lookup scans from point-min, so deep in a big file typing lags.
+  :var* ((distance (plist-get (completion-config-tests--settings 'yasnippet-capf)
+                              'yasnippet-capf-max-search-distance)))
+
+  (it "is bounded"
+    (expect (natnump distance) :to-be t)
+    (expect distance :to-be-greater-than 0))
+
+  (it "still finds the whole symbol at point deep in a big buffer"
+    (with-temp-buffer
+      (emacs-lisp-mode)
+      (dotimes (_ 20000) (insert "filler-word "))
+      (insert "(some-snippet-key")
+      (expect (thing-at-point-looking-at "\\(?:\\sw\\|\\s_\\)+" distance)
+              :to-be-truthy)
+      (expect (match-string 0) :to-equal "some-snippet-key"))))
 
 ;;; config-tests.el ends here

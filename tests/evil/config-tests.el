@@ -42,11 +42,25 @@ neither evil nor general (behind `map!') is available."
   (evil-tests--read-form "modules/evil/config.el"
                          "(defadvice! yank-sets-visual-selection-a"))
 
+(defvar evil-tests--settings
+  (cdr (evil-tests--read-form "modules/evil/config.el"
+                              "(setq evil-ex-search-vim-style-regexp"))
+  "The pre-load `setq' pairs, as a plist.")
+
 (eval (evil-tests--read-form "modules/evil/config.el"
                              "(defun remember-visual-selection")
       t)
 (eval evil-tests--paste-advice t)
 (eval evil-tests--yank-advice t)
+
+(describe "search highlight delay"
+  (it "refreshes faster than macOS's quickest key repeat (15ms)"
+    ;; Evil re-arms the timer on every scroll; a delay longer than the repeat
+    ;; interval never fires while a motion key is held down.
+    (let ((delay (plist-get evil-tests--settings 'evil-ex-hl-update-delay)))
+      (expect (numberp delay) :to-be t)
+      (expect delay :to-be-greater-than 0)
+      (expect delay :to-be-less-than 0.015))))
 
 (describe "paste-sets-visual-selection-a"
   (it "hangs on both paste commands"

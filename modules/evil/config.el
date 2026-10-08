@@ -24,6 +24,8 @@
       evil-insert-state-cursor 'bar
       evil-visual-state-cursor 'hollow
       evil-ex-interactive-search-highlight 'selected-window
+      ;; under the 15ms key repeat, so highlights keep up with held-key scrolling
+      evil-ex-hl-update-delay 0.01
       evil-kbd-macro-suppress-motion-error t
       ;; TODO: switch to undo-fu(+session) when :emacs undo gets ported.
       evil-undo-system 'undo-redo
