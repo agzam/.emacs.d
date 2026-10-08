@@ -65,6 +65,12 @@ Return (UPSTREAM CLONE)."
   (elpaca-remote-tests--git upstream "reset" "-q" "--hard" "HEAD~1")
   (elpaca-remote-tests--commit upstream "two-rewritten"))
 
+(defun elpaca-remote-tests--rename-upstream (upstream clone)
+  "Rename UPSTREAM's master to main, commit on it, and fetch CLONE with prune."
+  (elpaca-remote-tests--git upstream "branch" "-m" "master" "main")
+  (elpaca-remote-tests--commit upstream "three")
+  (elpaca-remote-tests--git clone "fetch" "-q" "--prune"))
+
 (describe "elpaca-remote--config-origin-url"
   (it "reads origin's url among other remotes"
     (expect (elpaca-remote--config-origin-url
@@ -145,6 +151,135 @@ Return (UPSTREAM CLONE)."
                     ((symbol-function 'elpaca<-recipe) (lambda (_e) '(:package "pkg")))
                     ((symbol-function 'elpaca-git--repo-uri) (lambda (_recipe) "https://elsewhere/x.git")))
             (expect (elpaca-remote-sync-origins '(other)) :to-be nil)))))))
+
+(describe "elpaca-remote-gone-upstream"
+  (let (root upstream clone)
+    (before-each
+      (setq root (make-temp-file "elpaca-remote" t))
+      (pcase-let ((`(,u ,c) (elpaca-remote-tests--upstream-and-clone root)))
+        (setq upstream u clone c)))
+    (after-each (delete-directory root t))
+
+    (it "describes a branch whose upstream the remote renamed away"
+      (elpaca-remote-tests--rename-upstream upstream clone)
+      (expect (elpaca-remote-gone-upstream clone)
+              :to-equal '(:branch "master" :remote "origin" :upstream "origin/master")))
+
+    (it "describes a single-branch clone, whose fetch fails before any ref goes stale"
+      (let ((single (expand-file-name "sources/single" root)))
+        (elpaca-remote-tests--git root "clone" "-q" "--single-branch" upstream single)
+        (elpaca-remote-tests--rename-upstream upstream single)
+        (expect (elpaca-remote-gone-upstream single)
+                :to-equal '(:branch "master" :remote "origin" :upstream "origin/master"))))
+
+    (it "is nil while the upstream branch exists"
+      (expect (elpaca-remote-gone-upstream clone) :to-be nil))
+
+    (it "is nil for a branch that tracks nothing"
+      (elpaca-remote-tests--git clone "branch" "--unset-upstream")
+      (expect (elpaca-remote-gone-upstream clone) :to-be nil))
+
+    (it "is nil on a detached HEAD"
+      (elpaca-remote-tests--rename-upstream upstream clone)
+      (elpaca-remote-tests--git clone "checkout" "-q" "--detach")
+      (expect (elpaca-remote-gone-upstream clone) :to-be nil))))
+
+(describe "elpaca-remote-retarget-renamed"
+  (let (root upstream clone)
+    (before-each
+      (setq root (make-temp-file "elpaca-remote" t))
+      (pcase-let ((`(,u ,c) (elpaca-remote-tests--upstream-and-clone root)))
+        (setq upstream u clone c)))
+    (after-each (delete-directory root t))
+
+    (it "moves a failed clone onto the renamed default branch and re-merges it"
+      (let ((elpaca-sources-directory (expand-file-name "sources/" root))
+            (old (elpaca-remote-tests--git clone "rev-parse" "--short" "HEAD"))
+            merged processed out)
+        (elpaca-remote-tests--rename-upstream upstream clone)
+        (elpaca-remote-tests--with-queue '((pkg . e))
+          (cl-letf (((symbol-function 'elpaca<-status) (lambda (_e) 'failed))
+                    ((symbol-function 'elpaca<-source-dir) (lambda (_e) clone))
+                    ((symbol-function 'elpaca-merge) (lambda (id &rest _) (push id merged)))
+                    ((symbol-function 'elpaca-process-queues) (lambda (&rest _) (setq processed t))))
+            (expect (elpaca-remote-retarget-renamed
+                     (lambda (fmt &rest args) (push (apply #'format fmt args) out)))
+                    :to-equal '(pkg))))
+        (expect (elpaca-remote-tests--git clone "symbolic-ref" "--short" "HEAD") :to-equal "main")
+        (expect (elpaca-remote-tests--git clone "rev-parse" "--abbrev-ref" "@{u}") :to-equal "origin/main")
+        (expect (elpaca-remote-tests--git clone "symbolic-ref" "--short" "refs/remotes/origin/HEAD")
+                :to-equal "origin/main")
+        (expect (elpaca-remote-tests--git clone "config" "--get-all" "remote.origin.fetch")
+                :to-equal "+refs/heads/main:refs/remotes/origin/main")
+        ;; moving HEAD is the merge's job, so the rebuild still follows it
+        (expect (elpaca-remote-tests--git clone "rev-parse" "--short" "HEAD") :to-equal old)
+        (expect merged :to-equal '(pkg))
+        (expect processed :to-be t)
+        (expect out :to-equal
+                '("retarget (renamed): pkg master -> origin/main, upstream origin/master is gone"))))
+
+    (it "moves a single-branch clone, whose next fetch then succeeds"
+      (let* ((single (expand-file-name "sources/single" root))
+             (elpaca-sources-directory (expand-file-name "sources/" root)))
+        (elpaca-remote-tests--git root "clone" "-q" "--single-branch" upstream single)
+        (elpaca-remote-tests--rename-upstream upstream single)
+        (elpaca-remote-tests--with-queue '((pkg . e))
+          (cl-letf (((symbol-function 'elpaca<-status) (lambda (_e) 'failed))
+                    ((symbol-function 'elpaca<-source-dir) (lambda (_e) single)))
+            (expect (elpaca-remote-retarget-renamed) :to-equal '(pkg))))
+        (expect (elpaca-remote-tests--git single "rev-parse" "--abbrev-ref" "@{u}") :to-equal "origin/main")
+        (expect (car (elpaca-remote--git single "fetch" "-q")) :to-equal 0)))
+
+    (it "leaves a failure alone while the remote still has its upstream"
+      (let ((elpaca-sources-directory (expand-file-name "sources/" root)))
+        (elpaca-remote-tests--with-queue '((pkg . e))
+          (cl-letf (((symbol-function 'elpaca<-status) (lambda (_e) 'failed))
+                    ((symbol-function 'elpaca<-source-dir) (lambda (_e) clone)))
+            (expect (elpaca-remote-retarget-renamed) :to-be nil)))
+        (expect (elpaca-remote-tests--git clone "config" "--get-all" "remote.origin.fetch")
+                :to-equal "+refs/heads/*:refs/remotes/origin/*")))
+
+    (it "re-tracks a branch that already carries the default's name"
+      (let ((elpaca-sources-directory (expand-file-name "sources/" root)))
+        (elpaca-remote-tests--rename-upstream upstream clone)
+        (elpaca-remote-tests--git clone "branch" "-m" "master" "main")
+        (elpaca-remote-tests--with-queue '((pkg . e))
+          (cl-letf (((symbol-function 'elpaca<-status) (lambda (_e) 'failed))
+                    ((symbol-function 'elpaca<-source-dir) (lambda (_e) clone)))
+            (expect (elpaca-remote-retarget-renamed) :to-equal '(pkg))))
+        (expect (elpaca-remote-tests--git clone "rev-parse" "--abbrev-ref" "@{u}") :to-equal "origin/main")))
+
+    (it "reports a rename git refuses and re-merges nothing"
+      (let ((elpaca-sources-directory (expand-file-name "sources/" root))
+            merged processed out)
+        (elpaca-remote-tests--rename-upstream upstream clone)
+        (elpaca-remote-tests--git clone "branch" "main" "origin/main")
+        (elpaca-remote-tests--with-queue '((pkg . e))
+          (cl-letf (((symbol-function 'elpaca<-status) (lambda (_e) 'failed))
+                    ((symbol-function 'elpaca<-source-dir) (lambda (_e) clone))
+                    ((symbol-function 'elpaca-merge) (lambda (id &rest _) (push id merged)))
+                    ((symbol-function 'elpaca-process-queues) (lambda (&rest _) (setq processed t))))
+            (expect (elpaca-remote-retarget-renamed
+                     (lambda (fmt &rest args) (push (apply #'format fmt args) out)))
+                    :to-be nil)))
+        (expect (elpaca-remote-tests--git clone "symbolic-ref" "--short" "HEAD") :to-equal "master")
+        (expect merged :to-be nil)
+        (expect processed :to-be nil)
+        (expect (car out) :to-match "^retarget (renamed): pkg failed: .*main.* already exists")))
+
+    (it "leaves pinned recipes, unfailed packages and build-in-place sources alone"
+      (elpaca-remote-tests--rename-upstream upstream clone)
+      (dolist (case '((failed (:package "pkg" :branch "master") "sources/")
+                      (failed (:package "pkg" :remotes ("fork" :repo "me/pkg")) "sources/")
+                      (finished nil "sources/")
+                      (failed nil "elsewhere/")))
+        (let ((elpaca-sources-directory (expand-file-name (nth 2 case) root)))
+          (elpaca-remote-tests--with-queue '((pkg . e))
+            (cl-letf (((symbol-function 'elpaca<-status) (lambda (_e) (nth 0 case)))
+                      ((symbol-function 'elpaca<-recipe) (lambda (_e) (nth 1 case)))
+                      ((symbol-function 'elpaca<-source-dir) (lambda (_e) clone)))
+              (expect (elpaca-remote-retarget-renamed) :to-be nil)))))
+      (expect (elpaca-remote-tests--git clone "symbolic-ref" "--short" "HEAD") :to-equal "master"))))
 
 (describe "elpaca-remote-divergence"
   (let (root upstream clone)

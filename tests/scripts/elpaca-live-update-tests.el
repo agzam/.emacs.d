@@ -39,7 +39,11 @@
         elpaca-live-update--batcher nil
         elpaca-live-update--failed nil
         elpaca-live-update--saved-log-fns 'unset
-        elpaca-live-update--last-emit nil))
+        elpaca-live-update--last-emit nil
+        elpaca-live-update--retargeted nil
+        elpaca-live-update--diverged-reset nil
+        elpaca-live-update--locals-rebuilt nil
+        elpaca-live-update--integrity-rebuilt nil))
 
 (defun elpaca-live-update-tests--slurp (file)
   (with-temp-buffer (insert-file-contents file) (buffer-string)))
@@ -70,6 +74,24 @@
             (let ((content (elpaca-live-update-tests--slurp logfile)))
               (expect content :to-match "0 package(s) queued")
               (expect content :to-match "fetching \\+ merging")))
+        (elpaca-live-update-tests--reset)
+        (delete-file logfile))))
+
+  (it "re-arms every post-update phase"
+    (let ((logfile (make-temp-file "elpaca-live-update-tests")))
+      (unwind-protect
+          (with-elpaca-stubs
+            (setq elpaca-live-update--retargeted t
+                  elpaca-live-update--diverged-reset t
+                  elpaca-live-update--locals-rebuilt t
+                  elpaca-live-update--integrity-rebuilt t)
+            (elpaca-live-update-start logfile)
+            (expect (list elpaca-live-update--retargeted
+                          elpaca-live-update--diverged-reset
+                          elpaca-live-update--locals-rebuilt
+                          elpaca-live-update--integrity-rebuilt)
+                    :to-equal '(nil nil nil nil)))
+        (with-elpaca-stubs (elpaca-live-update--cleanup))
         (elpaca-live-update-tests--reset)
         (delete-file logfile))))
 
@@ -136,6 +158,22 @@
         (delete-file logfile)))))
 
 (describe "elpaca-live-update--advance"
+  (it "moves renamed-branch clones before it resets diverged ones"
+    (let (calls)
+      (unwind-protect
+          (with-elpaca-stubs
+            (cl-letf (((symbol-function 'elpaca-update-report-pending) (lambda () nil))
+                      ((symbol-function 'elpaca-remote-retarget-renamed)
+                       (lambda (&rest _) (push 'retarget calls) nil))
+                      ((symbol-function 'elpaca-remote-reset-diverged)
+                       (lambda (&rest _) (push 'diverged calls) nil)))
+              (setq elpaca-live-update--batcher (elpaca-update-report-batcher))
+              (elpaca-live-update--advance)
+              (expect calls :to-equal '(retarget))
+              (elpaca-live-update--advance)
+              (expect calls :to-equal '(diverged retarget))))
+        (elpaca-live-update-tests--reset))))
+
   (it "lands the terminal UPDATE-ERROR marker and stops the poll on a tick error"
     (let ((logfile (make-temp-file "elpaca-live-update-tests"))
           (poll (run-at-time 3600 nil #'ignore))
