@@ -34,6 +34,8 @@
 (defvar mail-load-waiters)
 (defvar mail-address-file)
 (defvar mail-addresses-read-at)
+(defvar mail-label-keys-file)
+(defvar mail-label-jobs)
 
 (defun email-e2e--write-message (file from subject id &optional date references xref body)
   "Write a minimal RFC 822 message to FILE.
@@ -209,6 +211,8 @@ An untimed `read-event' is idle, and a timer ends it."
          ;; a reply reads no notmuch and writes no saved addresses
          (mail-address-file (expand-file-name "mail-addresses.eld" e2e-work-dir))
          (mail-addresses-read-at (float-time))
+         ;; the keys the fixture's labels get stay out of the real state
+         (mail-label-keys-file (expand-file-name "mail-label-keys.eld" e2e-work-dir))
          ;; gnus-started-hook subscribes every group under this root;
          ;; the module's mail-groups would add gmane and Reddit, which
          ;; CI cannot reach
@@ -1834,29 +1838,156 @@ An untimed `read-event' is idle, and a timer ends it."
                               :got (format "moved %S, lists %S"
                                            (message-ids (messages-in moved))
                                            (message-ids (messages-in lists))))
-                      (at to-label)
-                      (execute-kbd-macro (kbd ", l"))
-                      (record ", l adds a label: a copy lands there and the message stays"
-                              (and (equal (message-ids (messages-in labelled))
-                                          '("<to-label@fixture.example>"))
-                                   (member "<to-label@fixture.example>"
-                                           (message-ids (messages-in lists))))
-                              :got (format "labelled %S, lists %S"
-                                           (message-ids (messages-in labelled))
-                                           (message-ids (messages-in lists))))
-                      ;; expreg-transient opens with visual state and replays
-                      ;; a , it lets through, except inside a keyboard macro,
-                      ;; which general assumes recorded the replayed key
-                      (at plan)
-                      (let ((general--simulate-as-is t))
-                        (execute-kbd-macro (kbd "V j , l")))
-                      (let ((ids (sort (message-ids (messages-in labelled)) #'string<)))
-                        (record ", l on a visual selection labels each message in it and ends visual state"
-                                (and (equal ids '("<list-plan-dan@fixture.example>"
-                                                  "<list-plan@fixture.example>"
+                      ;; the label menu: keys from the label names, and a
+                      ;; change that lands once its turns have run
+                      (cl-flet ((menu-text ()
+                                  (with-current-buffer " *transient*"
+                                    (buffer-substring-no-properties (point-min) (point-max))))
+                                (labels-done ()
+                                  (loads-done)
+                                  (with-timeout (10 nil)
+                                    (while mail-label-jobs
+                                      (discard-input)
+                                      (accept-process-output nil 0.05)))
+                                  (set-buffer (window-buffer (selected-window)))))
+                        (at to-label)
+                        (execute-kbd-macro (kbd ", l"))
+                        (let ((menu (menu-text)))
+                          (execute-kbd-macro (kbd "l"))
+                          ;; a GUI's Return key, which the summary binds in normal state
+                          (execute-kbd-macro (kbd "<return>"))
+                          (labels-done)
+                          (record ", l lists each label under its key, the message's own checked, and l <return> adds labelled"
+                                  (and (string-match-p "Labels: the message on screen" menu)
+                                       (string-match-p "L ✓ lists" menu)
+                                       (string-match-p "l   labelled" menu)
+                                       (string-match-p "i   Inbox" menu)
+                                       (equal (message-ids (messages-in labelled))
+                                              '("<to-label@fixture.example>"))
+                                       (member "<to-label@fixture.example>"
+                                               (message-ids (messages-in lists))))
+                                  :got (format "%S, labelled %S" menu
+                                               (message-ids (messages-in labelled)))))
+                        ;; two marked, one of them labelled already
+                        (dolist (article (list to-label plan))
+                          (at article)
+                          (execute-kbd-macro "m"))
+                        (at answer)
+                        (execute-kbd-macro (kbd ", l"))
+                        (let ((menu (menu-text)))
+                          (execute-kbd-macro (kbd "l"))
+                          (let ((toggled (menu-text)))
+                            (execute-kbd-macro (kbd "RET"))
+                            (labels-done)
+                            (record ", l on marked messages half-fills a label some have, l checks it, RET adds it and uses the marks up"
+                                    (and (string-match-p "Labels: 2 marked messages" menu)
+                                         (string-match-p "l ◐ labelled" menu)
+                                         (string-match-p "l ✓ labelled" toggled)
+                                         (equal (sort (message-ids (messages-in labelled)) #'string<)
+                                                '("<list-plan@fixture.example>"
                                                   "<to-label@fixture.example>"))
-                                     (eq evil-state 'normal))
-                                :got (format "%S, %s state" ids evil-state)))
+                                         (null gnus-newsgroup-processable))
+                                    :got (format "%S then %S, labelled %S, marked %S" menu toggled
+                                                 (message-ids (messages-in labelled))
+                                                 gnus-newsgroup-processable))))
+                        (at plan)
+                        (execute-kbd-macro (kbd ", l"))
+                        (execute-kbd-macro (kbd "l"))
+                        (execute-kbd-macro (kbd "RET"))
+                        (labels-done)
+                        (record ", l l RET takes a label off, the message staying where it is read"
+                                (and (equal (message-ids (messages-in labelled))
+                                            '("<to-label@fixture.example>"))
+                                     (member "<list-plan@fixture.example>"
+                                             (message-ids (messages-in lists)))
+                                     (with-current-buffer summary
+                                       (gnus-summary-goto-subject plan)))
+                                :got (format "labelled %S" (message-ids (messages-in labelled))))
+                        ;; expreg-transient opens with visual state and replays
+                        ;; a , it lets through, except inside a keyboard macro,
+                        ;; which general assumes recorded the replayed key
+                        (at plan)
+                        (let ((general--simulate-as-is t))
+                          (execute-kbd-macro (kbd "V j , l")))
+                        (execute-kbd-macro (kbd "l"))
+                        (execute-kbd-macro (kbd "RET"))
+                        (labels-done)
+                        (let ((ids (sort (message-ids (messages-in labelled)) #'string<)))
+                          (record ", l on a visual selection labels each message in it and ends visual state"
+                                  (and (equal ids '("<list-plan-dan@fixture.example>"
+                                                    "<list-plan@fixture.example>"
+                                                    "<to-label@fixture.example>"))
+                                       (eq evil-state 'normal))
+                                  :got (format "%S, %s state" ids evil-state)))
+                        ;; a label made from the menu, over a whole thread
+                        (at plan)
+                        (execute-kbd-macro (kbd ", L"))
+                        (let ((menu (menu-text))
+                              (travel (expand-file-name "travel/" root)))
+                          ;; savehist would keep the answer in the real history
+                          (let ((minibuffer-history nil))
+                            (execute-kbd-macro (kbd "+ travel RET")))
+                          (let ((reopened (menu-text)))
+                            (execute-kbd-macro (kbd "RET"))
+                            (labels-done)
+                            (record ", L takes the thread, + makes a label checked on it, and RET fills the label"
+                                    (and (string-match-p "Labels: 2 messages" menu)
+                                         (string-match-p "t ✓ travel" reopened)
+                                         (gnus-group-entry "nnmaildir+gmail:travel")
+                                         (equal (sort (message-ids (messages-in travel)) #'string<)
+                                                '("<list-plan-dan@fixture.example>"
+                                                  "<list-plan@fixture.example>")))
+                                    :got (format "%S then %S, travel %S" menu reopened
+                                                 (and (file-directory-p travel)
+                                                      (message-ids (messages-in travel)))))
+                            ;; in the label's own summary the message leaves
+                            ;; once the label is off
+                            (delete-other-windows)
+                            (switch-to-buffer gnus-group-buffer)
+                            ;; a group no topic names has no line to RET on;
+                            ;; entering it needs Gnus to know the copies
+                            (gnus-summary-read-group "nnmaildir+gmail:travel" t t)
+                            (let ((first (gnus-summary-article-number)))
+                              (execute-kbd-macro (kbd ", l"))
+                              (execute-kbd-macro (kbd "t"))
+                              (execute-kbd-macro (kbd "RET"))
+                              (labels-done)
+                              (record ", l t RET in the label's own summary takes the message out of view"
+                                      (and (equal gnus-newsgroup-name "nnmaildir+gmail:travel")
+                                           (= 1 (length (messages-in travel)))
+                                           (not (gnus-summary-goto-subject first)))
+                                      :got (format "%s, travel %S, %S still shown" gnus-newsgroup-name
+                                                   (message-ids (messages-in travel))
+                                                   (gnus-summary-goto-subject first))))
+                            (execute-kbd-macro "q")))
+                        ;; the thread view labels the message at point
+                        (at plan)
+                        (execute-kbd-macro (kbd "RET"))
+                        (execute-kbd-macro (kbd ", l"))
+                        (let ((menu (menu-text)))
+                          (execute-kbd-macro "q")
+                          (record ", l in the thread view opens the menu on the message at point"
+                                  (and (string-match-p "Labels: the message on screen" menu)
+                                       (string-match-p "L ✓ lists" menu)
+                                       (string-match-p "l ✓ labelled" menu))
+                                  :got menu))
+                        ;; a NUL byte in an upload makes Gmail drop the connection
+                        (with-temp-buffer
+                          (insert "From: nul@example.com\nSubject: nul\n"
+                                  "Message-ID: <nul@fixture.example>\n\nbyte\0code\n")
+                          (gnus-request-accept-article "nnmaildir+gmail:moved" nil t t))
+                        (let ((file (seq-find (lambda (file)
+                                                (equal (car (message-ids (list file)))
+                                                       "<nul@fixture.example>"))
+                                              (messages-in moved))))
+                          (record "a message filed into a label leaves its NUL bytes behind"
+                                  (and file
+                                       (with-temp-buffer
+                                         (insert-file-contents-literally file)
+                                         (and (search-forward "bytecode" nil t)
+                                              (not (search-backward "\0" nil t))
+                                              (not (search-forward "\0" nil t)))))
+                                  :got (format "%S" file))))
                       ;; U left the thread unread, and the article view read
                       ;; the root again
                       (at plan)

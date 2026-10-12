@@ -74,10 +74,12 @@ so a letter Gnus replaces in place gets its symbol too."
 
 ;;; What a command marks, and where point goes next
 
+;;;###autoload
 (defun mail-real-articles (articles)
   "ARTICLES without the sparse placeholders Gnus invents for missing parents."
   (seq-remove (lambda (article) (memq article gnus-newsgroup-sparse)) articles))
 
+;;;###autoload
 (defun mail-articles-at-point-or-region ()
   "Articles on every line the active region touches, else the one at point.
 Reading the region deactivates it, which also ends evil's visual state."
@@ -93,12 +95,14 @@ Reading the region deactivates it, which also ends evil's visual state."
       (deactivate-mark)
       (nreverse articles))))
 
+;;;###autoload
 (defun thread-articles-at-point ()
   "Articles of the thread at point, the sparse placeholders left out."
   (mail-real-articles (save-excursion
                         (gnus-summary-top-thread)
                         (gnus-summary-articles-in-thread))))
 
+;;;###autoload
 (defun mail-whole-threads (articles)
   "Articles of every thread holding one of ARTICLES, in summary order."
   (seq-uniq (mapcan (lambda (article)
@@ -107,11 +111,13 @@ Reading the region deactivates it, which also ends evil's visual state."
                         (thread-articles-at-point)))
                     articles)))
 
+;;;###autoload
 (defun mail-move-below (articles)
   "Move point to the message below the last of ARTICLES."
   (gnus-summary-goto-subject (car (last articles)) nil t)
   (gnus-summary-next-subject 1))
 
+;;;###autoload
 (defun mail-process-marked ()
   "Process-marked articles the summary shows, in the order they were marked."
   (thread-last gnus-newsgroup-processable
@@ -138,32 +144,39 @@ WHOLE-THREADS passes their threads instead."
 ;; A message is one file per label it carries, and a search result is
 ;; whichever copy the search picked.
 
+;;;###autoload
 (defun mail-article-group (article)
   "Group whose file this summary's ARTICLE is."
   (if (gnus-nnselect-group-p gnus-newsgroup-name)
       (nnselect-article-group article)
     gnus-newsgroup-name))
 
+;;;###autoload
 (defun mail-article-number (article)
   "Number of this summary's ARTICLE in the group whose file it is."
   (if (gnus-nnselect-group-p gnus-newsgroup-name)
       (nnselect-article-number article)
     article))
 
+;;;###autoload
+(defun group-articles-by-id (group message-ids)
+  "GROUP's articles of the messages with MESSAGE-IDS, as (MESSAGE-ID . ARTICLE)."
+  (when (and message-ids (eq 'nov (gnus-retrieve-headers message-ids group)))
+    (with-current-buffer nntp-server-buffer
+      (goto-char (point-min))
+      (let (found)
+        (while (not (eobp))
+          (let ((header (nnheader-parse-nov)))
+            (push (cons (mail-header-id header) (mail-header-number header)) found))
+          (forward-line 1))
+        found))))
+
 (defun inbox-articles-by-id (message-ids)
   "Inbox articles of the messages with MESSAGE-IDS, as (MESSAGE-ID . ARTICLE)."
   (when message-ids
     ;; mail that arrived since the inbox was last read has no number yet
     (gnus-activate-group mail-inbox-group 'scan)
-    (when (eq 'nov (gnus-retrieve-headers message-ids mail-inbox-group))
-      (with-current-buffer nntp-server-buffer
-        (goto-char (point-min))
-        (let (found)
-          (while (not (eobp))
-            (let ((header (nnheader-parse-nov)))
-              (push (cons (mail-header-id header) (mail-header-number header)) found))
-            (forward-line 1))
-          found)))))
+    (group-articles-by-id mail-inbox-group message-ids)))
 
 (defun mail-inbox-copies (articles)
   "Inbox copies of this summary's ARTICLES, as (ARTICLE . INBOX-ARTICLE).
@@ -180,6 +193,7 @@ An article whose message is not in the inbox is left out."
                     (cons (cdr id) inbox)))
                 ids))))
 
+;;;###autoload
 (defun drop-gone-articles (group articles)
   "Take ARTICLES out of GROUP's open summary, when that is another buffer.
 Their files went from this summary, and GROUP's lines for them would
@@ -467,7 +481,8 @@ No drops the queue, and \\[keyboard-quit] stays in the summary."
     ("a" "archive" mail-mark-for-archive)
     ("A" "archive threads" mail-mark-thread-for-archive)]
    [""
-    ("x" "run the queue" mail-execute-marks)]])
+    ("x" "run the queue" mail-execute-marks)
+    ("l" "labels" label-mail)]])
 
 ;;; A search and the summaries open under it
 

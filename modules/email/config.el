@@ -198,6 +198,8 @@ are applied again from `evil-collection-setup-hook'."
              :desc "search like this" "?" #'search-mail-like-this
              :desc "new message"      "c" #'compose-new-mail
              :desc "forward"          "f" #'forward-mail
+             :desc "labels"           "l" #'label-mail
+             :desc "thread labels"    "L" #'label-mail-threads
              :desc "quit mail"        "q" #'quit-mail
              (:prefix ("r" . "reply")
               :desc "to the list only" "l" #'reply-to-list
@@ -236,9 +238,8 @@ are applied again from `evil-collection-setup-hook'."
             :n "zM" #'gnus-summary-hide-all-threads
             :n "zR" #'gnus-summary-show-all-threads
             (:localleader
-             ;; Gmail's Move to and Label as: a label is a group
+             ;; Gmail's Move to: a label is a group
              :desc "move to label" "m" #'gnus-summary-move-article
-             :desc "add label"     "l" #'gnus-summary-copy-article
              :desc "narrow"        "n" #'gnus-summary-limit-map
              (:prefix ("t" . "thread")
               :desc "fetch from every group" "f" #'gnus-summary-refer-thread
@@ -374,7 +375,9 @@ columns would go to the window left of Gnus."
   (advice-add 'nnmaildir-request-accept-article :around #'refuse-unloaded-mail-group-a)
   (advice-add 'nnmaildir-base-name-to-article-number :around #'scan-mail-group-on-miss-a)
   ;; a flag Gnus saves would drop the flags the phone changed on that file
-  (advice-add 'nnmaildir--article-set-flags :around #'keep-flags-set-elsewhere-a))
+  (advice-add 'nnmaildir--article-set-flags :around #'keep-flags-set-elsewhere-a)
+  ;; a copy or move is an upload, and Gmail refuses a NUL byte in one
+  (advice-add 'nnmaildir-request-accept-article :around #'accept-mail-without-nul-a))
 
 (use-package gnus-search
   :ensure nil

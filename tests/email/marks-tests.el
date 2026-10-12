@@ -637,7 +637,8 @@ and `%R' columns; line N is article N, its data mark the `%U' letter."
                     ("D" . mail-mark-thread-for-deletion)
                     ("a" . mail-mark-for-archive)
                     ("A" . mail-mark-thread-for-archive)
-                    ("x" . mail-execute-marks)))
+                    ("x" . mail-execute-marks)
+                    ("l" . label-mail)))
       (expect (plist-get (cdr (transient-get-suffix 'mail-selection-menu (car pair))) :command)
               :to-be (cdr pair))))
   (it "lays its keys out in columns of at most two rows"

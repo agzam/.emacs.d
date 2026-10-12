@@ -52,6 +52,7 @@ With FULL, the mail sync runs every tier at once."
 
 ;;; Navigation
 
+;;;###autoload
 (defun subscribe-mail-group (group)
   "Subscribe GROUP unless the newsrc already lists it.
 Gnus resolves a server it has not opened to a bare method and keeps that
@@ -231,6 +232,7 @@ LIMIT caps how many, `mail-search-limit' by default; 0 or a count past
                    (format "a prefix argument shows up to %d" mail-search-limit-max)
                  "narrow the query to reach older ones")))))
 
+;;;###autoload
 (defun mail-file-group (file)
   "Group of FILE, a message file in the Gmail store or the news store, or nil."
   (seq-some (pcase-lambda (`(,root . ,prefix))
@@ -276,6 +278,7 @@ names a message's copies in the same order with and without
       (puthash (car (split-string name ":")) (expand-file-name name dir) names))
     names))
 
+;;;###autoload
 (defun current-mail-file (file listings)
   "FILE under the name it has now, or nil once it is gone.
 A scan moves new mail into cur/ and a saved flag renames the file, and
@@ -365,6 +368,23 @@ the file to it would drop a flag the phone changed since."
                  (rebase-mail-flags old new-suffix now)
                new-suffix)
              curdir)))
+
+;;;###autoload
+(defun accept-mail-without-nul-a (fn &rest args)
+  "Call FN with ARGS to file the current buffer's article, NUL bytes dropped.
+Gmail closes the connection on a NUL in an upload, and mbsync then fails
+that folder on every run.  nnmaildir writes the buffer when it has no
+`nnmaildir--file' to link."
+  (if (save-excursion
+        (goto-char (point-min))
+        (search-forward "\0" nil t))
+      (let ((nnmaildir--file nil))
+        (save-excursion
+          (goto-char (point-min))
+          (while (search-forward "\0" nil t)
+            (replace-match "" t t)))
+        (apply fn args))
+    (apply fn args)))
 
 ;;; Order and folds
 

@@ -339,12 +339,18 @@ KEYS holds a prefix's key and the key under it apart by a space, as
                           (function gnus-summary-hide-all-threads)
                           (function gnus-summary-show-all-threads)))))
 
+  (it "opens the label menu on , l and , L wherever a message is read"
+    (dolist (map '(gnus-summary-mode-map gnus-article-mode-map mail-thread-mode-map))
+      (let ((leader (email-tests--localleader-pairs config map)))
+        (expect (list (cdr (assoc "l" leader)) (cdr (assoc "L" leader)))
+                :to-equal '((function label-mail) (function label-mail-threads))))))
+
   (it "labels, narrows, sorts and handles threads from the summary's localleader"
     (let ((leader (email-tests--localleader-pairs config 'gnus-summary-mode-map)))
       (expect (mapcar (lambda (keys) (cdr (assoc keys leader)))
                       '("m" "l" "n" "t f" "t r" "s d" "s a" "s s"))
               :to-equal '((function gnus-summary-move-article)
-                          (function gnus-summary-copy-article)
+                          (function label-mail)
                           (function gnus-summary-limit-map)
                           (function gnus-summary-refer-thread)
                           (function mail-mark-thread-read)
@@ -548,7 +554,9 @@ window and deletes the summary's."
                       sort-mail-by-subject toggle-mail-thread-fold
                       ;; a search, an advice or a sibling file calls these
                       search-likeliest-copies-a read-mail-search-limit refresh-mail-group
-                      keep-flags-set-elsewhere-a maildir-groups)
+                      keep-flags-set-elsewhere-a maildir-groups accept-mail-without-nul-a
+                      subscribe-mail-group mail-file-group current-mail-file)
+                     ("labels.el" label-mail label-mail-threads)
                      ;; the first group line draws through the format function
                      ("groups.el" gnus-user-format-function-C apply-mail-topics
                       add-mail-group defer-news-group-h
@@ -556,7 +564,11 @@ window and deletes the summary's."
                      ("marks.el" mail-mark-thread-read quit-mail-summary
                       note-entry-marks-h carry-search-marks-h
                       activate-search-hit-groups-h keep-newer-read-marks-a
-                      keep-group-changes-h keep-search-group-changes-h)
+                      keep-group-changes-h keep-search-group-changes-h
+                      ;; the label menu takes its selection the mark keys' way
+                      mail-real-articles mail-articles-at-point-or-region
+                      thread-articles-at-point mail-whole-threads mail-process-marked
+                      mail-article-group group-articles-by-id drop-gone-articles)
                      ;; a timer, a hook or a sibling file calls these
                      ("news.el" fetch-news fetch-stale-news start-news-fetch-timer
                       ensure-news-folders news-group-p make-news-folder news-active-groups)
@@ -715,7 +727,8 @@ window and deletes the summary's."
   (advice-remove 'nnmaildir-request-group #'refuse-unloaded-mail-group-a)
   (advice-remove 'nnmaildir-request-accept-article #'refuse-unloaded-mail-group-a)
   (advice-remove 'nnmaildir-base-name-to-article-number #'scan-mail-group-on-miss-a)
-  (advice-remove 'nnmaildir--article-set-flags #'keep-flags-set-elsewhere-a))
+  (advice-remove 'nnmaildir--article-set-flags #'keep-flags-set-elsewhere-a)
+  (advice-remove 'nnmaildir-request-accept-article #'accept-mail-without-nul-a))
 
 (describe "email module startup"
   (it "reads no group whole in the main thread, and refuses one still loading"
@@ -744,6 +757,16 @@ window and deletes the summary's."
           (dolist (form (email-tests--config-forms 'nnmaildir))
             (eval form t))
           (expect (advice-member-p #'keep-flags-set-elsewhere-a 'nnmaildir--article-set-flags)
+                  :to-be-truthy))
+      (email-tests--remove-nnmaildir-advice)))
+  (it "files a copy or a moved message without NUL bytes, which Gmail refuses"
+    (require 'nnmaildir)
+    (unwind-protect
+        (progn
+          (dolist (form (email-tests--config-forms 'nnmaildir))
+            (eval form t))
+          (expect (advice-member-p #'accept-mail-without-nul-a
+                                   'nnmaildir-request-accept-article)
                   :to-be-truthy))
       (email-tests--remove-nnmaildir-advice)))
   (it "loads every group once Gnus has started, after the subscriptions"
