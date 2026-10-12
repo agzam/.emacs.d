@@ -65,6 +65,7 @@
   "Non-nil when GROUP is an nnmaildir group."
   (string-prefix-p "nnmaildir+" group))
 
+;;;###autoload
 (defun mail-group-server (group)
   "The nnmaildir server struct of GROUP, or nil while that server is closed."
   (alist-get (car (mail-table-group-parts group)) nnmaildir--servers nil nil #'equal))
@@ -354,7 +355,9 @@ A maildir that changed while the batch read it is read again."
             (mail-load-apply-marks info header (and old (nnmaildir--grp-mmth old))))
           (gnus-activate-group group nil nil (gnus-find-method-for-group group))
           (gnus-get-unread-articles-in-group info (gnus-active group))
-          (gnus-group-update-group group t)))
+          (gnus-group-update-group group t))
+        ;; a label read again carries what the phone filed into it
+        (refresh-mail-labels-soon))
       (unless fresh
         (load-mail-groups (list group))))))
 

@@ -75,6 +75,18 @@ Every start puts these groups back into their topic, in this order, and
 they are listed even with nothing unread.  Groups and topics this does
 not name stay where they were moved.")
 
+(defvar mail-label-colors
+  '(("clojure" "#3e9a5e" "white")
+    ("emacs" "#5279df" "white")
+    ("friends" "#225930" "white")
+    ("Health" "#e78ca8" "#222222")
+    ("job" "#9b811e" "white")
+    ("kids" "#af91fb" "#222222")
+    ("money" "#3e9a5e" "white")
+    ("org-mode" "#734856" "white"))
+  "Chip colors of the labels Gmail colors, as (LABEL BACKGROUND TEXT).
+Any other label's chip takes the face `mail-label'.")
+
 (defvar mail-treat-quotes t
   "Treatment condition for `highlight-mail-quotes', like the gnus-treat ones.")
 
@@ -148,8 +160,8 @@ not name stay where they were moved.")
         gnus-thread-sort-functions '(gnus-thread-sort-by-most-recent-date)
         gnus-summary-thread-gathering-function #'gnus-gather-threads-by-references
         ;; %uD is the queued delete or archive and %uS the star, both
-        ;; drawn by marks.el
-        gnus-summary-line-format "%uD%U%R%uS %-16,16&user-date; %-24,24f %B%s\n"
+        ;; drawn by marks.el; %uL holds the labels, drawn by labels.el
+        gnus-summary-line-format "%uD%U%R%uS %-16,16&user-date; %-24,24f %B%uL%s\n"
         gnus-sum-thread-tree-root ""
         gnus-sum-thread-tree-false-root ""
         gnus-sum-thread-tree-single-indent ""
@@ -322,6 +334,7 @@ columns would go to the window left of Gnus."
   :config
   ;; the mark letters show as symbols (`mail-mark-symbols')
   (add-hook 'gnus-summary-mode-hook #'draw-mail-mark-symbols-h)
+  (add-hook 'gnus-summary-mode-hook #'draw-mail-labels-h)
   ;; ahead of Gnus's own function, which marks a starred unread message
   ;; read as it is displayed and drops the star with it
   (add-hook 'gnus-mark-article-hook #'mail-keep-star-on-read-h)
@@ -377,7 +390,10 @@ columns would go to the window left of Gnus."
   ;; a flag Gnus saves would drop the flags the phone changed on that file
   (advice-add 'nnmaildir--article-set-flags :around #'keep-flags-set-elsewhere-a)
   ;; a copy or move is an upload, and Gmail refuses a NUL byte in one
-  (advice-add 'nnmaildir-request-accept-article :around #'accept-mail-without-nul-a))
+  (advice-add 'nnmaildir-request-accept-article :around #'accept-mail-without-nul-a)
+  ;; a label added, removed or archived away shows on every summary
+  (advice-add 'nnmaildir-request-accept-article :after #'refresh-mail-labels-soon)
+  (advice-add 'nnmaildir-request-expire-articles :after #'refresh-mail-labels-soon))
 
 (use-package gnus-search
   :ensure nil

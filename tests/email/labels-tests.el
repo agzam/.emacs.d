@@ -12,6 +12,8 @@
 (defvar mail-inbox-group "nnmaildir+gmail:inbox")
 (defvar mail-trash-group "nnmaildir+gmail:trash")
 (defvar mail-archive-group "nnmaildir+gmail:archive")
+(defvar mail-label-colors nil)
+(defvar gnus-tmp-level)
 
 (load-module-file "scripts/mail-load.el")
 (load-module-file "modules/email/autoload/load.el")
@@ -553,5 +555,200 @@
          (lambda (&rest _) (setq seen (list nnmaildir--file (buffer-string))))
          "job")
         (expect seen :to-equal '("/store/inbox/cur/1:2,S" "Subject: x\n\nplain\n"))))))
+
+(describe "mail-label-groups"
+  (it "offers the inbox first, then the labels by name, without Sent, Trash and All Mail"
+    (let ((gnus-message-archive-group "nnmaildir+gmail:sent"))
+      (cl-letf (((symbol-function 'maildir-groups)
+                 (lambda ()
+                   (mapcar #'labels-tests-group
+                           '("sent" "job" "archive" "inbox" "Health" "trash" "clojure")))))
+        (expect (mapcar #'mail-label-name (mail-label-groups))
+                :to-equal '("Inbox" "clojure" "Health" "job"))))))
+
+;;; On the summary line
+
+(defun labels-tests-tables (&rest labels)
+  "Tables like `mail-label-tables' answers, from LABELS as (NAME ARTICLE...).
+A message is <ARTICLE@x>, as `labels-tests-header' makes it."
+  (mapcar (pcase-lambda (`(,name . ,articles))
+            (let ((ids (make-hash-table :test #'equal)))
+              (dolist (article articles)
+                (puthash (format "<%d@x>" article) t ids))
+              (cons (if (equal name "Inbox") mail-inbox-group (labels-tests-group name)) ids)))
+          labels))
+
+(defun labels-tests-summary (group lines)
+  "Fill the current buffer the way GROUP's summary format draws LINES.
+Each of LINES is (ARTICLE LEVEL): the thread's indent, the slot, the subject."
+  (setq-local gnus-newsgroup-name group)
+  (setq-local gnus-newsgroup-data nil)
+  (pcase-dolist (`(,article ,level) lines)
+    (push (gnus-data-make article gnus-read-mark (1+ (point)) (labels-tests-header article) level)
+          gnus-newsgroup-data)
+    (insert (propertize (concat (make-string (* 2 level) ?\s)
+                                (propertize " " 'mail-labels level)
+                                (format "subject %d\n" article))
+                        'gnus-number article)))
+  (setq gnus-newsgroup-data (nreverse gnus-newsgroup-data)))
+
+(defun labels-tests-shown (article)
+  "Label names the slot of ARTICLE's line shows."
+  (save-excursion
+    (goto-char (point-min))
+    (while (not (eql (get-text-property (point) 'gnus-number) article))
+      (forward-line 1))
+    (let ((slot (text-property-not-all (point) (line-end-position) 'mail-labels nil)))
+      (split-string (substring-no-properties (or (get-text-property slot 'display)
+                                                 "undrawn"))))))
+
+(describe "mail-label-tables"
+  (it "lists every label nnmaildir holds, the inbox first, Sent, Trash and All Mail left out"
+    (let* ((server (make-nnmaildir--srv :address "gmail" :groups (make-hash-table :test #'equal)))
+           (nnmaildir--servers (list (cons "gmail" server)))
+           (gnus-message-archive-group "nnmaildir+gmail:sent"))
+      (dolist (name '("job" "sent" "inbox" "trash" "Health" "archive" "clojure"))
+        (let ((ids (make-hash-table :test #'equal)))
+          (puthash (concat "<" name "@x>") t ids)
+          (puthash name (make-nnmaildir--grp :name name :mlist ids)
+                   (nnmaildir--srv-groups server))))
+      (let ((tables (mail-label-tables)))
+        (expect (mapcar #'car tables)
+                :to-equal (mapcar #'labels-tests-group '("inbox" "clojure" "Health" "job")))
+        ;; nnmaildir's own tables, not copies
+        (expect (gethash "<job@x>" (cdr (assoc (labels-tests-group "job") tables))) :to-be t))))
+  (it "has nothing while the Gmail server is closed"
+    (let ((nnmaildir--servers nil))
+      (expect (mail-label-tables) :to-be nil))))
+
+(describe "mail-message-labels"
+  (it "names each label holding one of the messages, in the tables' order"
+    (let ((tables (labels-tests-tables '("Inbox" 1) '("job" 2 3) '("kids" 3) '("money" 9))))
+      (expect (mail-message-labels '("<3@x>") tables)
+              :to-equal (mapcar #'labels-tests-group '("job" "kids")))
+      (expect (mail-message-labels '("<1@x>" "<3@x>") tables)
+              :to-equal (list mail-inbox-group (labels-tests-group "job")
+                              (labels-tests-group "kids")))
+      (expect (mail-message-labels '("<4@x>") tables) :to-be nil))))
+
+(describe "mail-label-chips"
+  (it "draws each label as a chip in its Gmail colors, a space between chips"
+    (let* ((mail-label-colors '(("job" "#9b811e" "white")))
+           (chips (mail-label-chips (list (labels-tests-group "job") mail-inbox-group))))
+      (expect (substring-no-properties chips) :to-equal " job   Inbox ")
+      (expect (get-text-property 1 'face chips)
+              :to-equal '(:background "#9b811e" :foreground "white"))
+      (expect (get-text-property 5 'face chips) :to-be nil)
+      ;; a label Gmail gives no colors
+      (expect (get-text-property 7 'face chips) :to-be 'mail-label))))
+
+(describe "mail-label-chips-of"
+  (it "chips every label a message of the thread carries, where the group shows labels"
+    (cl-letf (((symbol-function 'mail-label-tables)
+               (lambda () (labels-tests-tables '("Inbox" 1) '("job" 2) '("kids" 9)))))
+      (expect (substring-no-properties
+               (mail-label-chips-of (labels-tests-group "job") '("<1@x>" "<2@x>")))
+              :to-equal " Inbox   job ")
+      (expect (mail-label-chips-of (labels-tests-group "job") '("<5@x>")) :to-be nil)
+      (expect (mail-label-chips-of "nnmaildir+news:gmane.emacs.devel" '("<1@x>")) :to-be nil))))
+
+(describe "mail-labels-shown-p"
+  (it "shows labels in a Gmail folder and in search results only"
+    (expect (mail-labels-shown-p mail-inbox-group) :to-be-truthy)
+    (expect (mail-labels-shown-p (labels-tests-group "archive")) :to-be-truthy)
+    (expect (mail-labels-shown-p "nnselect:nnselect-87a5d8") :to-be-truthy)
+    (expect (mail-labels-shown-p "nnmaildir+news:gmane.emacs.devel") :to-be nil)
+    (expect (mail-labels-shown-p "nnatom+www.reddit.com/r/emacs/new/.rss:r/emacs") :to-be nil)
+    (expect (mail-labels-shown-p nil) :to-be nil)))
+
+(describe "gnus-user-format-function-L"
+  (it "leaves a slot that knows the line's thread level, in a Gmail folder or a search"
+    (dolist (group (list mail-inbox-group "nnselect:nnselect-87a5d8"))
+      (let ((gnus-newsgroup-name group)
+            (gnus-tmp-level 2))
+        (let ((slot (gnus-user-format-function-L (labels-tests-header 1))))
+          (expect (substring-no-properties slot) :to-equal " ")
+          (expect (get-text-property 0 'mail-labels slot) :to-equal 2)))))
+  (it "leaves nothing in a news group or a feed, whose lines stay as they were"
+    (let ((gnus-newsgroup-name "nnmaildir+news:gmane.emacs.devel")
+          (gnus-tmp-level 0))
+      (expect (gnus-user-format-function-L (labels-tests-header 1)) :to-equal ""))))
+
+(describe "draw-mail-labels"
+  :var (tables)
+  (before-each
+    (setq tables (labels-tests-tables '("Inbox" 1 2 5) '("job" 1 2 3 4 5) '("kids" 3 4)
+                                      '("lists" 1 2 3 4 5)))
+    (spy-on 'mail-label-tables :and-call-fake (lambda () tables)))
+  (it "shows each line's labels but the group read, Inbox among them outside the inbox"
+    (with-temp-buffer
+      (labels-tests-summary (labels-tests-group "lists") '((1 0) (6 0)))
+      (draw-mail-labels (point-min) (point-max))
+      (expect (labels-tests-shown 1) :to-equal '("Inbox" "job"))
+      ;; a line with no labels takes no room
+      (expect (labels-tests-shown 6) :to-be nil))
+    (with-temp-buffer
+      (labels-tests-summary mail-inbox-group '((1 0)))
+      (draw-mail-labels (point-min) (point-max))
+      (expect (labels-tests-shown 1) :to-equal '("job" "lists"))))
+  (it "shows a reply no labels when the line above has the same, and a thread's root always"
+    (with-temp-buffer
+      (labels-tests-summary (labels-tests-group "lists") '((1 0) (2 1) (3 1) (4 0) (5 1)))
+      (draw-mail-labels (point-min) (point-max))
+      (expect (mapcar #'labels-tests-shown '(1 2 3 4 5))
+              :to-equal '(("Inbox" "job") nil ("job" "kids") ("job" "kids") ("Inbox" "job")))))
+  (it "starts from the top of the line jit-lock starts in, and reads the line above it"
+    (with-temp-buffer
+      (labels-tests-summary (labels-tests-group "lists") '((1 0) (2 1)))
+      (goto-char (point-min))
+      (forward-line 1)
+      (draw-mail-labels (+ 3 (point)) (point-max))
+      (expect (labels-tests-shown 2) :to-be nil)
+      (expect (get-text-property 1 'display) :to-be nil)))
+  (it "reads no table for a summary with no slots, a news group's"
+    (with-temp-buffer
+      (insert (propertize "news line\n" 'gnus-number 1))
+      (setq-local gnus-newsgroup-name "nnmaildir+news:gmane.emacs.devel")
+      (draw-mail-labels (point-min) (point-max))
+      (expect 'mail-label-tables :not :to-have-been-called))))
+
+(describe "refresh-mail-labels"
+  (it "draws the labels again in each summary showing them and in the thread view"
+    (let ((gmail (generate-new-buffer " *labels-tests-gmail*"))
+          (news (generate-new-buffer " *labels-tests-news*"))
+          (thread (generate-new-buffer " *labels-tests-thread*"))
+          (headers nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'mail-thread-update-header-line)
+                     (lambda () (push (current-buffer) headers))))
+            (pcase-dolist (`(,buffer ,mode ,group) `((,gmail gnus-summary-mode ,mail-inbox-group)
+                                                     (,news gnus-summary-mode
+                                                            "nnmaildir+news:gmane.emacs.devel")
+                                                     (,thread mail-thread-mode nil)))
+              (with-current-buffer buffer
+                (setq-local major-mode mode)
+                (setq-local gnus-newsgroup-name group)
+                (insert (propertize "line\n" 'fontified t))))
+            (let ((mail-label-refresh-timer 'due))
+              (refresh-mail-labels)
+              (expect mail-label-refresh-timer :to-be nil))
+            (expect (get-text-property 1 'fontified gmail) :to-be nil)
+            (expect (get-text-property 1 'fontified news) :to-be t)
+            (expect headers :to-equal (list thread)))
+        (mapc #'kill-buffer (list gmail news thread))))))
+
+(describe "refresh-mail-labels-soon"
+  (it "draws once after the command, however many folders it changed"
+    (let ((mail-label-refresh-timer nil))
+      (unwind-protect
+          (progn
+            (refresh-mail-labels-soon "job" "gmail")
+            (let ((timer mail-label-refresh-timer))
+              (expect (timerp timer) :to-be t)
+              (expect (timer--function timer) :to-be 'refresh-mail-labels)
+              (refresh-mail-labels-soon '(1 2) "kids" "gmail" t)
+              (expect mail-label-refresh-timer :to-be timer)))
+        (when (timerp mail-label-refresh-timer)
+          (cancel-timer mail-label-refresh-timer))))))
 
 ;;; labels-tests.el ends here

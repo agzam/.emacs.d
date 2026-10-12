@@ -19,7 +19,9 @@
 (defvar mail-inbox-group)
 (defvar mail-trash-group)
 (defvar mail-archive-group)
+(defvar mail-label-colors)
 (defvar gnus-message-archive-group)
+(defvar gnus-tmp-level)
 
 (defvar mail-label-keys nil
   "Keys pinned to labels, as (NAME . KEY); other labels get theirs by themselves.")
@@ -33,6 +35,12 @@
 (defvar mail-label-slice 0.03
   "Seconds of label changes per timer turn.")
 
+(defface mail-label
+  '((((background dark)) :background "#4a4a4a" :foreground "#e0e0e0")
+    (t :background "#dddddd" :foreground "#444444"))
+  "Chip of a label `mail-label-colors' gives no colors."
+  :group 'gnus-summary)
+
 ;;; Labels and their keys
 
 (defun mail-label-name (group)
@@ -41,15 +49,19 @@
       "Inbox"
     (gnus-group-real-name group)))
 
+(defun mail-label-group-p (group)
+  "Non-nil when the Gmail GROUP is a label; Sent, Trash and All Mail are not."
+  (not (member group (list mail-trash-group mail-archive-group gnus-message-archive-group))))
+
+(defun mail-label-sort-key (group)
+  "What orders the label GROUP among the others: the inbox first, then by name."
+  (if (equal group mail-inbox-group) "" (downcase (mail-label-name group))))
+
 (defun mail-label-groups ()
   "Groups the label menu offers: the inbox, then every Gmail label by name."
   (cons mail-inbox-group
-        (sort (seq-difference (maildir-groups)
-                              (list mail-inbox-group mail-trash-group mail-archive-group
-                                    gnus-message-archive-group))
-              (lambda (a b)
-                (string-lessp (downcase (mail-label-name a))
-                              (downcase (mail-label-name b)))))))
+        (sort (seq-filter #'mail-label-group-p (remove mail-inbox-group (maildir-groups)))
+              :key #'mail-label-sort-key)))
 
 (defun mail-label-key-candidates (name)
   "Keys for the label NAME, best first.
@@ -451,5 +463,122 @@ Return `shown' when the summary's own copy went, nil when nothing changed."
                                (lambda () (seq-every-p #'mail-group-loaded-p unloaded))
                                (lambda () (mail-label-start job))))
           (t (mail-label-start job)))))
+
+;;; On the summary line
+;;
+;; Gmail's chips before the subject.  The format leaves a one-space slot
+;; that jit-lock fills from nnmaildir's tables of Message-IDs, so a label
+;; change only redraws what is on screen, folded threads included.
+
+(defvar mail-label-refresh-timer nil
+  "Timer of the next `refresh-mail-labels', or nil.")
+
+;;;###autoload
+(defun mail-labels-shown-p (group)
+  "Non-nil when the summary of GROUP shows labels: a Gmail folder or a search."
+  (and group
+       (or (string-prefix-p "nnmaildir+gmail:" group)
+           (string-prefix-p "nnselect:" group))))
+
+(defun mail-label-tables ()
+  "Every label nnmaildir holds as (GROUP . MESSAGE-IDS), in menu order.
+MESSAGE-IDS is nnmaildir's own table of the folder, so no file is read."
+  (when-let* ((server (mail-group-server mail-inbox-group))
+              (groups (nnmaildir--srv-groups server)))
+    (let (tables)
+      (maphash (lambda (name grp)
+                 (let ((group (mail-full-group-name name (nnmaildir--srv-address server))))
+                   (when (and (mail-label-group-p group) (nnmaildir--grp-mlist grp))
+                     (push (cons group (nnmaildir--grp-mlist grp)) tables))))
+               groups)
+      (sort tables :key (lambda (table) (mail-label-sort-key (car table)))))))
+
+(defun mail-message-labels (message-ids tables &optional except)
+  "Groups of TABLES but EXCEPT holding a message of MESSAGE-IDS."
+  ;; jit-lock calls this for every line it draws, so no closure per call
+  (cl-loop for (group . ids) in tables
+           when (and (not (equal group except))
+                     (cl-loop for id in message-ids thereis (gethash id ids)))
+           collect group))
+
+(defun mail-label-chips (groups)
+  "The label GROUPS as chips in the colors of `mail-label-colors'."
+  (mapconcat (lambda (group)
+               (let ((colors (cdr (assoc (mail-label-name group) mail-label-colors))))
+                 (propertize (concat " " (mail-label-name group) " ")
+                             'face (if colors
+                                       (list :background (car colors) :foreground (cadr colors))
+                                     'mail-label))))
+             groups " "))
+
+;;;###autoload
+(defun mail-label-chips-of (group message-ids)
+  "Chips of each label a message of MESSAGE-IDS carries, if GROUP shows labels."
+  (when-let* (((mail-labels-shown-p group))
+              (labels (mail-message-labels message-ids (mail-label-tables))))
+    (mail-label-chips labels)))
+
+;;;###autoload
+(defun gnus-user-format-function-L (_header)
+  "The `%uL' summary column: the slot `draw-mail-labels' shows the labels in."
+  (if (mail-labels-shown-p gnus-newsgroup-name)
+      (propertize " " 'mail-labels (or (bound-and-true-p gnus-tmp-level) 0))
+    ""))
+
+(defun mail-line-labels (pos tables)
+  "Labels of TABLES on the message of the summary line at POS, but the group read."
+  (when-let* ((article (get-text-property pos 'gnus-number))
+              (header (gnus-summary-article-header article)))
+    (mail-message-labels (list (mail-header-id header)) tables gnus-newsgroup-name)))
+
+(defun draw-mail-labels (start end)
+  "Show the labels of the summary lines from START to END in their slots.
+A reply whose labels are those of the line above shows none."
+  (save-excursion
+    (goto-char start)
+    (forward-line 0)
+    (when (text-property-not-all (point) end 'mail-labels nil)
+      (let* ((tables (mail-label-tables))
+             (chips (make-hash-table :test #'equal))
+             (above (unless (bobp)
+                      (mail-line-labels (line-beginning-position 0) tables))))
+        (while (< (point) end)
+          (let ((slot (text-property-not-all (point) (line-end-position) 'mail-labels nil))
+                (labels (mail-line-labels (point) tables)))
+            (when slot
+              (put-text-property slot (1+ slot) 'display
+                                 (if (or (null labels)
+                                         (and (< 0 (get-text-property slot 'mail-labels))
+                                              (equal labels above)))
+                                     ""
+                                   (or (gethash labels chips)
+                                       (puthash labels (concat (mail-label-chips labels) " ")
+                                                chips)))))
+            (setq above labels))
+          (forward-line 1))))))
+
+;;;###autoload
+(defun draw-mail-labels-h ()
+  "Show this summary's labels from now on."
+  (jit-lock-register #'draw-mail-labels))
+
+;;;###autoload
+(defun refresh-mail-labels ()
+  "Draw the labels again in every summary that shows them and in the thread view."
+  (setq mail-label-refresh-timer nil)
+  (dolist (buffer (buffer-list))
+    (with-current-buffer buffer
+      (cond ((and (derived-mode-p 'gnus-summary-mode)
+                  (mail-labels-shown-p gnus-newsgroup-name))
+             (jit-lock-refontify))
+            ((derived-mode-p 'mail-thread-mode)
+             (mail-thread-update-header-line))))))
+
+;;;###autoload
+(defun refresh-mail-labels-soon (&rest _)
+  "Draw the labels again once the command at hand is done.
+Advice on what files mail into a label folder or deletes it from one."
+  (unless (timerp mail-label-refresh-timer)
+    (setq mail-label-refresh-timer (run-with-timer 0 nil #'refresh-mail-labels))))
 
 ;;; labels.el ends here

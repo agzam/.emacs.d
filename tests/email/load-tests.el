@@ -115,7 +115,9 @@ loader made are the spec's own."
              ((symbol-function 'gnus-get-unread-articles-in-group)
               (lambda (info &rest _) (push (list 'count (gnus-info-group info)) ,calls)))
              ((symbol-function 'gnus-group-update-group)
-              (lambda (group &rest _) (push (list 'redraw group) ,calls))))
+              (lambda (group &rest _) (push (list 'redraw group) ,calls)))
+             ((symbol-function 'refresh-mail-labels-soon)
+              (lambda () (push '(labels) ,calls))))
      ,@body))
 
 (defun load-tests--info (group)
@@ -263,10 +265,12 @@ loader made are the spec's own."
               (nnmaildir-request-scan "inbox" "check")
               (expect (load-tests--rows loaded)
                       :to-equal (load-tests--rows (nnmaildir--prepare "check" "inbox"))))
+            ;; the summaries draw the labels of the group read again
             (expect (nreverse calls)
                     :to-equal '((activate "nnmaildir+gmail:inbox")
                                 (count "nnmaildir+gmail:inbox")
-                                (redraw "nnmaildir+gmail:inbox"))))
+                                (redraw "nnmaildir+gmail:inbox")
+                                (labels))))
         (delete-directory store t)
         (delete-directory tables t))))
 

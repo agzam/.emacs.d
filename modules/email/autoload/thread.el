@@ -231,19 +231,25 @@ on the next message stays there while a body lands above it."
                                   mail-thread-messages " or "))
         "and" (format "(%s)" query)))
 
+;;;###autoload
 (defun mail-thread-update-header-line ()
-  "Show the thread's subject and how many of its messages are on show."
-  (let ((subject (mail-thread-subject
-                  (mail-thread-message-header (car mail-thread-messages))))
-        (total (length mail-thread-messages)))
+  "Show the thread's subject, its labels, and how many messages are on show."
+  (let* ((subject (mail-thread-subject
+                   (mail-thread-message-header (car mail-thread-messages))))
+         (chips (mail-label-chips-of
+                 mail-thread-group
+                 (mapcar (lambda (message) (mail-header-id (mail-thread-message-header message)))
+                         mail-thread-messages)))
+         (title (if chips (concat subject "  " chips) subject))
+         (total (length mail-thread-messages)))
     (setq-local header-line-format
                 (string-replace
                  "%" "%%"
                  (if mail-thread-filter-query
-                     (format "%s   %d of %d shown: %s" subject
+                     (format "%s   %d of %d shown: %s" title
                              (length (mail-thread-shown-messages)) total
                              mail-thread-filter-query)
-                   (format "%s   %d messages" subject total))))))
+                   (format "%s   %d messages" title total))))))
 
 (defun mail-thread-show-all ()
   "Show every message of the thread again."

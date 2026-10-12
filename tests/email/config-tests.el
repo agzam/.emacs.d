@@ -528,6 +528,17 @@ window and deletes the summary's."
          (expect (window-total-width (get-buffer-window gnus-group-buffer))
                  :to-equal 40))))))
 
+(describe "email module labels"
+  (it "draws each message's labels between the thread tree and the subject, as Gmail does"
+    (expect gnus-summary-line-format :to-match "%B%uL%s\n\\'"))
+  (it "colors a label as Gmail does, background and text"
+    (expect (mapcar #'car mail-label-colors)
+            :to-equal '("clojure" "emacs" "friends" "Health" "job" "kids" "money" "org-mode"))
+    (dolist (entry mail-label-colors)
+      (expect (length entry) :to-equal 3)
+      (dolist (color (cdr entry))
+        (expect color :to-match "\\`\\(#[0-9a-f]\\{6\\}\\|white\\)\\'")))))
+
 (describe "email module deferred deletion"
   (it "draws the queued verb in the first summary column"
     ;; the column is a user format function, so marks.el has to be
@@ -549,14 +560,18 @@ window and deletes the summary's."
     (pcase-dolist (`(,file . ,commands)
                    '(("thread.el" reply-to-sender reply-to-everyone reply-to-list
                       follow-up-on-newsgroup forward-mail compose-new-mail
-                      run-in-mail-summary mail-on-screen)
+                      run-in-mail-summary mail-on-screen mail-thread-update-header-line)
                      ("mail.el" sort-mail-by-date sort-mail-by-author
                       sort-mail-by-subject toggle-mail-thread-fold
                       ;; a search, an advice or a sibling file calls these
                       search-likeliest-copies-a read-mail-search-limit refresh-mail-group
                       keep-flags-set-elsewhere-a maildir-groups accept-mail-without-nul-a
                       subscribe-mail-group mail-file-group current-mail-file)
-                     ("labels.el" label-mail label-mail-threads)
+                     ("labels.el" label-mail label-mail-threads
+                      ;; the first summary line draws through these, and
+                      ;; an advice, the thread view or a load calls the rest
+                      gnus-user-format-function-L draw-mail-labels-h mail-labels-shown-p
+                      mail-label-chips-of refresh-mail-labels refresh-mail-labels-soon)
                      ;; the first group line draws through the format function
                      ("groups.el" gnus-user-format-function-C apply-mail-topics
                       add-mail-group defer-news-group-h
@@ -574,7 +589,8 @@ window and deletes the summary's."
                       ensure-news-folders news-group-p make-news-folder news-active-groups)
                      ("load.el" load-mail-groups maildir-group-p mail-group-loaded-p
                       mail-group-pending-p mail-group-reading-p mail-load-busy-p
-                      mail-full-group-name wait-for-mail-load load-unloaded-mail-groups)
+                      mail-full-group-name wait-for-mail-load load-unloaded-mail-groups
+                      mail-group-server)
                      ("similar.el" count-mail)))
       (with-temp-buffer
         (insert-file-contents
@@ -663,7 +679,8 @@ window and deletes the summary's."
           (gnus-exit-group-hook nil))
       (dolist (form (email-tests--config-forms 'gnus-sum))
         (eval form t))
-      (expect gnus-summary-mode-hook :to-equal '(draw-mail-mark-symbols-h)))
+      (expect gnus-summary-mode-hook :to-have-same-items-as
+              '(draw-mail-mark-symbols-h draw-mail-labels-h)))
     ;; the first summary comes before any command of marks.el has run
     (with-temp-buffer
       (insert-file-contents
@@ -728,7 +745,9 @@ window and deletes the summary's."
   (advice-remove 'nnmaildir-request-accept-article #'refuse-unloaded-mail-group-a)
   (advice-remove 'nnmaildir-base-name-to-article-number #'scan-mail-group-on-miss-a)
   (advice-remove 'nnmaildir--article-set-flags #'keep-flags-set-elsewhere-a)
-  (advice-remove 'nnmaildir-request-accept-article #'accept-mail-without-nul-a))
+  (advice-remove 'nnmaildir-request-accept-article #'accept-mail-without-nul-a)
+  (advice-remove 'nnmaildir-request-accept-article #'refresh-mail-labels-soon)
+  (advice-remove 'nnmaildir-request-expire-articles #'refresh-mail-labels-soon))
 
 (describe "email module startup"
   (it "reads no group whole in the main thread, and refuses one still loading"
@@ -767,6 +786,18 @@ window and deletes the summary's."
             (eval form t))
           (expect (advice-member-p #'accept-mail-without-nul-a
                                    'nnmaildir-request-accept-article)
+                  :to-be-truthy))
+      (email-tests--remove-nnmaildir-advice)))
+  (it "draws the labels again after a copy into a label or a deletion from one"
+    ;; the label menu, , m and x all file and delete through these two
+    (require 'nnmaildir)
+    (unwind-protect
+        (progn
+          (dolist (form (email-tests--config-forms 'nnmaildir))
+            (eval form t))
+          (expect (advice-member-p #'refresh-mail-labels-soon 'nnmaildir-request-accept-article)
+                  :to-be-truthy)
+          (expect (advice-member-p #'refresh-mail-labels-soon 'nnmaildir-request-expire-articles)
                   :to-be-truthy))
       (email-tests--remove-nnmaildir-advice)))
   (it "loads every group once Gnus has started, after the subscriptions"

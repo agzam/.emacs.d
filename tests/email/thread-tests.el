@@ -7,9 +7,18 @@
                                   "helper.el")))
 (require 'buttercup)
 
+(defvar mail-inbox-group "nnmaildir+gmail:inbox")
+(defvar mail-trash-group "nnmaildir+gmail:trash")
+(defvar mail-archive-group "nnmaildir+gmail:archive")
+(defvar mail-label-colors nil)
+
 (load-module-file "modules/email/autoload/thread.el")
 (load-module-file "modules/email/autoload/quotes.el")
 (load-module-file "modules/email/autoload/html.el")
+;; the header line names the thread's labels
+(load-module-file "scripts/mail-load.el")
+(load-module-file "modules/email/autoload/load.el")
+(load-module-file "modules/email/autoload/labels.el")
 
 (defun thread-tests-header (number subject from date id &optional references)
   "Header of the article NUMBER the specs build a thread from.
@@ -227,6 +236,24 @@ is the only treatment."
   (it "names the thread and its size in the header line"
     (thread-tests-with-buffer 11 nil
       (expect header-line-format :to-equal "Plan   3 messages")))
+  (it "puts every label of the thread's messages after the subject, as Gmail does"
+    (let ((tables (list (cons "nnmaildir+gmail:inbox" (make-hash-table :test #'equal))
+                        (cons "nnmaildir+gmail:job" (make-hash-table :test #'equal))))
+          (mail-label-colors nil))
+      (puthash "<3@x>" t (cdr (nth 0 tables)))
+      (puthash "<1@x>" t (cdr (nth 1 tables)))
+      (cl-letf (((symbol-function 'mail-label-tables) (lambda () tables)))
+        (thread-tests-with-buffer 11 nil
+          (expect (substring-no-properties header-line-format)
+                  :to-equal "Plan   Inbox   job    3 messages")
+          (expect (get-text-property (string-search "job" header-line-format) 'face
+                                     header-line-format)
+                  :to-be 'mail-label)
+          ;; a news thread's messages are Gmail's too, but their summary
+          ;; shows no labels
+          (setq mail-thread-group "nnmaildir+news:gmane.emacs.devel")
+          (mail-thread-update-header-line)
+          (expect header-line-format :to-equal "Plan   3 messages")))))
   (it "gives every message a line of its own"
     (thread-tests-with-buffer 11 nil
       (expect (length (seq-filter (lambda (line) (string-match-p "\\`[▼▶]" line))

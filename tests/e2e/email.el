@@ -36,6 +36,8 @@
 (defvar mail-addresses-read-at)
 (defvar mail-label-keys-file)
 (defvar mail-label-jobs)
+(defvar mail-label-colors)
+(defvar mail-label-refresh-timer)
 
 (defun email-e2e--write-message (file from subject id &optional date references xref body)
   "Write a minimal RFC 822 message to FILE.
@@ -213,6 +215,8 @@ An untimed `read-event' is idle, and a timer ends it."
          (mail-addresses-read-at (float-time))
          ;; the keys the fixture's labels get stay out of the real state
          (mail-label-keys-file (expand-file-name "mail-label-keys.eld" e2e-work-dir))
+         ;; one fixture label in Gmail's colors, the others in the default chip
+         (mail-label-colors '(("labelled" "#9b811e" "white")))
          ;; gnus-started-hook subscribes every group under this root;
          ;; the module's mail-groups would add gmane and Reddit, which
          ;; CI cannot reach
@@ -495,6 +499,21 @@ An untimed `read-event' is idle, and a timer ends it."
                                 (string (char-after pos))))
                           (list (+ 1 (line-beginning-position))
                                 (+ 2 (line-beginning-position))))))
+              ;; the label chips ARTICLE's line shows, as redisplay draws
+              ;; them once the redraw a label change asks for has run;
+              ;; nil when the line has no slot for labels
+              (line-chips (article)
+                (with-timeout (2 nil)
+                  (while (timerp mail-label-refresh-timer)
+                    (accept-process-output nil 0.01)))
+                (save-excursion
+                  (when (gnus-summary-goto-subject article nil t)
+                    (when jit-lock-mode
+                      (jit-lock-fontify-now (line-beginning-position) (line-end-position)))
+                    (when-let* ((slot (text-property-not-all (line-beginning-position)
+                                                             (line-end-position)
+                                                             'mail-labels nil)))
+                      (or (get-text-property slot 'display) "undrawn")))))
               ;; the %U and %R letters themselves
               (mark-letters (article)
                 (save-excursion
@@ -747,6 +766,11 @@ An untimed `read-event' is idle, and a timer ends it."
                                                     (mail-header-subject
                                                      (gnus-summary-article-header article)))
                                                   gnus-newsgroup-unreads))))
+                (record "a news group's lines leave no room for Gmail's labels"
+                        (and (derived-mode-p 'gnus-summary-mode)
+                             (null (text-property-not-all (point-min) (point-max)
+                                                          'mail-labels nil)))
+                        :got (buffer-substring-no-properties (point-min) (point-max)))
                 (when (derived-mode-p 'gnus-summary-mode)
                   (gnus-summary-exit-no-update))
                 ;; the start's fetch delivers once go exists, into a
@@ -1849,7 +1873,11 @@ An untimed `read-event' is idle, and a timer ends it."
                                     (while mail-label-jobs
                                       (discard-input)
                                       (accept-process-output nil 0.05)))
-                                  (set-buffer (window-buffer (selected-window)))))
+                                  (set-buffer (window-buffer (selected-window))))
+                                ;; the label names on ARTICLE's line
+                                (chip-names (article)
+                                  (split-string (substring-no-properties
+                                                 (or (line-chips article) "no slot")))))
                         (at to-label)
                         (execute-kbd-macro (kbd ", l"))
                         (let ((menu (menu-text)))
@@ -1867,7 +1895,13 @@ An untimed `read-event' is idle, and a timer ends it."
                                        (member "<to-label@fixture.example>"
                                                (message-ids (messages-in lists))))
                                   :got (format "%S, labelled %S" menu
-                                               (message-ids (messages-in labelled)))))
+                                               (message-ids (messages-in labelled))))
+                          (let ((chips (line-chips to-label)))
+                            (record "the line shows the label the menu added at once, in its Gmail colors, its own group left out"
+                                    (and (equal (chip-names to-label) '("labelled"))
+                                         (equal (get-text-property 1 'face chips)
+                                                '(:background "#9b811e" :foreground "white")))
+                                    :got (format "%S" chips))))
                         ;; two marked, one of them labelled already
                         (dolist (article (list to-label plan))
                           (at article)
@@ -1903,6 +1937,9 @@ An untimed `read-event' is idle, and a timer ends it."
                                      (with-current-buffer summary
                                        (gnus-summary-goto-subject plan)))
                                 :got (format "labelled %S" (message-ids (messages-in labelled))))
+                        (record "the line drops the chip of a label taken off"
+                                (null (chip-names plan))
+                                :got (format "%S" (line-chips plan)))
                         ;; expreg-transient opens with visual state and replays
                         ;; a , it lets through, except inside a keyboard macro,
                         ;; which general assumes recorded the replayed key
@@ -1940,6 +1977,10 @@ An untimed `read-event' is idle, and a timer ends it."
                                     :got (format "%S then %S, travel %S" menu reopened
                                                  (and (file-directory-p travel)
                                                       (message-ids (messages-in travel)))))
+                            (record "a reply whose labels are those of the line above shows none, its root shows them"
+                                    (and (equal (chip-names plan) '("labelled" "travel"))
+                                         (null (chip-names answer)))
+                                    :got (format "%S then %S" (line-chips plan) (line-chips answer)))
                             ;; in the label's own summary the message leaves
                             ;; once the label is off
                             (delete-other-windows)
@@ -1947,6 +1988,10 @@ An untimed `read-event' is idle, and a timer ends it."
                             ;; a group no topic names has no line to RET on;
                             ;; entering it needs Gnus to know the copies
                             (gnus-summary-read-group "nnmaildir+gmail:travel" t t)
+                            (let ((root (email-e2e--article "list plan")))
+                              (record "a label's own summary shows every label of a line but its own"
+                                      (equal (chip-names root) '("labelled" "lists"))
+                                      :got (format "%S" (line-chips root))))
                             (let ((first (gnus-summary-article-number)))
                               (execute-kbd-macro (kbd ", l"))
                               (execute-kbd-macro (kbd "t"))
@@ -1963,6 +2008,19 @@ An untimed `read-event' is idle, and a timer ends it."
                         ;; the thread view labels the message at point
                         (at plan)
                         (execute-kbd-macro (kbd "RET"))
+                        (let ((header (with-current-buffer mail-thread-buffer-name
+                                        header-line-format)))
+                          (record "the thread view names every label of the thread after its subject, its group's too"
+                                  (and (stringp header)
+                                       (string-prefix-p "list plan  " header)
+                                       (seq-every-p (lambda (name)
+                                                      (member name (split-string
+                                                                    (substring-no-properties header))))
+                                                    '("labelled" "lists" "travel"))
+                                       (eq (get-text-property (string-search " lists " header)
+                                                              'face header)
+                                           'mail-label))
+                                  :got (format "%S" header)))
                         (execute-kbd-macro (kbd ", l"))
                         (let ((menu (menu-text)))
                           (execute-kbd-macro "q")
@@ -2086,6 +2144,11 @@ An untimed `read-event' is idle, and a timer ends it."
                                (equal (nnselect-article-group (car gnus-newsgroup-articles))
                                       "nnmaildir+gmail:inbox"))
                           :got (format "%s, %S" major-mode (bound-and-true-p gnus-newsgroup-selection)))
+                  (let ((chips (line-chips (car gnus-newsgroup-articles))))
+                    (record "a search hit shows Inbox among its labels, a search leaving none out"
+                            (equal (split-string (substring-no-properties (or chips "no slot")))
+                                   '("Inbox"))
+                            :got (format "%S" chips)))
                   (record "a search asks notmuch for the newest 500, then for every copy of them"
                           (let ((runs (searches)))
                             (and (string-match-p "--duplicate=1 --limit=500 twin-read\\'" (car runs))
@@ -2139,7 +2202,8 @@ An untimed `read-event' is idle, and a timer ends it."
                           :got (format "%S" (where "phone-search")))
                   (gnus-group-jump-to-group "nnmaildir+gmail:lists")
                   (execute-kbd-macro (kbd "RET"))
-                  (let ((label (email-e2e--article "twin-label")))
+                  (let* ((label (email-e2e--article "twin-label"))
+                         (before (line-chips label)))
                     (gnus-summary-goto-subject label)
                     (execute-kbd-macro "ax")
                     (record "a in a label archives: the inbox copy goes, the label keeps the message"
@@ -2149,7 +2213,13 @@ An untimed `read-event' is idle, and a timer ends it."
                                  (null mail-marks))
                             :got (format "inbox %S, lists %S, line %S, queue %S"
                                          (flags-of inbox "twin-label") (flags-of lists "twin-label")
-                                         (gnus-summary-goto-subject label nil t) mail-marks)))
+                                         (gnus-summary-goto-subject label nil t) mail-marks))
+                    (let ((after (line-chips label)))
+                      (record "a label's line shows Inbox while the inbox holds the message, and drops it once archived"
+                              (and (equal (split-string (substring-no-properties (or before "")))
+                                          '("Inbox"))
+                                   (equal after ""))
+                              :got (format "%S then %S" before after))))
                   (gnus-summary-goto-subject (email-e2e--article "to label"))
                   (condition-case nil
                       (execute-kbd-macro "a")
@@ -2166,6 +2236,9 @@ An untimed `read-event' is idle, and a timer ends it."
                   (let ((summary (current-buffer))
                         (carry (email-e2e--article "twin-carry"))
                         (drop (email-e2e--article "twin-drop")))
+                    (record "the inbox leaves Inbox off its own lines"
+                            (equal (line-chips carry) "")
+                            :got (format "%S" (line-chips carry)))
                     (search-for "twin-carry")
                     (execute-kbd-macro "!q")
                     (record "the inbox summary under a search learns what it changed"
