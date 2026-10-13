@@ -39,6 +39,47 @@ Like prisma, the stand-in keeps one blank line between blocks and trims."
             start (match-end 0)))
     count))
 
+(defun compose-tests-rgb (color &optional _frame)
+  "RGB of the hex COLOR read exactly, as a graphical frame reads it."
+  (when-let* ((values (color-values-from-color-spec color)))
+    (mapcar (lambda (value) (/ value 65535.0)) values)))
+
+(defmacro compose-tests-with-exact-colors (&rest body)
+  "Run BODY with colors read exactly; batch Emacs reads #d7d5d1 as white."
+  `(cl-letf (((symbol-function 'color-name-to-rgb) #'compose-tests-rgb))
+     ,@body))
+
+(defun compose-tests-contrast (a b)
+  "WCAG contrast ratio of the hex colors A and B."
+  (cl-flet ((luminance (color)
+              (cl-loop for c in (compose-tests-rgb color)
+                       for weight in '(0.2126 0.7152 0.0722)
+                       sum (* weight (if (<= c 0.04045)
+                                         (/ c 12.92)
+                                       (expt (/ (+ c 0.055) 1.055) 2.4))))))
+    (let ((x (luminance a))
+          (y (luminance b)))
+      (/ (+ (max x y) 0.05) (+ (min x y) 0.05)))))
+
+(defun compose-tests-unreadable (colors)
+  "Those of COLORS under 4.5:1 against the code block."
+  (seq-filter (lambda (color)
+                (< (compose-tests-contrast color mail-code-background) 4.5))
+              colors))
+
+(defun compose-tests-colors (html)
+  "Every text color HTML sets, in order."
+  (let ((start 0)
+        (colors '()))
+    (while (string-match "[^-]color: *\\(#[[:xdigit:]]+\\)" html start)
+      (push (match-string 1 html) colors)
+      (setq start (match-end 0)))
+    (nreverse colors)))
+
+(defun compose-tests-hue (color)
+  "Hue of the hex COLOR, 0 to 1."
+  (car (apply #'color-rgb-to-hsl (compose-tests-rgb color))))
+
 (defmacro compose-tests-with-message (body &rest forms)
   "Run FORMS in a message buffer whose body is BODY."
   (declare (indent 1))
@@ -163,7 +204,7 @@ Ag
          (dolist (element '("<b>bold</b>" "<i>italic</i>" "<u>under</u>" "<code>code</code>" "<del>strike</del>"
                             "<a href=\"https://gnu.org\">a link</a>" "<h2 id=\"[^\"]+\">A heading</h2>"
                             "<ul class=\"org-ul\">" "<ol class=\"org-ol\">" "&#x2611; done"
-                            "<table " "<pre class=\"src src-emacs-lisp\">"
+                            "<table " "<pre style=\"background-color: #f6f8fa;[^\"]*\" class=\"src src-emacs-lisp\">"
                             "<blockquote style=\"[^\"]*border-left[^\"]*\">\n<p>\nAn Org quote"
                             "snake_case stays"))
            (expect html :to-match element))
@@ -213,16 +254,61 @@ Ag
     (expect (mail-signature-to-html "A & <B>\nC")
             :to-equal "<p>-- <br>\nA &amp; &lt;B&gt;<br>\nC</p>")))
 
+(describe "readable-code-color"
+  :var ((light '("#d7d5d1" "#838083" "#3a81c3" "#2aa1ae" "#da8b55" "#ff00ff" "#ffffff")))
+  (it "darkens a color until it reads at 4.5:1 or better on the code block"
+    (compose-tests-with-exact-colors
+     (expect (compose-tests-unreadable (mapcar #'readable-code-color light)) :to-equal nil)))
+  (it "darkens it no further than about 5.6:1"
+    (compose-tests-with-exact-colors
+     (expect (seq-filter (lambda (color)
+                           (< 6 (compose-tests-contrast (readable-code-color color) mail-code-background)))
+                         light)
+             :to-equal nil)))
+  (it "keeps the color's hue"
+    (compose-tests-with-exact-colors
+     (dolist (color '("#3a81c3" "#2aa1ae" "#da8b55"))
+       (expect (abs (- (compose-tests-hue color) (compose-tests-hue (readable-code-color color))))
+               :to-be-less-than 0.03))))
+  (it "leaves a color that reads already"
+    (compose-tests-with-exact-colors
+     (expect (readable-code-color "#655370") :to-equal "#655370")))
+  (it "leaves a value that names no color"
+    (compose-tests-with-exact-colors
+     (expect (readable-code-color "inherit") :to-equal "inherit"))))
+
 (describe "finish-mail-html-h"
-  (it "gives code blocks the theme's colors"
-    (cl-letf (((symbol-function 'face-background) (lambda (&rest _) "black"))
-              ((symbol-function 'face-foreground) (lambda (&rest _) "white")))
-      (with-temp-buffer
-        (insert "<pre class=\"src\">x</pre>")
-        (let ((mail-signature-html nil))
-          (finish-mail-html-h))
-        (expect (buffer-string) :to-match
-                "<pre style=\"background-color: #000000; color: #ffffff;[^\"]*\" class=\"src\">"))))
+  (it "gives code blocks a light background, the theme's text color and readable colors"
+    (compose-tests-with-exact-colors
+     (cl-letf (((symbol-function 'face-foreground) (lambda (&rest _) "#d7d5d1")))
+       (with-temp-buffer
+         (insert "<pre class=\"src\">(<span style=\"color: #838083; font-style: italic;\">doc</span> "
+                 "<span style=\"color: #545053;\">x</span>)</pre>")
+         (let ((mail-signature-html nil))
+           (finish-mail-html-h))
+         (let ((html (buffer-string)))
+           (expect html :to-match
+                   "\\`<pre style=\"background-color: #f6f8fa; color: #[[:xdigit:]]\\{6\\}; padding: [^\"]*\" class=\"src\">(<span style=\"color: #[[:xdigit:]]\\{6\\}; font-style: italic;\">doc</span> <span style=\"color: #545053;\">x</span>)</pre>\\'")
+           (expect (length (compose-tests-colors html)) :to-be 3)
+           (expect (compose-tests-unreadable (compose-tests-colors html)) :to-equal nil))))))
+  (it "leaves colors outside code blocks alone"
+    (compose-tests-with-exact-colors
+     (cl-letf (((symbol-function 'face-foreground) (lambda (&rest _) "#655370")))
+       (with-temp-buffer
+         (insert "<p style=\"color: #eeeeee;\">a</p>\n<pre>b</pre>\n<p style=\"color: #dddddd;\">c</p>")
+         (let ((mail-signature-html nil))
+           (finish-mail-html-h))
+         (expect (buffer-string) :to-match
+                 "\\`<p style=\"color: #eeeeee;\">a</p>\n<pre style=\"[^\"]*\">b</pre>\n<p style=\"color: #dddddd;\">c</p>\\'")))))
+  (it "gives code blocks the light background when the theme names no text color"
+    (compose-tests-with-exact-colors
+     (cl-letf (((symbol-function 'face-foreground) (lambda (&rest _) "unspecified-fg")))
+       (with-temp-buffer
+         (insert "<pre class=\"src\">x</pre>")
+         (let ((mail-signature-html nil))
+           (finish-mail-html-h))
+         (expect (buffer-string) :to-equal
+                 "<pre style=\"background-color: #f6f8fa; padding: 0.6em; border-radius: 4px; overflow-x: auto;\" class=\"src\">x</pre>")))))
   (it "gives a quote block the reply quotes' border, and leaves those alone"
     (with-temp-buffer
       (insert "<blockquote>\n<p>x</p>\n</blockquote>\n<blockquote class=\"gmail_quote\" style=\"a\">y</blockquote>")
@@ -231,15 +317,7 @@ Ag
       (expect (buffer-string) :to-equal
               (concat (format "<blockquote style=\"%s\">\n<p>x</p>\n</blockquote>\n"
                               org-mime-beautify-quoted-mail-style)
-                      "<blockquote class=\"gmail_quote\" style=\"a\">y</blockquote>"))))
-  (it "leaves code blocks alone when the theme names no color"
-    (cl-letf (((symbol-function 'face-background) (lambda (&rest _) "unspecified-bg"))
-              ((symbol-function 'face-foreground) (lambda (&rest _) "unspecified-fg")))
-      (with-temp-buffer
-        (insert "<pre class=\"src\">x</pre>")
-        (let ((mail-signature-html nil))
-          (finish-mail-html-h))
-        (expect (buffer-string) :to-equal "<pre class=\"src\">x</pre>")))))
+                      "<blockquote class=\"gmail_quote\" style=\"a\">y</blockquote>")))))
 
 (describe "mail-body-to-markdown"
   (it "turns the body into Markdown, signature and parts after it"

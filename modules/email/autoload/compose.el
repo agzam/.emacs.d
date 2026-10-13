@@ -8,6 +8,7 @@
 (require 'message)
 (require 'subr-x)
 (require 'color)
+(require 'shr-color)
 (require 'xml)
 (require 'org-mime)
 (require 'prisma)
@@ -30,6 +31,9 @@
 
 (defvar mail-signature-html nil
   "Signature of the message under conversion, as HTML.")
+
+(defvar mail-code-background "#f6f8fa"
+  "Background of code blocks in HTML mail, whatever the theme.")
 
 (defconst mail-part-regexp "<#\\(part\\|mml\\|external\\|multipart\\)\\b"
   "Opening of an MML part, which no conversion may touch.")
@@ -178,16 +182,34 @@ block Org would read the star as a heading and end the block there."
   (when-let* ((rgb (and color (color-name-to-rgb color))))
     (apply #'color-rgb-to-hex (append rgb '(2)))))
 
+(defun readable-code-color (color)
+  "COLOR, darkened until it reads on `mail-code-background'.
+A value that names no color stays as it is."
+  ;; below 55, saturated colors end under 4.5:1
+  (let ((shr-color-visible-luminance-min 55))
+    (cadr (shr-color-visible mail-code-background color t))))
+
+(defun style-mail-code-blocks ()
+  "Give code blocks a light background, and colors that read on it.
+The text keeps the theme's colors, darkened where they would not read."
+  (goto-char (point-min))
+  (org-mime-change-element-style
+   "pre" (format "background-color: %s;%s padding: 0.6em; border-radius: 4px; overflow-x: auto;"
+                 mail-code-background
+                 (if-let* ((text (mail-css-color (face-foreground 'default nil t))))
+                     (format " color: %s;" text)
+                   "")))
+  (goto-char (point-min))
+  (while (search-forward "<pre" nil t)
+    (let ((end (save-excursion (search-forward "</pre>" nil 'move) (point-marker))))
+      (while (re-search-forward "[^-]color: *\\([^;\"]+\\)" end t)
+        (replace-match (readable-code-color (match-string 1)) t t nil 1)))))
+
 (defun finish-mail-html-h ()
   "Style code and quote blocks inline, and end the HTML with the signature.
-Code blocks take the theme's colors.  Mail clients drop the CSS of
-Org's classes, so a quote block takes the reply quotes' border."
-  (when-let* ((background (mail-css-color (face-background 'default nil t)))
-              (foreground (mail-css-color (face-foreground 'default nil t))))
-    (goto-char (point-min))
-    (org-mime-change-element-style
-     "pre" (format "background-color: %s; color: %s; padding: 0.6em; border-radius: 4px; overflow-x: auto;"
-                   background foreground)))
+Mail clients drop the CSS of Org's classes, so a quote block takes the
+reply quotes' border."
+  (style-mail-code-blocks)
   (goto-char (point-min))
   (while (search-forward "<blockquote>" nil t)
     (replace-match (format "<blockquote style=\"%s\">" org-mime-beautify-quoted-mail-style) t t))

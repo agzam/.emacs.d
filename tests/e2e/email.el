@@ -112,6 +112,37 @@ A multipart has no TEXT; a leaf's TEXT is decoded by its charset."
       (mm-destroy-parts handle)
       (nreverse parts))))
 
+(defun email-e2e--contrast (a b)
+  "WCAG contrast ratio of the hex colors A and B, read exactly."
+  (cl-flet ((luminance (color)
+              (cl-loop for value in (color-values-from-color-spec color)
+                       for weight in '(0.2126 0.7152 0.0722)
+                       sum (let ((c (/ value 65535.0)))
+                             (* weight (if (<= c 0.04045)
+                                           (/ c 12.92)
+                                         (expt (/ (+ c 0.055) 1.055) 2.4)))))))
+    (let ((x (luminance a))
+          (y (luminance b)))
+      (/ (+ (max x y) 0.05) (+ (min x y) 0.05)))))
+
+(defun email-e2e--colors (html)
+  "Every hex text color HTML sets, in order."
+  (let ((start 0)
+        (colors '()))
+    (while (and html (string-match "[^-]color: *\\(#[[:xdigit:]]+\\)" html start))
+      (push (match-string 1 html) colors)
+      (setq start (match-end 0)))
+    (nreverse colors)))
+
+(defun email-e2e--with-foreground (face color fn)
+  "Call FN with FACE's foreground COLOR, the old one restored after."
+  (let ((old (face-attribute face :foreground)))
+    (unwind-protect
+        (progn
+          (set-face-attribute face nil :foreground color)
+          (funcall fn))
+      (set-face-attribute face nil :foreground old))))
+
 (defun email-e2e--write-list-message (file from subject id date &optional references)
   "Write to FILE a message FROM posted to emacs-devel with two people in Cc.
 SUBJECT, ID, DATE and REFERENCES fill the headers."
@@ -295,7 +326,8 @@ closed whatever happens, so the flow's exit asks nothing."
                       "#+begin_quote\nAn Org quote.\n#+end_quote\n\n"
                       "[[file:" pixel "]]\n\n"
                       "<#part type=\"text/plain\" filename=\"" notes "\" disposition=attachment>\n<#/part>\n")
-              (let* ((parts (send))
+              ;; a string color that reads at 1.4:1 on the light code block
+              (let* ((parts (email-e2e--with-foreground 'font-lock-string-face "#d7d5d1" #'send))
                      (text (part parts "text/plain"))
                      (html (part parts "text/html"))
                      (image (seq-find (lambda (p) (equal (nth 1 p) "image/png")) parts))
@@ -327,7 +359,18 @@ closed whatever happens, so the flow's exit asks nothing."
                                              "\\[a link\\](https://gnu.org)" "café 🎉" "^- one$" "^- \\[x\\] done$"
                                              "^| a | b |$" "^```emacs-lisp$" "^> An Org quote\\.$" "^pixel\\.png$"
                                              "\n-- \nBest regards,\nAg\n*\\'")))
-                         :got (format "%S" text))))
+                         :got (format "%S" text))
+                (let* ((start (and html (string-search "<pre" html)))
+                       (code (and start (substring html start (string-search "</pre>" html start))))
+                       (colors (email-e2e--colors code))
+                       (unreadable (seq-filter (lambda (color) (< (email-e2e--contrast color "#f6f8fa") 4.5))
+                                               colors)))
+                  (funcall record "its code block is light, and every color in it reads at 4.5:1 or better"
+                           (and code
+                                (string-match-p "\\`<pre style=\"background-color: #f6f8fa;" code)
+                                colors
+                                (null unreadable))
+                           :got (format "unreadable %S in %S" unreadable code)))))
             (let ((new (compose)))
               (insert "Edit *me* here.\n")
               (execute-kbd-macro (kbd "<escape> , o"))
