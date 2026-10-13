@@ -566,7 +566,9 @@ window and deletes the summary's."
                       ;; a search, an advice or a sibling file calls these
                       search-likeliest-copies-a read-mail-search-limit refresh-mail-group
                       keep-flags-set-elsewhere-a maildir-groups accept-mail-without-nul-a
-                      subscribe-mail-group mail-file-group current-mail-file)
+                      subscribe-mail-group mail-file-group current-mail-file
+                      follow-renamed-mail-a follow-renamed-mail-marks-a
+                      check-mail-syncs start-mail-sync-check stop-mail-sync-check)
                      ("labels.el" label-mail label-mail-threads
                       ;; the first summary line draws through these, and
                       ;; an advice, the thread view or a load calls the rest
@@ -590,7 +592,7 @@ window and deletes the summary's."
                      ("load.el" load-mail-groups maildir-group-p mail-group-loaded-p
                       mail-group-pending-p mail-group-reading-p mail-load-busy-p
                       mail-full-group-name wait-for-mail-load load-unloaded-mail-groups
-                      mail-group-server)
+                      mail-group-server mail-group-store)
                      ("similar.el" count-mail)))
       (with-temp-buffer
         (insert-file-contents
@@ -747,7 +749,12 @@ window and deletes the summary's."
   (advice-remove 'nnmaildir--article-set-flags #'keep-flags-set-elsewhere-a)
   (advice-remove 'nnmaildir-request-accept-article #'accept-mail-without-nul-a)
   (advice-remove 'nnmaildir-request-accept-article #'refresh-mail-labels-soon)
-  (advice-remove 'nnmaildir-request-expire-articles #'refresh-mail-labels-soon))
+  (advice-remove 'nnmaildir-request-expire-articles #'refresh-mail-labels-soon)
+  (dolist (fn '(nnmaildir-retrieve-headers nnmaildir-request-article
+                nnmaildir-request-move-article nnmaildir-request-expire-articles))
+    (advice-remove fn #'follow-renamed-mail-a))
+  (dolist (fn '(nnmaildir-request-set-mark nnmaildir-request-update-info))
+    (advice-remove fn #'follow-renamed-mail-marks-a)))
 
 (describe "email module startup"
   (it "reads no group whole in the main thread, and refuses one still loading"
@@ -777,6 +784,19 @@ window and deletes the summary's."
             (eval form t))
           (expect (advice-member-p #'keep-flags-set-elsewhere-a 'nnmaildir--article-set-flags)
                   :to-be-truthy))
+      (email-tests--remove-nnmaildir-advice)))
+  (it "follows a file mbsync renamed before nnmaildir reads or changes its group"
+    ;; a header read, an article, a move, a deletion, a flag and the marks
+    (require 'nnmaildir)
+    (unwind-protect
+        (progn
+          (dolist (form (email-tests--config-forms 'nnmaildir))
+            (eval form t))
+          (dolist (fn '(nnmaildir-retrieve-headers nnmaildir-request-article
+                        nnmaildir-request-move-article nnmaildir-request-expire-articles))
+            (expect (advice-member-p #'follow-renamed-mail-a fn) :to-be-truthy))
+          (dolist (fn '(nnmaildir-request-set-mark nnmaildir-request-update-info))
+            (expect (advice-member-p #'follow-renamed-mail-marks-a fn) :to-be-truthy)))
       (email-tests--remove-nnmaildir-advice)))
   (it "files a copy or a moved message without NUL bytes, which Gmail refuses"
     (require 'nnmaildir)
@@ -810,15 +830,15 @@ window and deletes the summary's."
           (eval form t)))
       (expect gnus-started-hook
               :to-equal '(subscribe-mail-groups apply-mail-topics load-all-mail-groups
-                          start-feed-fetches fetch-stale-news))))
-  (it "drops every load when Gnus leaves"
+                          start-mail-sync-check start-feed-fetches fetch-stale-news))))
+  (it "drops every load and stops looking for syncs when Gnus leaves"
     (require 'gnus)
     (let ((gnus-exit-gnus-hook nil))
       (dolist (form (email-tests--config-forms 'gnus))
         (when (and (eq (car-safe form) 'add-hook)
                    (equal (cadr form) ''gnus-exit-gnus-hook))
           (eval form t)))
-      (expect gnus-exit-gnus-hook :to-equal '(stop-mail-load))))
+      (expect gnus-exit-gnus-hook :to-equal '(stop-mail-sync-check stop-mail-load))))
   (it "waits for loads before a search, a thread search or entering a group"
     (require 'gnus-sum)
     (let ((gnus-mark-article-hook nil)

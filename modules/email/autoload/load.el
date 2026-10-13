@@ -103,6 +103,7 @@ Its read waits for the fetch, whose end asks for it again."
   (or mail-load-running mail-load-tables mail-load-job
       (seq-remove #'mail-load-parked-p mail-load-queue)))
 
+;;;###autoload
 (defun mail-group-store (group)
   "Directory of the nnmaildir server GROUP lives on."
   (let ((server (car (mail-table-group-parts group))))

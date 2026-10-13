@@ -50,6 +50,56 @@ With FULL, the mail sync runs every tier at once."
   (fetch-news)
   (fetch-feeds))
 
+;;; Syncs launchd runs
+
+(defvar mail-sync-check-interval 15
+  "Seconds between looks for routine groups whose folder mbsync changed.")
+
+(defvar mail-sync-check-timer nil
+  "Timer of `check-mail-syncs' while Gnus runs, or nil.")
+
+(defvar mail-sync-states (make-hash-table :test #'equal)
+  "The time of each routine group's mbsync state file at the last look.")
+
+(defun mail-sync-state-time (group)
+  "When mbsync last wrote its state file in GROUP's folder, or nil."
+  (when-let* ((store (mail-group-store group)))
+    (file-attribute-modification-time
+     (file-attributes (expand-file-name (concat (gnus-group-real-name group) "/.mbsyncstate")
+                                        store)))))
+
+;;;###autoload
+(defun check-mail-syncs ()
+  "Read again, in the background, each routine group whose folder mbsync changed.
+mbsync rewrites a folder's state file only when it changed the folder.
+The first look at a group only notes the time."
+  (when (gnus-alive-p)
+    (when-let* ((changed (seq-filter
+                          (lambda (group)
+                            (let ((then (gethash group mail-sync-states 'unseen))
+                                  (now (mail-sync-state-time group)))
+                              (puthash group now mail-sync-states)
+                              (not (or (eq then 'unseen)
+                                       (if (and now then) (time-equal-p now then) (eq now then))))))
+                          (scanned-mail-groups))))
+      (load-mail-groups changed))))
+
+;;;###autoload
+(defun start-mail-sync-check ()
+  "Look for folders mbsync changed every `mail-sync-check-interval' seconds."
+  (stop-mail-sync-check)
+  (check-mail-syncs)
+  (setq mail-sync-check-timer
+        (run-with-timer mail-sync-check-interval mail-sync-check-interval #'check-mail-syncs)))
+
+;;;###autoload
+(defun stop-mail-sync-check ()
+  "Stop looking for folders mbsync changed, and forget what was seen."
+  (when (timerp mail-sync-check-timer)
+    (cancel-timer mail-sync-check-timer))
+  (setq mail-sync-check-timer nil)
+  (clrhash mail-sync-states))
+
 ;;; Navigation
 
 ;;;###autoload
@@ -271,26 +321,50 @@ names a message's copies in the same order with and without
              (push file (car messages)))))
     (nreverse (mapcar #'reverse messages))))
 
+(defun mail-base-without-uid (base)
+  "BASE, a message file's name before its flags, without the UID mbsync adds."
+  (if (string-match ",U=[0-9]+\\'" base)
+      (substring base 0 (match-beginning 0))
+    base))
+
 (defun maildir-file-names (dir)
   "Hash of each message file's name in maildir directory DIR by its base name."
-  (let ((names (make-hash-table :test #'equal)))
-    (dolist (name (directory-files dir nil "\\`[^.]" t))
-      (puthash (car (split-string name ":")) (expand-file-name name dir) names))
+  (let* ((files (directory-files dir nil "\\`[^.]" t))
+         (names (make-hash-table :test #'equal :size (length files))))
+    (dolist (name files)
+      (puthash (substring name 0 (string-search ":" name)) name names))
     names))
+
+(defun maildir-uploads (names)
+  "Hash of each base name in NAMES carrying mbsync's UID, by the base without it.
+NAMES is a `maildir-file-names' hash."
+  (let ((uploads (make-hash-table :test #'equal)))
+    (maphash (lambda (base _)
+               (when-let* ((at (string-match-p ",U=[0-9]+\\'" base)))
+                 (puthash (substring base 0 at) base uploads)))
+             names)
+    uploads))
 
 ;;;###autoload
 (defun current-mail-file (file listings)
   "FILE under the name it has now, or nil once it is gone.
-A scan moves new mail into cur/ and a saved flag renames the file, and
-notmuch learns the new name at its next run.  LISTINGS holds the cur/
+A scan, a saved flag and mbsync's upload rename a file, and notmuch
+learns the new name at its next run.  LISTINGS caches the cur/
 directories read so far, each by `maildir-file-names'."
   (if (file-exists-p file)
       file
-    (let ((cur (expand-file-name
-                "cur" (file-name-directory (directory-file-name (file-name-directory file))))))
-      (gethash (car (split-string (file-name-nondirectory file) ":"))
-               (with-memoization (gethash cur listings)
-                 (maildir-file-names cur))))))
+    (let* ((cur (expand-file-name
+                 "cur" (file-name-directory (directory-file-name (file-name-directory file)))))
+           (names (with-memoization (gethash cur listings)
+                    (maildir-file-names cur)))
+           (base (car (split-string (file-name-nondirectory file) ":")))
+           (name (or (gethash base names)
+                     (when-let* ((uploaded (gethash (mail-base-without-uid base)
+                                                    (with-memoization
+                                                        (gethash (cons 'uploads cur) listings)
+                                                      (maildir-uploads names)))))
+                       (gethash uploaded names)))))
+      (and name (expand-file-name name cur)))))
 
 (defun likeliest-copy (copies &optional listings)
   "The one of COPIES, a message's files, a search shows.
@@ -385,6 +459,65 @@ that folder on every run.  nnmaildir writes the buffer when it has no
             (replace-match "" t t)))
         (apply fn args))
     (apply fn args)))
+
+;;; Names mbsync changed
+;;
+;; nnmaildir builds a message's file name from what it remembers, and
+;; drops the message once no file has that name.
+
+(defvar mail-names-checked (make-hash-table :test #'eq :weakness 'key)
+  "Each nnmaildir group's cur/ time when its file names were last checked.")
+
+(defun follow-renamed-mail (group dir)
+  "Point nnmaildir GROUP's articles at their files in maildir DIR, as renamed.
+mbsync renames a file when a flag changes elsewhere, and adds a UID once
+it uploaded the file.  A name GROUP knows already and a file gone for
+good are left to nnmaildir."
+  (let* ((cur (nnmaildir--cur dir))
+         (time (file-attribute-modification-time (file-attributes cur)))
+         (flist (nnmaildir--grp-flist group))
+         (then (gethash group mail-names-checked)))
+    (unless (or (null time) (not (hash-table-p flist))
+                (and then (time-equal-p time then)))
+      (puthash group time mail-names-checked)
+      (let ((names (maildir-file-names cur))
+            missing)
+        (maphash (lambda (prefix article)
+                   (if-let* ((name (gethash prefix names)))
+                       (let ((suffix (nnmaildir--art-suffix article)))
+                         (unless (and suffix (eq t (compare-strings suffix nil nil
+                                                                    name (length prefix) nil)))
+                           (setf (nnmaildir--art-suffix article) (substring name (length prefix)))))
+                     (push article missing)))
+                 flist)
+        ;; only a file Gnus wrote lacks the UID mbsync gives an upload
+        (when-let* ((wrote (seq-remove (lambda (article)
+                                         (string-search ",U=" (nnmaildir--art-prefix article)))
+                                       missing))
+                    (uploads (maildir-uploads names)))
+          (dolist (article wrote)
+            (when-let* ((base (gethash (nnmaildir--art-prefix article) uploads))
+                        ((not (gethash base flist))))
+              (remhash (nnmaildir--art-prefix article) flist)
+              (setf (nnmaildir--art-prefix article) base
+                    (nnmaildir--art-suffix article) (substring (gethash base names) (length base)))
+              (puthash base article flist))))))))
+
+(defun follow-renamed-mail-group (gname server)
+  "Run `follow-renamed-mail' on group GNAME of nnmaildir SERVER, if it holds one."
+  (when-let* ((group (nnmaildir--prepare server gname)))
+    (follow-renamed-mail group (nnmaildir--srvgrp-dir (nnmaildir--srv-dir nnmaildir--cur-server)
+                                                      (nnmaildir--grp-name group)))))
+
+;;;###autoload
+(defun follow-renamed-mail-a (_articles &optional gname server &rest _)
+  "Bring nnmaildir's file names in group GNAME on SERVER up to date first."
+  (follow-renamed-mail-group gname server))
+
+;;;###autoload
+(defun follow-renamed-mail-marks-a (gname _info &optional server)
+  "Bring nnmaildir's file names in group GNAME on SERVER up to date first."
+  (follow-renamed-mail-group gname server))
 
 ;;; Order and folds
 

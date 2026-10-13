@@ -803,3 +803,288 @@ FIRSTS is the first notmuch run's output and ALL the second's, for QUERY."
             called)
         (keep-flags-set-elsewhere-a (lambda (&rest args) (setq called args)) article ":2," cur)
         (expect called :to-equal (list article ":2," cur))))))
+
+;;; Names mbsync changed
+
+(describe "maildir-file-names"
+  (it "files each name under its base name, the flags cut off"
+    (cl-letf (((symbol-function 'directory-files)
+               (lambda (&rest _) '("1.x:2,S" "1.x,U=7:2," "2.x"))))
+      (let ((names (maildir-file-names "/m/cur/")))
+        (expect (mapcar (lambda (base) (gethash base names)) '("1.x" "1.x,U=7" "2.x"))
+                :to-equal '("1.x:2,S" "1.x,U=7:2," "2.x"))))))
+
+(describe "maildir-uploads"
+  (it "finds a base name mbsync gave a UID by the base before it"
+    (let ((names (make-hash-table :test #'equal)))
+      (puthash "1.x,U=7" "1.x,U=7:2," names)
+      (puthash "2.x" "2.x:2,S" names)
+      (let ((uploads (maildir-uploads names)))
+        (expect (list (gethash "1.x" uploads) (gethash "2.x" uploads)
+                      (hash-table-count uploads))
+                :to-equal '("1.x,U=7" nil 1))))))
+
+(describe "current-mail-file"
+  (it "finds a file under the name mbsync gave it with a UID once it went up"
+    (mail-tests--in-store '("trash/cur/1.x,U=7:2,S")
+      (expect (current-mail-file (concat root "trash/cur/1.x:2,S")
+                                 (make-hash-table :test #'equal))
+              :to-equal (concat root "trash/cur/1.x,U=7:2,S"))))
+  (it "finds a file whose UID mbsync changed"
+    (mail-tests--in-store '("inbox/cur/1.x,U=9:2,")
+      (expect (current-mail-file (concat root "inbox/cur/1.x,U=5:2,")
+                                 (make-hash-table :test #'equal))
+              :to-equal (concat root "inbox/cur/1.x,U=9:2,"))))
+  (it "takes a file of the same base name over one that only lacks its UID"
+    (mail-tests--in-store '("inbox/cur/1.x,U=7:2," "inbox/cur/1.x:2,S")
+      (expect (current-mail-file (concat root "inbox/cur/1.x:2,")
+                                 (make-hash-table :test #'equal))
+              :to-equal (concat root "inbox/cur/1.x:2,S")))))
+
+(defun mail-tests--group (remembered)
+  "An nnmaildir group remembering REMEMBERED, each (PREFIX . SUFFIX), numbered from 1."
+  (let ((group (make-nnmaildir--grp :name "inbox" :flist (make-hash-table :test #'equal)))
+        (num 0))
+    (pcase-dolist (`(,prefix . ,suffix) remembered)
+      (puthash prefix (make-nnmaildir--art :prefix prefix :suffix suffix :num (cl-incf num))
+               (nnmaildir--grp-flist group)))
+    group))
+
+(defun mail-tests--names (group)
+  "GROUP's file table as (KEY PREFIX SUFFIX NUMBER) rows, sorted by key."
+  (let (rows)
+    (maphash (lambda (key article)
+               (push (list key (nnmaildir--art-prefix article) (nnmaildir--art-suffix article)
+                           (nnmaildir--art-num article))
+                     rows))
+             (nnmaildir--grp-flist group))
+    (sort rows (lambda (a b) (string< (car a) (car b))))))
+
+(describe "follow-renamed-mail"
+  (it "gives an article the flags its file has now"
+    (mail-tests--in-store '("inbox/cur/1.x:2,FS" "inbox/cur/2.x:2,")
+      (let ((group (mail-tests--group '(("1.x" . ":2,") ("2.x" . ":2,")))))
+        (follow-renamed-mail group (concat root "inbox/"))
+        (expect (mail-tests--names group)
+                :to-equal '(("1.x" "1.x" ":2,FS" 1) ("2.x" "2.x" ":2," 2))))))
+  (it "points an article at the name mbsync gave its upload, keeping its number"
+    (mail-tests--in-store '("trash/cur/1.x,U=7:2,S")
+      (let ((group (mail-tests--group '(("1.x" . ":2,")))))
+        (follow-renamed-mail group (concat root "trash/"))
+        (expect (mail-tests--names group) :to-equal '(("1.x,U=7" "1.x,U=7" ":2,S" 1))))))
+  (it "leaves an upload's old name to nnmaildir when the group knows the new one"
+    ;; a scan numbered the uploaded file already, and two articles of one
+    ;; file would show the message twice
+    (mail-tests--in-store '("trash/cur/1.x,U=7:2,")
+      (let ((group (mail-tests--group '(("1.x" . ":2,") ("1.x,U=7" . ":2,")))))
+        (follow-renamed-mail group (concat root "trash/"))
+        (expect (mail-tests--names group)
+                :to-equal '(("1.x" "1.x" ":2," 1) ("1.x,U=7" "1.x,U=7" ":2," 2))))))
+  (it "leaves an article whose file is gone for good to nnmaildir"
+    (mail-tests--in-store '("inbox/cur/other:2,")
+      (let ((group (mail-tests--group '(("1.x" . ":2,S")))))
+        (follow-renamed-mail group (concat root "inbox/"))
+        (expect (mail-tests--names group) :to-equal '(("1.x" "1.x" ":2,S" 1))))))
+  (it "reads cur/ again only once something in it changed"
+    (mail-tests--in-store '("inbox/cur/1.x:2,")
+      (let ((group (mail-tests--group '(("1.x" . ":2,"))))
+            (cur (concat root "inbox/cur/")))
+        (spy-on 'maildir-file-names :and-call-through)
+        (set-file-times cur (time-subtract nil 60))
+        (follow-renamed-mail group (concat root "inbox/"))
+        (follow-renamed-mail group (concat root "inbox/"))
+        (expect (spy-calls-count 'maildir-file-names) :to-be 1)
+        (rename-file (concat cur "1.x:2,") (concat cur "1.x:2,S"))
+        (set-file-times cur)
+        (follow-renamed-mail group (concat root "inbox/"))
+        (expect (spy-calls-count 'maildir-file-names) :to-be 2)
+        (expect (mail-tests--names group) :to-equal '(("1.x" "1.x" ":2,S" 1)))))))
+
+(defmacro mail-tests--with-nnmaildir (files &rest body)
+  "Run BODY with nnmaildir server gmail open over `store', holding FILES.
+FILES are (NAME SUBJECT), NAME under the store's inbox or trash; both
+groups are read, and the renamed-file advice is on as config.el puts it."
+  (declare (indent 1))
+  `(let* ((store (file-name-as-directory (make-temp-file "mail-tests-nnmaildir" t)))
+          (nnmaildir--servers nil)
+          (nnmaildir--cur-server nil)
+          (nntp-server-buffer (generate-new-buffer " *mail-tests-nntp*"))
+          (gnus-newsrc-hashtb (gnus-make-hashtable))
+          (gnus-verbose 0)
+          (advised '((follow-renamed-mail-a nnmaildir-retrieve-headers nnmaildir-request-article
+                                            nnmaildir-request-move-article
+                                            nnmaildir-request-expire-articles)
+                     (follow-renamed-mail-marks-a nnmaildir-request-set-mark
+                                                  nnmaildir-request-update-info))))
+     (unwind-protect
+         (progn
+           (dolist (group '("inbox" "trash"))
+             (dolist (sub '("cur" "new" "tmp"))
+               (make-directory (expand-file-name (concat group "/" sub) store) t)))
+           (pcase-dolist (`(,name ,subject) ,files)
+             (with-temp-file (expand-file-name name store)
+               (insert "From: Ann <ann@example.com>\nSubject: " subject
+                       "\nMessage-ID: <" subject "@example.com>\n\nbody\n")))
+           (nnmaildir-open-server "gmail" `((directory ,store) (get-new-mail nil)))
+           (setf (nnmaildir--srv-method nnmaildir--cur-server)
+                 `(nnmaildir "gmail" (directory ,store) (get-new-mail nil)))
+           (dolist (group '("inbox" "trash"))
+             (nnmaildir-request-scan group "gmail"))
+           (pcase-dolist (`(,advice . ,fns) advised)
+             (dolist (fn fns)
+               (advice-add fn :before advice)))
+           ,@body)
+       (pcase-dolist (`(,advice . ,fns) advised)
+         (dolist (fn fns)
+           (advice-remove fn advice)))
+       (kill-buffer nntp-server-buffer)
+       (delete-directory store t))))
+
+(defun mail-tests--files (store dir)
+  "The message files in DIR under STORE."
+  (directory-files (expand-file-name dir store) nil "\\`[^.]"))
+
+(defun mail-tests--number (group base)
+  "Number nnmaildir gave the file named BASE in GROUP of server gmail."
+  (nnmaildir-base-name-to-article-number base group "gmail"))
+
+(describe "follow-renamed-mail-a"
+  (it "lets nnmaildir read the header of a message the phone renamed"
+    (mail-tests--with-nnmaildir '(("inbox/cur/1.x:2," "one"))
+      (let ((number (mail-tests--number "inbox" "1.x")))
+        (rename-file (concat store "inbox/cur/1.x:2,") (concat store "inbox/cur/1.x:2,F"))
+        (nnmaildir-retrieve-headers (list number) "inbox" "gmail")
+        (expect (with-current-buffer nntp-server-buffer (buffer-string)) :to-match "\tone\t"))))
+  (it "lets nnmaildir open a copy mbsync renamed with a UID"
+    (mail-tests--with-nnmaildir '(("trash/cur/1.x:2,S" "one"))
+      (let ((number (mail-tests--number "trash" "1.x")))
+        (rename-file (concat store "trash/cur/1.x:2,S") (concat store "trash/cur/1.x,U=7:2,S"))
+        (expect (nnmaildir-request-article number "trash" "gmail")
+                :to-equal (cons "trash" number)))))
+  (it "moves a message the phone renamed, as d x asks"
+    (mail-tests--with-nnmaildir '(("inbox/cur/1.x:2," "one"))
+      (let ((number (mail-tests--number "inbox" "1.x")))
+        (rename-file (concat store "inbox/cur/1.x:2,") (concat store "inbox/cur/1.x:2,F"))
+        (expect (nnmaildir-request-move-article
+                 number "inbox" "gmail" '(nnmaildir-request-accept-article "trash" "gmail"))
+                :to-be-truthy)
+        (expect (list (mail-tests--files store "inbox/cur")
+                      (length (mail-tests--files store "trash/cur")))
+                :to-equal '(nil 1)))))
+  (it "deletes the file of a message the phone renamed, as an archive asks"
+    (mail-tests--with-nnmaildir '(("inbox/cur/1.x:2," "one"))
+      (let ((number (mail-tests--number "inbox" "1.x")))
+        (rename-file (concat store "inbox/cur/1.x:2,") (concat store "inbox/cur/1.x:2,S"))
+        (nnmaildir-request-expire-articles (list number) "inbox" "gmail" t)
+        (expect (mail-tests--files store "inbox/cur") :to-be nil))))
+  (it "leaves a group nnmaildir does not hold alone"
+    (mail-tests--with-nnmaildir nil
+      (expect (follow-renamed-mail-a nil "nosuch" "gmail") :to-be nil))))
+
+(describe "follow-renamed-mail-marks-a"
+  (it "keeps the UID mbsync added when Gnus saves a flag"
+    ;; nnmaildir would rename the file to the name it remembers
+    (mail-tests--with-nnmaildir '(("trash/cur/1.x:2," "one"))
+      (let ((number (mail-tests--number "trash" "1.x")))
+        (rename-file (concat store "trash/cur/1.x:2,") (concat store "trash/cur/1.x,U=7:2,"))
+        (nnmaildir-request-set-mark "trash" `(((,number . ,number) add (read))) "gmail")
+        (expect (mail-tests--files store "trash/cur") :to-equal '("1.x,U=7:2,S")))))
+  (it "reads the flags of a copy mbsync renamed with a UID"
+    (mail-tests--with-nnmaildir '(("trash/cur/1.x:2," "one"))
+      (let ((number (mail-tests--number "trash" "1.x"))
+            (info (gnus-info-make "trash" 3 nil nil '(nnmaildir "gmail"))))
+        (rename-file (concat store "trash/cur/1.x:2,") (concat store "trash/cur/1.x,U=7:2,S"))
+        (nnmaildir-request-update-info "trash" info "gmail")
+        (expect (range-member-p number (gnus-info-read info)) :to-be-truthy)))))
+
+;;; Syncs launchd runs
+
+(defun mail-tests--look (states times)
+  "Run one `check-mail-syncs' over STATES, the state files dated per TIMES.
+TIMES maps each routine group to its state file's time, nil for none.
+Returns the groups it read again."
+  (let ((mail-sync-states states)
+        loaded)
+    (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
+              ((symbol-function 'scanned-mail-groups) (lambda () (mapcar #'car times)))
+              ((symbol-function 'mail-sync-state-time) (lambda (group) (cdr (assoc group times))))
+              ((symbol-function 'load-mail-groups) (lambda (groups) (setq loaded groups))))
+      (check-mail-syncs))
+    loaded))
+
+(describe "check-mail-syncs"
+  (it "only notes the times at its first look"
+    (expect (mail-tests--look (make-hash-table :test #'equal)
+                              '(("inbox" . (1 0)) ("trash" . nil)))
+            :to-be nil))
+  (it "reads again only the groups whose state file mbsync rewrote"
+    (let ((states (make-hash-table :test #'equal)))
+      (mail-tests--look states '(("inbox" . (1 0)) ("trash" . (1 0)) ("job" . (1 0))))
+      (expect (mail-tests--look states '(("inbox" . (2 0)) ("trash" . (1 0)) ("job" . (3 0))))
+              :to-equal '("inbox" "job"))
+      (expect (mail-tests--look states '(("inbox" . (2 0)) ("trash" . (1 0)) ("job" . (3 0))))
+              :to-be nil)))
+  (it "reads again a group whose state file appeared"
+    ;; mbsync's first sync of a new label
+    (let ((states (make-hash-table :test #'equal)))
+      (mail-tests--look states '(("job" . nil)))
+      (expect (mail-tests--look states '(("job" . (1 0)))) :to-equal '("job"))))
+  (it "looks at nothing while Gnus is down"
+    (let ((mail-sync-states (make-hash-table :test #'equal)))
+      (cl-letf (((symbol-function 'gnus-alive-p) #'ignore))
+        (spy-on 'scanned-mail-groups)
+        (check-mail-syncs)
+        (expect 'scanned-mail-groups :not :to-have-been-called)))))
+
+(describe "mail-sync-state-time"
+  (it "reads when mbsync last wrote the state file in the group's folder"
+    (mail-tests--in-store '("inbox/cur/1.x:2,")
+      (let ((gnus-secondary-select-methods `((nnmaildir "gmail" (directory ,root))))
+            (state (concat root "inbox/.mbsyncstate")))
+        (write-region "" nil state nil 'silent)
+        (set-file-times state '(25000 0))
+        (expect (time-equal-p (mail-sync-state-time "nnmaildir+gmail:inbox") '(25000 0))
+                :to-be t))))
+  (it "answers nil for a folder mbsync never synced"
+    (mail-tests--in-store '("inbox/cur/1.x:2,")
+      (let ((gnus-secondary-select-methods `((nnmaildir "gmail" (directory ,root)))))
+        (expect (mail-sync-state-time "nnmaildir+gmail:inbox") :to-be nil)))))
+
+(describe "start-mail-sync-check"
+  (it "notes the times at once, then looks again every interval"
+    (let ((mail-sync-check-timer nil)
+          (mail-sync-check-interval 15)
+          (mail-sync-states (make-hash-table :test #'equal))
+          looks)
+      (cl-letf (((symbol-function 'check-mail-syncs) (lambda () (push 'look looks))))
+        (unwind-protect
+            (progn
+              (start-mail-sync-check)
+              (expect looks :to-equal '(look))
+              (expect (timer--repeat-delay mail-sync-check-timer) :to-equal 15)
+              (expect (timer--function mail-sync-check-timer) :to-be 'check-mail-syncs))
+          (stop-mail-sync-check)))))
+  (it "keeps one timer however often Gnus starts"
+    (let ((mail-sync-check-timer nil)
+          (mail-sync-check-interval 15)
+          (mail-sync-states (make-hash-table :test #'equal)))
+      (cl-letf (((symbol-function 'check-mail-syncs) #'ignore))
+        (unwind-protect
+            (progn
+              (start-mail-sync-check)
+              (start-mail-sync-check)
+              (expect (seq-count (lambda (timer) (eq (timer--function timer) 'check-mail-syncs))
+                                 timer-list)
+                      :to-be 1))
+          (stop-mail-sync-check))))))
+
+(describe "stop-mail-sync-check"
+  (it "cancels the timer and forgets the times seen"
+    (let ((mail-sync-check-timer (run-with-timer 3600 3600 #'ignore))
+          (mail-sync-states (make-hash-table :test #'equal)))
+      (puthash "nnmaildir+gmail:inbox" '(1 0) mail-sync-states)
+      (let ((timer mail-sync-check-timer))
+        (stop-mail-sync-check)
+        (expect (list (memq timer timer-list) mail-sync-check-timer
+                      (hash-table-count mail-sync-states))
+                :to-equal '(nil nil 0))))))

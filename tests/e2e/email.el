@@ -38,6 +38,7 @@
 (defvar mail-label-jobs)
 (defvar mail-label-colors)
 (defvar mail-label-refresh-timer)
+(defvar mail-sync-check-interval)
 
 (defun email-e2e--write-message (file from subject id &optional date references xref body)
   "Write a minimal RFC 822 message to FILE.
@@ -210,6 +211,8 @@ An untimed `read-event' is idle, and a timer ends it."
          (mail-load-directory (expand-file-name "mail-load/" e2e-work-dir))
          (mail-table-directory (expand-file-name "mail-tables/" e2e-work-dir))
          (mail-sync-program "true")
+         ;; the flow looks for mbsync's changes itself, never on a timer
+         (mail-sync-check-interval 3600)
          ;; a reply reads no notmuch and writes no saved addresses
          (mail-address-file (expand-file-name "mail-addresses.eld" e2e-work-dir))
          (mail-addresses-read-at (float-time))
@@ -2325,7 +2328,96 @@ An untimed `read-event' is idle, and a timer ends it."
                             (and (equal (flags-of inbox "twin-late") "S")
                                  (equal (flags-of inbox "twin-fresh") "S"))
                             :got (format "late %S, fresh %S"
-                                         (where "twin-late") (where "twin-fresh")))))
+                                         (where "twin-late") (where "twin-fresh"))))
+                  ;; mbsync renames files behind nnmaildir's back: a flag
+                  ;; set on the phone, and a UID once an upload went up
+                  (cl-flet* ((try (keys)
+                               ;; the error KEYS raise fails their case, not the flow
+                               (condition-case err
+                                   (progn (execute-kbd-macro (kbd keys)) nil)
+                                 (error err)))
+                             (enter (group)
+                               (switch-to-buffer gnus-group-buffer)
+                               (gnus-group-jump-to-group group)
+                               (try "RET"))
+                             (leave ()
+                               (when (derived-mode-p 'gnus-summary-mode)
+                                 (execute-kbd-macro "q")))
+                             ;; the article with SUBJECT here, or nil
+                             (article-of (subject)
+                               (when-let* ((header (seq-find (lambda (header)
+                                                               (equal (mail-header-subject header)
+                                                                      subject))
+                                                             gnus-newsgroup-headers)))
+                                 (mail-header-number header)))
+                             (trash-file (id)
+                               (seq-find (lambda (file)
+                                           (equal (message-ids (list file))
+                                                  (list (format "<%s@fixture.example>" id))))
+                                         (messages-in trash)))
+                             ;; FILE renamed as mbsync names an upload once it has UID
+                             (upload (file uid)
+                               (when file
+                                 (let ((name (file-name-nondirectory file)))
+                                   (string-match "\\`\\([^:]*\\)\\(.*\\)\\'" name)
+                                   (rename-file file (expand-file-name
+                                                      (format "%s,U=%d%s" (match-string 1 name)
+                                                              uid (match-string 2 name))
+                                                      (file-name-directory file)))))))
+                    (delete-other-windows)
+                    (switch-to-buffer gnus-group-buffer)
+                    (dolist (id '("renamed-search" "renamed-enter" "synced-star"))
+                      (twin id ""))
+                    (execute-kbd-macro (kbd "gR"))
+                    (loads-done)
+                    (phone "renamed-search" "F")
+                    (phone "renamed-enter" "S")
+                    (let ((err (try ", / renamed-search RET")))
+                      (record "a search shows a message the phone renamed since its group was read"
+                              (and (derived-mode-p 'gnus-summary-mode)
+                                   (equal (nnselect-article-group (car gnus-newsgroup-articles))
+                                          "nnmaildir+gmail:inbox"))
+                              :got (format "%s in %s, %S" major-mode (buffer-name) err)))
+                    (leave)
+                    (let ((err (enter "nnmaildir+gmail:inbox")))
+                      (record "RET shows a message the phone renamed since its group was read"
+                              (article-of "renamed-enter")
+                              :got (format "%s, %S" (buffer-name) err)))
+                    (leave)
+                    ;; the trash copy d x filed above, renamed by the push
+                    (upload (trash-file "twin-trash") 1)
+                    (let ((err (enter "nnmaildir+gmail:trash")))
+                      (record "RET shows a copy mbsync renamed with a UID once it went up"
+                              (article-of "twin-trash")
+                              :got (format "%s, %S" (buffer-name) err)))
+                    ;; the push of another copy ends while the trash is open
+                    (let ((before (flags-of trash "twin-drop"))
+                          (article (article-of "twin-drop")))
+                      (upload (trash-file "twin-drop") 2)
+                      (when article
+                        (gnus-summary-goto-subject article)
+                        (execute-kbd-macro "!"))
+                      (leave)
+                      (let ((name (file-name-nondirectory (or (trash-file "twin-drop") "gone"))))
+                        (record "a flag saved on a copy mbsync renamed meanwhile keeps its UID"
+                                (and article
+                                     (string-match-p ",U=2:2," name)
+                                     (not (equal (flags-of trash "twin-drop") before)))
+                                :got (format "article %S, %s, flags %S then %S" article name
+                                             before (flags-of trash "twin-drop")))))
+                    ;; a launchd sync: mbsync stars synced-star and writes
+                    ;; the inbox's state file, which the start found missing
+                    (phone "synced-star" "F")
+                    (write-region "" nil (expand-file-name ".mbsyncstate" inbox))
+                    (check-mail-syncs)
+                    (loads-done)
+                    (let* ((err (enter "nnmaildir+gmail:inbox"))
+                           (article (article-of "synced-star")))
+                      (record "a sync that changed the inbox reloads it, and RET shows the phone's star"
+                              (and article (equal (line-star article) star))
+                              :got (format "article %S, column %S, %S" article
+                                           (and article (line-star article)) err)))
+                    (leave)))
                 ;; the group buffer's own localleader over topics and
                 ;; subscriptions; moved is a group mail-topics leaves out
                 (delete-other-windows)

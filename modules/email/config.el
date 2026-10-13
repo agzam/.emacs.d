@@ -180,6 +180,9 @@ Any other label's chip takes the face `mail-label'.")
   ;; a slice at a time
   (add-hook 'gnus-started-hook #'load-all-mail-groups 90)
   (add-hook 'gnus-exit-gnus-hook #'stop-mail-load)
+  ;; what launchd's syncs change reaches the routine groups, as after , u
+  (add-hook 'gnus-started-hook #'start-mail-sync-check 90)
+  (add-hook 'gnus-exit-gnus-hook #'stop-mail-sync-check)
   ;; entering a group or searching needs the groups nnmaildir holds
   (advice-add 'gnus-group-read-ephemeral-search-group :around #'wait-for-mail-loads-a)
   ;; a feed is read from its downloaded copy, so a group never waits on
@@ -389,6 +392,12 @@ columns would go to the window left of Gnus."
   (advice-add 'nnmaildir-base-name-to-article-number :around #'scan-mail-group-on-miss-a)
   ;; a flag Gnus saves would drop the flags the phone changed on that file
   (advice-add 'nnmaildir--article-set-flags :around #'keep-flags-set-elsewhere-a)
+  ;; nnmaildir drops a message mbsync renamed at its next read or change
+  (dolist (fn '(nnmaildir-retrieve-headers nnmaildir-request-article
+                nnmaildir-request-move-article nnmaildir-request-expire-articles))
+    (advice-add fn :before #'follow-renamed-mail-a))
+  (dolist (fn '(nnmaildir-request-set-mark nnmaildir-request-update-info))
+    (advice-add fn :before #'follow-renamed-mail-marks-a))
   ;; a copy or move is an upload, and Gmail refuses a NUL byte in one
   (advice-add 'nnmaildir-request-accept-article :around #'accept-mail-without-nul-a)
   ;; a label added, removed or archived away shows on every summary
