@@ -436,13 +436,33 @@ columns would go to the window left of Gnus."
         ;; the mail
         message-dont-reply-to-names (regexp-opt (list mail-from-address mail-inbox-address))
         message-citation-line-function #'message-insert-formatted-citation-line
-        message-citation-line-format "On %a, %b %d, %Y at %R, %N wrote:\n")
+        message-citation-line-format "On %a, %b %d, %Y at %R, %N wrote:\n"
+        message-signature "Best regards,\nAg")
   :config
   ;; ahead of message.el's own entry, which covers From as well
   (add-to-list 'message-completion-alist
                '("^\\([^ :]*-\\)?\\(To\\|B?Cc\\|Reply-To\\|Mail-Followup-To\\|Mail-Copies-To\\):"
                  . complete-mail-address))
   (add-hook 'message-mode-hook #'prepare-mail-addresses-h))
+
+(use-package gnus-msg
+  :ensure nil
+  :defer t
+  :config
+  ;; the body is Org; what Gnus composes leaves as HTML or plain text
+  (add-hook 'gnus-message-setup-hook #'prepare-mail-format-h)
+  (advice-add 'message-send :around #'send-converted-mail-a)
+  (map! :map message-mode-map
+        (:localleader
+         :desc "plain text or HTML" "p" #'toggle-mail-format
+         :desc "edit body in Org"   "o" #'org-mime-edit-mail-in-org-mode)))
+
+(use-package org-mime
+  :defer t
+  :commands org-mime-edit-mail-in-org-mode
+  :init
+  ;; the Org buffer opens as any other buffer would, not over the frame
+  (setq org-mime-obey-display-buffer-p t))
 
 (use-package smtpmail
   :ensure nil

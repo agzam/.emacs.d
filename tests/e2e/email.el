@@ -17,6 +17,8 @@
 (require 'gnus-start)
 (require 'gnus-sum)
 (require 'gnus-search)
+;; the Org compose cases bind its folders before a message buffer saves
+(require 'nndraft)
 ;; , q's case moves the drafts folder by binding these
 (require 'nndraft)
 ;; the feed and news variables live in autoload files no key has loaded yet
@@ -78,6 +80,37 @@ SUBJECT and ID fill the headers."
             "\n"
             html "\n"
             "--alt--\n")))
+
+(defconst email-e2e--pixel
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+  "A one-pixel PNG, base64-encoded, for an image in a composed message.")
+
+(defun email-e2e--parts (raw)
+  "Each part of the encoded message RAW as (DEPTH TYPE TEXT ID), in order.
+A multipart has no TEXT; a leaf's TEXT is decoded by its charset."
+  (with-temp-buffer
+    (set-buffer-multibyte nil)
+    (insert raw)
+    (let ((handle (mm-dissect-buffer t))
+          parts)
+      (cl-labels ((walk (h depth)
+                    (if (stringp (car h))
+                        (progn
+                          (push (list depth (substring-no-properties (car h)) nil nil) parts)
+                          (dolist (child (cdr h))
+                            (walk child (1+ depth))))
+                      (push (list depth (mm-handle-media-type h)
+                                  (let ((charset (mail-content-type-get (mm-handle-type h) 'charset)))
+                                    (with-temp-buffer
+                                      (mm-insert-part h)
+                                      (if charset
+                                          (mm-decode-string (buffer-string) (intern (downcase charset)))
+                                        (buffer-string))))
+                                  (mm-handle-id h))
+                            parts))))
+        (walk handle 0))
+      (mm-destroy-parts handle)
+      (nreverse parts))))
 
 (defun email-e2e--write-list-message (file from subject id date &optional references)
   "Write to FILE a message FROM posted to emacs-devel with two people in Cc.
@@ -149,6 +182,193 @@ An untimed `read-event' is idle, and a timer ends it."
             (while t (read-event))))
       (cancel-timer poll))
     (and done (funcall done))))
+
+(defun email-e2e--org-compose (record)
+  "Compose in Org through real keys, calling RECORD on each case.
+A stand-in keeps what would leave.  The summaries the cases open are
+closed whatever happens, so the flow's exit asks nothing."
+  (let* ((sent nil)
+         (message-send-mail-function (lambda () (setq sent (buffer-string))))
+         (message-confirm-send t)
+         (pixel (expand-file-name "pixel.png" e2e-work-dir))
+         (notes (expand-file-name "notes.txt" e2e-work-dir))
+         ;; the drafts a message buffer saves stay in the work dir
+         (drafts (file-name-as-directory (expand-file-name "org-drafts" e2e-work-dir)))
+         (nndraft-directory drafts)
+         (nnmh-directory drafts)
+         (nndraft-current-group nil))
+    (make-directory (expand-file-name "drafts" drafts) t)
+    (let ((coding-system-for-write 'no-conversion))
+      (with-temp-file pixel
+        (set-buffer-multibyte nil)
+        (insert (base64-decode-string email-e2e--pixel))))
+    (with-temp-file notes
+      (insert "attached notes\n"))
+    (cl-flet* ((without-gcc ()
+                 (save-excursion
+                   (save-restriction
+                     (message-narrow-to-headers)
+                     (message-remove-header "Gcc"))))
+               (reply-in (group subject)
+                 (delete-other-windows)
+                 (switch-to-buffer gnus-group-buffer)
+                 (gnus-group-jump-to-group group)
+                 (execute-kbd-macro (kbd "RET"))
+                 (gnus-summary-goto-subject (email-e2e--article subject))
+                 (execute-kbd-macro "r")
+                 (without-gcc)
+                 (current-buffer))
+               (compose ()
+                 (delete-other-windows)
+                 (switch-to-buffer gnus-group-buffer)
+                 (execute-kbd-macro (kbd ", c"))
+                 (without-gcc)
+                 (message-goto-to)
+                 (insert "bob@example.com")
+                 (message-goto-subject)
+                 (insert "Org compose")
+                 (message-goto-body)
+                 (current-buffer))
+               (send ()
+                 (setq sent nil)
+                 (execute-kbd-macro (kbd "C-c C-c y"))
+                 (and sent (email-e2e--parts sent)))
+               (part (parts type)
+                 (nth 2 (seq-find (lambda (p) (equal (nth 1 p) type)) parts)))
+               (format-line ()
+                 (format-mode-line mode-name)))
+      (unwind-protect
+          (progn
+            (let ((reply (reply-in "nnmaildir+gmail:inbox" "fresh")))
+              (funcall record "a reply to a plain-text mail leaves as plain text, the mode line says so"
+                       (and (eq mail-format 'plain)
+                            (string-match-p "Plain" (format-line)))
+                       :got (format "%S, %S" mail-format (format-line)))
+              (execute-kbd-macro "Noted *with thanks*.\r\r")
+              (let* ((parts (send))
+                     (text (part parts "text/plain")))
+                (funcall record "the plain reply leaves as Markdown, the quote as typed, the signature last"
+                         (and (= 1 (length parts))
+                              (not (buffer-live-p reply))
+                              (string-match-p "\\`Noted \\*\\*with thanks\\*\\*\\." text)
+                              (string-match-p "^> body of fresh$" text)
+                              (string-match-p "\n-- \nBest regards,\nAg\n*\\'" text))
+                         :got (format "%S" parts))))
+            (let ((reply (reply-in "nnmaildir+gmail:html" "html letter")))
+              (funcall record "a reply to an HTML mail leaves as HTML, the mode line says so"
+                       (and (eq mail-format 'html)
+                            (string-match-p "HTML" (format-line)))
+                       :got (format "%S, %S" mail-format (format-line)))
+              (execute-kbd-macro "Here is *bold* and ~code~.\r\r")
+              (let* ((parts (send))
+                     (text (part parts "text/plain"))
+                     (html (part parts "text/html")))
+                (funcall record "the HTML reply leaves as Markdown and HTML, quotes in blockquotes, the signature in both"
+                         (and (equal (mapcar #'cadr parts)
+                                     '("multipart/alternative" "text/plain" "text/html"))
+                              (not (buffer-live-p reply))
+                              (string-match-p "^Here is \\*\\*bold\\*\\* and `code`\\.$" text)
+                              (string-match-p "\n-- \nBest regards,\nAg\n*\\'" text)
+                              (string-match-p "<b>bold</b> and <code>code</code>" html)
+                              (string-match-p "<blockquote class=\"gmail_quote\"" html)
+                              (string-match-p "<p>-- <br>\nBest regards,<br>\nAg</p>" html))
+                         :got (format "%S" parts))))
+            (let ((new (compose))
+                  (states '()))
+              (push (cons mail-format (format-line)) states)
+              (execute-kbd-macro (kbd "C-, p"))
+              (push (cons mail-format (format-line)) states)
+              (execute-kbd-macro (kbd "C-, p"))
+              (push (cons mail-format (format-line)) states)
+              (setq states (nreverse states))
+              (funcall record "a new message starts as HTML, and C-, p flips it to plain text and back"
+                       (and (equal (mapcar #'car states) '(html plain html))
+                            (string-match-p "HTML" (cdr (nth 0 states)))
+                            (string-match-p "Plain" (cdr (nth 1 states)))
+                            (string-match-p "HTML" (cdr (nth 2 states))))
+                       :got (format "%S" states))
+              (insert "* Plan\n"
+                      "Some *bold*, /italic/, ~code~, +gone+ and [[https://gnu.org][a link]], snake_case, café 🎉.\n\n"
+                      "- one\n  1. nested\n- [X] done\n\nTerms:\n- term :: meaning\n\n"
+                      "| a | b |\n|---+---|\n| 1 | 2 |\n\n"
+                      "#+begin_src emacs-lisp\n(message \"hi\")\n#+end_src\n\n"
+                      "#+begin_quote\nAn Org quote.\n#+end_quote\n\n"
+                      "[[file:" pixel "]]\n\n"
+                      "<#part type=\"text/plain\" filename=\"" notes "\" disposition=attachment>\n<#/part>\n")
+              (let* ((parts (send))
+                     (text (part parts "text/plain"))
+                     (html (part parts "text/html"))
+                     (image (seq-find (lambda (p) (equal (nth 1 p) "image/png")) parts))
+                     (missing (seq-remove
+                               (lambda (element) (string-match-p element (or html "")))
+                               (list "<h2 id=\"[^\"]+\">Plan</h2>" "<b>bold</b>" "<i>italic</i>"
+                                     "<code>code</code>" "<del>gone</del>"
+                                     "<a href=\"https://gnu.org\">a link</a>" "snake_case" "café 🎉"
+                                     "<ul class=\"org-ul\">" "<ol class=\"org-ol\">" "&#x2611; done"
+                                     "<dl class=\"org-dl\">" "<table "
+                                     "<pre[^>]*class=\"src src-emacs-lisp\"><code>(message <span style=\"color: "
+                                     "<blockquote>\n<p>\nAn Org quote"
+                                     (format "src=\"cid:%s\""
+                                             (string-trim (or (nth 3 image) "") "<" ">"))
+                                     "<p>-- <br>\nBest regards,<br>\nAg</p>"))))
+                (funcall record "a new message carries every Org element in HTML, its image inline, its attachment after"
+                         (and (not (buffer-live-p new))
+                              (equal (mapcar #'cadr parts)
+                                     '("multipart/mixed" "multipart/alternative" "text/plain"
+                                       "multipart/related" "text/html" "image/png" "text/plain"))
+                              (nth 3 image)
+                              (null missing)
+                              (equal (nth 2 (car (last parts))) "attached notes\n"))
+                         :got (format "missing %S in %S" missing parts))
+                (funcall record "its Markdown part renders the same elements"
+                         (and text
+                              (seq-every-p (lambda (element) (string-match-p element text))
+                                           '("^# Plan$" "Some \\*\\*bold\\*\\*, \\*italic\\*, `code`, ~~gone~~"
+                                             "\\[a link\\](https://gnu.org)" "café 🎉" "^- one$" "^- \\[x\\] done$"
+                                             "^| a | b |$" "^```emacs-lisp$" "^> An Org quote\\.$" "^pixel\\.png$"
+                                             "\n-- \nBest regards,\nAg\n*\\'")))
+                         :got (format "%S" text))))
+            (let ((new (compose)))
+              (insert "Edit *me* here.\n")
+              (execute-kbd-macro (kbd "<escape> , o"))
+              (let ((org (current-buffer)))
+                (funcall record ", o opens the body in an Org buffer"
+                         (and (not (eq org new))
+                              (derived-mode-p 'org-mode)
+                              (bound-and-true-p org-mime-src-mode)
+                              (string-match-p "Edit \\*me\\* here\\." (buffer-string)))
+                         :got (format "%S in %s: %S" major-mode (buffer-name)
+                                      (buffer-substring-no-properties (point-min) (min (point-max) 200))))
+                ;; in the message itself, C-c C-c would start a send
+                (when (derived-mode-p 'org-mode)
+                  (execute-kbd-macro (kbd "C-c C-c")))
+                (funcall record "C-c C-c there puts the body back into the message"
+                         (and (not (buffer-live-p org))
+                              (eq (current-buffer) new)
+                              (string-match-p "\\`Edit \\*me\\* here\\.\n" (mail-body)))
+                         :got (format "%s: %S" (buffer-name) (mail-body))))
+              (setq sent nil)
+              (let ((quit (condition-case nil
+                              (progn (execute-kbd-macro (kbd "C-c C-c n")) nil)
+                            (quit t))))
+                (funcall record "n at Send message? leaves the Org body as typed, nothing sent"
+                         (and quit
+                              (null sent)
+                              (buffer-live-p new)
+                              (string-match-p "\\`Edit \\*me\\* here\\.\n"
+                                              (with-current-buffer new (mail-body))))
+                         :got (format "quit %S, sent %S, body %S" quit sent
+                                      (and (buffer-live-p new) (with-current-buffer new (mail-body))))))))
+        (dolist (buffer (buffer-list))
+          (when (memq (buffer-local-value 'major-mode buffer) '(message-mode org-mode))
+            (with-current-buffer buffer
+              (when (or (derived-mode-p 'message-mode) (bound-and-true-p org-mime-src-mode))
+                (set-buffer-modified-p nil)
+                (kill-buffer buffer)))))
+        (dolist (group '("nnmaildir+gmail:inbox" "nnmaildir+gmail:html"))
+          (when-let* ((summary (get-buffer (gnus-summary-buffer-name group))))
+            (with-current-buffer summary
+              (gnus-summary-exit-no-update))))))))
 
 (defun email-e2e ()
   "Gnus reads the fixture maildir, replies, and shows a thread in one buffer."
@@ -257,7 +477,8 @@ An untimed `read-event' is idle, and a timer ends it."
          (gnus-startup-file (expand-file-name "newsrc" e2e-work-dir))
          (gnus-init-file (expand-file-name "gnus-init" e2e-work-dir))
          (gnus-directory (expand-file-name "news/" e2e-work-dir))
-         (gnus-interactive-exit nil)
+         ;; an exit closes any summary a dead case left open, unasked
+         (gnus-interactive-exit 'quiet)
          (gnus-expert-user t)
          reply)
     (dolist (dir (list inbox trash html starred lists moved labelled archive emacs))
@@ -2649,6 +2870,8 @@ An untimed `read-event' is idle, and a timer ends it."
                   (record "a label that appeared after the start loads once its batch runs"
                           (member "fresh" (read-groups))
                           :got (format "%S" (read-groups))))
+                ;; Org in the body, sent through real keys
+                (email-e2e--org-compose #'record)
                 ;; , q leaves mail: an unsent reply goes to the drafts, the
                 ;; summary closes the way q closes it, and Gnus exits.  The
                 ;; drafts server is open by now, so binding its folder moves it

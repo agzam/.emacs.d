@@ -9,6 +9,8 @@
 
 ;; embark is never loaded here; the exporter spec binds this
 (defvar embark-exporters-alist)
+(defvar gnus-message-setup-hook)
+(defvar org-mime-obey-display-buffer-p)
 
 (defun email-tests--load ()
   "Load the module config with `use-package' reduced to its :init forms.
@@ -969,4 +971,33 @@ window and deletes the summary's."
       (insert-file-contents
        (expand-file-name "modules/email/autoload/addresses.el" test-config-root))
       (dolist (fn '(complete-mail-address prepare-mail-addresses-h))
+        (expect (buffer-string) :to-match (format "^;;;###autoload\n(defun %s " fn))))))
+
+(describe "email module compose"
+  :var (forms)
+  (before-all
+    (setq forms (email-tests--config-forms 'gnus-msg)))
+  (it "signs every message under the standard separator"
+    (expect message-signature :to-equal "Best regards,\nAg"))
+  (it "converts what Gnus composes at send"
+    (let ((gnus-message-setup-hook nil))
+      (unwind-protect
+          (progn
+            (dolist (form forms)
+              (unless (eq (car-safe form) 'map!)
+                (eval form t)))
+            (expect (memq 'prepare-mail-format-h gnus-message-setup-hook) :to-be-truthy)
+            (expect (advice-member-p #'send-converted-mail-a 'message-send) :to-be-truthy))
+        (advice-remove 'message-send #'send-converted-mail-a))))
+  (it "flips the format and edits the body in Org from the localleader"
+    (let ((leader (email-tests--localleader-pairs forms 'message-mode-map)))
+      (expect (assoc "p" leader) :to-equal '("p" function toggle-mail-format))
+      (expect (assoc "o" leader) :to-equal '("o" function org-mime-edit-mail-in-org-mode))))
+  (it "opens the Org buffer where buffers open, not over the frame"
+    (expect org-mime-obey-display-buffer-p :to-be t))
+  (it "autoloads what message buffers call"
+    (with-temp-buffer
+      (insert-file-contents
+       (expand-file-name "modules/email/autoload/compose.el" test-config-root))
+      (dolist (fn '(prepare-mail-format-h toggle-mail-format send-converted-mail-a))
         (expect (buffer-string) :to-match (format "^;;;###autoload\n(defun %s " fn))))))
