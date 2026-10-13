@@ -79,8 +79,8 @@
 
   (it "outranks a handler that claims the url"
     ;; real `browse-url': it picks a handler over
-    ;; `browse-url-browser-function', and code-review registers one for
-    ;; every github /pull/ url
+    ;; `browse-url-browser-function', and forge registers one for the
+    ;; topic urls of repos it tracks
     (let (seen)
       (cl-letf (((symbol-function 'browse-url-default-browser)
                  (lambda (url &rest _) (push (cons 'external url) seen))))

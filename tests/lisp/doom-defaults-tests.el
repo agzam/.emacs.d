@@ -45,6 +45,12 @@
     (expect (default-value 'truncate-lines) :to-be-truthy)
     (expect (memq #'visual-line-mode text-mode-hook) :to-be-truthy)))
 
+(describe "runtime optimizations"
+  (it "keeps font caches uncompacted"
+    ;; the only setter: modeline icon glyphs stutter redisplay when GC
+    ;; compacts the cache
+    (expect inhibit-compacting-font-caches :to-be t)))
+
 (describe "doom/escape"
   (it "remaps keyboard-quit globally"
     (expect (lookup-key global-map [remap keyboard-quit]) :to-be #'doom/escape))

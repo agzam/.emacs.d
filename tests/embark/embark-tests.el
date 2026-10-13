@@ -452,7 +452,7 @@
   ;; and for a HN result that is a full page fetch - preview them by moving
   ;; through candidates and Hacker News gets concurrent requests, which it
   ;; answers with HTTP 429 for minutes afterwards.
-  (dolist (type '(consult-hn-result github-topics-pr slacko-message))
+  (dolist (type '(consult-hn-result github-topics-pr slacko-message mail-thread))
     (it (format "does not act or dwim on a %s target" type)
       (let (acted dwim)
         (with-fake-feature 'embark

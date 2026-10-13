@@ -1,0 +1,617 @@
+;;; modules/email/autoload/marks.el -*- lexical-binding: t; -*-
+;;; Commentary:
+;; Delete and archive wait in a queue for x: a Gnus mark would count as
+;; read and reach Gmail as seen.
+;;; Code:
+
+(require 'dired)
+(require 'gnus)
+(require 'gnus-group)
+(require 'gnus-sum)
+(require 'nnselect)
+(require 'range)
+(require 'seq)
+(require 'transient)
+
+(defvar mail-inbox-group)
+(defvar mail-trash-group)
+
+(defvar-local mail-marks nil
+  "Queue of (ARTICLE . VERB) for this summary; VERB is `delete' or `archive'.")
+
+;;; The summary column
+
+(defun mail-mark-glyph (verb)
+  "One-column glyph for a queued VERB, in Dired's mark colours."
+  ;; line highlighting swaps the second face for the line's own where
+  ;; `gnus-face' is set, and overwrites the property everywhere else
+  (pcase verb
+    ('delete (propertize "×" 'face (list 'dired-flagged 'default) 'gnus-face t))
+    ('archive (propertize "↓" 'face (list 'dired-marked 'default) 'gnus-face t))
+    (_ " ")))
+
+;;;###autoload
+(defun gnus-user-format-function-D (header)
+  "The `%uD' summary column: the verb queued on HEADER's article, if any."
+  (mail-mark-glyph (alist-get (mail-header-number header) mail-marks)))
+
+;; Gnus reads an article's state back from its `%U' letter, so the
+;; letters stay in the buffer and only show as symbols
+(defvar mail-mark-symbols
+  '((unread (gnus-unread-mark . "●")
+            (gnus-read-mark . " ") (gnus-del-mark . " ") (gnus-ancient-mark . " ")
+            (gnus-ticked-mark . " ") (gnus-killed-mark . " ") (gnus-catchup-mark . " ")
+            (gnus-low-score-mark . " ") (gnus-kill-file-mark . " ")
+            (gnus-duplicate-mark . " ") (gnus-sparse-mark . " "))
+    (replied (gnus-replied-mark . "↩") (gnus-forwarded-mark . "↪")
+             (gnus-unseen-mark . " ")))
+  "What each mark variable shows as, per column of `gnus-summary-mark-positions'.
+A mark left out shows as its letter.  The star has a column of its own,
+so a starred read message reads blank here.")
+
+(defun draw-mail-mark-symbols (start end)
+  "Show the mark letters of the summary lines from START to END as symbols.
+jit-lock calls this for what redisplay shows and again after a change,
+so a letter Gnus replaces in place gets its symbol too."
+  (save-excursion
+    (goto-char start)
+    (forward-line 0)
+    (while (< (point) end)
+      (pcase-dolist (`(,column . ,symbols) mail-mark-symbols)
+        (when-let* ((offset (alist-get column gnus-summary-mark-positions)))
+          (let* ((pos (+ (point) offset))
+                 (mark (char-after pos)))
+            (put-text-property
+             pos (1+ pos) 'display
+             (cdr (seq-find (lambda (entry) (eql mark (symbol-value (car entry))))
+                            symbols))))))
+      (forward-line 1))))
+
+;;;###autoload
+(defun draw-mail-mark-symbols-h ()
+  "Show this summary's mark letters as symbols from now on."
+  (jit-lock-register #'draw-mail-mark-symbols))
+
+;;; What a command marks, and where point goes next
+
+;;;###autoload
+(defun mail-real-articles (articles)
+  "ARTICLES without the sparse placeholders Gnus invents for missing parents."
+  (seq-remove (lambda (article) (memq article gnus-newsgroup-sparse)) articles))
+
+;;;###autoload
+(defun mail-articles-at-point-or-region ()
+  "Articles on every line the active region touches, else the one at point.
+Reading the region deactivates it, which also ends evil's visual state."
+  (if (not (use-region-p))
+      (list (gnus-summary-article-number))
+    (let ((end (region-end))
+          articles)
+      (save-excursion
+        (goto-char (region-beginning))
+        (while (progn (push (gnus-summary-article-number) articles)
+                      (and (gnus-summary-find-next)
+                           (< (line-beginning-position) end)))))
+      (deactivate-mark)
+      (nreverse articles))))
+
+;;;###autoload
+(defun thread-articles-at-point ()
+  "Articles of the thread at point, the sparse placeholders left out."
+  (mail-real-articles (save-excursion
+                        (gnus-summary-top-thread)
+                        (gnus-summary-articles-in-thread))))
+
+;;;###autoload
+(defun mail-whole-threads (articles)
+  "Articles of every thread holding one of ARTICLES, in summary order."
+  (seq-uniq (mapcan (lambda (article)
+                      (save-excursion
+                        (gnus-summary-goto-subject article)
+                        (thread-articles-at-point)))
+                    articles)))
+
+;;;###autoload
+(defun mail-move-below (articles)
+  "Move point to the message below the last of ARTICLES."
+  (gnus-summary-goto-subject (car (last articles)) nil t)
+  (gnus-summary-next-subject 1))
+
+;;;###autoload
+(defun mail-process-marked ()
+  "Process-marked articles the summary shows, in the order they were marked."
+  (thread-last gnus-newsgroup-processable
+               reverse
+               (seq-filter #'gnus-data-find)))
+
+(defun mail-act-on-selection (action &optional whole-threads)
+  "Call ACTION with the region's articles, else the marked ones, else point's.
+WHOLE-THREADS passes their threads instead."
+  (let* ((marked (unless (use-region-p) (mail-process-marked)))
+         (covered (or marked (mail-articles-at-point-or-region)))
+         (articles (if whole-threads
+                       (mail-whole-threads covered)
+                     (mail-real-articles covered))))
+    (save-excursion
+      (funcall action articles)
+      (apply #'gnus-summary-remove-process-mark
+             (seq-intersection gnus-newsgroup-processable (append covered articles))))
+    (unless marked
+      (mail-move-below (if whole-threads articles covered)))))
+
+;;; The copy in the inbox
+;;
+;; A message is one file per label it carries, and a search result is
+;; whichever copy the search picked.
+
+;;;###autoload
+(defun mail-article-group (article)
+  "Group whose file this summary's ARTICLE is."
+  (if (gnus-nnselect-group-p gnus-newsgroup-name)
+      (nnselect-article-group article)
+    gnus-newsgroup-name))
+
+;;;###autoload
+(defun mail-article-number (article)
+  "Number of this summary's ARTICLE in the group whose file it is."
+  (if (gnus-nnselect-group-p gnus-newsgroup-name)
+      (nnselect-article-number article)
+    article))
+
+;;;###autoload
+(defun group-articles-by-id (group message-ids)
+  "GROUP's articles of the messages with MESSAGE-IDS, as (MESSAGE-ID . ARTICLE)."
+  (when (and message-ids (eq 'nov (gnus-retrieve-headers message-ids group)))
+    (with-current-buffer nntp-server-buffer
+      (goto-char (point-min))
+      (let (found)
+        (while (not (eobp))
+          (let ((header (nnheader-parse-nov)))
+            (push (cons (mail-header-id header) (mail-header-number header)) found))
+          (forward-line 1))
+        found))))
+
+(defun inbox-articles-by-id (message-ids)
+  "Inbox articles of the messages with MESSAGE-IDS, as (MESSAGE-ID . ARTICLE)."
+  (when message-ids
+    ;; mail that arrived since the inbox was last read has no number yet
+    (gnus-activate-group mail-inbox-group 'scan)
+    (group-articles-by-id mail-inbox-group message-ids)))
+
+(defun mail-inbox-copies (articles)
+  "Inbox copies of this summary's ARTICLES, as (ARTICLE . INBOX-ARTICLE).
+An article whose message is not in the inbox is left out."
+  (if (equal gnus-newsgroup-name mail-inbox-group)
+      (mapcar (lambda (article) (cons article article)) articles)
+    (let* ((ids (mapcar (lambda (article)
+                          (cons (mail-header-id (gnus-summary-article-header article))
+                                article))
+                        articles))
+           (found (inbox-articles-by-id (mapcar #'car ids))))
+      (seq-keep (lambda (id)
+                  (when-let* ((inbox (cdr (assoc (car id) found))))
+                    (cons (cdr id) inbox)))
+                ids))))
+
+;;;###autoload
+(defun drop-gone-articles (group articles)
+  "Take ARTICLES out of GROUP's open summary, when that is another buffer.
+Their files went from this summary, and GROUP's lines for them would
+point at nothing."
+  (when-let* ((buffer (get-buffer (gnus-summary-buffer-name group)))
+              ((not (eq buffer (current-buffer)))))
+    (with-current-buffer buffer
+      (save-excursion
+        (dolist (article articles)
+          (when (gnus-data-find article)
+            (gnus-summary-mark-article article gnus-canceled-mark))))
+      (gnus-summary-limit-to-marks (list gnus-canceled-mark) 'reverse))))
+
+;;; Queueing
+
+(defun mail-mark-redraw (article)
+  "Redraw ARTICLE's summary line from `mail-marks'."
+  (when (gnus-summary-goto-subject article nil t)
+    (gnus-summary-show-thread)
+    (gnus-summary-update-article-line article (gnus-summary-article-header article))))
+
+(defun mail-mark-articles (articles verb)
+  "Queue ARTICLES under VERB, or take them out of the queue when VERB is nil.
+Only a message in the inbox can be archived."
+  (when (eq verb 'archive)
+    (let ((inbox (mapcar #'car (mail-inbox-copies articles))))
+      (unless inbox
+        (user-error "Not in the inbox"))
+      (when (< (length inbox) (length articles))
+        (message "%d not in the inbox, left alone" (- (length articles) (length inbox))))
+      (setq articles inbox)))
+  (save-excursion
+    (dolist (article articles)
+      (if verb
+          (setf (alist-get article mail-marks) verb)
+        (setf (alist-get article mail-marks nil t) nil))
+      (mail-mark-redraw article))))
+
+(defun mail-queue (verb &optional whole-threads)
+  "Queue the selected messages under VERB; a nil VERB unqueues them as unread.
+WHOLE-THREADS takes their threads."
+  (mail-act-on-selection
+   (lambda (articles)
+     (unless verb
+       (dolist (article articles)
+         (mail-mark-keeping-star article gnus-unread-mark)))
+     (mail-mark-articles articles verb))
+   whole-threads))
+
+;;;###autoload
+(defun mail-mark-for-deletion ()
+  "Queue the selected messages for the trash."
+  (interactive nil gnus-summary-mode)
+  (mail-queue 'delete))
+
+;;;###autoload
+(defun mail-mark-for-archive ()
+  "Queue the selected messages to leave the inbox."
+  (interactive nil gnus-summary-mode)
+  (mail-queue 'archive))
+
+;;;###autoload
+(defun mail-unmark ()
+  "Unqueue the selected messages and mark them unread, keeping stars."
+  (interactive nil gnus-summary-mode)
+  (mail-queue nil))
+
+;;;###autoload
+(defun mail-mark-thread-for-deletion ()
+  "Queue the threads of the selected messages for the trash."
+  (interactive nil gnus-summary-mode)
+  (mail-queue 'delete t))
+
+;;;###autoload
+(defun mail-mark-thread-for-archive ()
+  "Queue the threads of the selected messages to leave the inbox."
+  (interactive nil gnus-summary-mode)
+  (mail-queue 'archive t))
+
+;;;###autoload
+(defun mail-unmark-thread ()
+  "Unqueue the threads of the selected messages and mark them unread."
+  (interactive nil gnus-summary-mode)
+  (mail-queue nil t))
+
+;;; Read and star
+;;
+;; An article in both the unread and the tick list is starred and
+;; unread, and nnmaildir saves it that way.  Gnus's own commands never
+;; make one: its tick counts as read.
+
+(defun mail-star-glyph ()
+  "One-column star in the colour of Gnus's starred lines."
+  ;; the buffer font has U+2217; a star from a fallback font breaks the
+  ;; columns
+  (propertize "\u2217" 'face (list 'gnus-summary-normal-ticked 'default) 'gnus-face t))
+
+;;;###autoload
+(defun gnus-user-format-function-S (header)
+  "The `%uS' summary column: a star if HEADER's article is starred.
+Gnus's own `%U' column shows the tick on a read message only."
+  (if (memq (mail-header-number header) gnus-newsgroup-marked)
+      (mail-star-glyph)
+    " "))
+
+(defun mail-mark-keeping-star (article mark)
+  "Give ARTICLE the read or unread MARK without dropping its star.
+Marked read, a starred message becomes Gnus's tick; marked unread, it
+goes back into the tick list too."
+  (let ((starred (memq article gnus-newsgroup-marked))
+        (unread (= mark gnus-unread-mark)))
+    (gnus-summary-mark-article article
+                               (if (and starred (not unread)) gnus-ticked-mark mark)
+                               gnus-inhibit-user-auto-expire)
+    (when (and starred unread)
+      (setq gnus-newsgroup-marked
+            (gnus-add-to-sorted-list gnus-newsgroup-marked article)))))
+
+(defun mail-set-star (article star)
+  "Star ARTICLE when STAR is non-nil, else unstar it; it stays read or unread.
+Gnus's tick would make an unread message read, so an unread one only
+joins or leaves the tick list."
+  (if (memq article gnus-newsgroup-unreads)
+      (setq gnus-newsgroup-marked
+            (if star
+                (gnus-add-to-sorted-list gnus-newsgroup-marked article)
+              (delq article gnus-newsgroup-marked)))
+    (gnus-summary-mark-article article (if star gnus-ticked-mark gnus-del-mark)
+                               gnus-inhibit-user-auto-expire))
+  (mail-mark-redraw article))
+
+;;;###autoload
+(defun mail-keep-star-on-read-h ()
+  "Mark a starred article read as it is displayed, keeping its star.
+Runs ahead of `gnus-summary-mark-read-and-unread-as-read', which sees
+the unread mark on a starred unread article and drops the star."
+  (when (memq gnus-current-article gnus-newsgroup-marked)
+    (mail-mark-keeping-star gnus-current-article gnus-read-mark)))
+
+;;;###autoload
+(defun mail-toggle-read ()
+  "Mark the selected messages read, or unread when all are read."
+  (interactive nil gnus-summary-mode)
+  (mail-act-on-selection
+   (lambda (articles)
+     (let ((mark (if (seq-intersection articles gnus-newsgroup-unreads)
+                     gnus-del-mark
+                   gnus-unread-mark)))
+       (dolist (article articles)
+         (mail-mark-keeping-star article mark))))))
+
+;;;###autoload
+(defun mail-mark-thread-read ()
+  "Mark the threads of the selected messages read, keeping stars."
+  (interactive nil gnus-summary-mode)
+  (mail-act-on-selection
+   (lambda (articles)
+     (dolist (article articles)
+       (mail-mark-keeping-star article gnus-del-mark)))
+   t))
+
+;;;###autoload
+(defun mail-toggle-star ()
+  "Star the selected messages, or unstar them when all are starred."
+  (interactive nil gnus-summary-mode)
+  (mail-act-on-selection
+   (lambda (articles)
+     (let ((star (seq-difference articles gnus-newsgroup-marked)))
+       (dolist (article articles)
+         (mail-set-star article star))))))
+
+;;; Executing
+
+(defun mail-marked-articles (verb)
+  "Articles queued for VERB, lowest number first."
+  (sort (mapcar #'car (seq-filter (lambda (mark) (eq (cdr mark) verb)) mail-marks))
+        #'<))
+
+;;;###autoload
+(defun mail-execute-marks ()
+  "Run the queue: deletions go to the trash, archives leave the inbox.
+A message's inbox copy goes either way, whichever copy this summary
+shows, and an archive keeps every label.  A news post is deleted where
+it lies.  Gnus's commands act on the process mark, lent the queue."
+  (interactive nil gnus-summary-mode)
+  (unless mail-marks
+    (user-error "Nothing is marked"))
+  ;; the queue stays for a later x
+  (when (and (mail-marked-articles 'delete)
+             (not (mail-group-loaded-p mail-trash-group)))
+    (load-mail-groups (list mail-trash-group) t)
+    (user-error "%s is still loading; the queue stays"
+                (gnus-group-short-name mail-trash-group)))
+  (let* ((news-p (lambda (article) (news-group-p (mail-article-group article))))
+         ;; Gmail never sees a news post, so none goes to the trash
+         (posts (seq-filter news-p (mail-marked-articles 'delete)))
+         (deletes (seq-remove news-p (mail-marked-articles 'delete)))
+         (archives (mail-marked-articles 'archive))
+         (inbox-p (lambda (article)
+                    (equal (mail-article-group article) mail-inbox-group)))
+         ;; archives whose file here is the inbox's own
+         (here (seq-filter inbox-p archives))
+         ;; inbox copies this summary does not show
+         (elsewhere (sort (seq-keep (lambda (copy)
+                                      (unless (funcall inbox-p (car copy))
+                                        (cdr copy)))
+                                    (mail-inbox-copies (append deletes archives)))
+                          #'<))
+         (gone (mapcar (lambda (article)
+                         (cons (mail-article-group article) (mail-article-number article)))
+                       (append deletes here posts)))
+         ;; an active region would win over the process mark
+         (mark-active nil)
+         (gnus-newsgroup-process-stack nil))
+    (when deletes
+      (let ((gnus-newsgroup-processable deletes))
+        (gnus-summary-move-article nil mail-trash-group)))
+    (when (or here posts)
+      (let ((gnus-newsgroup-processable (sort (append here posts) #'<)))
+        (gnus-summary-delete-article)))
+    (setq gnus-newsgroup-processable
+          (seq-difference gnus-newsgroup-processable (append deletes here posts)))
+    (when elsewhere
+      (gnus-request-expire-articles elsewhere mail-inbox-group t)
+      (refresh-mail-group mail-inbox-group)
+      (gnus-group-update-group mail-inbox-group t))
+    (pcase-dolist (`(,group . ,copies)
+                   (seq-group-by #'car (append gone
+                                               (mapcar (lambda (article)
+                                                         (cons mail-inbox-group article))
+                                                       elsewhere))))
+      (drop-gone-articles group (mapcar #'cdr copies)))
+    (setq mail-marks nil)
+    ;; an archive whose file stays here loses only its A
+    (save-excursion
+      (mapc #'mail-mark-redraw (seq-difference archives here)))
+    (gnus-summary-limit-to-marks (list gnus-canceled-mark) 'reverse)
+    (message "Trashed %d, archived %d%s" (length deletes) (length archives)
+             (if posts (format ", deleted %d news posts" (length posts)) ""))))
+
+(defun mail-queue-description ()
+  "The queue in words, such as \"2 deletions and 1 archive\"."
+  (string-join
+   (seq-keep (pcase-lambda (`(,verb . ,noun))
+               (let ((count (length (mail-marked-articles verb))))
+                 (when (< 0 count)
+                   (format "%d %s%s" count noun (if (= count 1) "" "s")))))
+             '((delete . "deletion") (archive . "archive")))
+   " and "))
+
+;;;###autoload
+(defun quit-mail-summary ()
+  "Leave the summary; with messages queued, ask whether to run them first.
+No drops the queue, and \\[keyboard-quit] stays in the summary."
+  (interactive nil gnus-summary-mode)
+  (when (and mail-marks
+             (y-or-n-p (format "Run %s first? " (mail-queue-description))))
+    (mail-execute-marks))
+  (gnus-summary-exit))
+
+;;; The menu
+
+(defun mail-selection-header ()
+  "What the menu's commands act on."
+  (cond ((use-region-p) "Selected: the region's messages")
+        ((when-let* ((marked (mail-process-marked)))
+           (format "Selected: %d marked" (length marked))))
+        (t "Selected: the message at point")))
+
+;;;###autoload
+(transient-define-prefix mail-selection-menu ()
+  "Mark messages, or act on the selected ones."
+  [["Mark"
+    ("*" "every message shown" gnus-uu-mark-buffer)
+    ("u" "unmark all" gnus-summary-unmark-all-processable)]
+   [""
+    ("s" "by subject" gnus-uu-mark-by-regexp)]
+   [:description mail-selection-header
+    ("!" "read / unread" mail-toggle-read)
+    ("=" "star / unstar" mail-toggle-star)]
+   [""
+    ("d" "trash" mail-mark-for-deletion)
+    ("D" "trash threads" mail-mark-thread-for-deletion)]
+   [""
+    ("a" "archive" mail-mark-for-archive)
+    ("A" "archive threads" mail-mark-thread-for-archive)]
+   [""
+    ("x" "run the queue" mail-execute-marks)
+    ("l" "labels" label-mail)]])
+
+;;; A search and the summaries open under it
+
+(defvar-local mail-entry-marks nil
+  "Unread and starred articles of this summary as it opened, a cons.")
+
+;;;###autoload
+(defun note-entry-marks-h ()
+  "Note which articles of this summary are unread and starred as it opens."
+  (setq mail-entry-marks (cons (gnus-sorted-union gnus-newsgroup-unreads
+                                                  gnus-newsgroup-unselected)
+                               (copy-sequence gnus-newsgroup-marked))))
+
+(defun mail-set-read-and-star (article unread starred)
+  "Make this summary's ARTICLE read unless UNREAD, and starred when STARRED."
+  (when (gnus-data-find article)
+    (unless (eq unread (and (memq article gnus-newsgroup-unreads) t))
+      (mail-mark-keeping-star article (if unread gnus-unread-mark gnus-del-mark)))
+    (unless (eq starred (and (memq article gnus-newsgroup-marked) t))
+      (mail-set-star article starred))))
+
+;;;###autoload
+(defun carry-search-marks-h ()
+  "Give the summaries open under this search what it changed in read and star.
+The search writes its changes to the groups as it closes, and a summary
+left open would write its own older state back when it exits."
+  (when (and mail-entry-marks
+             (gnus-nnselect-group-p gnus-newsgroup-name)
+             (not gnus-group-is-exiting-without-update-p))
+    (let (changes)
+      (dolist (article gnus-newsgroup-articles)
+        (let ((unread (and (memq article gnus-newsgroup-unreads) t))
+              (starred (and (memq article gnus-newsgroup-marked) t)))
+          (unless (and (eq unread (and (memq article (car mail-entry-marks)) t))
+                       (eq starred (and (memq article (cdr mail-entry-marks)) t)))
+            (push (list (mail-article-group article) (mail-article-number article)
+                        unread starred)
+                  changes))))
+      (pcase-dolist (`(,group ,article ,unread ,starred) changes)
+        (when-let* ((buffer (get-buffer (gnus-summary-buffer-name group))))
+          (with-current-buffer buffer
+            (save-excursion
+              (mail-set-read-and-star article unread starred))))))))
+
+;;;###autoload
+(defun activate-search-hit-groups-h ()
+  "Activate each group whose active range ends below a hit this search shows.
+nnselect saves read marks only within a group's active range, and a hit
+can be mail that arrived after its group was last read."
+  (when (and (gnus-nnselect-group-p gnus-newsgroup-name)
+             (not gnus-group-is-exiting-without-update-p))
+    (pcase-dolist (`(,group . ,articles)
+                   (seq-group-by #'mail-article-group gnus-newsgroup-articles))
+      (when (< (or (cdr (gnus-active group)) 0)
+               (apply #'max (mapcar #'mail-article-number articles)))
+        (gnus-activate-group group)))))
+
+;;;###autoload
+(defun keep-newer-read-marks-a (fn group unread &optional compute)
+  "Call FN with GROUP, UNREAD and COMPUTE, sparing mail the summary never saw.
+A summary's read ranges end at the active range it copied on entry, and
+Gnus would take the read mark off every article above it."
+  (if-let* (((not compute))
+            ((derived-mode-p 'gnus-summary-mode))
+            ((equal group gnus-newsgroup-name))
+            (entry gnus-newsgroup-active)
+            (now (cdr (gnus-active group)))
+            ((< (cdr entry) now)))
+      (let ((gnus-newsgroup-active (cons (car entry) now)))
+        (funcall fn group
+                 (gnus-sorted-union
+                  unread
+                  (range-uncompress
+                   (range-remove (list (cons (1+ (cdr entry)) now))
+                                 (gnus-info-read (gnus-get-info group)))))
+                 compute))
+    (funcall fn group unread compute)))
+
+;;; Changes a refresh merged while a summary was open
+;;
+;; A summary saves its whole view of read and star when it exits, over
+;; what a refresh brought from the phone into its groups meanwhile.
+
+(defun mail-toggled (from to)
+  "Articles in just one of the sorted lists FROM and TO."
+  (gnus-sorted-union (gnus-sorted-difference from to)
+                     (gnus-sorted-difference to from)))
+
+(defun merge-mark-list (mine entry theirs)
+  "MINE, with the changes THEIRS made since ENTRY where MINE made none.
+Each is a sorted list of the articles in one state, such as unread."
+  (mail-toggled mine (gnus-sorted-difference (mail-toggled entry theirs)
+                                             (mail-toggled entry mine))))
+
+(defun keep-group-changes (info)
+  "Give this summary the changes in read and star INFO got since it opened.
+INFO numbers the articles the way the summary does."
+  (when-let* ((entry mail-entry-marks)
+              (active gnus-newsgroup-active))
+    (let ((unread (merge-mark-list
+                   (gnus-sorted-union gnus-newsgroup-unreads gnus-newsgroup-unselected)
+                   (car entry)
+                   (range-uncompress
+                    (range-difference (list active) (gnus-info-read info))))))
+      (setq gnus-newsgroup-unselected (gnus-sorted-intersection gnus-newsgroup-unselected
+                                                                unread)
+            gnus-newsgroup-unreads (gnus-sorted-difference unread gnus-newsgroup-unselected)
+            gnus-newsgroup-marked (merge-mark-list
+                                   gnus-newsgroup-marked (cdr entry)
+                                   (range-uncompress
+                                    (range-intersection
+                                     (list active) (alist-get 'tick (gnus-info-marks info)))))))))
+
+;;;###autoload
+(defun keep-group-changes-h ()
+  "Give a label's summary the changes in read and star its group got meanwhile."
+  (when-let* (((not (gnus-nnselect-group-p gnus-newsgroup-name)))
+              (info (gnus-get-info gnus-newsgroup-name)))
+    (keep-group-changes info)))
+
+;;;###autoload
+(defun keep-search-group-changes-h ()
+  "Give a search summary the changes in read and star its hits got meanwhile.
+The hits' groups hold them, and nnselect maps them to the search's
+numbers the way it does when the search opens."
+  (when (and (gnus-nnselect-group-p gnus-newsgroup-name)
+             (not gnus-group-is-exiting-without-update-p))
+    (let ((info (list gnus-newsgroup-name 1 nil nil)))
+      (nnselect-request-update-info gnus-newsgroup-name info)
+      (keep-group-changes info))))
+
+;;; marks.el ends here

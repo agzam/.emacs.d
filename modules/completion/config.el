@@ -423,6 +423,9 @@
   :ensure (yasnippet-capf :host github :repo "elken/yasnippet-capf")
   :after cape
   :config
+  ;; nil rescans from point-min on every call, so each keystroke costs time
+  ;; in proportion to how deep point is in the buffer
+  (setopt yasnippet-capf-max-search-distance 100)
   (add-hook! 'yas-minor-mode-hook :append
     (defun remove-t-capf-h ()
       (remove-hook! 'completion-at-point-functions :local 't))))

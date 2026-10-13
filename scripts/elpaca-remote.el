@@ -1,7 +1,7 @@
 ;;; scripts/elpaca-remote.el --- keep elpaca's clones in step with their recipes -*- lexical-binding: t; -*-
 ;; Shared by `bb update's two drivers (elpaca-update.el, elpaca-live-update.el).
-;; Two heals for the clones elpaca keeps under `elpaca-sources-directory', both
-;; about a clone and its recipe drifting apart:
+;; Three heals for the clones elpaca keeps under `elpaca-sources-directory', each
+;; about a clone drifting from its recipe or its upstream:
 ;;
 ;; `elpaca-remote-sync-origins' - elpaca computes a clone's URL once, at clone
 ;; time, and never looks at `origin' again.  A recipe that later names another
@@ -9,6 +9,11 @@
 ;; only; an existing clone keeps fetching from the dead host and fails every
 ;; update.  Runs before the fetch: re-points `origin' wherever the recipe's
 ;; URL differs from the clone's.
+;;
+;; `elpaca-remote-retarget-renamed' - a clone stays on the branch it was
+;; cloned on.  Once upstream renames its default branch, every update fails
+;; at the fetch or the update log; move the clone onto the remote's new
+;; default and merge again.  Runs before the diverged reset.
 ;;
 ;; `elpaca-remote-reset-diverged' - elpaca merges with `--ff-only', which
 ;; refuses whenever upstream rewrote its history (a force-pushed master).  The
@@ -90,6 +95,79 @@ finds it already in step."
               (when emit
                 (funcall emit "remote: %s origin %s -> %s failed: %s" id have want out)))))))
     (nreverse synced)))
+
+;;; Renamed default branch
+
+(defun elpaca-remote-gone-upstream (dir)
+  "Describe clone DIR's branch when the remote no longer has its upstream, or nil.
+Returns (:branch B :remote R :upstream U).  Asks the remote, because a
+single-branch clone fails its fetch before any tracking ref goes stale."
+  (pcase-let ((`(,exit . ,branch) (elpaca-remote--git dir "symbolic-ref" "--short" "-q" "HEAD")))
+    (when (zerop exit)
+      (pcase-let ((`(,remote ,ref)
+                   (split-string
+                    (cdr (elpaca-remote--git
+                          dir "for-each-ref"
+                          "--format=%(upstream:remotename)%09%(upstream:remoteref)"
+                          (concat "refs/heads/" branch)))
+                    "\t")))
+        ;; ls-remote exits 2 when the remote answers without the ref
+        (when (and ref (= 2 (car (elpaca-remote--git dir "ls-remote" "--exit-code" remote ref))))
+          (list :branch branch :remote remote
+                :upstream (concat remote "/" (string-remove-prefix "refs/heads/" ref))))))))
+
+(defun elpaca-remote--default-branch (dir remote)
+  "REMOTE's default branch, asked of the remote from clone DIR, or nil."
+  (pcase-let ((`(,exit . ,out) (elpaca-remote--git dir "ls-remote" "--symref" remote "HEAD")))
+    (when (and (zerop exit) (string-match "^ref: refs/heads/\\(.+\\)\tHEAD$" out))
+      (match-string 1 out))))
+
+(defun elpaca-remote--pinned-p (recipe)
+  "Non-nil when RECIPE chooses its own branch, ref or remotes."
+  (cl-some (lambda (key) (plist-get recipe key)) '(:branch :tag :ref :pin :remotes)))
+
+(defun elpaca-remote--git-until-failure (dir &rest commands)
+  "Run the git COMMANDS in DIR in order, skipping nil ones.
+Return the output of the first that fails, or nil when all succeed."
+  (cl-loop for args in (delq nil commands)
+           for (exit . out) = (apply #'elpaca-remote--git dir args)
+           unless (zerop exit) return out))
+
+(defun elpaca-remote-retarget-renamed (&optional emit)
+  "Move failed clones whose upstream branch is gone onto the remote's default.
+Fetch only that branch, rename the local one after it, track it, and queue
+`elpaca-merge' again.  EMIT, when non-nil, is called as (EMIT FMT &rest ARGS)
+per package.  Return the ids re-merged; callers wait for elpaca to settle."
+  (let (moved)
+    (dolist (cell (elpaca--queued))
+      (let ((id (car cell)) (e (cdr cell)))
+        (when-let* (((eq (elpaca<-status e) 'failed))
+                    ((not (elpaca-remote--pinned-p (elpaca<-recipe e))))
+                    (dir (ignore-errors (elpaca<-source-dir e)))
+                    ((elpaca-remote--clone-p dir))
+                    (gone (elpaca-remote-gone-upstream dir)))
+          (let* ((branch (plist-get gone :branch))
+                 (remote (plist-get gone :remote))
+                 (target (elpaca-remote--default-branch dir remote))
+                 (err (if (null target)
+                          (format "no default branch on %s" remote)
+                        (elpaca-remote--git-until-failure
+                         dir
+                         (list "remote" "set-branches" remote target)
+                         (list "fetch" "-q" remote)
+                         (unless (equal branch target) (list "branch" "-m" branch target))
+                         (list "branch" "-u" (concat remote "/" target) target)
+                         (list "remote" "set-head" remote target)))))
+            (if err
+                (when emit (funcall emit "retarget (renamed): %s failed: %s" id err))
+              (when emit
+                (funcall emit "retarget (renamed): %s %s -> %s/%s, upstream %s is gone"
+                         id branch remote target (plist-get gone :upstream)))
+              (elpaca-merge id)
+              (push id moved))))))
+    (when (and moved (fboundp 'elpaca-process-queues))
+      (elpaca-process-queues))
+    (nreverse moved)))
 
 ;;; Rewritten upstream
 
