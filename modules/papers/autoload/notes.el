@@ -1,8 +1,8 @@
 ;;; modules/papers/autoload/notes.el -*- lexical-binding: t; -*-
 ;;; Commentary:
 ;; A citar notes source backed by vulpea.  citar-org-roam cannot serve here:
-;; it reads the org-roam database, which indexes nothing on this machine
-;; because vulpea indexes the same tree instead.
+;; it reads the org-roam database, and vulpea, not org-roam, indexes the
+;; notes.
 ;;
 ;; A paper note is an ordinary vulpea note whose ROAM_REFS holds the citekey
 ;; as `@key'.  That reuses the property 457 notes already carry rather than

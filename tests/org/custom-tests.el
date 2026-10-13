@@ -1,8 +1,7 @@
 ;;; tests/org/custom-tests.el --- org/autoload/custom.el specs -*- lexical-binding: t; -*-
 ;; get-gh-item-title / org-link-make-description-fn pin the dash/s rewrites
 ;; (->>/-non-nil/s-blank? ground-truthed against the doom.d originals).
-;; Smoke-only: org-roam-toggle-ui-xwidget (xwidget), org-store-link-id-optional
-;; (org-store-link session plumbing).
+;; Smoke-only: org-store-link-id-optional (org-store-link session plumbing).
 
 (require 'test-helper
          (expand-file-name

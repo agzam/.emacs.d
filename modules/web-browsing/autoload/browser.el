@@ -179,42 +179,6 @@ jump to selected tab, activating it in the browser."
         (insert (format "[[%s][%s]]" url title)))
        (t (insert url)))))))
 
-;;;###autoload
-(defun roam-ref-add-for-active-tab ()
-  "Add roam_ref prop for heading with url of active browser tab."
-  (interactive)
-  (org-id-get-create)
-  (cond
-   ((featurep :system 'linux)
-    (browser-copy-tab-link)
-    (org-roam-ref-add (car kill-ring)))
-   ((featurep :system 'macos)
-    (when-let* ((tab (browser--get-active-tab))
-                (url (plist-get tab :url)))
-      (org-roam-ref-add url)))))
-
-;;;###autoload
-(defun browser-create-roam-node-for-active-tab ()
-  "Captures new roam node based on info from active tab."
-  (interactive)
-  (require 'org)
-  (require 'org-roam)
-  (when-let* ((tab (browser--get-active-tab))
-              (title (plist-get tab :title))
-              (url (plist-get tab :url))
-              (base (replace-regexp-in-string
-                     "^http[s]?://" "" url)))
-    (if-let* ((refs (seq-filter
-                     (lambda (x)
-                       (string-match-p base (car x)))
-                     (org-roam-ref-read--completions))))
-        (org-roam-ref-find base)
-      (org-roam-capture-
-       :node (org-roam-node-create
-              :title title)
-       :info (list :ref url)
-       :goto t))))
-
 (defun browser-get-default ()
   "Determine default browser class."
   (cond ((featurep :system 'linux)

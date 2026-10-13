@@ -12,9 +12,9 @@
 ;; ever renamed and saveplace-pdf-view keeps its positions.
 ;;
 ;; citar-org-roam is deliberately absent: it queries the org-roam
-;; database, which holds no nodes here because vulpea indexes the same
-;; tree.  `citar-register-notes-source' takes a vulpea-backed source
-;; instead (autoload/notes.el).
+;; database, and vulpea, not org-roam, indexes the notes here.
+;; `citar-register-notes-source' takes a vulpea-backed source instead
+;; (autoload/notes.el).
 ;;; Code:
 
 (defvar papers-directory (expand-file-name "~/SyncMobile/Papers/")

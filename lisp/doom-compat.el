@@ -54,8 +54,8 @@
       org-persist-directory (concat doom-cache-dir "org-persist/")
       org-publish-timestamp-directory (concat doom-cache-dir "org-timestamps/")
       org-clock-persist-file (concat doom-state-dir "org-clock-save.el")
-      ;; org-roam/vulpea db locations live with their packages in the org
-      ;; module (both target doom-local-dir - lab builds its own, never Doom's)
+      ;; vulpea's db location lives with its package in the org module
+      ;; (targets doom-local-dir - lab builds its own, never Doom's)
       ;; treemacs defaults both under user-emacs-directory/.cache/
       treemacs-persist-file (concat doom-cache-dir "treemacs-persist")
       treemacs-last-error-persist-file (concat doom-cache-dir "treemacs-last-error-persist")
