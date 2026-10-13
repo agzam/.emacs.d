@@ -1,12 +1,7 @@
 ;;; modules/org/config.el -*- lexical-binding: t; -*-
 
-;; doom.d's org module ported to vanilla: org, the vulpea trio +
-;; consult-vulpea, evil-org, org-modern-indent, org-appear, org-superstar,
-;; org-cliplink, plus the former long tail - anki-editor(+ui, +anki-gen),
-;; ob-async/http/mermaid, org-edit-indirect, org-pomodoro (+mp3s), toc-org,
-;; orgit(-forge), ox-clip/ox-gfm, org-download.  vulpea's db path sits
-;; inline with its package (own db under doom-local-dir).  Still parked in
-;; doom.d (see MIGRATION.org): verb, org-contrib.
+;; org, vulpea and the org extras.  vulpea's db path sits inline with its
+;; package, under `doom-local-dir'.
 
 ;; org builds via elpaca's own menu (elpaca-menu-org generates
 ;; org-version/loaddefs) - doom.d's straight :pre-build fake is obsolete.

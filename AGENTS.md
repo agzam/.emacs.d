@@ -13,7 +13,7 @@ The daily-driver config: Elpaca + vendored Doom macro layer. Lives at `~/.emacs.
   - Exception for the -a and -h suffixes in the names of advising and hook functions. 
 - No made-up namespace prefixes either (`lab-`, `my-`, project names). This is a personal config; the global namespace is fine.
 - Plain descriptive names: `search-in-project`, `alternate-buffer`, `window-cleanup`. Never any `+` prefix or suffix on symbols; when a name would shadow the package function it wraps, pick a distinct descriptive name (`dired-remove-subtree` wrapping `dired-subtree-remove`). 
-- When porting Doom-named functions, rename them and update every reference (bindings tree, `consult-customize` lists, hooks, advice). Files vendored from Doom itself (see below) are exempt until their planned rename sweep.
+- When porting Doom-named functions, rename them and update every reference (bindings tree, `consult-customize` lists, hooks, advice). Files vendored from Doom itself (see below) keep their Doom names.
 
 ## Comments and docstrings
 
@@ -35,26 +35,25 @@ The daily-driver config: Elpaca + vendored Doom macro layer. Lives at `~/.emacs.
 
 `modules/NAME/`:
 - `config.el` - settings, hooks, keybindings, `use-package` blocks
-- `autoload/*.el` - functions, loaded lazily via generated loaddefs (`lab--generate-loaddefs` in init.el; regenerates in a batch subprocess on mtime change). Files may `require` packages freely - they only load in full on first call.
+- `autoload/*.el` - functions, loaded lazily via generated loaddefs (`generate-module-loaddefs` in init.el; regenerates in a batch subprocess on mtime change). Files may `require` packages freely - they only load in full on first call.
 - `autoload.el` (single file) - loaded eagerly; must be load-safe.
 - No `packages.el`: recipes go inline via `:ensure (name :host ... :repo ...)`. EmacsWiki/codeberg packages need explicit recipes (no MELPA entry or unreliable host - use emacsmirror).
-- Local checkouts: a bare local path in `:repo` (no `:host`) builds in place from that dir - the elpaca way to consume packages being developed locally. The cons form `:repo ("~/path" . "name")` clones instead; avoid it. See MIGRATION "Local :repo packages".
+- Local checkouts: a bare local path in `:repo` (no `:host`) builds in place from that dir - the elpaca way to consume packages being developed locally. The cons form `:repo ("~/path" . "name")` clones instead; avoid it.
 - New module: add to `active-modules` in init.el (explicit order, never globs) and, if guarded by `modulep!`, to `doom-modules-enabled`.
 
 ## Doom compat layer
 
 - Use the vendored macros: `map!`, `after!`, `add-hook!`, `defadvice!`, `cmd!`, `letf!`, `setq-hook!`, plus `doom-first-{input,file,buffer}-hook`, `:after-call`, `:defer-incrementally`. Doom's AGENTS.md conventions for these macros apply here too.
 - `elpaca (pkg :wait t)` only for init-time needs (general, evil). Everything else defers via hooks/autoloads.
-- Near-verbatim vendored files (keep diffs minimal, note deviations in the header): `lisp/doom-compat.el`, `lisp/doom-keybinds.el`, `lisp/doom-defaults.el`. (`modules/bindings/config.el` was the leader tree's vendored base; the migration-conclusion sweep made it the lab's own - edit it freely.)
+- Near-verbatim vendored files (keep diffs minimal, note deviations in the header): `lisp/doom-compat.el`, `lisp/doom-keybinds.el`, `lisp/doom-defaults.el`. (`modules/bindings/config.el` started from Doom's leader tree but is this config's own - edit it freely.)
 - User layering mirrors Doom: modules load in `active-modules` order, root `config.el` loads last and always wins.
 
 ## Verification
 
 - Canonical entry points (same locally and in CI, see `.github/workflows/ci.yml`): `bb lint` (check-parens over tracked elisp), `bb test` (buttercup suites in `tests/`), `bb check-root` (nothing leaked into the config root), `bb smoke` (full elpaca boot in a pty; verdict comes from the marker written by `scripts/smoke-check.el`), `bb e2e` (the same boot, then real keypresses over real buffers; marker from `scripts/e2e-check.el`). Both pty probes share one CI job - smoke first, since e2e means nothing if the config does not boot.
-- Every module port adds or extends a suite in `tests/`, which mirrors the source tree: `tests/MODULE/FILE-tests.el` per module source file (the `autoload/` level is flattened), `lisp/` sources under `tests/lisp/`. Suites load `tests/helper.el` (located via `locate-dominating-file`), which sandboxes the XDG dirs before doom-compat derives its paths - tests never touch the real cache/state.
+- Every module change adds or extends a suite in `tests/`, which mirrors the source tree: `tests/MODULE/FILE-tests.el` per module source file (the `autoload/` level is flattened), `lisp/` sources under `tests/lisp/`. Suites load `tests/helper.el` (located via `locate-dominating-file`), which sandboxes the XDG dirs before doom-compat derives its paths - tests never touch the real cache/state.
 - The root `.rgignore` hides `tests/` from ripgrep, so a plain `rg`, an agent's grep tool, and `consult-ripgrep` all skip the suites. Absence of test hits in such a search proves nothing about coverage. Search the suites with `rg --no-ignore-dot` (keeps `.gitignore` in force), with `git grep`, or by pointing the search at a path inside `tests/`.
 - A `with-temp-buffer` spec runs in a replica of a buffer, not in one: no major mode was turned on, nothing is fontified, and no keymap was consulted. Behaviour that depends on any of those - thingatpt providers, overlays, text properties, or which target/keymap reaches a command - cannot fail there, so a suite covering it proves nothing. Enable the modes and fontify in the fixture, and add the flow to `tests/e2e/`: a scenario file registering a function on `e2e-scenarios`, whose cases run through `e2e-act-case` (real file in its own mode, fontified, displayed, driven by real keypresses). Scenario files must not be named `*-tests.el` - that is buttercup's discovery pattern. Link conversion shipped broken twice because both fixes were verified only against the replica.
 - Ad-hoc smoke checks: the /tmp elisp file + kitty tab pattern still applies (`TERM=xterm-256color emacs -nw --init-directory ~/.emacs.d -l /tmp/check.el`, marker on `elpaca-after-init-hook`, `kill-emacs`). Always capture `*Warnings*` and elpaca statuses (`(elpaca--queued)` is an alist of `(ID . E)`; status via `elpaca<-status`) - no `ignore-errors` around checks.
 - `check-parens` every edited file (`eca--check-parens-file`).
 - Deleting an `autoload/*.el` does NOT invalidate the generated loaddefs cache (the mtime check only sees newer files) - also remove `~/.emacs.d/.local/.cache/autoloads/NAME.el`.
-- MIGRATION.org tracks the porting plan; update it as modules land.

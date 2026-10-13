@@ -126,8 +126,8 @@
         (window-move-up))
       (expect called :to-be-truthy))))
 
-;; dynamic declarations: evil isn't loaded in the batch tier (see the
-;; defcustom-let gotcha in MIGRATION.org)
+;; evil isn't loaded in the batch tier: without these bare defvars, `let'
+;; would bind the two options lexically.
 (defvar evil-split-window-below)
 (defvar evil-vsplit-window-right)
 

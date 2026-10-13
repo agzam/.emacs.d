@@ -155,9 +155,6 @@
 (use-package consult-lsp
   :defer t)
 
-;; Deviation from doom.d's shape (:defer t + :init after!-require): a bare
-;; :after gives the same demand-after-lsp-mode semantics under this
-;; use-package (always-defer premise was Doom-side rot, see MIGRATION).
 (use-package dap-mode
   :after lsp-mode
   :config

@@ -1,22 +1,9 @@
 ;;; modules/bindings/config.el --- Doom's leader tree -*- lexical-binding: t; -*-
 ;;; Commentary:
-;; Vendored from Doom Emacs (MIT License, Copyright (c) 2014-2026 Henrik
-;; Lissner), modules/config/default/+evil-bindings.el @ doomemacs 8e4fbba.
-;; modulep! guards prune against `doom-modules-enabled' (see init.el), so the
-;; SPC tree matches the old Doom setup key for key.
-;; Migration conclusion (2026-07): the remaining void doom/* rows were
-;; adjudicated - useful ones ported plain-named (sudo-*, macos-reveal-*), the
-;; rest dropped or parked in MIGRATION.org's post-migration backlog.  The
-;; audited trees (leader + evil g/z/[/]) are void-free.
-;; Deviation: the <leader> p tree is rebound from projectile to built-in
-;; project.el commands (projectile is not part of this config); entries with
-;; no project.el analog were dropped.
-;; Deviation: the help-map surgery from modules/config/default/config.el is
-;; vendored here too, pruned per the SPC h key audit.
-;; Deviation: the :term ghostel o-t/T block is gone (those commands never
-;; existed upstream) and the :term eshell toggle row too - shell-pop owns
-;; popping (SPC '); SPC o e stays unbound - elfeed was dropped at the
-;; web-browsing port.
+;; Based on Doom Emacs modules/config/default/+evil-bindings.el and the
+;; help-map setup in its config.el @ doomemacs 8e4fbba (MIT License,
+;; Copyright (c) 2014-2026 Henrik Lissner).  modulep! guards prune rows
+;; against `doom-modules-enabled' (init.el).
 ;;; Code:
 
 ;; From modules/config/default/config.el.

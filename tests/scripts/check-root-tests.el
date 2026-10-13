@@ -65,7 +65,7 @@
         (delete-directory dir t))))
 
   (it "counts a tracked entry as allowed even before it is committed"
-    (let ((dir (check-root-tests--repo "MIGRATION.org")))
+    (let ((dir (check-root-tests--repo "README.md")))
       (unwind-protect
           (expect (check-root-strays dir) :to-equal nil)
         (delete-directory dir t)))))

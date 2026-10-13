@@ -1,8 +1,6 @@
 ;;; modules/tab-bar/config.el -*- lexical-binding: t; -*-
 ;;; Commentary:
-;; Port of ~/.doom.d/modules/custom/tab-bar (no packages; tab-bar is
-;; preloaded, so the after! block runs at module load).  Deltas from the
-;; Doom original are in MIGRATION.org's Decisions log.
+;; No packages: tab-bar is preloaded, so the after! block runs at module load.
 ;;; Code:
 
 (after! tab-bar

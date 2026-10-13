@@ -16,7 +16,7 @@
 
 ;; expreg--line is visual-line based: batch frames are ~10 columns wide, so
 ;; lines wrap and end-of-visual-line diverges from real-window behavior -
-;; display-dependent, smoke-covered (see MIGRATION coverage map).
+;; display-dependent, smoke-covered.
 
 (describe "expreg--markdown-subtree"
   (it "produces nothing outside markdown-mode"

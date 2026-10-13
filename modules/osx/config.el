@@ -1,8 +1,7 @@
 ;;; modules/osx/config.el -*- lexical-binding: t; -*-
 ;;; Commentary:
-;; Port of ~/.doom.d/modules/custom/osx, folding in the useful subset of
-;; Doom's os/macos module (deltas in MIGRATION.org).  Darwin-only: init.el
-;; splices it into `active-modules' conditionally (Doom's :if equivalent).
+;; macOS integration, including a subset of Doom's os/macos module.
+;; Darwin-only: init.el splices it into `active-modules' conditionally.
 ;;; Code:
 
 ;; doom-defaults frees the right option key for character composition
