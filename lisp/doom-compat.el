@@ -79,10 +79,11 @@
       eca-server-install-path (concat doom-data-dir "eca/eca")
       eca-server-version-file-path (concat doom-data-dir "eca/eca-version")
       ;; search module: tldr pages default under user-emacs-directory;
-      ;; slacko's extracted-token cache defaults there too (secret-bearing -
-      ;; ai-module token-cache precedent)
+      ;; so do slacko's extracted-token cache (secret-bearing - ai-module
+      ;; token-cache precedent) and its workspace emoji images
       tldr-directory-path (concat doom-cache-dir "tldr/")
       slacko-creds-gpg-file (concat doom-cache-dir "slacko-creds.gpg")
+      slacko-emoji-cache-directory (concat doom-cache-dir "slacko-emoji/")
       ;; tab-bar module: desktop files live with the rest of the session
       ;; state (the module presets desktop-dirname to match)
       desktop-path (list doom-state-dir)
@@ -103,7 +104,21 @@
       ;; chat module: emojify downloads its emoji-image sets under
       ;; user-emacs-directory/emojis/ by default (Doom's :ui emoji relocates
       ;; the same way)
-      emojify-emojis-dir (concat doom-data-dir "emojis/"))
+      emojify-emojis-dir (concat doom-data-dir "emojis/")
+      ;; email module: gnus derives News/, .newsrc*, .gnus, its kill,
+      ;; cache, agent and duplicate files from gnus-home-directory at load
+      ;; time, so the home must be redirected before gnus loads; message,
+      ;; nndraft, nnmail and smtpmail default their drafts, queue and
+      ;; message-id cache into ~/Mail and ~/.nnmail-cache independently
+      gnus-home-directory (concat doom-state-dir "gnus/")
+      gnus-directory (concat doom-state-dir "gnus/news/")
+      gnus-startup-file (concat doom-state-dir "gnus/newsrc")
+      message-directory (concat doom-state-dir "mail/")
+      message-auto-save-directory (concat doom-state-dir "mail/drafts/")
+      nndraft-directory (concat doom-state-dir "mail/drafts/")
+      nnmail-message-id-cache-file (concat doom-state-dir "mail/message-id-cache")
+      mail-source-directory (concat doom-state-dir "mail/")
+      smtpmail-queue-dir (concat doom-state-dir "mail/queued-mail/"))
 
 (defvar doom-disabled-packages nil)
 

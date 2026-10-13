@@ -18,6 +18,37 @@
 
 (load-module-file "modules/writing/autoload/google-translate.el")
 
+(defun google-translate-tests--listen-args ()
+  "Return the listen program args the writing module's config sets."
+  (with-temp-buffer
+    (insert-file-contents
+     (expand-file-name "modules/writing/config.el" test-config-root))
+    (goto-char (point-min))
+    (let (form)
+      (condition-case nil
+          (while (not form)
+            (let ((f (read (current-buffer))))
+              (when (and (eq (car-safe f) 'use-package)
+                         (eq (cadr f) 'google-translate))
+                (setq form f))))
+        (end-of-file nil))
+      (when-let* ((setq-form
+                   (cl-find-if (lambda (f)
+                                 (and (eq (car-safe f) 'setq)
+                                      (memq 'google-translate-listen-program-args f)))
+                               form)))
+        (eval (plist-get (cdr setq-form) 'google-translate-listen-program-args) t)))))
+
+(describe "google-translate listen program args"
+  (it "keeps ffplay's http connection open so -autoexit plays the whole clip"
+    (let ((args (google-translate-tests--listen-args)))
+      (expect (member "-autoexit" args) :to-be-truthy)
+      (expect (cadr (member "-multiple_requests" args)) :to-equal "1")))
+
+  (it "speeds speech up 30% without changing pitch"
+    (expect (cadr (member "-af" (google-translate-tests--listen-args)))
+            :to-equal "atempo=1.3")))
+
 (describe "number-to-words"
   (it "runs node from the quarantined cache workdir"
     (let (install-attempted seen-dir)

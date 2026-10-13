@@ -150,8 +150,9 @@ not block on a credential prompt)."
   ;; (30.1 ships 0.7, 32 a 0.13 snapshot).  Installing it pins both CI
   ;; and local batch runs to the same version - the one runtime gets.
   ;; mpv and subed are test deps because the player-sharing specs drive
-  ;; their real IPC clients against a fake mpv socket.
-  deps {:doc "Install test deps (buttercup, parseedn, transient, mpv, subed) into .local/.cache/test-elpa"
+  ;; their real IPC clients against a fake mpv socket.  org-mime is one
+  ;; because the compose specs run its conversion.
+  deps {:doc "Install test deps (buttercup, parseedn, transient, mpv, subed, org-mime) into .local/.cache/test-elpa"
         :task (apply p/shell
                      (concat emacs-batch
                              ["--eval" (format "(setq package-user-dir %s)" (pr-str test-elpa))
@@ -159,8 +160,10 @@ not block on a credential prompt)."
                               "--eval" "(add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\"))"
                               "-f" "package-initialize"
                               ;; install by archive desc, not by name: name-based install
-                              ;; treats the built-in transient as already satisfied
-                              "--eval" "(dolist (p '(buttercup parseedn transient mpv subed)) (unless (assq p package-alist) (unless package-archive-contents (package-refresh-contents)) (package-install (cadr (assq p package-archive-contents)))))"]))}
+                              ;; treats the built-in transient as already satisfied.  A
+                              ;; missing dep refreshes the archive list first: a cached one
+                              ;; names versions the archive no longer serves
+                              "--eval" "(let (fresh) (dolist (p '(buttercup parseedn transient mpv subed org-mime)) (unless (assq p package-alist) (unless fresh (package-refresh-contents) (setq fresh t)) (package-install (cadr (assq p package-archive-contents))))))"]))}
 
   lint {:doc "check-parens over every tracked .el file"
         :task (let [files (->> (p/shell {:out :string :dir root}
@@ -253,6 +256,19 @@ not block on a credential prompt)."
 
   tcc {:doc "Verify/repair the macOS TCC grants Emacs needs (screen capture, accessibility); idempotent, sudo only when rows drifted, no-op off macOS"
        :task (load-file (str (fs/path root "scripts" "tcc.bb")))}
+
+  mail-index {:doc "Build the nnmaildir overviews Gnus would otherwise build in-session, one per message under GROUP/.nnmaildir/nov: `bb mail-index [--rebuild] [GROUP ...]`, every group of ~/.mail/gmail when none is named; --rebuild discards a group's overviews and renumbers it, for a group whose fill-in never finishes"
+              :task (let [{rebuild true groups false}
+                          (group-by (fn [arg] (= "--rebuild" arg)) *command-line-args*)]
+                      (System/exit
+                       (:exit (apply p/shell {:continue true}
+                                     (concat emacs-batch
+                                             ["-l" (str (fs/path root "scripts" "mail-index.el"))
+                                              "--eval" (format "(mail-index-main %s %s%s)"
+                                                               (pr-str (str (fs/expand-home "~/.mail/gmail/")))
+                                                               (if (seq rebuild) "t" "nil")
+                                                               (apply str (map (fn [group] (str " " (pr-str group)))
+                                                                               groups)))])))))}
 
   check-root {:doc "Fail on anything at the config root that is neither tracked nor a sanctioned exception - a stray means some run wrote outside .local/"
               :task (System/exit

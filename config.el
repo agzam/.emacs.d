@@ -384,8 +384,8 @@
       ( :prefix ("o" . "open/Org")
         :desc "store link" "l" #'org-store-link
         :desc "link without id" "L" #'org-store-link-id-optional
-        ( :when (modulep! :custom notmuch)
-          :desc "notmuch" "m" #'notmuch)
+        ( :when (modulep! :custom email)
+          :desc "mail" "m" #'open-mail-inbox)
         ( :when (modulep! :custom git)
           (:prefix ("g" . "git")
                    "h" #'gh-notify))

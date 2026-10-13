@@ -176,7 +176,7 @@ build-in-place to clone."
          (:custom web-browsing) (:custom multimedia) (:custom tree-sitter) (:custom lsp) (:custom clojure)
          (:custom python) (:custom lua) (:custom java) (:custom rust)
          (:custom org) (:custom shell)
-         (:custom writing) (:custom chat) (:custom yaml) (:custom pdf) (:custom papers))
+         (:custom writing) (:custom chat) (:custom email) (:custom yaml) (:custom pdf) (:custom papers))
        (when (eq system-type 'darwin) '((:os macos) (:custom osx) (:custom jira)))))
 
 ;; Leader prefixes are read at bind time; set before doom-keybinds loads so
@@ -222,7 +222,7 @@ build-in-place to clone."
 ;; Mac and Linux), then config.el; config.el may `load!' extra +files.
 ;; The module list itself is explicit, in this exact order.
 (defvar active-modules
-  `(evil bindings lookup git general multiple-cursors completion embark colors modeline tab-bar elisp search dired ai web-browsing multimedia tree-sitter lsp clojure python lua java rust org shell writing chat yaml pdf papers
+  `(evil bindings lookup git general multiple-cursors completion embark colors modeline tab-bar elisp search dired ai web-browsing multimedia tree-sitter lsp clojure python lua java rust org shell writing chat email yaml pdf papers
     ;; darwin-only tail - Doom's (:if (featurep :system 'macos) ...)
     ;; hammerspoon: monroe glue for the spacehammer fennel nREPL.
     ;; jira after osx: its browse autoload rides the web-browsing + git

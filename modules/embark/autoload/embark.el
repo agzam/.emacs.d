@@ -165,7 +165,7 @@ targets."
      ;; would additionally run the default action (browser / thread capture,
      ;; and for a HN result a full page fetch - Hacker News answers the
      ;; resulting concurrent requests with HTTP 429)
-     ((memq type '(github-topics-pr slacko-message consult-hn-result)) nil)
+     ((memq type '(github-topics-pr slacko-message consult-hn-result mail-thread)) nil)
      ((and (member type '(url consult-omni))
            (string-match-p
             ;; only match PRs/Issues or individual files

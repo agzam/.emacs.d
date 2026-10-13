@@ -5,7 +5,7 @@ The daily-driver config: Elpaca + vendored Doom macro layer. Lives at `~/.emacs.
 ## Hard boundaries
 
 - THIS session is the live working environment now - all live-session hygiene (elisp-eval cleanup, no destructive tests in-session, probes in throwaway `--init-directory` instances) protects it.
-- `~/.doom.d` and `~/.emacs.d` are the retired porting reference: consult them as text only. NEVER modify them, and NEVER load their files into this session - Doom's real module/dir plumbing would fight the vendored compat layer the same way lab files used to corrupt Doom. The Doom instance normally doesn't run - it stays a text-only reference.
+- `~/.doom.d` and `~/.doom-emacs.d` are the retired porting reference: consult them as text only. NEVER modify them, and NEVER load their files into this session - Doom's real module/dir plumbing would fight the vendored compat layer the same way lab files used to corrupt Doom. The Doom instance normally doesn't run - it stays a text-only reference.
 
 ## Naming: plain names, no invented prefixes
 

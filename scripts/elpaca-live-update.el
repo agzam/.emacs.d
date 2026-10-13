@@ -43,6 +43,8 @@
   "Hash of source dirs whose changelog block has already been emitted.")
 (defvar elpaca-live-update--batcher nil
   "Shared `pulled:'-line batcher (see `elpaca-update-report-batcher').")
+(defvar elpaca-live-update--retargeted nil
+  "Non-nil once the post-update renamed-default-branch phase has run.")
 (defvar elpaca-live-update--diverged-reset nil
   "Non-nil once the post-update rewritten-upstream reset phase has run.")
 (defvar elpaca-live-update--locals-rebuilt nil
@@ -130,6 +132,18 @@ progress regex still anchors."
                               elpaca-live-update--total updated
                               (length elpaca-live-update--failed))))
 
+(defun elpaca-live-update--run-retargets ()
+  "Move failed clones onto a renamed default branch, and merge them again.
+Queued merges keep the poll ticking until they settle."
+  (when-let* ((moved (elpaca-remote-retarget-renamed
+                      (lambda (fmt &rest args)
+                        (elpaca-update-report-flush elpaca-live-update--batcher
+                                                    #'elpaca-live-update--emit)
+                        (apply #'elpaca-live-update--emit fmt args)))))
+    (elpaca-live-update--emit "waiting for %d re-merge(s): %s"
+                              (length moved)
+                              (mapconcat #'symbol-name moved ", "))))
+
 (defun elpaca-live-update--run-diverged-resets ()
   "Reset merge-failed clones whose upstream rewrote history, and merge them again.
 Queuing the merges makes the queue non-terminal again, so the poll keeps
@@ -180,11 +194,12 @@ Heartbeats keep the run from ever going silent: whenever nothing has been
 emitted for `elpaca-live-update--heartbeat-interval' - a slow compile, or a
 genuinely wedged package - a line says exactly what is still pending, via the
 same silence-keyed helper the headless driver uses.  Once the queue settles
-three more phases run before the terminal marker, each re-arming the poll
-when it queues work: clones whose merge failed on a rewritten upstream (reset
-onto upstream, merged again), on-disk-changed locals (a git update skips a
-build-in-place checkout whose merge moved no HEAD), then broken-build healing
-\(half-built or stale builds a plain update also skips).
+four more phases run before the terminal marker, each re-arming the poll
+when it queues work: clones whose upstream renamed its default branch
+\(moved onto it, merged again), clones whose merge failed on a rewritten
+upstream (reset onto upstream, merged again), on-disk-changed locals (a git
+update skips a build-in-place checkout whose merge moved no HEAD), then
+broken-build healing (half-built or stale builds a plain update also skips).
 
 The whole tick is guarded: the poll timer stays armed through a signaling
 function, so an unguarded error in a heal helper would repeat once a second
@@ -207,6 +222,9 @@ and dismantles the run."
                                elpaca-live-update--heartbeat-interval)))
               (elpaca-live-update--emit "%s" line))
           (cond
+           ((not elpaca-live-update--retargeted)
+            (setq elpaca-live-update--retargeted t)
+            (elpaca-live-update--run-retargets))
            ((not elpaca-live-update--diverged-reset)
             (setq elpaca-live-update--diverged-reset t)
             (elpaca-live-update--run-diverged-resets))
@@ -251,6 +269,7 @@ UPDATE-ERROR line."
                                             (length (elpaca--queued)))
                 elpaca-live-update--failed nil
                 elpaca-live-update--batcher (elpaca-update-report-batcher)
+                elpaca-live-update--retargeted nil
                 elpaca-live-update--diverged-reset nil
                 elpaca-live-update--locals-rebuilt nil
                 elpaca-live-update--integrity-rebuilt nil

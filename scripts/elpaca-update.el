@@ -175,6 +175,13 @@ that is genuinely empty."
       ;; queue fetch+merge+rebuild for every package elpaca clones
       (elpaca-local-update-remotes nil nil #'elpaca-update--emit)
       (elpaca-wait)                ; settle the update queue (streamed as it goes)
+      ;; An upstream that renamed its default branch leaves the clone tracking
+      ;; a ref that is gone; move it onto the new default and merge again.
+      (when (elpaca-remote-retarget-renamed
+             (lambda (fmt &rest args)
+               (elpaca-update-report-flush elpaca-update--batcher #'elpaca-update--emit)
+               (apply #'elpaca-update--emit fmt args)))
+        (elpaca-wait))
       ;; An upstream that rewrote its history refuses the ff-only merge; the
       ;; clone is a cache of it, so reset onto upstream and merge again.
       (when (elpaca-remote-reset-diverged
