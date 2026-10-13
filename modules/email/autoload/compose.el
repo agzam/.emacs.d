@@ -136,7 +136,9 @@ signature separator, nil without one, and TEXT is the rest."
 ;;; HTML
 
 (defun mail-quote-html (run)
-  "RUN of quoted lines as nested blockquotes, its text escaped."
+  "RUN of quoted lines as nested blockquotes, its text escaped.
+A line's leading star or hash becomes an entity: inside the export
+block Org would read the star as a heading and end the block there."
   (let ((open (format "<blockquote class=\"gmail_quote\" style=\"%s\">"
                       org-mime-beautify-quoted-mail-style))
         (depth 0)
@@ -152,7 +154,11 @@ signature separator, nil without one, and TEXT is the rest."
         (while (< level depth)
           (push "</blockquote>" html)
           (setq depth (1- depth)))
-        (push (concat (xml-escape-string line) "<br>") html)))
+        (push (concat (replace-regexp-in-string
+                       "\\`[*#]" (lambda (char) (format "&#%d;" (string-to-char char)))
+                       (xml-escape-string line) t t)
+                      "<br>")
+              html)))
     (dotimes (_ depth)
       (push "</blockquote>" html))
     (string-join (nreverse html) "\n")))
@@ -173,13 +179,18 @@ signature separator, nil without one, and TEXT is the rest."
     (apply #'color-rgb-to-hex (append rgb '(2)))))
 
 (defun finish-mail-html-h ()
-  "Give code blocks the theme's colors and end the HTML with the signature."
+  "Style code and quote blocks inline, and end the HTML with the signature.
+Code blocks take the theme's colors.  Mail clients drop the CSS of
+Org's classes, so a quote block takes the reply quotes' border."
   (when-let* ((background (mail-css-color (face-background 'default nil t)))
               (foreground (mail-css-color (face-foreground 'default nil t))))
     (goto-char (point-min))
     (org-mime-change-element-style
      "pre" (format "background-color: %s; color: %s; padding: 0.6em; border-radius: 4px; overflow-x: auto;"
                    background foreground)))
+  (goto-char (point-min))
+  (while (search-forward "<blockquote>" nil t)
+    (replace-match (format "<blockquote style=\"%s\">" org-mime-beautify-quoted-mail-style) t t))
   (when mail-signature-html
     (goto-char (point-max))
     (insert "\n" mail-signature-html "\n")))
@@ -233,6 +244,8 @@ A file link keeps only the file's name."
           (org-mime-html-hook (list #'finish-mail-html-h))
           (org-export-use-babel nil)
           (org-html-checkbox-type 'unicode)
+          ;; Org underlines through a class, whose CSS mail clients drop
+          (org-html-text-markup-alist (cons '(underline . "<u>%s</u>") org-html-text-markup-alist))
           (mark-active nil))
       (replace-mail-body (concat (map-mail-quotes text #'mail-quote-block) "\n"))
       (org-mime-htmlize))

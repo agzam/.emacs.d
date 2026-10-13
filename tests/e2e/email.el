@@ -288,7 +288,7 @@ closed whatever happens, so the flow's exit asks nothing."
                             (string-match-p "HTML" (cdr (nth 2 states))))
                        :got (format "%S" states))
               (insert "* Plan\n"
-                      "Some *bold*, /italic/, ~code~, +gone+ and [[https://gnu.org][a link]], snake_case, café 🎉.\n\n"
+                      "Some *bold*, /italic/, _under_, ~code~, +gone+ and [[https://gnu.org][a link]], snake_case, café 🎉.\n\n"
                       "- one\n  1. nested\n- [X] done\n\nTerms:\n- term :: meaning\n\n"
                       "| a | b |\n|---+---|\n| 1 | 2 |\n\n"
                       "#+begin_src emacs-lisp\n(message \"hi\")\n#+end_src\n\n"
@@ -302,12 +302,12 @@ closed whatever happens, so the flow's exit asks nothing."
                      (missing (seq-remove
                                (lambda (element) (string-match-p element (or html "")))
                                (list "<h2 id=\"[^\"]+\">Plan</h2>" "<b>bold</b>" "<i>italic</i>"
-                                     "<code>code</code>" "<del>gone</del>"
+                                     "<u>under</u>" "<code>code</code>" "<del>gone</del>"
                                      "<a href=\"https://gnu.org\">a link</a>" "snake_case" "café 🎉"
                                      "<ul class=\"org-ul\">" "<ol class=\"org-ol\">" "&#x2611; done"
                                      "<dl class=\"org-dl\">" "<table "
                                      "<pre[^>]*class=\"src src-emacs-lisp\"><code>(message <span style=\"color: "
-                                     "<blockquote>\n<p>\nAn Org quote"
+                                     "<blockquote style=\"[^\"]*border-left[^\"]*\">\n<p>\nAn Org quote"
                                      (format "src=\"cid:%s\""
                                              (string-trim (or (nth 3 image) "") "<" ">"))
                                      "<p>-- <br>\nBest regards,<br>\nAg</p>"))))
@@ -323,7 +323,7 @@ closed whatever happens, so the flow's exit asks nothing."
                 (funcall record "its Markdown part renders the same elements"
                          (and text
                               (seq-every-p (lambda (element) (string-match-p element text))
-                                           '("^# Plan$" "Some \\*\\*bold\\*\\*, \\*italic\\*, `code`, ~~gone~~"
+                                           '("^# Plan$" "Some \\*\\*bold\\*\\*, \\*italic\\*, _under_, `code`, ~~gone~~"
                                              "\\[a link\\](https://gnu.org)" "café 🎉" "^- one$" "^- \\[x\\] done$"
                                              "^| a | b |$" "^```emacs-lisp$" "^> An Org quote\\.$" "^pixel\\.png$"
                                              "\n-- \nBest regards,\nAg\n*\\'")))

@@ -58,7 +58,7 @@ Like prisma, the stand-in keeps one blank line between blocks and trims."
 (defconst compose-tests-org
   "Hi,
 
-Some *bold*, /italic/, ~code~, +strike+ and [[https://gnu.org][a link]].
+Some *bold*, /italic/, _under_, ~code~, +strike+ and [[https://gnu.org][a link]].
 
 * A heading
 - one
@@ -160,10 +160,11 @@ Ag
        (setq mail-format 'html)
        (mail-body-to-html)
        (let ((html (compose-tests-part (mail-body) "text/html")))
-         (dolist (element '("<b>bold</b>" "<i>italic</i>" "<code>code</code>" "<del>strike</del>"
+         (dolist (element '("<b>bold</b>" "<i>italic</i>" "<u>under</u>" "<code>code</code>" "<del>strike</del>"
                             "<a href=\"https://gnu.org\">a link</a>" "<h2 id=\"[^\"]+\">A heading</h2>"
                             "<ul class=\"org-ul\">" "<ol class=\"org-ol\">" "&#x2611; done"
-                            "<table " "<pre class=\"src src-emacs-lisp\">" "<blockquote>\n<p>\nAn Org quote"
+                            "<table " "<pre class=\"src src-emacs-lisp\">"
+                            "<blockquote style=\"[^\"]*border-left[^\"]*\">\n<p>\nAn Org quote"
                             "snake_case stays"))
            (expect html :to-match element))
          (expect html :not :to-match "table-of-contents")
@@ -178,6 +179,17 @@ Ag
          (expect html :to-match "gmail_quote[^>]*>\nQuoted \\*stars\\* &amp; &lt;tags&gt;<br>\n<blockquote")
          (expect (compose-tests-count html "Quoted") :to-be 1)
          (expect html :not :to-match "<b>stars</b>")))))
+  (it "keeps a quoted star or hash line inside the blockquote"
+    ;; a rendered HTML mail quotes its list items as "* " lines
+    (compose-tests-with-prisma
+     (compose-tests-with-message
+         "Answer.\n\nOn Mon, Bob wrote:\n> * a bullet\n> #+end_export\n> after\n"
+       (setq mail-format 'html)
+       (mail-body-to-html)
+       (let ((html (compose-tests-part (mail-body) "text/html")))
+         (expect html :to-match "gmail_quote[^>]*>\n&#42; a bullet<br>\n&#35;\\+end_export<br>\nafter<br>\n</blockquote>")
+         (expect html :not :to-match "<h2")
+         (expect html :not :to-match "begin_export")))))
   (it "keeps attachments and forwarded mail after the alternative"
     (compose-tests-with-prisma
      (compose-tests-with-message
@@ -211,6 +223,15 @@ Ag
           (finish-mail-html-h))
         (expect (buffer-string) :to-match
                 "<pre style=\"background-color: #000000; color: #ffffff;[^\"]*\" class=\"src\">"))))
+  (it "gives a quote block the reply quotes' border, and leaves those alone"
+    (with-temp-buffer
+      (insert "<blockquote>\n<p>x</p>\n</blockquote>\n<blockquote class=\"gmail_quote\" style=\"a\">y</blockquote>")
+      (let ((mail-signature-html nil))
+        (finish-mail-html-h))
+      (expect (buffer-string) :to-equal
+              (concat (format "<blockquote style=\"%s\">\n<p>x</p>\n</blockquote>\n"
+                              org-mime-beautify-quoted-mail-style)
+                      "<blockquote class=\"gmail_quote\" style=\"a\">y</blockquote>"))))
   (it "leaves code blocks alone when the theme names no color"
     (cl-letf (((symbol-function 'face-background) (lambda (&rest _) "unspecified-bg"))
               ((symbol-function 'face-foreground) (lambda (&rest _) "unspecified-fg")))
