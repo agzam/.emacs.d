@@ -173,10 +173,9 @@ Worktree checkouts get named after the worktree container directory."
 ;;;###autoload
 (defun restore-desktop-and-tabs ()
   "Manually restore the saved desktop (buffers + tabs).
-Requiring the heavyweights first keeps `desktop-read' from
-resurrecting their buffers before the modes exist."
+Requiring magit first keeps `desktop-read' from resurrecting its
+buffers before the modes exist."
   (interactive)
-  (require 'org-roam-mode)
   (require 'magit)
   (tab-bar-mode 1)
   (desktop-read doom-state-dir))

@@ -1,11 +1,11 @@
 ;;; modules/org/config.el -*- lexical-binding: t; -*-
 
-;; doom.d's org module ported to vanilla: org, org-roam(+ui), the vulpea trio
-;; + consult-vulpea, evil-org, org-modern-indent, org-appear, org-superstar,
+;; doom.d's org module ported to vanilla: org, the vulpea trio +
+;; consult-vulpea, evil-org, org-modern-indent, org-appear, org-superstar,
 ;; org-cliplink, plus the former long tail - anki-editor(+ui, +anki-gen),
 ;; ob-async/http/mermaid, org-edit-indirect, org-pomodoro (+mp3s), toc-org,
-;; orgit(-forge), ox-clip/ox-gfm, org-download.  org-roam/vulpea db paths sit
-;; inline with their packages (own dbs under doom-local-dir).  Still parked in
+;; orgit(-forge), ox-clip/ox-gfm, org-download.  vulpea's db path sits
+;; inline with its package (own db under doom-local-dir).  Still parked in
 ;; doom.d (see MIGRATION.org): verb, org-contrib.
 
 ;; org builds via elpaca's own menu (elpaca-menu-org generates
@@ -50,7 +50,12 @@
    org-enforce-todo-dependencies t
    org-enforce-todo-checkbox-dependencies t)
 
-  (setopt org-link-make-description-function #'org-link-make-description-fn)
+  (setopt org-link-make-description-function #'org-link-make-description-fn
+          org-id-link-to-org-use-id 'create-if-interactive-and-no-custom-id)
+
+  ;; property completion for note aliases and refs
+  (add-to-list 'org-default-properties "roam_aliases")
+  (add-to-list 'org-default-properties "roam_refs")
 
   ;; Better context for sparse-tree/occur matches — 'lineage reveals
   ;; the full ancestor chain *and* sibling headings at each level,
@@ -99,14 +104,10 @@
           "b" #'vulpea-backlinks
           "i" #'vulpea-insert
           "l" #'vulpea-ui-sidebar-toggle
-          :desc "org-roam-ui in xwidget" "w" #'org-roam-toggle-ui-xwidget
-          :desc "org-roam-ui in browser" "W" #'org-roam-ui-in-browser
           "f" #'vulpea-find
           "F" #'vulpea-forward-links
           :desc "work note" "n" (cmd! (open-journal 'work (org-read-date nil t)))
-          :desc "personal note" "N" (cmd! (open-journal 'personal (org-read-date nil t)))
-          (:prefix ("r" . "refile")
-                   "n" #'org-roam-refile-to-node))
+          :desc "personal note" "N" (cmd! (open-journal 'personal (org-read-date nil t))))
          (:prefix ("s" . "tree/subtree")
                   "a" #'org-toggle-archive-tag
                   "A" #'org-archive-subtree
@@ -126,7 +127,7 @@
    'org-mode-hook
    #'org-indent-mode
    #'yas-minor-mode-on
-   #'org-roam-count-overlay-mode
+   #'backlink-count-mode
    ;; fboundp: flycheck waits on :checkers - unguarded, the void call
    ;; aborted the rest of org-mode-hook (live probe caught it)
    (defun flycheck-disable-h ()
@@ -135,6 +136,8 @@
   (add-hook! 'org-capture-mode-hook #'recenter)
 
   (setopt org-export-with-smart-quotes nil
+          ;; an unresolvable link to another note must not abort the export
+          org-export-with-broken-links t
           ;; "" not nil: the defcustom type is string (setopt warns on nil);
           ;; the postamble %v spec renders either as nothing
           org-html-validation-link ""
@@ -198,75 +201,6 @@
   :after org
   :config
   (add-to-list 'org-modules 'org-tempo t))
-
-(use-package org-roam
-  ;; extensions flattened into the build root (MELPA-style) - doom.d's manual
-  ;; extensions/ load-path hack dissolves.  org-roam-ui hard-requires
-  ;; org-roam-dailies at load, so they must be reachable.
-  :ensure (org-roam :host github :repo "org-roam/org-roam"
-                    :files (:defaults "extensions/*"))
-  :after org
-  :init
-  (setopt
-   org-roam-v2-ack t
-   org-roam-directory org-default-folder
-   ;; own db, kept out of user-emacs-directory and off the live Doom session's
-   org-roam-db-location (concat doom-local-dir "org-roam.db")
-   org-roam-dailies-directory "daily/" ; kept for org-roam-ui graph rendering
-
-   ;; org-mode doesn't know how to properly export with roam links
-   org-export-with-broken-links t
-   org-roam-file-exclude-regexp '("data/" ".sync/"))
-  :config
-  (after! xwidget
-    (map! :localleader :map xwidget-webkit-mode-map
-          (:prefix ("r" . "roam")
-                   "w" #'org-roam-toggle-ui-xwidget)))
-
-  (setopt
-   org-roam-completion-everywhere nil
-   org-id-link-to-org-use-id 'create-if-interactive-and-no-custom-id)
-
-  (setopt org-roam-capture-templates
-          `(("d" "default" plain
-             "%?"
-             :if-new
-             (file+head
-              "${slug}.org"
-              "\n#+title: ${title}\n#+startup: overview\n\n")
-             :unnarrowed t
-             :jump-to-captured t)))
-
-  (add-to-list 'org-default-properties "roam_aliases")
-  (add-to-list 'org-default-properties "roam_refs"))
-
-(use-package org-roam-ui
-  :ensure (org-roam-ui :host github :repo "org-roam/org-roam-ui" :files ("*.el" "out"))
-  :after org-roam
-  :init
-  (setq org-roam-ui-port 8088
-        org-roam-ui-sync-theme t
-        org-roam-ui-follow t
-        org-roam-ui-update-on-save t
-        org-roam-ui-open-on-start nil)
-  :config
-  (add-to-list
-   'display-buffer-alist
-   '("\\*org-roam-ui\\*"
-     (display-buffer-reuse-window
-      display-buffer-reuse-mode-window
-      display-buffer-in-direction)
-     (direction . right)
-     (window . root)
-     (window-width . 0.4)))
-
-  (add-hook! 'org-mode-hook
-    (defun org-roam-ui-on ()
-      (unless org-roam-ui-mode
-        ;; demoted: while the Doom trial runs in parallel, its session may
-        ;; already hold port 8088
-        (with-demoted-errors "org-roam-ui: %S"
-          (org-roam-ui-mode +1))))))
 
 (use-package evil-org
   :ensure (evil-org :host github :repo "hlissner/evil-org-mode")
@@ -450,7 +384,7 @@
   ;; matched literal backslashes and never fired - fixed on port
   (add-to-list
    'display-buffer-alist
-   `(,(rx bos (or "*org-roam*" "*vulpea-ui-sidebar"))
+   `(,(rx bos "*vulpea-ui-sidebar")
      (display-buffer-reuse-window
       display-buffer-reuse-mode-window
       display-buffer-in-quadrant)

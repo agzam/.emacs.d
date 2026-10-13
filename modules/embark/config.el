@@ -230,11 +230,6 @@
       "a" (embark-ace-action embark-find-definition)))
 
    (:map
-    embark-org-heading-map
-    ( :prefix ("r" . "roam")
-      :desc "add ref" "u" #'roam-ref-add-for-active-tab))
-
-   (:map
     embark-url-map
     "RET" #'eww-open-in-other-window
     ( :prefix

@@ -63,8 +63,8 @@ where neither `use-package' nor general (behind `map!') exists."
 
 (describe "citar notes source"
   (it "registers vulpea rather than citar-org-roam"
-    ;; citar-org-roam reads the org-roam database, which indexes nothing
-    ;; here because vulpea indexes the same tree
+    ;; citar-org-roam reads the org-roam database, and vulpea, not
+    ;; org-roam, indexes the notes here
     (let ((config (flatten-tree
                    (use-package-body-forms (cdr papers-tests--citar) :config))))
       (expect (memq 'citar-register-notes-source config) :to-be-truthy)

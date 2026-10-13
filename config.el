@@ -400,11 +400,7 @@
           :desc "work today" "t" (cmd! (open-journal 'work))
           :desc "personal today" "T" (cmd! (open-journal 'personal))
           :desc "work note" "n" (cmd! (open-journal 'work (org-read-date nil t)))
-          :desc "personal note" "N" (cmd! (open-journal 'personal (org-read-date nil t)))
-          :desc "org-roam-ui in xwidget" "w" #'org-roam-toggle-ui-xwidget
-          :desc "org-roam-ui in browser" "W" #'org-roam-ui-in-browser
-          ( :when (modulep! :custom web-browsing)
-            "C-b" #'browser-create-roam-node-for-active-tab)))
+          :desc "personal note" "N" (cmd! (open-journal 'personal (org-read-date nil t)))))
 
       ( :prefix ("p" . "projects")
         "b" #'consult-project-buffer

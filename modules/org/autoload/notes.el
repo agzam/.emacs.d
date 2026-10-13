@@ -1,4 +1,4 @@
-;;; modules/org/autoload/org-roam-helpers.el -*- lexical-binding: t; -*-
+;;; modules/org/autoload/notes.el -*- lexical-binding: t; -*-
 
 (defvar vulpea-backlinks--target-id nil
   "Target note ID from the most recent `vulpea-backlinks' session.
@@ -21,105 +21,42 @@ navigation via M-g M-n / M-g M-p."
     (org-fold-show-context 'occur-tree)
     (recenter)))
 
-;;;###autoload
-(defun outline-collapsed? ()
-  "Returns nil if the top outline heading is collapsed (hidden)"
-  (save-excursion
-    (when (org-get-outline-path 'with-self?)
-      (ignore-errors (outline-up-heading 1))
-      (let* ((beg (point))
-             (end (+ 1 (line-end-position))))
-        (not
-         (seq-empty-p
-          (seq-filter
-           (lambda (o)
-             (and (eq (overlay-get o 'invisible) 'outline)
-                  (save-excursion
-                    (goto-char (overlay-start o))
-                    (outline-on-heading-p t))))
-           (overlays-in beg end))))))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Backlink count overlays ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;;;###autoload
-(defun org--get-headline-with-text ()
-  "Grabs top level headline and its content"
-  (save-excursion
-    (save-restriction
-      (ignore-errors (outline-up-heading 1))
-      (let ((heading-shown? (not (outline-collapsed?))))
-        (when heading-shown? (outline-hide-subtree))
-        (let* ((elt (org-element-at-point))
-               (title (org-element-property :title elt))
-               (beg (progn (org-end-of-meta-data t) (point)))
-               (end (progn (outline-next-visible-heading 1) (point))))
-          (when heading-shown? (outline-show-subtree))
-          (list title (buffer-substring-no-properties beg end)))))))
-
-;;;###autoload
-(defun org-roam-refile-to-node ()
-  "Refile heading to another Org-roam node."
-  (interactive)
-  (let* ((headline? (org-get-outline-path 'with-self?))
-         (props (org-entry-properties))
-         (id (org-entry-get nil "id"))
-         (title (if headline?
-                    (org-element-property :title (org-element-at-point))
-                  (cadar (org-collect-keywords '("title")))))
-         (content (cadr (org--get-headline-with-text))))
-    (when headline?
-      (org-cut-subtree))
-    (org-roam-capture-
-     :goto nil
-     :node (org-roam-node-create
-            :title title
-            :properties props
-            :id id)
-     :props '(:immediate-finish nil))
-    (let ((insert-at (plist-get org-capture-plist :position-for-last-stored)))
-      (with-current-buffer (marker-buffer insert-at)
-        (insert content)
-        (mark-whole-buffer)
-        (org-do-promote)))))
-
-;;;###autoload
-(defun org-roam-ui-in-browser ()
-  (interactive)
-  (browse-url
-   (concat "http://localhost:"
-           (number-to-string org-roam-ui-port))))
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Org-roam-count-overlays  ;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defface org-roam-count-overlay-face
+(defface backlink-count
   '((t :inherit shadow :height 1.3 :underline nil :weight light))
-  "Face for Org Roam count overlay.")
+  "Face for the backlink count shown at a note title.")
 
-(defconst org-roam--superscript-digits
+(defconst backlink-count--superscript-digits
   (vector "⁰" "¹" "²" "³" "⁴" "⁵" "⁶" "⁷" "⁸" "⁹"))
 
-(defun org-roam--number-to-superscript (n)
+(defun backlink-count--superscript (n)
   "Convert integer N to a string of Unicode superscript digits."
-  (mapconcat (lambda (c) (aref org-roam--superscript-digits (- c ?0)))
+  (mapconcat (lambda (c) (aref backlink-count--superscript-digits (- c ?0)))
              (number-to-string n) ""))
 
-(defun org-roam--count-overlay-make (pos count)
+(defun backlink-count--make-overlay (pos count)
+  "Show COUNT as superscript digits at POS."
   (let* ((overlay-value (propertize
-                         (org-roam--number-to-superscript count)
-                         'face 'org-roam-count-overlay-face))
+                         (backlink-count--superscript count)
+                         'face 'backlink-count))
          (ov (make-overlay pos pos (current-buffer) nil t)))
-    (overlay-put ov 'roam-backlinks-count count)
+    (overlay-put ov 'backlink-count count)
     (overlay-put ov 'priority 1)
     (overlay-put ov 'after-string overlay-value)))
 
-(defun org-roam--count-overlay-remove-all ()
+(defun backlink-count--remove-overlays ()
+  "Delete every backlink count overlay in the current buffer."
   (dolist (ov (overlays-in (point-min) (point-max)))
-    (when (overlay-get ov 'roam-backlinks-count)
+    (when (overlay-get ov 'backlink-count)
       (delete-overlay ov))))
 
-(defun org-roam--count-overlay-query (id)
-  "Return backlink count for node with ID."
+(defun backlink-count--query (id)
+  "Return backlink count for note with ID."
+  ;; the first org buffer of a session can open before any vulpea command ran
+  (require 'vulpea)
   (caar (emacsql (vulpea-db)
                  [:select (funcall count source)
                   :from links
@@ -127,36 +64,37 @@ navigation via M-g M-n / M-g M-p."
                               (= type "id"))]
                  id)))
 
-(defun org-roam--count-overlay-make-all ()
+(defun backlink-count--make-overlays ()
+  "Redraw the backlink counts of every note in the current buffer."
   (save-excursion
     (goto-char (point-min))
-    (org-roam--count-overlay-remove-all)
-    ;; File-level node: :PROPERTIES: drawer at top with #+title: below
+    (backlink-count--remove-overlays)
+    ;; File-level note: :PROPERTIES: drawer at top with #+title: below
     (when (looking-at "^:properties:\n\\(?:.*\n\\)*?:id:\\s-+\\([^[:space:]\n]+\\)")
       (when-let* ((id (string-trim (substring-no-properties (match-string 1))))
-                  (count (org-roam--count-overlay-query id)))
+                  (count (backlink-count--query id)))
         (when (and (< 0 count)
                    (re-search-forward "^#\\+title:\\s-+" nil t))
-          (org-roam--count-overlay-make (point) count)
+          (backlink-count--make-overlay (point) count)
           (goto-char (point-min)))))
-    ;; Heading-level nodes
+    ;; Heading-level notes
     (while (re-search-forward "^\\(*+ \\)\\(.*$\\)\n\\(:properties:\\)\n\\(?:.*\n\\)*?:id:\\s-+\\([^[:space:]\n]+\\)" nil :no-error)
       (when-let* ((pos (match-beginning 2))
                   (id (string-trim (substring-no-properties (match-string 4))))
-                  (count (org-roam--count-overlay-query id)))
+                  (count (backlink-count--query id)))
         (when (< 0 count)
-          (org-roam--count-overlay-make pos count))))))
+          (backlink-count--make-overlay pos count))))))
 
 ;;;###autoload
-(define-minor-mode org-roam-count-overlay-mode
-  "Display backlink count for org-roam links."
+(define-minor-mode backlink-count-mode
+  "Show how many notes link to each note in the buffer."
   :after-hook
-  (if org-roam-count-overlay-mode
+  (if backlink-count-mode
       (progn
-        (org-roam--count-overlay-make-all)
-        (add-hook 'after-save-hook #'org-roam--count-overlay-make-all nil t))
-    (org-roam--count-overlay-remove-all)
-    (remove-hook 'after-save-hook #'org-roam--count-overlay-remove-all t)))
+        (backlink-count--make-overlays)
+        (add-hook 'after-save-hook #'backlink-count--make-overlays nil t))
+    (backlink-count--remove-overlays)
+    (remove-hook 'after-save-hook #'backlink-count--make-overlays t)))
 
 
 ;;;###autoload
@@ -394,12 +332,11 @@ Returns the number of fixes applied."
 ;;;###autoload
 (defun org-drawer-lint-before-save-h ()
   "Auto-fix malformed property drawers before saving.
-Only acts in `org-mode' buffers within `org-roam-directory'."
+Only acts in `org-mode' buffers within `org-default-folder'."
   (when (and (derived-mode-p 'org-mode)
              (buffer-file-name)
-             (bound-and-true-p org-roam-directory)
              (string-prefix-p
-              (expand-file-name org-roam-directory)
+              (expand-file-name org-default-folder)
               (expand-file-name (buffer-file-name))))
     (let ((n (org-drawer-lint-fix)))
       (when (< 0 n)
@@ -408,10 +345,10 @@ Only acts in `org-mode' buffers within `org-roam-directory'."
 ;;;###autoload
 (defun org-drawer-lint-scan (&optional dir)
   "Scan and fix all .org files in DIR for malformed property drawers.
-DIR defaults to `org-roam-directory'.  Works in both interactive
+DIR defaults to `org-default-folder'.  Works in both interactive
 and batch (`emacs --batch') contexts."
   (interactive)
-  (let* ((dir (expand-file-name (or dir org-roam-directory)))
+  (let* ((dir (expand-file-name (or dir org-default-folder)))
          (files (directory-files-recursively dir "\\.org$"))
          (total-fixed 0)
          (total-remaining 0)
@@ -438,12 +375,12 @@ and batch (`emacs --batch') contexts."
 ;;;###autoload
 (defun org-attach-lint-check (&optional dir)
   "Check that attachments referenced by Org headings exist on disk.
-Scans .org files in DIR (defaults to `org-roam-directory') for
+Scans .org files in DIR (defaults to `org-default-folder') for
 headings with the :ATTACH: tag, then verifies the attachment
 directory exists and listed files in ORG_ATTACH_FILES are present."
   (interactive)
   (require 'org-attach)
-  (let* ((dir (expand-file-name (or dir org-roam-directory)))
+  (let* ((dir (expand-file-name (or dir org-default-folder)))
          (attach-root (expand-file-name org-attach-id-dir dir))
          (files (directory-files-recursively dir "\\.org$"))
          (issues nil))
@@ -528,10 +465,10 @@ and the ORG_ATTACH_FILES property."
 (defun vulpea-db-verify (&optional dir)
   "Verify that all filesystem IDs are indexed in the Vulpea DB.
 Compares IDs recognized by `org-element' on disk against entries
-in the DB.  DIR defaults to `org-roam-directory'.
+in the DB.  DIR defaults to `org-default-folder'.
 Run after `vulpea-db-sync-full-scan' for meaningful results."
   (interactive)
-  (let* ((dir (expand-file-name (or dir org-roam-directory)))
+  (let* ((dir (expand-file-name (or dir org-default-folder)))
          (files (directory-files-recursively dir "\\.org$"))
          (fs-ids (make-hash-table :test 'equal))
          (db-ids (make-hash-table :test 'equal))
