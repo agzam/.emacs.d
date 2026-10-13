@@ -1,24 +1,9 @@
 ;;; modules/lookup/config.el -*- lexical-binding: t; -*-
 
-;; Vendored core of Doom's :tools lookup (autoload/lookup.el machinery,
-;; commands, xref/evil fallbacks), plus-free renames (+lookup/definition ->
-;; lookup-definition, +lookup-*-functions -> lookup-*-functions).  The SPC c
-;; and SPC s rows in bindings/config.el and both set-lookup-handlers!
-;; consumers (lsp module, clojure module) were already written against these
-;; names.  2026-07 lookup verdict - see MIGRATION.org Decisions log.
-;;
-;; K (`lookup-documentation') is in-Emacs only: every target mode registers a
-;; handler that renders inside Emacs (helpful, lsp hover -> *lsp-help*, cider,
-;; fennel, sdcv, or a Dash docset via eww), the online backend is off the
-;; default chain, and `lookup-open-url-fn' is eww - so K never spawns a
-;; system browser.
-;;
-;; Not vendored from Doom: the +docsets / +dictionary machinery.  The three
-;; SPC s commands that referenced it (lookup-in-all-docsets,
-;; lookup-dictionary-definition, lookup-synonyms) are lab-native thin wrappers
-;; over consult-dash / sdcv / mw-thesaurus, in this module's autoload/commands.el.
-;; Also dropped: the ivy/helm online provider frontends (the alist keeps plain
-;; URL strings) and better-jumper (evil-set-jump records the origin jump).
+;; Core of Doom's :tools lookup: handler dispatch, commands, xref/evil
+;; fallbacks.  K (`lookup-documentation') never spawns a system browser:
+;; every mode's handler renders inside Emacs, the online backend is off the
+;; default chain, and `lookup-open-url-fn' is eww.
 
 (defvar lookup-provider-url-alist
   '(("Google"            "https://google.com/search?q=%s")

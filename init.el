@@ -83,13 +83,10 @@
 ;; never completes (see the file).  Before the queues run.
 (require 'elpaca-failures)
 
-;; Own packages declare plain GitHub recipes (portable across machines);
-;; where a checkout below exists, `local-checkout-recipe' redirects the recipe
-;; to it and elpaca builds in place - edits picked up on `elpaca-rebuild',
-;; nothing cloned (MIGRATION "Local :repo packages").  A checkout this machine
-;; lacks (a newly added or private own package) is cloned over ssh into its dev
-;; folder by `ensure-local-dev-checkouts' below, before elpaca resolves - so it
-;; too builds in place instead of failing elpaca's anonymous https clone.
+;; Own packages declare plain GitHub recipes; where a checkout below exists,
+;; `local-checkout-recipe' redirects the recipe to it and elpaca builds in
+;; place.  `ensure-local-dev-checkouts' clones a missing checkout over ssh
+;; first, so it builds in place too instead of failing elpaca's https clone.
 (defvar local-dev-packages
   '((remoto . "~/GitHub/agzam/remoto.el")
     (github-topics . "~/GitHub/agzam/github-topics")

@@ -8,8 +8,6 @@ I ran Doom for years and [it served me well](https://github.com/agzam/.doom.d). 
 
 It stopped being a trial about a month later. This is the config I use every day now.
 
-The whole port is logged in `MIGRATION.org` - every module, every decision, every thing that broke and why. It is long and it is not for you, but if you are doing the same migration it is the most useful file here.
-
 ## Why leave Doom
 
 Mostly Elpaca.
@@ -71,7 +69,6 @@ tests/           buttercup suites, mirrors the source tree; tests/e2e/ drives re
 scripts/         batch entry points behind the tasks
 snippets/        yasnippet library
 bb.edn           task runner
-MIGRATION.org    the porting log
 ```
 
 Load order: `early-init` -> Elpaca bootstrap -> `general` -> `doom-compat` -> `doom-keybinds` -> `doom-defaults` -> `lisp/functions` -> modules in their listed order -> `config.el` -> `custom.el`.

@@ -1,6 +1,6 @@
 ;;; tests/org/journal-tests.el --- org/autoload/journal.el specs -*- lexical-binding: t; -*-
 ;; open-journal and vulpea-journal--type-from-note need live vulpea
-;; structs/db - smoke bucket (see MIGRATION coverage map).
+;; structs/db - smoke-only.
 
 (require 'test-helper
          (expand-file-name

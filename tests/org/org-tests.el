@@ -1,7 +1,7 @@
 ;;; tests/org/org-tests.el --- org/autoload/org.el specs -*- lexical-binding: t; -*-
 ;; Runs against BUILT-IN org (test-elpa carries only buttercup); the module
 ;; targets the elpaca-menu org build, but these helpers stick to stable API.
-;; Smoke-only siblings (see MIGRATION coverage map): org-dwim-at-point,
+;; Smoke-only siblings: org-dwim-at-point,
 ;; org-cycle-only-current-subtree-h and the fold-level pair (window-bound).
 
 (require 'test-helper

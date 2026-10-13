@@ -1,7 +1,7 @@
 ;;; tests/org/notes-tests.el --- org/autoload/notes.el specs -*- lexical-binding: t; -*-
 ;; Drawer lint and backlink counts run on built-in org, the count query
 ;; stubbed; backlinks, forward-links and db-verify need the live vulpea db
-;; and stay smoke-only (see MIGRATION coverage map).
+;; and stay smoke-only.
 
 (require 'test-helper
          (expand-file-name

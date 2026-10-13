@@ -342,8 +342,8 @@
       (apply #'gptel-make-preset 'gptel-plan p))))
 
 ;; The two vendored in-module packages have no upstream repo; elpaca builds
-;; them in place from the module tree, artifacts land in the builds dir
-;; (MIGRATION "Local :repo packages").  Backquoted orders are evaluated.
+;; them in place from the module tree, artifacts land in the builds dir.
+;; Backquoted orders are evaluated.
 (elpaca `(gptel-anthropic-oauth
           :repo ,(file-name-as-directory
                   (expand-file-name "modules/ai/gptel-anthropic-oauth"
