@@ -209,7 +209,7 @@ are applied again from `evil-collection-setup-hook'."
             :n "R" #'reply-to-everyone
             (:localleader
              :desc "sync"             "u" #'sync-mail
-             :desc "search all mail"  "/" #'search-mail
+             :desc "search all mail"  "/" #'search-mail-live
              :desc "search like this" "?" #'search-mail-like-this
              :desc "new message"      "c" #'compose-new-mail
              :desc "forward"          "f" #'forward-mail
@@ -270,7 +270,7 @@ are applied again from `evil-collection-setup-hook'."
             :n "gR" #'refresh-mail-groups
             (:localleader
              :desc "sync"            "u" #'sync-mail
-             :desc "search all mail" "/" #'search-mail
+             :desc "search all mail" "/" #'search-mail-live
              :desc "new message"     "c" #'compose-new-mail
              :desc "inbox"           "i" #'open-mail-inbox
              :desc "quit mail"       "q" #'quit-mail
@@ -418,6 +418,10 @@ columns would go to the window left of Gnus."
   ;; a hit is the copy in the inbox when there is one, so marks and
   ;; moves in search results reach what the inbox shows
   (advice-add 'gnus-search-indexed-parse-output :around #'search-likeliest-copies-a))
+
+;; exporting a live search reads all its matches in a search group
+(after! embark
+  (setf (alist-get 'mail-thread embark-exporters-alist) #'export-mail-live-search))
 
 (use-package message
   :ensure nil

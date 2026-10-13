@@ -39,6 +39,7 @@
 (defvar mail-label-colors)
 (defvar mail-label-refresh-timer)
 (defvar mail-sync-check-interval)
+(defvar mail-live-preview-name)
 
 (defun email-e2e--write-message (file from subject id &optional date references xref body)
   "Write a minimal RFC 822 message to FILE.
@@ -177,6 +178,11 @@ An untimed `read-event' is idle, and a timer ends it."
          (notmuch (expand-file-name "notmuch" e2e-work-dir))
          (counted-log (expand-file-name "notmuch-counted" e2e-work-dir))
          (hits (expand-file-name "hits/" e2e-work-dir))
+         ;; for the live search: the threads a query lists, a thread's
+         ;; newest match, and files a search prints whole either way
+         (summaries (expand-file-name "summaries/" e2e-work-dir))
+         (newest (expand-file-name "newest/" e2e-work-dir))
+         (whole (expand-file-name "whole/" e2e-work-dir))
          (searches-log (expand-file-name "notmuch-searches" e2e-work-dir))
          ;; what the %uS column draws on a starred message
          (star (string #x2217))
@@ -311,7 +317,8 @@ An untimed `read-event' is idle, and a timer ends it."
     (let ((archived (expand-file-name "cur/1700000030.30.fixture:2,S" archive)))
       (email-e2e--write-message archived "Ann <ann@example.com>" "archived" "archived"
                                 "Sun, 20 Sep 2026 09:00:00 +0000")
-      (make-directory hits t)
+      (dolist (dir (list hits summaries newest whole))
+        (make-directory dir t))
       (with-temp-file notmuch
         (insert "#!/bin/sh\n"
                 "case \" $* \" in\n"
@@ -322,10 +329,20 @@ An untimed `read-event' is idle, and a timer ends it."
                 "      printf '%s\\n' \"$query\" >> '" counted-log "'\n"
                 "      n=$((n+1)); echo $n\n"
                 "    done;;\n"
+                "  *\" --output=summary \"*)\n"
+                "    for query; do :; done\n"
+                "    if [ -f '" summaries "'\"$query\" ]; then cat '" summaries "'\"$query\";"
+                " else echo '()'; fi;;\n"
+                "  *\" --output=messages \"*)\n"
+                "    for query; do :; done\n"
+                "    if [ -f '" newest "'\"$query\" ]; then cat '" newest "'\"$query\";"
+                " elif [ -f '" hits "'\"$query\" ]; then cat '" hits "'\"$query\"; fi;;\n"
                 "  *)\n"
                 "    printf '%s\\n' \"$*\" >> '" searches-log "'\n"
                 "    for query; do :; done\n"
-                "    if [ -f '" hits "'\"$query\" ]; then\n"
+                "    if [ -f '" whole "'\"$query\" ]; then\n"
+                "      cat '" whole "'\"$query\"\n"
+                "    elif [ -f '" hits "'\"$query\" ]; then\n"
                 "      case \" $* \" in\n"
                 "        *\" --duplicate=1 \"*) head -n 1 '" hits "'\"$query\";;\n"
                 "        *) cat '" hits "'\"$query\";;\n"
@@ -1597,6 +1614,9 @@ An untimed `read-event' is idle, and a timer ends it."
                                  (interactive)
                                  (push 'search called)
                                  (setq searched query)))
+                              ;; , / opens the live search's minibuffer
+                              ((symbol-function 'search-mail-live)
+                               (lambda () (interactive) (push 'search called)))
                               ((symbol-function 'open-mail-inbox)
                                (lambda () (interactive) (push 'inbox called)))
                               ;; notmuch is not on CI
@@ -2105,8 +2125,10 @@ An untimed `read-event' is idle, and a timer ends it."
                                  (email-e2e--write-message file "Tom <tom@example.com>" id id))
                                (with-temp-file (expand-file-name id hits)
                                  (insert (mapconcat (lambda (file) (concat file "\n")) files "")))))
+                           ;; , / is the live search; this is the summary
+                           ;; search its export runs
                            (search-for (query)
-                             (execute-kbd-macro (kbd (concat ", / " query " RET"))))
+                             (search-mail query))
                            (searches ()
                              (with-temp-buffer
                                (insert-file-contents searches-log)
@@ -2372,7 +2394,9 @@ An untimed `read-event' is idle, and a timer ends it."
                     (loads-done)
                     (phone "renamed-search" "F")
                     (phone "renamed-enter" "S")
-                    (let ((err (try ", / renamed-search RET")))
+                    (let ((err (condition-case err
+                                   (progn (search-mail "renamed-search") nil)
+                                 (error err))))
                       (record "a search shows a message the phone renamed since its group was read"
                               (and (derived-mode-p 'gnus-summary-mode)
                                    (equal (nnselect-article-group (car gnus-newsgroup-articles))
@@ -2417,7 +2441,111 @@ An untimed `read-event' is idle, and a timer ends it."
                               (and article (equal (line-star article) star))
                               :got (format "article %S, column %S, %S" article
                                            (and article (line-star article)) err)))
-                    (leave)))
+                    (leave))
+                  ;; the live search over a thread of its own in the inbox.
+                  ;; A timer types as a person would: a keyboard macro that
+                  ;; ends inside the minibuffer leaves it with what it holds
+                  ;; Gnus starts a summary on its first unread message, so
+                  ;; only the root is unread and RET has to move to Ann's
+                  (let* ((files (mapcar (lambda (name) (expand-file-name name inbox))
+                                        '("cur/1700000060.60.fixture:2,"
+                                          "cur/1700000061.61.fixture:2,S"
+                                          "cur/1700000062.62.fixture:2,S")))
+                         (query "live plan")
+                         (in-thread "thread:fixture-live and (live plan)")
+                         (stage 'typing)
+                         (feed (lambda (keys)
+                                 (setq unread-command-events
+                                       (append unread-command-events
+                                               (listify-key-sequence (kbd keys))))))
+                         listed previewed beside timer)
+                    (email-e2e--write-message (nth 0 files) "Ann <ann@example.com>" "live plan"
+                                              "live-plan" "Wed, 23 Sep 2026 09:00:00 +0000")
+                    (email-e2e--write-message (nth 1 files) "Bob <bob@example.com>"
+                                              "Re: live plan (Bob)" "live-plan-bob"
+                                              "Wed, 23 Sep 2026 10:00:00 +0000"
+                                              "<live-plan@fixture.example>")
+                    (email-e2e--write-message (nth 2 files) "Ann <ann@example.com>"
+                                              "Re: live plan (Ann)" "live-plan-ann"
+                                              "Wed, 23 Sep 2026 11:00:00 +0000"
+                                              (concat "<live-plan@fixture.example> "
+                                                      "<live-plan-bob@fixture.example>"))
+                    (with-temp-file (expand-file-name query summaries)
+                      (insert "((:thread \"fixture-live\" :timestamp 1790000000"
+                              " :date_relative \"x\" :matched 3 :total 3 :authors \"Ann, Bob\""
+                              " :subject \"live plan\" :query (\"id:live-plan@fixture.example\" nil)"
+                              " :tags (\"inbox\")))\n"))
+                    (with-temp-file (expand-file-name in-thread newest)
+                      (insert "id:live-plan-ann@fixture.example\n"))
+                    (with-temp-file (expand-file-name in-thread whole)
+                      (insert (nth 2 files) "\n"))
+                    ;; RET asks for the thread's messages, then searches them
+                    (let ((ids '("id:live-plan-ann@fixture.example"
+                                 "id:live-plan-bob@fixture.example"
+                                 "id:live-plan@fixture.example")))
+                      (with-temp-file (expand-file-name "thread:fixture-live" newest)
+                        (insert (mapconcat (lambda (id) (concat id "\n")) ids "")))
+                      (with-temp-file (expand-file-name (string-join ids " or ") whole)
+                        (insert (mapconcat (lambda (file) (concat file "\n")) files ""))))
+                    (delete-other-windows)
+                    (switch-to-buffer gnus-group-buffer)
+                    (execute-kbd-macro (kbd "gR"))
+                    (loads-done)
+                    (setq beside (split-window-right)
+                          timer (run-at-time
+                                 0.05 0.05
+                                 (lambda ()
+                                   (when-let* ((mini (active-minibuffer-window)))
+                                     (with-current-buffer (window-buffer mini)
+                                       (pcase stage
+                                         ('typing
+                                          (funcall feed "live SPC plan")
+                                          (setq stage 'listing))
+                                         ('listing
+                                          (when (< 0 (or (bound-and-true-p vertico--total) 0))
+                                            (setq listed (mapcar #'substring-no-properties
+                                                                 vertico--candidates))
+                                            (funcall feed "C-SPC")
+                                            (setq stage 'previewing)))
+                                         ('previewing
+                                          (when (eq (window-buffer beside)
+                                                    (get-buffer mail-live-preview-name))
+                                            (setq previewed (with-current-buffer (window-buffer beside)
+                                                              (buffer-substring-no-properties
+                                                               (point-min) (point-max))))
+                                            (funcall feed "RET")
+                                            (setq stage 'done)))))))))
+                    (unwind-protect
+                        (with-timeout (20 (setq stage (list 'timed-out stage)))
+                          (call-interactively #'search-mail-live))
+                      (cancel-timer timer))
+                    (record "the live search lists the thread the typed query matches"
+                            (seq-some (lambda (line)
+                                        (string-match-p "Ann, Bob +3/3 live plan\\'" line))
+                                      listed)
+                            :got (format "%S, stage %S" listed stage))
+                    (record "C-SPC previews the thread's newest match beside the search"
+                            (and previewed
+                                 (string-match-p "^Subject: Re: live plan (Ann)$" previewed)
+                                 (string-match-p "body of Re: live plan (Ann)" previewed))
+                            :got (format "%S" previewed))
+                    (let ((view (get-buffer mail-thread-buffer-name)))
+                      (record "RET reads the thread in the thread view at its newest match"
+                              (and (eq stage 'done)
+                                   view (get-buffer-window view)
+                                   (equal (with-current-buffer view (subject-at-point))
+                                          "Re: live plan (Ann)")
+                                   (null (get-buffer mail-live-preview-name)))
+                              :got (format "stage %S, view %S, at %S" stage
+                                           (and view (get-buffer-window view))
+                                           (and view (with-current-buffer view
+                                                       (ignore-errors (subject-at-point))))))
+                      (when-let* ((window (and view (get-buffer-window view))))
+                        (select-window window)
+                        (execute-kbd-macro "q"))
+                      (set-buffer (window-buffer (selected-window)))
+                      (when (derived-mode-p 'gnus-summary-mode)
+                        (gnus-summary-exit-no-update t)))))
                 ;; the group buffer's own localleader over topics and
                 ;; subscriptions; moved is a group mail-topics leaves out
                 (delete-other-windows)

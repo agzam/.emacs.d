@@ -74,6 +74,24 @@ inside one, reading order is chronological."
 
 ;;; Rendering one message
 
+;;;###autoload
+(defun mail-render-message (raw group)
+  "Body of the message in buffer RAW, rendered as GROUP's article buffer would."
+  (with-temp-buffer
+    (insert-buffer-substring raw)
+    ;; treatments read the undecoded article back out of the
+    ;; original-article buffer, and Gnus's own one holds whatever the
+    ;; article buffer showed last
+    (let ((gnus-newsgroup-name group)
+          (gnus-original-article-buffer raw))
+      (gnus-article-mode)
+      (run-hooks 'gnus-article-decode-hook)
+      (gnus-article-prepare-display))
+    (widen)
+    (article-goto-body)
+    (prog1 (string-trim (buffer-substring (point) (point-max)))
+      (mm-destroy-parts gnus-article-mime-handles))))
+
 (defun mail-thread-render (group article)
   "Body of ARTICLE in GROUP as the article buffer would render it.
 Nil when the store no longer holds the article: nnmaildir can lose one
@@ -82,21 +100,7 @@ from its in-memory map and then raises on the request."
     (when (condition-case nil
               (gnus-request-article article group (current-buffer))
             (error nil))
-      (let ((raw (current-buffer)))
-        (with-temp-buffer
-          (insert-buffer-substring raw)
-          ;; treatments read the undecoded article back out of the
-          ;; original-article buffer, and Gnus's own one holds whatever
-          ;; the article buffer showed last
-          (let ((gnus-newsgroup-name group)
-                (gnus-original-article-buffer raw))
-            (gnus-article-mode)
-            (run-hooks 'gnus-article-decode-hook)
-            (gnus-article-prepare-display))
-          (widen)
-          (article-goto-body)
-          (prog1 (string-trim (buffer-substring (point) (point-max)))
-            (mm-destroy-parts gnus-article-mime-handles)))))))
+      (mail-render-message (current-buffer) group))))
 
 (defun mail-thread-sender (header)
   "Display name of HEADER's sender, or their address."

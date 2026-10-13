@@ -7,6 +7,9 @@
                                   "helper.el")))
 (require 'buttercup)
 
+;; embark is never loaded here; the exporter spec binds this
+(defvar embark-exporters-alist)
+
 (defun email-tests--load ()
   "Load the module config with `use-package' reduced to its :init forms.
 Emacs ships use-package, so the real macro is always there; left alone it
@@ -315,7 +318,7 @@ KEYS holds a prefix's key and the key under it apart by a space, as
                 :to-equal '((function reply-to-sender) (function reply-to-everyone)))
         (expect (mapcar (lambda (keys) (cdr (assoc keys leader)))
                         '("u" "/" "?" "c" "f" "r l" "r n" "o g" "o l"))
-                :to-equal '((function sync-mail) (function search-mail)
+                :to-equal '((function sync-mail) (function search-mail-live)
                             (function search-mail-like-this)
                             (function compose-new-mail) (function forward-mail)
                             (function reply-to-list) (function follow-up-on-newsgroup)
@@ -373,8 +376,25 @@ KEYS holds a prefix's key and the key under it apart by a space, as
   (it "gives the group buffer the summary's sync, search and new message keys"
     (let ((leader (email-tests--localleader-pairs config 'gnus-group-mode-map)))
       (expect (mapcar (lambda (keys) (cdr (assoc keys leader))) '("u" "/" "c" "i"))
-              :to-equal '((function sync-mail) (function search-mail)
+              :to-equal '((function sync-mail) (function search-mail-live)
                           (function compose-new-mail) (function open-mail-inbox)))))
+
+  (it "exports a live search as every match in a search group"
+    ;; read back from the source: the form waits for embark, which the
+    ;; suite never loads
+    (let ((form (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "modules/email/config.el" test-config-root))
+                  (goto-char (point-min))
+                  (let (form)
+                    (while (and (setq form (ignore-errors (read (current-buffer))))
+                                (not (equal (seq-take form 2) '(after! embark)))))
+                    form)))
+          (embark-exporters-alist nil))
+      (expect form :to-be-truthy)
+      (dolist (body (cddr form))
+        (eval body t))
+      (expect (alist-get 'mail-thread embark-exporters-alist) :to-be 'export-mail-live-search)))
 
   (it "adds, drops and moves groups, and edits topics, from the group buffer"
     (let ((leader (email-tests--localleader-pairs config 'gnus-group-mode-map)))
@@ -560,7 +580,8 @@ window and deletes the summary's."
     (pcase-dolist (`(,file . ,commands)
                    '(("thread.el" reply-to-sender reply-to-everyone reply-to-list
                       follow-up-on-newsgroup forward-mail compose-new-mail
-                      run-in-mail-summary mail-on-screen mail-thread-update-header-line)
+                      run-in-mail-summary mail-on-screen mail-thread-update-header-line
+                      mail-render-message)
                      ("mail.el" sort-mail-by-date sort-mail-by-author
                       sort-mail-by-subject toggle-mail-thread-fold
                       ;; a search, an advice or a sibling file calls these
@@ -568,7 +589,10 @@ window and deletes the summary's."
                       keep-flags-set-elsewhere-a maildir-groups accept-mail-without-nul-a
                       subscribe-mail-group mail-file-group current-mail-file
                       follow-renamed-mail-a follow-renamed-mail-marks-a
-                      check-mail-syncs start-mail-sync-check stop-mail-sync-check)
+                      check-mail-syncs start-mail-sync-check stop-mail-sync-check
+                      ;; the live search goes through these
+                      when-mail-loaded search-mail-now)
+                     ("live.el" search-mail-live export-mail-live-search)
                      ("labels.el" label-mail label-mail-threads
                       ;; the first summary line draws through these, and
                       ;; an advice, the thread view or a load calls the rest

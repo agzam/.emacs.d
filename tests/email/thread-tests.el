@@ -464,6 +464,21 @@ is the only treatment."
                       :to-equal "The plan, as posted.")))
         (kill-buffer shown)))))
 
+(describe "mail-render-message"
+  (it "renders a raw message from a buffer, as the article buffer would"
+    ;; the live search's preview has a file, not an article of a group
+    (let ((raw (generate-new-buffer " *thread-tests raw*"))
+          (gnus-newsrc-hashtb (gnus-make-hashtable))
+          (mm-text-html-renderer #'render-mail-html))
+      (unwind-protect
+          (progn
+            (with-current-buffer raw
+              (insert (thread-tests-html-article "<p>Agreed.</p><blockquote><p>The plan.</p></blockquote>")))
+            (let ((text (mail-render-message raw "nnmaildir+gmail:inbox")))
+              (expect text :to-match "\\`Agreed\\.")
+              (expect text :to-match "^> The plan\\.")))
+        (kill-buffer raw)))))
+
 (describe "quoted lines in the thread view"
   ;; the thread view copies each rendered body as text, which drops
   ;; overlays; the faces only survive as text properties

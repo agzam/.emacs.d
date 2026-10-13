@@ -251,19 +251,27 @@ LIMIT caps how many, `mail-search-limit' by default; 0 or a count past
 `mail-search-limit-max' gives that maximum.  A prefix argument asks for LIMIT."
   (interactive (list (read-string "Search mail: ")
                      (and current-prefix-arg (read-mail-search-limit))))
+  (when-mail-loaded "for the search" (lambda () (search-mail-now query limit))))
+
+;;;###autoload
+(defun when-mail-loaded (what action)
+  "Call ACTION with Gnus running once no maildir group is loading.
+A search maps its hits to groups nnmaildir holds.  WHAT says in the
+progress messages what waits, such as \"for the search\"."
   (unless (gnus-alive-p)
     (gnus))
   ;; mbsync creates a group dir the moment a label appears
   (subscribe-mail-groups)
   (load-unloaded-mail-groups)
   (if (mail-load-busy-p)
-      ;; a hit maps to its group only once nnmaildir holds the group
-      (wait-for-mail-load 'search "for the search" (lambda () (not (mail-load-busy-p)))
-                          (lambda () (search-mail query limit)))
-    (search-mail-now query limit)))
+      (wait-for-mail-load 'search what (lambda () (not (mail-load-busy-p)))
+                          (lambda () (when-mail-loaded what action)))
+    (funcall action)))
 
+;;;###autoload
 (defun search-mail-now (query limit)
-  "Read the ephemeral group of the newest LIMIT messages matching QUERY."
+  "Read the ephemeral group of the newest LIMIT messages matching QUERY.
+Returns the group's name, nil when nothing matched."
   (let* ((limit (cond ((null limit) mail-search-limit)
                       ((<= 1 limit mail-search-limit-max) limit)
                       (t mail-search-limit-max)))
@@ -280,7 +288,8 @@ LIMIT caps how many, `mail-search-limit' by default; 0 or a count past
                shown (car (count-mail (list (notmuch-query-text query))))
                (if (< limit mail-search-limit-max)
                    (format "a prefix argument shows up to %d" mail-search-limit-max)
-                 "narrow the query to reach older ones")))))
+                 "narrow the query to reach older ones")))
+    group))
 
 ;;;###autoload
 (defun mail-file-group (file)

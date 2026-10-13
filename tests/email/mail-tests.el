@@ -548,6 +548,45 @@ would have been bounded by in `large'."
           (search-mail "List:x" 0)))
       (expect counted :to-be nil))))
 
+(describe "search-mail-now"
+  (it "returns the group it reads, so the live search can open its thread"
+    (mail-tests--searching 3
+      (expect (search-mail-now "thread:abc" nil) :to-equal "nnselect:search-tests")))
+  (it "returns nil when nothing matched"
+    (mail-tests--searching 0
+      (expect (search-mail-now "thread:abc" nil) :to-be nil))))
+
+(describe "when-mail-loaded"
+  (it "runs at once when no group is loading"
+    (let (ran)
+      (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
+                ((symbol-function 'subscribe-mail-groups) #'ignore)
+                ((symbol-function 'load-unloaded-mail-groups) #'ignore)
+                ((symbol-function 'mail-load-busy-p) #'ignore))
+        (when-mail-loaded "for the test" (lambda () (setq ran t))))
+      (expect ran :to-be t)))
+  (it "starts Gnus first when it is down"
+    (let (started)
+      (cl-letf (((symbol-function 'gnus-alive-p) #'ignore)
+                ((symbol-function 'gnus) (lambda (&rest _) (setq started t)))
+                ((symbol-function 'subscribe-mail-groups) #'ignore)
+                ((symbol-function 'load-unloaded-mail-groups) #'ignore)
+                ((symbol-function 'mail-load-busy-p) #'ignore))
+        (when-mail-loaded "for the test" #'ignore))
+      (expect started :to-be t)))
+  (it "waits while groups load, saying what waits, then runs"
+    (let ((mail-load-queue nil) (mail-load-running (list "nnmaildir+gmail:archive"))
+          (mail-load-tables nil) (mail-load-job nil) (mail-load-waiters nil)
+          ran)
+      (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
+                ((symbol-function 'subscribe-mail-groups) #'ignore)
+                ((symbol-function 'load-unloaded-mail-groups) #'ignore))
+        (when-mail-loaded "for the test" (lambda () (setq ran t)))
+        (expect (list ran (nth 1 (car mail-load-waiters))) :to-equal '(nil "for the test"))
+        (setq mail-load-running nil)
+        (mail-load-run-waiters))
+      (expect ran :to-be t))))
+
 (describe "message-copies"
   (it "splits every copy notmuch named into one list per message"
     (expect (message-copies '("a1" "a2" "b1" "c1" "c2" "c3") '("a1" "b1" "c1"))
