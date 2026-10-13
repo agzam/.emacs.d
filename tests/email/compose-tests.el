@@ -422,6 +422,18 @@ Ag
       (compose-tests-with-message ""
         (prepare-mail-format-h)
         (expect mail-format :to-be 'html))))
+  (it "keeps the format a reopened message was saved with, and drops the header"
+    ;; each saved format differs from the one the message would get anew
+    (dolist (case '(("plain" "" . plain)
+                    ("html" "Newsgroups: gmane.emacs.devel\n" . html)
+                    ("none" "" . nil)))
+      (compose-tests-with-message ""
+        (save-excursion
+          (goto-char (point-min))
+          (insert (cadr case) "X-Mail-Format: " (car case) "\n"))
+        (prepare-mail-format-h)
+        (expect mail-format :to-be (cddr case))
+        (expect (buffer-string) :not :to-match "X-Mail-Format"))))
   (it "names the format after the mode's name"
     ;; batch Emacs formats no mode line; the e2e reads the real one
     (compose-tests-with-message ""
@@ -432,6 +444,21 @@ Ag
       (expect (mail-format-tag) :to-equal " Plain")
       (prepare-mail-format-h)
       (expect mode-name :to-equal '("Message" (:eval (mail-format-tag)))))))
+
+(describe "save-mail-format"
+  (it "writes the format into one header, none for a message sent as typed"
+    (compose-tests-with-message "Hi\n"
+      (setq mail-format 'plain)
+      (save-mail-format)
+      (setq mail-format 'html)
+      (save-mail-format)
+      (expect (compose-tests-count (buffer-string) "^X-Mail-Format:") :to-be 1)
+      (expect (buffer-string) :to-match "^X-Mail-Format: html\n")
+      (setq mail-format nil)
+      (save-mail-format)
+      (expect (buffer-string) :to-match "^X-Mail-Format: none\n")
+      ;; the header stays above the separator
+      (expect (buffer-string) :to-match (concat "X-Mail-Format: none\n" (regexp-quote mail-header-separator))))))
 
 (describe "toggle-mail-format"
   (it "flips between HTML and plain text"

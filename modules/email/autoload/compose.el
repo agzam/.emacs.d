@@ -65,13 +65,43 @@
   (unless (consp mode-name)
     (setq mode-name (list mode-name '(:eval (mail-format-tag))))))
 
+(defconst mail-format-header "X-Mail-Format"
+  "Header that carries `mail-format' through a queued message.")
+
+;;;###autoload
+(defun save-mail-format ()
+  "Write `mail-format' into a header, for the reopened message to read."
+  (save-excursion
+    (save-restriction
+      (message-narrow-to-headers)
+      (message-remove-header mail-format-header)
+      (goto-char (point-max))
+      (insert mail-format-header ": " (symbol-name (or mail-format 'none)) "\n"))))
+
+(defun take-saved-mail-format ()
+  "Remove the format header and return what it names, nil without one.
+The value is `html', `plain', or `none' for a message sent as typed."
+  (save-excursion
+    (save-restriction
+      (message-narrow-to-headers)
+      (when-let* ((value (message-fetch-field mail-format-header)))
+        (message-remove-header mail-format-header)
+        (pcase value
+          ("html" 'html)
+          ("plain" 'plain)
+          (_ 'none))))))
+
 ;;;###autoload
 (defun prepare-mail-format-h ()
   "Pick the format a message composed in Gnus leaves in.
-News goes as plain text, a reply as the mail it answers, the rest as HTML."
-  (setq mail-format (cond ((message-news-p) 'plain)
-                          ((mail-answered-format))
-                          (t 'html)))
+A reopened message keeps the format it was saved with; otherwise news
+goes as plain text, a reply as the mail it answers, the rest as HTML."
+  (let ((saved (take-saved-mail-format)))
+    (setq mail-format (cond ((eq saved 'none) nil)
+                            (saved)
+                            ((message-news-p) 'plain)
+                            ((mail-answered-format))
+                            (t 'html))))
   (show-mail-format))
 
 ;;;###autoload

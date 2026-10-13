@@ -90,7 +90,9 @@ SUBJECT and ID fill the headers."
 A multipart has no TEXT; a leaf's TEXT is decoded by its charset."
   (with-temp-buffer
     (set-buffer-multibyte nil)
-    (insert raw)
+    ;; smtpmail sends the separator line as the empty line
+    (insert (replace-regexp-in-string
+             (concat "^" (regexp-quote mail-header-separator) "$") "" raw t t))
     (let ((handle (mm-dissect-buffer t))
           parts)
       (cl-labels ((walk (h depth)
@@ -262,7 +264,8 @@ closed whatever happens, so the flow's exit asks nothing."
                  (current-buffer))
                (send ()
                  (setq sent nil)
-                 (execute-kbd-macro (kbd "C-c C-c y"))
+                 ;; C-c C-c alone queues; these cases send at once
+                 (execute-kbd-macro (kbd "C-u C-c C-c y"))
                  (and sent (email-e2e--parts sent)))
                (part (parts type)
                  (nth 2 (seq-find (lambda (p) (equal (nth 1 p) type)) parts)))
@@ -281,8 +284,8 @@ closed whatever happens, so the flow's exit asks nothing."
                 (funcall record "the plain reply leaves as Markdown, the quote as typed, the signature last"
                          (and (= 1 (length parts))
                               (not (buffer-live-p reply))
-                              (string-match-p "\\`Noted \\*\\*with thanks\\*\\*\\." text)
-                              (string-match-p "^> body of fresh$" text)
+                              ;; point lands under the attribution, above the quote
+                              (string-match-p "\\`On .*, Someone wrote:\n\nNoted \\*\\*with thanks\\*\\*\\.\n\n> body of fresh$" text)
                               (string-match-p "\n-- \nBest regards,\nAg\n*\\'" text))
                          :got (format "%S" parts))))
             (let ((reply (reply-in "nnmaildir+gmail:html" "html letter")))
@@ -392,7 +395,7 @@ closed whatever happens, so the flow's exit asks nothing."
                          :got (format "%s: %S" (buffer-name) (mail-body))))
               (setq sent nil)
               (let ((quit (condition-case nil
-                              (progn (execute-kbd-macro (kbd "C-c C-c n")) nil)
+                              (progn (execute-kbd-macro (kbd "C-u C-c C-c n")) nil)
                             (quit t))))
                 (funcall record "n at Send message? leaves the Org body as typed, nothing sent"
                          (and quit
@@ -412,6 +415,234 @@ closed whatever happens, so the flow's exit asks nothing."
           (when-let* ((summary (get-buffer (gnus-summary-buffer-name group))))
             (with-current-buffer summary
               (gnus-summary-exit-no-update))))))))
+
+(defun email-e2e--delayed-send (record)
+  "Queue mail through real keys and send it from the queue, calling RECORD.
+A stand-in keeps what leaves.  The queue lives in the work dir, and the
+buffers, summary and queued files the cases leave are cleared after."
+  (let* ((sent '())
+         (message-send-mail-function (lambda () (push (buffer-string) sent)))
+         (message-confirm-send t)
+         ;; the drafts folder , q binds after this, so its queue is this one
+         (drafts (file-name-as-directory (expand-file-name "drafts" e2e-work-dir)))
+         (nndraft-directory drafts)
+         (nnmh-directory drafts)
+         (nndraft-current-group nil)
+         (queue (expand-file-name "delayed" drafts))
+         (mail-queue-retry-time 0)
+         (mail-queue-failure nil))
+    (make-directory (expand-file-name "drafts" drafts) t)
+    (cl-flet* ((numbered (dir)
+                 (and (file-directory-p dir)
+                      (directory-files dir t "\\`[0-9]+\\'")))
+               (queued () (numbered queue))
+               (contents (file)
+                 (with-temp-buffer
+                   (insert-file-contents file)
+                   (buffer-string)))
+               (head (file field)
+                 (with-temp-buffer
+                   (insert-file-contents file)
+                   (goto-char (point-min))
+                   (when (search-forward "\n\n" nil t)
+                     (narrow-to-region (point-min) (point)))
+                   (mail-fetch-field field)))
+               (seconds-left (file)
+                 (- (float-time (encode-time (parse-time-string (head file "X-Gnus-Delayed"))))
+                    (float-time)))
+               (backdate (file seconds)
+                 (with-temp-file file
+                   (insert-file-contents file)
+                   (goto-char (point-min))
+                   (re-search-forward "^X-Gnus-Delayed: .*$")
+                   (replace-match (concat "X-Gnus-Delayed: "
+                                          (message-make-date (time-subtract nil seconds)))
+                                  t t)))
+               (compose (subject)
+                 (delete-other-windows)
+                 (switch-to-buffer gnus-group-buffer)
+                 (execute-kbd-macro (kbd ", c"))
+                 (save-excursion
+                   (save-restriction
+                     (message-narrow-to-headers)
+                     (message-remove-header "Gcc")))
+                 (message-goto-to)
+                 (insert "bob@example.com")
+                 (message-goto-subject)
+                 (insert subject)
+                 (message-goto-body)
+                 (current-buffer))
+               (new-message-buffers (before)
+                 (seq-filter (lambda (buffer)
+                               (and (not (memq buffer before))
+                                    (eq (buffer-local-value 'major-mode buffer) 'message-mode)))
+                             (buffer-list)))
+               (warnings ()
+                 (if-let* ((buffer (get-buffer "*Warnings*")))
+                     (with-current-buffer buffer (buffer-string))
+                   "")))
+      (unwind-protect
+          (condition-case err
+              (progn
+                (funcall record "Gnus's start puts the queue on its demon, every 10 s after 5 s idle, and on Emacs's quit"
+                         (and (member '(send-due-mail 2 1) gnus-demon-handlers)
+                              (= gnus-demon-timestep 5)
+                              (plist-get gnus-demon-timers 'send-due-mail)
+                              (memq 'send-queued-mail-before-quit kill-emacs-query-functions)
+                              (memq 'stop-mail-queue gnus-exit-gnus-hook))
+                         :got (format "%S, step %S" gnus-demon-handlers gnus-demon-timestep))
+                (let ((new (compose "Lunch on Friday")))
+                  (insert "Noon works *for me*.\n")
+                  (execute-kbd-macro (kbd "C-, p"))
+                  (execute-kbd-macro (kbd "C-c C-c"))
+                  (let ((files (queued)))
+                    (funcall record "C-c C-c queues the message for a minute: its buffer goes, nothing leaves, the Org body waits with its format"
+                             (and (not (buffer-live-p new))
+                                  (eq (window-buffer) (get-buffer gnus-group-buffer))
+                                  (null sent)
+                                  (= 1 (length files))
+                                  (< 55 (seconds-left (car files)) 65)
+                                  (equal (head (car files) "X-Mail-Format") "plain")
+                                  (string-match-p "Noon works \\*for me\\*\\." (contents (car files))))
+                             :got (format "live %S, window %S, sent %S, queue %S"
+                                          (buffer-live-p new) (window-buffer) sent (mapcar #'contents files)))
+                    (when files
+                      (backdate (car files) 120))
+                    (let ((before (buffer-list))
+                          (shown (window-buffer)))
+                      (send-due-mail)
+                      (let* ((raw (car sent))
+                             (parts (and raw (email-e2e--parts raw))))
+                        (funcall record "a due message leaves in the format it was queued with, its queue headers gone, and the queue forgets it"
+                                 (and (= 1 (length sent))
+                                      (= 1 (length parts))
+                                      (string-match-p "Noon works \\*\\*for me\\*\\*\\." (nth 2 (car parts)))
+                                      (not (string-match-p "^X-\\(Mail-Format\\|Gnus-Delayed\\):" raw))
+                                      (null (queued))
+                                      (null (new-message-buffers before))
+                                      (eq (window-buffer) shown))
+                                 :got (format "sent %S, parts %S, queue %S, buffers %S, window %S for %S"
+                                              sent parts (queued) (new-message-buffers before)
+                                              (window-buffer) shown))))))
+                (setq sent nil)
+                (compose "Second thoughts")
+                (insert "First draft.\n")
+                (execute-kbd-macro (kbd "C-c C-c"))
+                (when (queued)
+                  (backdate (car (queued)) 600))
+                (delete-other-windows)
+                (switch-to-buffer gnus-group-buffer)
+                (gnus-group-jump-to-group (mail-queue-group))
+                (execute-kbd-macro (kbd "RET"))
+                (let ((summary (current-buffer)))
+                  (goto-char (point-min))
+                  (execute-kbd-macro "e")
+                  (let ((editing (current-buffer)))
+                    (funcall record "e on a queued message takes it out of the queue and opens its Org body"
+                             (and (not (eq editing summary))
+                                  (derived-mode-p 'message-mode)
+                                  (null (queued))
+                                  (string-match-p "First draft\\." (mail-body)))
+                             :got (format "%S in %s, queue %S" major-mode (buffer-name) (queued)))
+                    (when (derived-mode-p 'message-mode)
+                      (message-goto-body)
+                      (insert "Second thought.\n")
+                      (execute-kbd-macro (kbd "C-c C-c")))
+                    (let ((files (queued)))
+                      (funcall record "C-c C-c queues the edited message anew: one copy, a fresh minute"
+                               (and (not (buffer-live-p editing))
+                                    (= 1 (length files))
+                                    (< 55 (seconds-left (car files)) 65)
+                                    (string-match-p "Second thought\\." (contents (car files)))
+                                    (null (numbered (expand-file-name "drafts" drafts))))
+                               :got (format "live %S, queue %S, drafts %S" (buffer-live-p editing)
+                                            (mapcar #'contents files)
+                                            (numbered (expand-file-name "drafts" drafts)))))
+                    (send-due-mail)
+                    (funcall record "a message queued anew waits out its fresh minute"
+                             (and (null sent) (= 1 (length (queued))))
+                             :got (format "sent %S, queue %S" sent (queued))))
+                  (when (buffer-live-p summary)
+                    (with-current-buffer summary
+                      (gnus-summary-exit-no-update))))
+                (setq sent nil)
+                (let ((new (compose "Right away")))
+                  (insert "Now.\n")
+                  (execute-kbd-macro (kbd "C-u C-c C-c y"))
+                  (funcall record "C-u C-c C-c sends at once, past the queue"
+                           (and (= 1 (length sent))
+                                (not (buffer-live-p new))
+                                (= 1 (length (queued))))
+                           :got (format "sent %S, queue %S" (length sent) (length (queued)))))
+                (setq sent nil)
+                (when (queued)
+                  (backdate (car (queued)) 120))
+                (let ((before (buffer-list)))
+                  (let ((message-send-mail-function (lambda () (error "550 refused"))))
+                    (send-due-mail))
+                  (funcall record "a due message that fails to leave stays queued, leaves no buffer, holds the queue off and warns"
+                           (and (null sent)
+                                (= 1 (length (queued)))
+                                (null (new-message-buffers before))
+                                (time-less-p nil mail-queue-retry-time)
+                                (string-search "Delayed mail to bob@example.com failed: 550 refused" (warnings)))
+                           :got (format "queue %S, buffers %S, retry %S, warnings %S"
+                                        (queued) (new-message-buffers before) mail-queue-retry-time (warnings))))
+                (send-due-mail)
+                (funcall record "after a failure the queue waits out its backoff"
+                         (and (null sent) (= 1 (length (queued))))
+                         :got (format "sent %S" sent))
+                (setq mail-queue-retry-time 0)
+                (let* ((message-send-mail-function (lambda ()
+                                                     (y-or-n-p "Really send? ")
+                                                     (push "answered" sent)))
+                       (result (with-timeout (10 'waited)
+                                 (send-due-mail)
+                                 'returned)))
+                  (funcall record "a queued send that would ask a question fails at once instead of waiting"
+                           (and (eq result 'returned)
+                                (null sent)
+                                (= 1 (length (queued)))
+                                (string-search "would ask" (warnings)))
+                           :got (format "%S, sent %S, warnings %S" result sent (warnings))))
+                (setq mail-queue-retry-time 0
+                      mail-queue-failure nil
+                      sent nil)
+                (let ((new (compose "From normal state")))
+                  (insert "Bye.\n")
+                  (execute-kbd-macro (kbd "<escape> Z Z"))
+                  (funcall record "ZZ queues the message the way C-c C-c does"
+                           (and (not (buffer-live-p new))
+                                (null sent)
+                                (= 2 (length (queued))))
+                           :got (format "live %S, sent %S, queue %S" (buffer-live-p new) sent (length (queued)))))
+                (stop-mail-queue)
+                (funcall record "quitting Gnus sends every queued message, due or not, and stops the demon"
+                         (and (= 2 (length sent))
+                              (null (queued))
+                              (not (assq 'send-due-mail gnus-demon-handlers))
+                              (not (memq 'send-queued-mail-before-quit kill-emacs-query-functions)))
+                         :got (format "sent %S, queue %S, demon %S" (length sent) (queued) gnus-demon-handlers)))
+            ;; a quit from a key would end every later scenario of the run
+            ((error quit)
+             (funcall record "the delayed-send cases run to their end" nil
+                      :got (format "%S" err))))
+        (dolist (buffer (buffer-list))
+          (when (eq (buffer-local-value 'major-mode buffer) 'message-mode)
+            (with-current-buffer buffer
+              (set-buffer-modified-p nil)
+              (let ((kill-buffer-query-functions nil))
+                (kill-buffer buffer)))))
+        (when-let* ((summary (get-buffer (gnus-summary-buffer-name (mail-queue-group)))))
+          (with-current-buffer summary
+            (gnus-summary-exit-no-update)))
+        (mapc #'delete-file (queued))
+        (when (get-buffer "*Warnings*")
+          (kill-buffer "*Warnings*"))
+        (unless (assq 'send-due-mail gnus-demon-handlers)
+          (start-mail-queue))
+        (delete-other-windows)
+        (switch-to-buffer gnus-group-buffer)))))
 
 (defun email-e2e ()
   "Gnus reads the fixture maildir, replies, and shows a thread in one buffer."
@@ -2915,6 +3146,8 @@ closed whatever happens, so the flow's exit asks nothing."
                           :got (format "%S" (read-groups))))
                 ;; Org in the body, sent through real keys
                 (email-e2e--org-compose #'record)
+                ;; C-c C-c queues, the queue sends, e takes a message back
+                (email-e2e--delayed-send #'record)
                 ;; , q leaves mail: an unsent reply goes to the drafts, the
                 ;; summary closes the way q closes it, and Gnus exits.  The
                 ;; drafts server is open by now, so binding its folder moves it

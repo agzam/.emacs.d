@@ -11,6 +11,8 @@
 (defvar embark-exporters-alist)
 (defvar gnus-message-setup-hook)
 (defvar org-mime-obey-display-buffer-p)
+(defvar gnus-delay-default-delay)
+(defvar gnus-demon-timestep)
 
 (defun email-tests--load ()
   "Load the module config with `use-package' reduced to its :init forms.
@@ -619,6 +621,9 @@ window and deletes the summary's."
                       mail-group-pending-p mail-group-reading-p mail-load-busy-p
                       mail-full-group-name wait-for-mail-load load-unloaded-mail-groups
                       mail-group-server mail-group-store)
+                     ;; C-c C-c, Gnus's hooks, its demon and an advice call these
+                     ("delay.el" send-later send-due-mail send-queued-article-a
+                      start-mail-queue stop-mail-queue)
                      ("similar.el" count-mail)))
       (with-temp-buffer
         (insert-file-contents
@@ -856,7 +861,8 @@ window and deletes the summary's."
           (eval form t)))
       (expect gnus-started-hook
               :to-equal '(subscribe-mail-groups apply-mail-topics load-all-mail-groups
-                          start-mail-sync-check start-feed-fetches fetch-stale-news))))
+                          start-mail-sync-check start-mail-queue start-feed-fetches
+                          fetch-stale-news))))
   (it "drops every load and stops looking for syncs when Gnus leaves"
     (require 'gnus)
     (let ((gnus-exit-gnus-hook nil))
@@ -864,7 +870,9 @@ window and deletes the summary's."
         (when (and (eq (car-safe form) 'add-hook)
                    (equal (cadr form) ''gnus-exit-gnus-hook))
           (eval form t)))
-      (expect gnus-exit-gnus-hook :to-equal '(stop-mail-sync-check stop-mail-load))))
+      ;; queued mail leaves first, while every server is still open
+      (expect gnus-exit-gnus-hook
+              :to-equal '(stop-mail-queue stop-mail-sync-check stop-mail-load))))
   (it "waits for loads before a search, a thread search or entering a group"
     (require 'gnus-sum)
     (let ((gnus-mark-article-hook nil)
@@ -995,9 +1003,41 @@ window and deletes the summary's."
       (expect (assoc "o" leader) :to-equal '("o" function org-mime-edit-mail-in-org-mode))))
   (it "opens the Org buffer where buffers open, not over the frame"
     (expect org-mime-obey-display-buffer-p :to-be t))
+  (it "queues the message from C-c C-c and evil-collection's ZZ"
+    (let* ((form (seq-find (lambda (form) (eq (car-safe form) 'map!)) forms))
+           (body (car (map-form-groups form 'message-mode-map))))
+      (expect (cadr (member [remap message-send-and-exit] body))
+              :to-equal '(function send-later))))
   (it "autoloads what message buffers call"
     (with-temp-buffer
       (insert-file-contents
        (expand-file-name "modules/email/autoload/compose.el" test-config-root))
-      (dolist (fn '(prepare-mail-format-h toggle-mail-format send-converted-mail-a))
+      (dolist (fn '(prepare-mail-format-h toggle-mail-format send-converted-mail-a
+                    save-mail-format))
         (expect (buffer-string) :to-match (format "^;;;###autoload\n(defun %s " fn))))))
+
+(describe "email module delayed send"
+  (it "opens a queued message with e, which evil-collection gives the raw article"
+    (let* ((form (seq-find (lambda (form) (eq (car-safe form) 'map!))
+                           (email-tests--config-forms 'gnus-draft)))
+           (body (car (map-form-groups form 'gnus-draft-mode-map))))
+      (expect (email-tests--key-states form 'gnus-draft-mode-map) :to-equal '(("e" . :n)))
+      (expect (cdr (assoc "e" (map-form-key-pairs body))) :to-equal '(function gnus-draft-edit-message))
+      ;; the mode starts in a summary already in normal state
+      (expect (member '(add-hook 'gnus-draft-mode-hook #'evil-normalize-keymaps)
+                      (email-tests--config-forms 'gnus-draft))
+              :to-be-truthy)))
+  (it "holds a message a minute, and the demon looks every 10 s after 5 idle"
+    (expect gnus-delay-default-delay :to-equal "1m")
+    ;; start-mail-queue registers the handler at 2 steps, idle 1 step
+    (expect gnus-demon-timestep :to-be 5))
+  (it "notes where each queued message goes and cleans up after a failure"
+    (require 'gnus-draft)
+    (unwind-protect
+        (progn
+          (dolist (form (email-tests--config-forms 'gnus))
+            (when (and (eq (car-safe form) 'advice-add)
+                       (equal (cadr form) ''gnus-draft-send))
+              (eval form t)))
+          (expect (advice-member-p #'send-queued-article-a 'gnus-draft-send) :to-be-truthy))
+      (advice-remove 'gnus-draft-send #'send-queued-article-a))))

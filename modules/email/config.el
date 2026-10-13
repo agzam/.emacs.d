@@ -183,6 +183,10 @@ Any other label's chip takes the face `mail-label'.")
   ;; what launchd's syncs change reaches the routine groups, as after , u
   (add-hook 'gnus-started-hook #'start-mail-sync-check 90)
   (add-hook 'gnus-exit-gnus-hook #'stop-mail-sync-check)
+  ;; queued mail leaves on Gnus's demon, and what is left before Gnus quits
+  (add-hook 'gnus-started-hook #'start-mail-queue 90)
+  (add-hook 'gnus-exit-gnus-hook #'stop-mail-queue)
+  (advice-add 'gnus-draft-send :around #'send-queued-article-a)
   ;; entering a group or searching needs the groups nnmaildir holds
   (advice-add 'gnus-group-read-ephemeral-search-group :around #'wait-for-mail-loads-a)
   ;; a feed is read from its downloaded copy, so a group never waits on
@@ -453,9 +457,31 @@ columns would go to the window left of Gnus."
   (add-hook 'gnus-message-setup-hook #'prepare-mail-format-h)
   (advice-add 'message-send :around #'send-converted-mail-a)
   (map! :map message-mode-map
+        ;; C-c C-c and evil-collection's ZZ queue the message instead
+        [remap message-send-and-exit] #'send-later
         (:localleader
          :desc "plain text or HTML" "p" #'toggle-mail-format
          :desc "edit body in Org"   "o" #'org-mime-edit-mail-in-org-mode)))
+
+(use-package gnus-delay
+  :ensure nil
+  :defer t
+  :init
+  ;; C-c C-c holds a message this long; C-c C-j still asks for any delay
+  (setq gnus-delay-default-delay "1m"
+        ;; the demon checks the queue every 2 steps, after 1 idle step
+        gnus-demon-timestep 5))
+
+(use-package gnus-draft
+  :ensure nil
+  :defer t
+  :config
+  ;; evil-collection's e edits the raw article in every summary; in a
+  ;; draft group, the delayed one included, e opens the message itself
+  (map! :map gnus-draft-mode-map :n "e" #'gnus-draft-edit-message)
+  ;; the mode turns on in a summary already in normal state, and evil
+  ;; reads a minor mode's state keys only when it recomputes its maps
+  (add-hook 'gnus-draft-mode-hook #'evil-normalize-keymaps))
 
 (use-package org-mime
   :defer t
