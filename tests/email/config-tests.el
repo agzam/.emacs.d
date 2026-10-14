@@ -721,6 +721,36 @@ window and deletes the summary's."
       (expect (buffer-string)
               :to-match "^;;;###autoload\n(defun draw-mail-mark-symbols-h "))))
 
+(describe "email module recentering"
+  (before-all
+    (require 'gnus-sum)
+    (let ((gnus-summary-mode-hook nil)
+          (gnus-mark-article-hook nil)
+          (gnus-select-group-hook nil)
+          (gnus-summary-prepare-exit-hook nil)
+          (gnus-exit-group-hook nil))
+      (dolist (form (email-tests--config-forms 'gnus-sum))
+        (eval form t))))
+  (it "recenters after the mark and run-the-queue commands, and once labels are applied"
+    ;; label changes can finish in a timer, after the command returned
+    (dolist (fn '(mail-act-on-selection mail-execute-marks mail-label-apply mail-label-finish))
+      (expect (advice-member-p #'recenter-mail-summary-a fn) :to-be-truthy)))
+  (it "recenters the summary the selected window shows, whatever buffer is current"
+    ;; a label change finishing in a timer runs in no particular buffer
+    (let ((summary (generate-new-buffer " *email-tests summary*"))
+          recentered)
+      (spy-on 'recenter :and-call-fake (lambda (&rest _) (push (current-buffer) recentered)))
+      (unwind-protect
+          (save-window-excursion
+            (with-current-buffer summary
+              (gnus-summary-mode)
+              (recenter-mail-summary-a))
+            (set-window-buffer nil summary)
+            (with-temp-buffer
+              (recenter-mail-summary-a)))
+        (kill-buffer summary))
+      (expect recentered :to-equal (list summary)))))
+
 (describe "email module subscriptions"
   (it "subscribes the inbox, emacs-devel and r/emacs on startup"
     (expect mail-groups :to-equal
