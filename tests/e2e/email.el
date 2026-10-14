@@ -2399,15 +2399,17 @@ buffers, summary and queued files the cases leave are cleared after."
                         (at to-label)
                         (execute-kbd-macro (kbd ", l"))
                         (let ((menu (menu-text)))
-                          (execute-kbd-macro (kbd "l"))
+                          (execute-kbd-macro (kbd "L"))
                           ;; a GUI's Return key, which the summary binds in normal state
                           (execute-kbd-macro (kbd "<return>"))
                           (labels-done)
-                          (record ", l lists each label under its key, the message's own checked, and l <return> adds labelled"
+                          ;; l is the picker's, so no label gets it
+                          (record ", l lists each label under its key, the message's own checked, and L <return> adds labelled"
                                   (and (string-match-p "Labels: the message on screen" menu)
-                                       (string-match-p "L ✓ lists" menu)
-                                       (string-match-p "l   labelled" menu)
+                                       (string-match-p "t ✓ lists" menu)
+                                       (string-match-p "L   labelled" menu)
                                        (string-match-p "i   Inbox" menu)
+                                       (string-match-p "l by name" menu)
                                        (equal (message-ids (messages-in labelled))
                                               '("<to-label@fixture.example>"))
                                        (member "<to-label@fixture.example>"
@@ -2427,14 +2429,14 @@ buffers, summary and queued files the cases leave are cleared after."
                         (at answer)
                         (execute-kbd-macro (kbd ", l"))
                         (let ((menu (menu-text)))
-                          (execute-kbd-macro (kbd "l"))
+                          (execute-kbd-macro (kbd "L"))
                           (let ((toggled (menu-text)))
                             (execute-kbd-macro (kbd "RET"))
                             (labels-done)
-                            (record ", l on marked messages half-fills a label some have, l checks it, RET adds it and uses the marks up"
+                            (record ", l on marked messages half-fills a label some have, L checks it, RET adds it and uses the marks up"
                                     (and (string-match-p "Labels: 2 marked messages" menu)
-                                         (string-match-p "l ◐ labelled" menu)
-                                         (string-match-p "l ✓ labelled" toggled)
+                                         (string-match-p "L ◐ labelled" menu)
+                                         (string-match-p "L ✓ labelled" toggled)
                                          (equal (sort (message-ids (messages-in labelled)) #'string<)
                                                 '("<list-plan@fixture.example>"
                                                   "<to-label@fixture.example>"))
@@ -2444,17 +2446,22 @@ buffers, summary and queued files the cases leave are cleared after."
                                                  gnus-newsgroup-processable))))
                         (at plan)
                         (execute-kbd-macro (kbd ", l"))
-                        (execute-kbd-macro (kbd "l"))
-                        (execute-kbd-macro (kbd "RET"))
-                        (labels-done)
-                        (record ", l l RET takes a label off, the message staying where it is read"
-                                (and (equal (message-ids (messages-in labelled))
-                                            '("<to-label@fixture.example>"))
-                                     (member "<list-plan@fixture.example>"
-                                             (message-ids (messages-in lists)))
-                                     (with-current-buffer summary
-                                       (gnus-summary-goto-subject plan)))
-                                :got (format "labelled %S" (message-ids (messages-in labelled))))
+                        ;; savehist would keep the pick in the real history
+                        (let ((minibuffer-history nil))
+                          (execute-kbd-macro (kbd "l labelled RET")))
+                        (let ((picked (menu-text)))
+                          (execute-kbd-macro "q")
+                          (labels-done)
+                          (record ", l l picks a label by name, and closing the menu takes it off, the message staying where it is read"
+                                  (and (string-match-p "L   labelled" picked)
+                                       (equal (message-ids (messages-in labelled))
+                                              '("<to-label@fixture.example>"))
+                                       (member "<list-plan@fixture.example>"
+                                               (message-ids (messages-in lists)))
+                                       (with-current-buffer summary
+                                         (gnus-summary-goto-subject plan)))
+                                  :got (format "%S, labelled %S" picked
+                                               (message-ids (messages-in labelled)))))
                         (record "the line drops the chip of a label taken off"
                                 (null (chip-names plan))
                                 :got (format "%S" (line-chips plan)))
@@ -2464,7 +2471,7 @@ buffers, summary and queued files the cases leave are cleared after."
                         (at plan)
                         (let ((general--simulate-as-is t))
                           (execute-kbd-macro (kbd "V j , l")))
-                        (execute-kbd-macro (kbd "l"))
+                        (execute-kbd-macro (kbd "L"))
                         (execute-kbd-macro (kbd "RET"))
                         (labels-done)
                         (let ((ids (sort (message-ids (messages-in labelled)) #'string<)))
@@ -2487,7 +2494,7 @@ buffers, summary and queued files the cases leave are cleared after."
                             (labels-done)
                             (record ", L takes the thread, + makes a label checked on it, and RET fills the label"
                                     (and (string-match-p "Labels: 2 messages" menu)
-                                         (string-match-p "t ✓ travel" reopened)
+                                         (string-match-p "T ✓ travel" reopened)
                                          (gnus-group-entry "nnmaildir+gmail:travel")
                                          (equal (sort (message-ids (messages-in travel)) #'string<)
                                                 '("<list-plan-dan@fixture.example>"
@@ -2512,10 +2519,10 @@ buffers, summary and queued files the cases leave are cleared after."
                                       :got (format "%S" (line-chips root))))
                             (let ((first (gnus-summary-article-number)))
                               (execute-kbd-macro (kbd ", l"))
-                              (execute-kbd-macro (kbd "t"))
+                              (execute-kbd-macro (kbd "T"))
                               (execute-kbd-macro (kbd "RET"))
                               (labels-done)
-                              (record ", l t RET in the label's own summary takes the message out of view"
+                              (record ", l T RET in the label's own summary takes the message out of view"
                                       (and (equal gnus-newsgroup-name "nnmaildir+gmail:travel")
                                            (= 1 (length (messages-in travel)))
                                            (not (gnus-summary-goto-subject first)))
@@ -2541,12 +2548,23 @@ buffers, summary and queued files the cases leave are cleared after."
                                   :got (format "%S" header)))
                         (execute-kbd-macro (kbd ", l"))
                         (let ((menu (menu-text)))
-                          (execute-kbd-macro "q")
-                          (record ", l in the thread view opens the menu on the message at point"
-                                  (and (string-match-p "Labels: the message on screen" menu)
-                                       (string-match-p "L ✓ lists" menu)
-                                       (string-match-p "l ✓ labelled" menu))
-                                  :got menu))
+                          ;; M-m is embark-select, which moves down after
+                          ;; each pick: Inbox and emacs are the first two
+                          (let ((minibuffer-history nil))
+                            (execute-kbd-macro (kbd "l M-m M-m RET")))
+                          (let ((picked (menu-text)))
+                            (execute-kbd-macro (kbd "i e"))
+                            (let ((said (saying "q")))
+                              (record ", l in the thread view opens the menu on the message at point"
+                                      (and (string-match-p "Labels: the message on screen" menu)
+                                           (string-match-p "t ✓ lists" menu)
+                                           (string-match-p "L ✓ labelled" menu))
+                                      :got menu)
+                              (record "l with M-m picks several labels by name, and closing a menu set back changes nothing"
+                                      (and (string-match-p "i ✓ Inbox" picked)
+                                           (string-match-p "e ✓ emacs" picked)
+                                           (member "Labels: nothing changed" said))
+                                      :got (format "%S, said %S" picked said)))))
                         ;; a NUL byte in an upload makes Gmail drop the connection
                         (with-temp-buffer
                           (insert "From: nul@example.com\nSubject: nul\n"

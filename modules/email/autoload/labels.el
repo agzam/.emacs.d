@@ -5,6 +5,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'consult)
 (require 'gnus)
 (require 'gnus-group)
 (require 'gnus-search)
@@ -66,17 +67,18 @@
 (defun mail-label-key-candidates (name)
   "Keys for the label NAME, best first.
 The first letters of its words, the same shifted, its other letters,
-then any letter or digit.  q quits every menu."
+then any letter or digit.  q quits every menu, and l picks by name."
   (let* ((words (split-string (downcase name) "[^[:alnum:]]+" t))
          (initials (mapcar #'string-to-char words))
          (rest (cdr (string-to-list (apply #'concat words))))
          (vowel-p (lambda (char) (memq char '(?a ?e ?i ?o ?u))))
          (inner (append (seq-remove vowel-p rest) (seq-filter vowel-p rest))))
     (mapcar #'string
-            (delq ?q (seq-uniq (append initials (mapcar #'upcase initials)
-                                       inner (mapcar #'upcase inner)
-                                       (number-sequence ?a ?z) (number-sequence ?A ?Z)
-                                       (number-sequence ?0 ?9)))))))
+            (seq-difference (seq-uniq (append initials (mapcar #'upcase initials)
+                                              inner (mapcar #'upcase inner)
+                                              (number-sequence ?a ?z) (number-sequence ?A ?Z)
+                                              (number-sequence ?0 ?9)))
+                            '(?q ?l)))))
 
 (defun mail-label-assign-keys (names kept)
   "A key for each of NAMES, as (NAME . KEY), with the keys KEPT gives kept.
@@ -218,8 +220,12 @@ WHOLE-THREADS takes their threads."
                                                (thread-articles-at-point))
                                            (list article)))))))
 
+(defvar mail-label-pending nil
+  "Scope of the open label menu, which closing the menu applies.")
+
 (defun mail-label-open (scope)
-  "Show the label menu for SCOPE, each label's state read afresh."
+  "Show the label menu for SCOPE, each label's state read afresh.
+Closing the menu applies it."
   (with-current-buffer (mail-label-scope-summary scope)
     (let* ((groups (mail-label-groups))
            (carriers (mail-label-carriers groups (mail-label-scope-articles scope))))
@@ -228,7 +234,17 @@ WHOLE-THREADS takes their threads."
             (mail-label-scope-want scope) nil)
       (dolist (group groups)
         (push (cons group (mail-label-held scope group)) (mail-label-scope-want scope)))))
+  (setq mail-label-pending scope)
+  (add-hook 'transient-exit-hook #'mail-label-apply-pending)
   (transient-setup 'mail-label-menu nil nil :scope scope))
+
+(defun mail-label-apply-pending ()
+  "Apply the label menu that just closed, unless its RET did."
+  (remove-hook 'transient-exit-hook #'mail-label-apply-pending)
+  (when-let* ((scope mail-label-pending))
+    ;; this runs inside transient's post-command
+    (with-demoted-errors "Labels: %S"
+      (mail-label-apply scope))))
 
 ;;;###autoload
 (defun label-mail (&optional whole-threads)
@@ -262,14 +278,17 @@ The region, else the marked messages, else the one on screen."
                   ((= count 1) "the message on screen")
                   (t (format "%d messages" count))))))
 
+(defun mail-label-mark (scope group)
+  "Mark of GROUP in SCOPE: a check on every message, a half circle on some."
+  (pcase (alist-get group (mail-label-scope-want scope) nil nil #'equal)
+    ('all (propertize "✓" 'face 'success))
+    ('some (propertize "◐" 'face 'shadow))
+    (_ " ")))
+
 (defun mail-label-description (obj)
-  "The mark and name of OBJ's label: a check on every message, a half circle on some."
+  "The mark and name of OBJ's label."
   (let ((group (oref obj group)))
-    (concat (pcase (alist-get group (mail-label-scope-want (transient-scope 'mail-label-menu))
-                              nil nil #'equal)
-              ('all (propertize "✓" 'face 'success))
-              ('some (propertize "◐" 'face 'shadow))
-              (_ " "))
+    (concat (mail-label-mark (transient-scope 'mail-label-menu) group)
             " " (mail-label-name group))))
 
 (defun mail-label-children (_)
@@ -277,7 +296,9 @@ The region, else the marked messages, else the one on screen."
   (let* ((scope (transient-scope 'mail-label-menu))
          (groups (mail-label-scope-groups scope))
          (keys (mail-label-keys-for (mapcar #'mail-label-name groups)))
-         (actions '(("RET" "apply" mail-label-apply) ("+" "new label" mail-label-create)))
+         (actions '(("RET" "apply" mail-label-apply)
+                    ("l" "by name" mail-label-pick :transient t)
+                    ("+" "new label" mail-label-create :transient t)))
          ;; " k ✓ name", as transient formats a suffix
          (widths (mapcar (lambda (group) (+ 5 (string-width (mail-label-name group)))) groups))
          (rows (mail-label-rows-for widths (- (window-body-width) 2 (length " + new label")))))
@@ -295,6 +316,8 @@ The region, else the marked messages, else the one on screen."
 
 (transient-define-prefix mail-label-menu ()
   "Add and remove labels on the messages the menu was opened for."
+  ;; a label made with + needs a key and a place in the columns
+  :refresh-suffixes t
   [:class transient-columns
    :description mail-label-heading
    :setup-children mail-label-children]
@@ -307,6 +330,32 @@ The region, else the marked messages, else the one on screen."
   (interactive)
   (mail-label-cycle (transient-scope 'mail-label-menu)
                     (oref (transient-suffix-object) group)))
+
+(defun mail-label-pick ()
+  "Turn the labels picked by name on or off, as their keys do.
+Embark's select picks several; a name no label has picks none."
+  (interactive)
+  (let* ((scope (transient-scope 'mail-label-menu))
+         (names (mapcar (lambda (group) (cons (mail-label-name group) group))
+                        (mail-label-scope-groups scope)))
+         selected
+         (picked (minibuffer-with-setup-hook
+                     (lambda ()
+                       (add-hook 'minibuffer-exit-hook
+                                 (lambda ()
+                                   (when (fboundp 'embark-selected-candidates)
+                                     (setq selected (cdr (embark-selected-candidates)))))
+                                 nil t))
+                   (consult--read (mapcar #'car names)
+                                  :prompt "Label: "
+                                  :category 'mail-label
+                                  :sort nil
+                                  :annotate (lambda (name)
+                                              (concat " " (mail-label-mark
+                                                           scope (cdr (assoc name names)))))))))
+    (dolist (name (or selected (list picked)))
+      (when-let* ((group (cdr (assoc name names))))
+        (mail-label-cycle scope group)))))
 
 (defun mail-label-create ()
   "Make a new label and turn it on for the menu's messages."
@@ -325,8 +374,7 @@ The region, else the marked messages, else the one on screen."
     (load-mail-groups (list group) t)
     (setf (mail-label-scope-groups scope) (mail-label-groups)
           (alist-get group (mail-label-scope-carriers scope) nil nil #'equal) nil
-          (alist-get group (mail-label-scope-want scope) nil nil #'equal) 'all)
-    (transient-setup 'mail-label-menu nil nil :scope scope)))
+          (alist-get group (mail-label-scope-want scope) nil nil #'equal) 'all)))
 
 ;;; Applying
 
@@ -442,11 +490,11 @@ Return `shown' when the summary's own copy went, nil when nothing changed."
   (unless mail-label-timer
     (mail-label-step)))
 
-(defun mail-label-apply ()
-  "Apply the labels the menu was set to; the marks are used up."
-  (interactive)
-  (let* ((scope (transient-scope 'mail-label-menu))
-         (summary (mail-label-scope-summary scope))
+(defun mail-label-apply (scope)
+  "Apply the labels SCOPE's menu was set to; the marks are used up."
+  (interactive (list (transient-scope 'mail-label-menu)))
+  (setq mail-label-pending nil)
+  (let* ((summary (mail-label-scope-summary scope))
          (items (mail-label-items scope))
          (job (mail-label-job-make :summary summary :items items))
          (unloaded (seq-remove #'mail-group-loaded-p (seq-uniq (mapcar #'cadr items)))))
