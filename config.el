@@ -398,9 +398,9 @@
           "r" #'vulpea-find
           "b" #'vulpea-backlinks
           :desc "work today" "t" (cmd! (open-journal 'work))
-          :desc "personal today" "T" (cmd! (open-journal 'personal))
-          :desc "work note" "n" (cmd! (open-journal 'work (org-read-date nil t)))
-          :desc "personal note" "N" (cmd! (open-journal 'personal (org-read-date nil t)))
+          :desc "personal note" "T" (cmd! (open-journal-date 'personal))
+          :desc "work note" "n" (cmd! (open-journal-date 'work))
+          :desc "personal note" "N" (cmd! (open-journal-date 'personal))
           :desc "note graph" "W" #'vulpea-graph))
 
       ( :prefix ("p" . "projects")

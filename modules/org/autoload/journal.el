@@ -1,5 +1,7 @@
 ;;; modules/org/autoload/journal.el -*- lexical-binding: t; -*-
 
+(defvar vulpea-journal-tag)
+
 (defvar vulpea-journal--type 'work
   "Active journal type: `work' or `personal'.
 Set by journal commands, read by the dynamic template function.")
@@ -67,3 +69,15 @@ If the sidebar is already visible, it gets refreshed."
     ;; refresh sidebar only if already visible, never force-open
     (when (vulpea-ui--sidebar-visible-p)
       (vulpea-ui-sidebar-refresh))))
+
+;;;###autoload
+(defun open-journal-date (type)
+  "Prompt for a date and open the TYPE journal for it.
+Like `vulpea-journal-date', the calendar marks the TYPE journal entries."
+  ;; vulpea-journal loads through the :after gates of the org config, and
+  ;; it has to load before the let binds its tag
+  (require 'vulpea)
+  (let* ((vulpea-journal--buffer-type type)
+         (vulpea-journal-tag (car (plist-get (journal-template nil) :tags))))
+    (open-journal type (vulpea-journal--read-date
+                        (format "Journal date (%s): " type)))))
