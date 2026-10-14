@@ -99,6 +99,7 @@
           "b" #'vulpea-backlinks
           "i" #'vulpea-insert
           "l" #'vulpea-ui-sidebar-toggle
+          :desc "note graph" "W" #'vulpea-graph
           "f" #'vulpea-find
           "F" #'vulpea-forward-links
           :desc "work note" "n" (cmd! (open-journal 'work (org-read-date nil t)))
@@ -487,6 +488,26 @@
   :after (consult vulpea)
   :config
   (consult-vulpea-mode 1))
+
+(use-package vulpea-graph
+  :ensure (vulpea-graph :host github :repo "Arenile/vulpea-graph-ui"
+                        :files (:defaults "assets"))
+  :commands (vulpea-graph vulpea-graph-mode)
+  :config
+  ;; vulpea's extraction worker writes the db from its own process, past the
+  ;; package's advice on `vulpea-db-update-file'; this hook sees every write.
+  (add-hook 'vulpea-db-updated-functions #'vulpea-graph--mark-dirty)
+
+  ;; Any site open in the browser can connect to a localhost websocket, and
+  ;; the server ignores the Origin header.
+  (defadvice! vulpea-graph-local-origin-a (fn client)
+    "Call FN for websocket CLIENT only when it comes from the graph's own page."
+    :around #'vulpea-graph--ws-on-open
+    (if (member (websocket-origin client)
+                (list (format "http://localhost:%d" vulpea-graph-port)
+                      (format "http://127.0.0.1:%d" vulpea-graph-port)))
+        (funcall fn client)
+      (websocket-close client))))
 
 ;;; former long tail - ported 2026-07
 

@@ -400,7 +400,8 @@
           :desc "work today" "t" (cmd! (open-journal 'work))
           :desc "personal today" "T" (cmd! (open-journal 'personal))
           :desc "work note" "n" (cmd! (open-journal 'work (org-read-date nil t)))
-          :desc "personal note" "N" (cmd! (open-journal 'personal (org-read-date nil t)))))
+          :desc "personal note" "N" (cmd! (open-journal 'personal (org-read-date nil t)))
+          :desc "note graph" "W" #'vulpea-graph))
 
       ( :prefix ("p" . "projects")
         "b" #'consult-project-buffer
