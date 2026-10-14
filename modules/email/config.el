@@ -363,7 +363,17 @@ columns would go to the window left of Gnus."
   ;; a group still loading opens once its table is applied, and a thread
   ;; search waits for every group, like any search
   (advice-add 'gnus-summary-read-group :around #'wait-for-mail-group-a)
-  (advice-add 'gnus-summary-refer-thread :around #'wait-for-mail-loads-a))
+  (advice-add 'gnus-summary-refer-thread :around #'wait-for-mail-loads-a)
+
+  ;; a summary rebuild or a menu over the window leaves point on the
+  ;; bottom row; label changes can finish in a timer, after the command
+  (defadvice! recenter-mail-summary-a (&rest _)
+    "Recenter the summary window after an action on its messages."
+    :after '(mail-act-on-selection mail-execute-marks
+             mail-label-apply mail-label-finish)
+    (with-current-buffer (window-buffer)
+      (when (derived-mode-p 'gnus-summary-mode)
+        (recenter)))))
 
 (use-package gnus-art
   :ensure nil
