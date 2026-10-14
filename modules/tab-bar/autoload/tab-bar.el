@@ -187,7 +187,7 @@ buffers before the modes exist."
   "New Tab"
   ["Choose a template"
    [("ort" "work note" (lambda () (interactive) (open-journal 'work)))
-    ("orT" "personal note" (lambda () (interactive) (open-journal 'personal)))
+    ("orT" "personal note" (lambda () (interactive) (open-journal-date 'personal)))
     ("orr" "roam find" vulpea-find)
     ("orb" "backlinks" vulpea-backlinks)]
 

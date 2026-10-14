@@ -300,7 +300,20 @@ interns for lambda suffixes."
             :to-have-same-items-as
             '(vulpea-find vulpea-backlinks open-gptel gh-notify telega
               gnus find-in-config-dir go-jira-browse-default-board
-              consult-zoxide consult-buffer consult-recent-file tab-bar-kill-tab))))
+              consult-zoxide consult-buffer consult-recent-file tab-bar-kill-tab)))
+
+  (it "opens today's work journal and asks for the personal journal date"
+    (let ((suffixes (transient-layout-suffix-alist
+                     (get 'tab-bar-new-tab-transient 'transient--layout)))
+          calls)
+      (cl-letf (((symbol-function 'open-journal)
+                 (lambda (&rest args) (push (cons 'open-journal args) calls)))
+                ((symbol-function 'open-journal-date)
+                 (lambda (&rest args) (push (cons 'open-journal-date args) calls))))
+        (funcall (car (rassoc "work note" suffixes)))
+        (funcall (car (rassoc "personal note" suffixes))))
+      (expect (nreverse calls)
+              :to-equal '((open-journal work) (open-journal-date personal))))))
 
 (describe "desktop quarantine"
   (it "desktop-path points into the (sandboxed) state dir"

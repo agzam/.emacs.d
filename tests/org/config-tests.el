@@ -120,4 +120,18 @@ neither `use-package' nor general (behind `map!') exists."
                              (org-config-tests--forms "config.el"))))
             :to-equal '(function vulpea-graph))))
 
+(describe "journal keys"
+  (it "open today's work journal and ask for the personal journal date"
+    (let ((keys (org-config-tests--roam-keys (org-config-tests--forms "config.el"))))
+      (expect (cdr (assoc "t" keys)) :to-equal '(cmd! (open-journal 'work)))
+      (expect (cdr (assoc "T" keys)) :to-equal '(cmd! (open-journal-date 'personal)))))
+
+  (it "ask for the date under n and N on the leader and the localleader"
+    (dolist (form (list (org-config-tests--forms "config.el")
+                        (org-config-tests--use-package 'org)))
+      (let ((keys (org-config-tests--roam-keys form)))
+        (expect (cdr (assoc "n" keys)) :to-equal '(cmd! (open-journal-date 'work)))
+        (expect (cdr (assoc "N" keys))
+                :to-equal '(cmd! (open-journal-date 'personal)))))))
+
 ;;; config-tests.el ends here

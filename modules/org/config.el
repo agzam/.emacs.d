@@ -102,8 +102,8 @@
           :desc "note graph" "W" #'vulpea-graph
           "f" #'vulpea-find
           "F" #'vulpea-forward-links
-          :desc "work note" "n" (cmd! (open-journal 'work (org-read-date nil t)))
-          :desc "personal note" "N" (cmd! (open-journal 'personal (org-read-date nil t))))
+          :desc "work note" "n" (cmd! (open-journal-date 'work))
+          :desc "personal note" "N" (cmd! (open-journal-date 'personal)))
          (:prefix ("s" . "tree/subtree")
                   "a" #'org-toggle-archive-tag
                   "A" #'org-archive-subtree

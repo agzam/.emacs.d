@@ -11,6 +11,9 @@
 
 (load-module-file "modules/org/autoload/journal.el")
 
+;; vulpea-journal is not installed in the batch tier
+(defvar vulpea-journal-tag "journal")
+
 (describe "journal-template"
   (it "dispatches on the global type"
     (let ((vulpea-journal--type 'work))
@@ -49,3 +52,20 @@
   (it "ignores buffers without a file"
     (with-temp-buffer
       (expect (vulpea-journal--detect-buffer-type) :to-be nil))))
+
+(describe "open-journal-date"
+  (it "reads the date while the TYPE journal tag is in effect"
+    (let (tags opened)
+      (with-fake-feature 'vulpea
+        (cl-letf (((symbol-function 'vulpea-journal--read-date)
+                   (lambda (_prompt) (push vulpea-journal-tag tags) 'picked))
+                  ((symbol-function 'open-journal)
+                   (lambda (&rest args) (push args opened))))
+          (with-temp-buffer
+            ;; a work journal buffer must not lend its type to the prompt
+            (setq-local vulpea-journal--buffer-type 'work)
+            (open-journal-date 'personal)
+            (open-journal-date 'work))))
+      (expect (nreverse tags) :to-equal '("personal-notes" "work-notes"))
+      (expect (nreverse opened) :to-equal '((personal picked) (work picked)))
+      (expect vulpea-journal-tag :to-equal "journal"))))
