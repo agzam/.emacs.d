@@ -15,6 +15,10 @@
 (defvar mail-label-colors nil)
 (defvar gnus-tmp-level)
 
+;; labels.el's top-level (require 'consult) must no-op in the batch tier;
+;; the specs stub consult--read
+(provide 'consult)
+
 (load-module-file "scripts/mail-load.el")
 (load-module-file "modules/email/autoload/load.el")
 (load-module-file "modules/email/autoload/mail.el")
@@ -62,10 +66,12 @@
     (expect (seq-take (mail-label-key-candidates "job-search") 6)
             :to-equal '("j" "s" "J" "S" "b" "r")))
   (it "ends with every letter and digit, so a key is always left"
-    (expect (length (mail-label-key-candidates "ab")) :to-equal (+ 26 26 10 -1)))
-  (it "never offers q, which quits every menu"
+    (expect (length (mail-label-key-candidates "ab")) :to-equal (+ 26 26 10 -2)))
+  (it "never offers q, which quits every menu, or l, which picks by name"
     (expect (member "q" (mail-label-key-candidates "quotes")) :to-be nil)
-    (expect (car (mail-label-key-candidates "quotes")) :to-equal "Q")))
+    (expect (car (mail-label-key-candidates "quotes")) :to-equal "Q")
+    (expect (member "l" (mail-label-key-candidates "legal")) :to-be nil)
+    (expect (car (mail-label-key-candidates "legal")) :to-equal "L")))
 
 (describe "mail-label-assign-keys"
   (it "gives today's labels their first letters, the second f shifted"
@@ -85,7 +91,7 @@
                                         '(("forwarded" . "f") ("friends" . "F")))))
       (expect (mapcar (lambda (name) (cdr (assoc name keys)))
                       '("family" "forwarded" "friends" "money"))
-              :to-equal '("l" "f" "F" "m"))))
+              :to-equal '("y" "f" "F" "m"))))
   (it "drops a kept key whose label is gone"
     (expect (mail-label-assign-keys '("job") '(("gone" . "g") ("job" . "j")))
             :to-equal '(("job" . "j")))))
@@ -96,7 +102,7 @@
       (mail-label-keys-for labels-tests-today)
       (let ((keys (mail-label-keys-for (append labels-tests-today '("family")))))
         (expect (cdr (assoc "forwarded" keys)) :to-equal "f")
-        (expect (cdr (assoc "family" keys)) :to-equal "l")))
+        (expect (cdr (assoc "family" keys)) :to-equal "y")))
     ;; without the memory family would take forwarded's f
     (labels-tests-with-keys-file
       (expect (cdr (assoc "family" (mail-label-keys-for
@@ -296,7 +302,7 @@
               (expect (length (aref column 2)) :to-be-less-than 4))
             (expect (mapcar (lambda (suffix) (plist-get (cdr suffix) :key))
                             (aref (car (last columns)) 2))
-                    :to-equal '("RET" "+"))
+                    :to-equal '("RET" "l" "+"))
             (expect (mapcar (lambda (suffix) (plist-get (cdr suffix) :key))
                             (aref (car columns) 2))
                     :to-equal '("i" "c" "e"))))))))
@@ -304,7 +310,82 @@
 (describe "mail-label-menu"
   (it "applies on RET and on the Return key, which evil binds in the summary"
     (expect (plist-get (cdr (transient-get-suffix 'mail-label-menu "<return>")) :command)
-            :to-be 'mail-label-apply)))
+            :to-be 'mail-label-apply))
+  (it "lays its labels out again after every key, so a label + makes shows at once"
+    (expect (oref (get 'mail-label-menu 'transient--prefix) refresh-suffixes) :to-be t)))
+
+(describe "mail-label-pick"
+  :var (scope offered)
+  (before-each
+    (setq offered nil
+          scope (mail-label-scope-make
+                 :articles '(1)
+                 :groups (list mail-inbox-group (labels-tests-group "job")
+                               (labels-tests-group "kids"))
+                 :carriers `((,(labels-tests-group "kids") 1))
+                 :want `((,mail-inbox-group . none)
+                         (,(labels-tests-group "job") . none)
+                         (,(labels-tests-group "kids") . all))))
+    (spy-on 'transient-scope :and-return-value scope))
+  (cl-flet ((pick (answer)
+              (cl-letf (((symbol-function 'consult--read)
+                         (lambda (candidates &rest props)
+                           (setq offered
+                                 (mapcar (lambda (name)
+                                           (concat name (funcall (plist-get props :annotate)
+                                                                 name)))
+                                         candidates))
+                           answer)))
+                (mail-label-pick)))
+            (want (name)
+              (alist-get (labels-tests-group name) (mail-label-scope-want scope)
+                         nil nil #'equal)))
+    (it "offers the labels by their menu names, marked as the menu marks them"
+      (pick "job")
+      (expect (mapcar #'substring-no-properties offered)
+              :to-equal '("Inbox  " "job  " "kids ✓")))
+    (it "turns the picked label on or off, as its key does"
+      (pick "job")
+      (expect (want "job") :to-be 'all)
+      (pick "kids")
+      (expect (want "kids") :to-be 'none)
+      (pick "Inbox")
+      (expect (alist-get mail-inbox-group (mail-label-scope-want scope) nil nil #'equal)
+              :to-be 'all))
+    (it "picks nothing for a name no label has"
+      (pick "jbo")
+      (expect (mapcar #'cdr (mail-label-scope-want scope)) :to-equal '(none none all)))))
+
+(describe "closing the label menu"
+  :var (scope summary)
+  (before-each
+    (setq summary (generate-new-buffer " *labels-tests-summary*")
+          scope (mail-label-scope-make :summary summary :articles '(1)))
+    ;; each apply asks once what changed
+    (spy-on 'mail-label-items :and-return-value nil)
+    (spy-on 'message))
+  (after-each
+    (remove-hook 'transient-exit-hook #'mail-label-apply-pending)
+    (setq mail-label-pending nil)
+    (kill-buffer summary))
+  (it "applies what the menu was set to, as RET does"
+    (cl-letf (((symbol-function 'mail-label-groups) (lambda () nil))
+              ((symbol-function 'mail-label-carriers) #'ignore)
+              ((symbol-function 'transient-setup) #'ignore))
+      (mail-label-open scope))
+    (run-hooks 'transient-exit-hook)
+    (expect 'mail-label-items :to-have-been-called-times 1)
+    (expect 'mail-label-items :to-have-been-called-with scope)
+    (expect (memq #'mail-label-apply-pending transient-exit-hook) :to-be nil))
+  (it "applies nothing more once RET applied"
+    (setq mail-label-pending scope)
+    (add-hook 'transient-exit-hook #'mail-label-apply-pending)
+    (mail-label-apply scope)
+    (run-hooks 'transient-exit-hook)
+    (expect 'mail-label-items :to-have-been-called-times 1))
+  (it "leaves another menu's closing alone"
+    (run-hooks 'transient-exit-hook)
+    (expect 'mail-label-items :not :to-have-been-called)))
 
 (describe "mail-label-copy-number"
   (it "answers nnmaildir's number for the copy"
@@ -460,9 +541,8 @@
                   :summary summary :articles '(1 2) :marked t
                   :carriers `((,(labels-tests-group "job") 1))
                   :want `((,(labels-tests-group "job") . all)))))
-      (cl-letf (((symbol-function 'transient-scope) (lambda (&rest _) scope))
-                ((symbol-function 'mail-group-loaded-p) (lambda (_) t)))
-        (mail-label-apply)))
+      (cl-letf (((symbol-function 'mail-group-loaded-p) (lambda (_) t)))
+        (mail-label-apply scope)))
     (expect (mail-label-job-items (car started))
             :to-equal `((add ,(labels-tests-group "job") 2)))
     (expect (buffer-local-value 'gnus-newsgroup-processable summary) :to-equal '(9)))
@@ -471,12 +551,11 @@
                   :summary summary :articles '(1)
                   :want `((,(labels-tests-group "travel") . all))))
           loaded waiting)
-      (cl-letf (((symbol-function 'transient-scope) (lambda (&rest _) scope))
-                ((symbol-function 'mail-group-loaded-p) (lambda (_) loaded))
+      (cl-letf (((symbol-function 'mail-group-loaded-p) (lambda (_) loaded))
                 ((symbol-function 'load-mail-groups) (lambda (groups &rest _) (push groups waiting)))
                 ((symbol-function 'wait-for-mail-load)
                  (lambda (_key _what predicate action) (push (cons predicate action) waiting))))
-        (mail-label-apply)
+        (mail-label-apply scope)
         (expect started :to-be nil)
         (expect (cadr waiting) :to-equal (list (labels-tests-group "travel")))
         (pcase-let ((`(,predicate . ,action) (car waiting)))
@@ -490,10 +569,9 @@
                                         :carriers `((,(labels-tests-group "job") 1))
                                         :want `((,(labels-tests-group "job") . all))))
           said)
-      (cl-letf (((symbol-function 'transient-scope) (lambda (&rest _) scope))
-                ((symbol-function 'message)
+      (cl-letf (((symbol-function 'message)
                  (lambda (&rest args) (setq said (apply #'format args)))))
-        (mail-label-apply))
+        (mail-label-apply scope))
       (expect started :to-be nil)
       (expect said :to-equal "Labels: nothing changed"))))
 
@@ -525,7 +603,8 @@
               :to-be 'all)
       (expect (member (labels-tests-group "travel") (mail-label-scope-groups scope))
               :to-be-truthy)
-      (expect reopened :to-equal (list 'mail-label-menu nil nil :scope scope))))
+      ;; the menu stays open, so closing it later applies the label
+      (expect reopened :to-be nil)))
   (it "refuses a name Gmail and Gnus would read apart, and one that exists"
     (let ((gmail-maildir root)
           (gnus-message-archive-group "nnmaildir+gmail:sent"))
