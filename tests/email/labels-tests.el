@@ -722,14 +722,18 @@ Each of LINES is (ARTICLE LEVEL): the thread's indent, the slot, the subject."
       (expect (get-text-property 7 'face chips) :to-be 'mail-label))))
 
 (describe "mail-label-chips-of"
-  (it "chips every label a message of the thread carries, where the group shows labels"
+  (it "chips every label a message of the thread carries"
     (cl-letf (((symbol-function 'mail-label-tables)
                (lambda () (labels-tests-tables '("Inbox" 1) '("job" 2) '("kids" 9)))))
-      (expect (substring-no-properties
-               (mail-label-chips-of (labels-tests-group "job") '("<1@x>" "<2@x>")))
+      (expect (substring-no-properties (mail-label-chips-of '("<1@x>" "<2@x>")))
               :to-equal " Inbox   job ")
-      (expect (mail-label-chips-of (labels-tests-group "job") '("<5@x>")) :to-be nil)
-      (expect (mail-label-chips-of "nnmaildir+news:gmane.emacs.devel" '("<1@x>")) :to-be nil))))
+      (expect (mail-label-chips-of '("<5@x>")) :to-be nil)))
+  (it "reads the tables it is given, so a caller drawing many lines reads them once"
+    (let ((tables (labels-tests-tables '("kids" 9))))
+      (spy-on 'mail-label-tables)
+      (expect (substring-no-properties (mail-label-chips-of '("<9@x>") tables))
+              :to-equal " kids ")
+      (expect 'mail-label-tables :not :to-have-been-called))))
 
 (describe "mail-labels-shown-p"
   (it "shows labels in a Gmail folder and in search results only"
@@ -791,30 +795,44 @@ Each of LINES is (ARTICLE LEVEL): the thread's indent, the slot, the subject."
       (draw-mail-labels (point-min) (point-max))
       (expect 'mail-label-tables :not :to-have-been-called))))
 
+(defvar mail-live-collect-mode)
+
 (describe "refresh-mail-labels"
-  (it "draws the labels again in each summary showing them and in the thread view"
+  (it "draws the labels again in summaries showing them, thread views and collected lines"
     (let ((gmail (generate-new-buffer " *labels-tests-gmail*"))
           (news (generate-new-buffer " *labels-tests-news*"))
           (thread (generate-new-buffer " *labels-tests-thread*"))
-          (headers nil))
+          (collect (generate-new-buffer " *labels-tests-collect*"))
+          (other (generate-new-buffer " *labels-tests-other*"))
+          (drawn nil))
       (unwind-protect
           (cl-letf (((symbol-function 'mail-thread-update-header-line)
-                     (lambda () (push (current-buffer) headers))))
+                     (lambda () (push (list 'header (current-buffer)) drawn)))
+                    ((symbol-function 'mail-thread-draw-labels)
+                     (lambda () (push (list 'lines (current-buffer)) drawn)))
+                    ((symbol-function 'mail-live-draw-labels)
+                     (lambda () (push (list 'collect (current-buffer)) drawn))))
             (pcase-dolist (`(,buffer ,mode ,group) `((,gmail gnus-summary-mode ,mail-inbox-group)
                                                      (,news gnus-summary-mode
                                                             "nnmaildir+news:gmane.emacs.devel")
-                                                     (,thread mail-thread-mode nil)))
+                                                     (,thread mail-thread-mode nil)
+                                                     (,collect embark-collect-mode nil)
+                                                     (,other embark-collect-mode nil)))
               (with-current-buffer buffer
                 (setq-local major-mode mode)
                 (setq-local gnus-newsgroup-name group)
                 (insert (propertize "line\n" 'fontified t))))
+            (with-current-buffer collect
+              (setq-local mail-live-collect-mode t))
             (let ((mail-label-refresh-timer 'due))
               (refresh-mail-labels)
               (expect mail-label-refresh-timer :to-be nil))
             (expect (get-text-property 1 'fontified gmail) :to-be nil)
             (expect (get-text-property 1 'fontified news) :to-be t)
-            (expect headers :to-equal (list thread)))
-        (mapc #'kill-buffer (list gmail news thread))))))
+            (expect (nreverse drawn)
+                    :to-equal (list (list 'lines thread) (list 'header thread)
+                                    (list 'collect collect))))
+        (mapc #'kill-buffer (list gmail news thread collect other))))))
 
 (describe "refresh-mail-labels-soon"
   (it "draws once after the command, however many folders it changed"

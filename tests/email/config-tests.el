@@ -14,7 +14,10 @@
 (defvar embark-multitarget-actions)
 (defvar embark-after-export-hook)
 (defvar embark-general-map)
+(defvar embark-collect-mode-hook)
+(defvar embark--type)
 (defvar mail-thread-embark-map)
+(defvar mail-live-collect-mode-hook)
 (defvar gnus-message-setup-hook)
 (defvar org-mime-obey-display-buffer-p)
 (defvar gnus-delay-default-delay)
@@ -210,6 +213,16 @@ STATES is the evil state keyword `map!' reads right before the key."
             (push (cons (car body) item) states)))))
     (nreverse states)))
 
+(defun email-tests--embark-form ()
+  "The module config's `after! embark' form, read back from the source."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "modules/email/config.el" test-config-root))
+    (goto-char (point-min))
+    (let (form)
+      (while (and (setq form (ignore-errors (read (current-buffer))))
+                  (not (equal (seq-take form 2) '(after! embark)))))
+      form)))
+
 (defun email-tests--localleader-pairs (form map)
   "Alist of (KEYS . DEFINITION) FORM binds under the localleader of MAP.
 KEYS holds a prefix's key and the key under it apart by a space, as
@@ -392,25 +405,22 @@ KEYS holds a prefix's key and the key under it apart by a space, as
   (it "makes a line of the live search act as its thread, and export it to a summary"
     ;; read back from the source: the form waits for embark, which the
     ;; suite never loads
-    (let ((form (with-temp-buffer
-                  (insert-file-contents
-                   (expand-file-name "modules/email/config.el" test-config-root))
-                  (goto-char (point-min))
-                  (let (form)
-                    (while (and (setq form (ignore-errors (read (current-buffer))))
-                                (not (equal (seq-take form 2) '(after! embark)))))
-                    form)))
+    (let ((form (email-tests--embark-form))
           (embark-exporters-alist nil)
           (embark-keymap-alist nil)
           (embark-default-action-overrides nil)
           (embark-multitarget-actions '(embark-insert))
           (embark-after-export-hook nil)
+          (embark-collect-mode-hook nil)
+          (mail-live-collect-mode-hook nil)
           (embark-general-map (make-sparse-keymap)))
       (expect form :to-be-truthy)
       ;; a defvar keeps a value from an earlier run of the form
       (makunbound 'mail-thread-embark-map)
       (dolist (body (cddr form))
-        (eval body t))
+        ;; the suite has no general to run map! with
+        (unless (eq (car-safe body) 'map!)
+          (eval body t)))
       (expect (alist-get 'mail-thread embark-exporters-alist) :to-be 'export-mail-live-search)
       ;; RET in a collect buffer would otherwise rerun the search on the line's text
       (expect (alist-get 'mail-thread embark-default-action-overrides)
@@ -421,7 +431,36 @@ KEYS holds a prefix's key and the key under it apart by a space, as
               :to-equal '(open-mail-live-candidate open-mail-live-summary open-mail-live-in-gmail))
       ;; s on every line acted on reads them in one summary
       (expect embark-multitarget-actions :to-equal '(open-mail-live-summary embark-insert))
-      (expect embark-after-export-hook :to-equal '(open-mail-live-export-h))))
+      (expect embark-after-export-hook :to-equal '(open-mail-live-export-h))
+      (expect embark-collect-mode-hook :to-equal '(prepare-mail-collect-h))
+      (expect mail-live-collect-mode-hook :to-equal '(evil-normalize-keymaps))
+      ;; only a collect buffer of the live search gets the mail keys
+      (let (turned-on)
+        (cl-letf (((symbol-function 'mail-live-collect-mode)
+                   (lambda (&rest _) (push embark--type turned-on))))
+          (dolist (type '(mail-thread file consult-location))
+            (with-temp-buffer
+              (setq-local embark--type type)
+              (prepare-mail-collect-h))))
+        (expect turned-on :to-equal '(mail-thread)))))
+
+  (it "gives a collect buffer of the live search the mail localleader"
+    (let ((leader (email-tests--localleader-pairs (list (email-tests--embark-form))
+                                                  'mail-live-collect-mode-map)))
+      ;; keys that need no message, as in every mail buffer
+      (expect (mapcar (lambda (keys) (cdr (assoc keys leader))) '("u" "/" "c" "q"))
+              :to-equal '((function sync-mail) (function search-mail-live)
+                          (function compose-new-mail) (function quit-mail)))
+      ;; keys on a message read the line's thread first
+      (expect (mapcar (lambda (keys) (cdr (assoc keys leader))) '("?" "f" "l" "L" "r l" "r n" "o l"))
+              :to-equal (mapcar (lambda (command)
+                                  `(cmd! (run-on-mail-live-line (function ,command))))
+                                '(search-mail-like-this forward-mail label-mail
+                                  label-mail-threads reply-to-list follow-up-on-newsgroup
+                                  open-message-in-list-archive)))
+      ;; Gmail takes the line's newest match without reading the thread
+      (expect (cdr (assoc "o g" leader))
+              :to-equal '(cmd! (open-mail-live-in-gmail (mail-live-line-at-point))))))
 
   (it "adds, drops and moves groups, and edits topics, from the group buffer"
     (let ((leader (email-tests--localleader-pairs config 'gnus-group-mode-map)))
@@ -608,7 +647,7 @@ window and deletes the summary's."
                    '(("thread.el" reply-to-sender reply-to-everyone reply-to-list
                       follow-up-on-newsgroup forward-mail compose-new-mail
                       run-in-mail-summary mail-on-screen mail-thread-update-header-line
-                      mail-render-message)
+                      mail-render-message mail-thread-draw-labels)
                      ("mail.el" sort-mail-by-date sort-mail-by-author
                       sort-mail-by-subject toggle-mail-thread-fold
                       ;; a search, an advice or a sibling file calls these
@@ -619,14 +658,18 @@ window and deletes the summary's."
                       check-mail-syncs start-mail-sync-check stop-mail-sync-check
                       ;; the live search goes through these
                       when-mail-loaded search-mail-now gmail-message-url)
-                     ;; embark runs the actions, the exporter and the hook
+                     ;; embark runs the actions, the exporter and the hook; the
+                     ;; collect buffer's keys and the label refresh call the rest
                      ("live.el" search-mail-live export-mail-live-search open-mail-live-export-h
-                      open-mail-live-candidate open-mail-live-summary open-mail-live-in-gmail)
+                      open-mail-live-candidate open-mail-live-summary open-mail-live-in-gmail
+                      run-on-mail-live-line mail-live-line-at-point mail-live-draw-labels)
                      ("labels.el" label-mail label-mail-threads
                       ;; the first summary line draws through these, and
                       ;; an advice, the thread view or a load calls the rest
                       gnus-user-format-function-L draw-mail-labels-h mail-labels-shown-p
-                      mail-label-chips-of refresh-mail-labels refresh-mail-labels-soon)
+                      mail-label-chips-of refresh-mail-labels refresh-mail-labels-soon
+                      ;; the live search's lines read the tables once per batch
+                      mail-label-tables)
                      ;; the first group line draws through the format function
                      ("groups.el" gnus-user-format-function-C apply-mail-topics
                       add-mail-group defer-news-group-h
@@ -655,7 +698,13 @@ window and deletes the summary's."
          (expand-file-name (concat "modules/email/autoload/" file) test-config-root))
         (dolist (command commands)
           (expect (buffer-string)
-                  :to-match (format "^;;;###autoload\n(defun %s " command)))))))
+                  :to-match (format "^;;;###autoload\n(defun %s " command))))))
+  (it "loads the mail keys of a collect buffer before the live search's file has loaded"
+    (with-temp-buffer
+      (insert-file-contents
+       (expand-file-name "modules/email/autoload/live.el" test-config-root))
+      (expect (buffer-string)
+              :to-match "^;;;###autoload\n(define-minor-mode mail-live-collect-mode\n"))))
 
 (describe "email module stars"
   ;; evaluating the gnus-sum forms advises Gnus for the rest of the run
