@@ -169,6 +169,14 @@ is the only treatment."
       (kill-buffer summary)
       (kill-buffer buffer))))
 
+(defun thread-tests-line-labels (message)
+  "What the label slot on MESSAGE's line shows, or nil before it is drawn."
+  (save-excursion
+    (goto-char (mail-thread-message-marker message))
+    (when-let* ((slot (text-property-not-all (point) (line-end-position) 'mail-labels nil)))
+      (when-let* ((shown (get-text-property slot 'display)))
+        (substring-no-properties shown)))))
+
 (defun thread-tests-line-face (text line)
   "Face on the last character of LINE in TEXT."
   (let ((start (string-match (concat "^" (regexp-quote line) "$") text)))
@@ -208,7 +216,14 @@ is the only treatment."
       (expect (substring-no-properties (mail-thread-message-line message "Plan" t))
               :to-match "\\`▼")
       (expect (substring-no-properties (mail-thread-message-line message "Plan" nil))
-              :to-match "\\`▶"))))
+              :to-match "\\`▶"))
+    (it "leaves a slot for the message's labels after the date, holding its Message-ID"
+      (let* ((line (mail-thread-message-line message "Plan" t))
+             (slot (text-property-not-all 0 (length line) 'mail-labels nil line)))
+        (expect (get-text-property slot 'mail-labels line) :to-equal "<2@x>")
+        (expect (substring line (1- slot) slot) :to-match "[0-9]")
+        (expect (text-property-not-all (1+ slot) (length line) 'mail-labels nil line)
+                :to-be nil)))))
 
 (describe "mail-thread-build"
   (it "keeps the messages in date order"
@@ -249,11 +264,25 @@ is the only treatment."
           (expect (get-text-property (string-search "job" header-line-format) 'face
                                      header-line-format)
                   :to-be 'mail-label)
-          ;; a news thread's messages are Gmail's too, but their summary
-          ;; shows no labels
+          ;; a news thread's messages that Gmail holds too carry its labels
           (setq mail-thread-group "nnmaildir+news:gmane.emacs.devel")
           (mail-thread-update-header-line)
-          (expect header-line-format :to-equal "Plan   3 messages")))))
+          (expect (substring-no-properties header-line-format)
+                  :to-equal "Plan   Inbox   job    3 messages")))))
+  (it "shows each message's own labels on its line, and none where it has none"
+    (let ((tables (list (cons "nnmaildir+gmail:inbox" (make-hash-table :test #'equal))
+                        (cons "nnmaildir+gmail:job" (make-hash-table :test #'equal))))
+          (mail-label-colors nil))
+      (puthash "<3@x>" t (cdr (nth 0 tables)))
+      (puthash "<1@x>" t (cdr (nth 1 tables)))
+      (puthash "<3@x>" t (cdr (nth 1 tables)))
+      (cl-letf (((symbol-function 'mail-label-tables) (lambda () tables)))
+        (thread-tests-with-buffer 11 nil
+          (expect (mapcar (lambda (article)
+                            (thread-tests-line-labels (thread-tests-message article)))
+                          '(10 11 12))
+                  :to-equal '("   job " "" "   Inbox   job "))
+          (expect (buffer-modified-p) :to-be nil)))))
   (it "gives every message a line of its own"
     (thread-tests-with-buffer 11 nil
       (expect (length (seq-filter (lambda (line) (string-match-p "\\`[▼▶]" line))
@@ -689,14 +718,33 @@ is the only treatment."
     (let (calls)
       (cl-letf (((symbol-function 'run-in-mail-summary)
                  (lambda (command &optional stay) (push (list command stay) calls)))
+                ((symbol-function 'gnus-alive-p) (lambda () t))
                 ((symbol-function 'gnus-group-mail)
                  (lambda (&rest _) (interactive) (push 'group-mail calls))))
         (with-temp-buffer
           (setq major-mode 'gnus-group-mode)
-          (compose-new-mail))
-        (compose-new-mail))
+          (let ((gnus-group-buffer (buffer-name)))
+            (compose-new-mail)))
+        (with-temp-buffer
+          (setq major-mode 'gnus-summary-mode)
+          (compose-new-mail)))
       (expect (nreverse calls)
-              :to-equal '(group-mail (gnus-summary-mail-other-window nil))))))
+              :to-equal '(group-mail (gnus-summary-mail-other-window nil)))))
+  (it "start a new message from the group buffer anywhere else, Gnus started first"
+    ;; a collect buffer of the live search, for one, runs without Gnus
+    (let ((group (generate-new-buffer " *thread-tests group*"))
+          calls)
+      (unwind-protect
+          (cl-letf (((symbol-function 'gnus-alive-p) (lambda () (memq 'started calls)))
+                    ((symbol-function 'gnus) (lambda (&rest _) (push 'started calls)))
+                    ((symbol-function 'gnus-group-mail)
+                     (lambda (&rest _) (interactive) (push (current-buffer) calls))))
+            (with-temp-buffer
+              (let ((gnus-group-buffer (buffer-name group)))
+                (compose-new-mail)
+                (compose-new-mail))))
+        (kill-buffer group))
+      (expect (nreverse calls) :to-equal (list 'started group group)))))
 
 (defun thread-tests-notmuch (output &optional delay status)
   "Stand-in notmuch printing OUTPUT after DELAY seconds, then exiting STATUS."

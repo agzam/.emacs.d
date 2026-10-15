@@ -447,7 +447,36 @@ columns would go to the window left of Gnus."
         (alist-get 'mail-thread embark-exporters-alist) #'export-mail-live-search)
   ;; s on several lines reads them in one summary
   (add-to-list 'embark-multitarget-actions #'open-mail-live-summary)
-  (add-hook 'embark-after-export-hook #'open-mail-live-export-h))
+  (add-hook 'embark-after-export-hook #'open-mail-live-export-h)
+  ;; checked here, so collecting anything else loads no mail code
+  (add-hook! 'embark-collect-mode-hook
+    (defun prepare-mail-collect-h ()
+      "Turn on `mail-live-collect-mode' where Embark collects the live search's lines."
+      (when (eq embark--type 'mail-thread)
+        (mail-live-collect-mode))))
+  ;; the mode turns on in a buffer already in normal state, and evil reads
+  ;; a minor mode's state keys only when it recomputes its maps
+  (add-hook 'mail-live-collect-mode-hook #'evil-normalize-keymaps)
+  ;; the mail localleader; a key on a message reads the line's thread
+  ;; first, as RET does
+  (map! :map mail-live-collect-mode-map
+        (:localleader
+         :desc "sync"             "u" #'sync-mail
+         :desc "search all mail"  "/" #'search-mail-live
+         :desc "search like this" "?" (cmd! (run-on-mail-live-line #'search-mail-like-this))
+         :desc "new message"      "c" #'compose-new-mail
+         :desc "forward"          "f" (cmd! (run-on-mail-live-line #'forward-mail))
+         :desc "labels"           "l" (cmd! (run-on-mail-live-line #'label-mail))
+         :desc "thread labels"    "L" (cmd! (run-on-mail-live-line #'label-mail-threads))
+         :desc "quit mail"        "q" #'quit-mail
+         (:prefix ("r" . "reply")
+          :desc "to the list only" "l" (cmd! (run-on-mail-live-line #'reply-to-list))
+          :desc "on the newsgroup" "n" (cmd! (run-on-mail-live-line #'follow-up-on-newsgroup)))
+         (:prefix ("o" . "open")
+          ;; no thread view first: reading it would mark the message read
+          :desc "in Gmail"        "g" (cmd! (open-mail-live-in-gmail (mail-live-line-at-point)))
+          :desc "in list archive" "l" (cmd! (run-on-mail-live-line
+                                               #'open-message-in-list-archive))))))
 
 (use-package message
   :ensure nil

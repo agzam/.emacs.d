@@ -24,7 +24,18 @@
 (load-module-file "modules/email/autoload/thread.el")
 (load-module-file "modules/email/autoload/quotes.el")
 (load-module-file "modules/email/autoload/html.el")
+;; a line shows its thread's labels
+(load-module-file "modules/email/autoload/labels.el")
 (load-module-file "modules/email/autoload/live.el")
+
+(defun live-tests--tables (&rest labels)
+  "Tables like `mail-label-tables' answers, from LABELS as (NAME ID...)."
+  (mapcar (pcase-lambda (`(,name . ,ids))
+            (let ((table (make-hash-table :test #'equal)))
+              (dolist (id ids)
+                (puthash id t table))
+              (cons (concat "nnmaildir+gmail:" name) table)))
+          labels))
 
 (defun live-tests--thread (&rest props)
   "A notmuch thread summary with PROPS over a thread of three messages."
@@ -126,7 +137,41 @@
     (cl-letf (((symbol-function 'mail-live-date) (lambda (_) "Today, 17:59")))
       (let ((line (mail-live-candidate (live-tests--thread) "from:ann")))
         (expect (get-text-property 0 'mail-query line) :to-equal "from:ann")
-        (expect (get-text-property (1- (length line)) 'mail-query line) :to-equal "from:ann")))))
+        (expect (get-text-property (1- (length line)) 'mail-query line) :to-equal "from:ann"))))
+  (it "shows the labels the thread's messages carry before the subject"
+    (cl-letf (((symbol-function 'mail-live-date) (lambda (_) "Today, 17:59")))
+      (let* ((mail-label-colors nil)
+             (thread (live-tests--thread :query '("id:2@x" "id:1@x id:3@x")))
+             (line (mail-live-candidate thread "q" (live-tests--tables '("inbox" "<1@x>")
+                                                                       '("job" "<3@x>")
+                                                                       '("kids" "<9@x>")))))
+        (expect (substring-no-properties line)
+                :to-match " 2/3  Inbox   job  Release plan\\'")
+        ;; what `mail-live-draw-labels' draws again, the ids of every message
+        (let ((start (text-property-not-all 0 (length line) 'mail-labels nil line)))
+          (expect (get-text-property start 'mail-labels line)
+                  :to-equal '("<2@x>" "<1@x>" "<3@x>"))
+          (expect (substring-no-properties
+                   line start (next-single-property-change start 'mail-labels line))
+                  :to-equal "  Inbox   job  ")))))
+  (it "takes no room for labels when the thread carries none, or Gnus holds no tables"
+    (cl-letf (((symbol-function 'mail-live-date) (lambda (_) "Today, 17:59")))
+      (let ((thread (live-tests--thread :query '("id:2@x" nil))))
+        (dolist (tables (list nil (live-tests--tables '("kids" "<9@x>"))))
+          (expect (substring-no-properties (mail-live-candidate thread "q" tables))
+                  :to-match "Ann, Bob, Cy +2/3 Release plan\\'"))))))
+
+(describe "mail-live-message-ids"
+  (it "reads the Message-ID of every message, the matched ones and the rest"
+    (expect (mail-live-message-ids (live-tests--thread :query '("id:a@x id:b@x" "id:c@x")))
+            :to-equal '("<a@x>" "<b@x>" "<c@x>")))
+  (it "reads an id notmuch quotes, its doubled quotes made single"
+    ;; notmuch quotes an id holding a space, a ( or a "
+    (expect (mail-live-message-ids
+             (live-tests--thread :query '("id:\"odd id@x\" id:\"say \"\"hi\"\"@x\"" nil)))
+            :to-equal '("<odd id@x>" "<say \"hi\"@x>")))
+  (it "reads nothing from a thread notmuch gave no query"
+    (expect (mail-live-message-ids (live-tests--thread)) :to-be nil)))
 
 (describe "mail-live-candidates"
   (it "makes one candidate per thread line and drops the rest"
@@ -143,7 +188,20 @@
       (let ((mail-live-query "from:ann"))
         (expect (mapcar (lambda (candidate) (get-text-property 0 'mail-query candidate))
                         (mail-live-candidates '("((:thread \"a\" :total 1 :tags nil))")))
-                :to-equal '("from:ann"))))))
+                :to-equal '("from:ann")))))
+  (it "reads the label tables once for every line of a batch"
+    (cl-letf (((symbol-function 'mail-live-date) (lambda (_) "Today, 17:59")))
+      (let ((tables (live-tests--tables '("job" "<1@x>")))
+            (mail-label-colors nil))
+        (spy-on 'mail-label-tables :and-call-fake (lambda () tables))
+        (let ((lines (mapcar #'substring-no-properties
+                             (mail-live-candidates
+                              '("((:thread \"a\" :total 1 :tags nil :subject \"one\" :query (\"id:1@x\" nil))"
+                                "(:thread \"b\" :total 1 :tags nil :subject \"two\" :query (\"id:2@x\" nil)))")))))
+          (expect (car lines) :to-match " job  one\\'")
+          (expect (cadr lines) :to-match " two\\'")
+          (expect (cadr lines) :not :to-match "job"))
+        (expect (spy-calls-count 'mail-label-tables) :to-equal 1)))))
 
 (describe "mail-live-candidate-threads"
   (it "takes the thread of each line and skips a line without one"
@@ -434,7 +492,33 @@
                 ((symbol-function 'when-mail-loaded)
                  (lambda (what action) (setq waited (list what (functionp action))))))
         (open-mail-live-thread (live-tests--thread) "from:ann"))
-      (expect waited :to-equal '("for the thread" t)))))
+      (expect waited :to-equal '("for the thread" t))))
+  (it "calls THEN in the thread view, its window selected, once the thread opens"
+    (save-window-excursion
+      (delete-other-windows)
+      (let ((summary (get-buffer-create "*Summary nnselect:live-tests*"))
+            (other (split-window-right))
+            seen)
+        (unwind-protect
+            (cl-letf (((symbol-function 'mail-live-newest-id) #'ignore)
+                      ((symbol-function 'mail-live-thread-ids) (lambda (_) '("id:1@x")))
+                      ((symbol-function 'when-mail-loaded) (lambda (_what action) (funcall action)))
+                      ((symbol-function 'search-mail-now) (lambda (&rest _) "nnselect:live-tests"))
+                      ((symbol-function 'open-mail-thread)
+                       (lambda () (set-window-buffer other (get-buffer-create mail-thread-buffer-name)))))
+              (open-mail-live-thread (live-tests--thread) "from:ann"
+                                     (lambda () (setq seen (list (selected-window) (buffer-name))))))
+          (kill-buffer summary)
+          (when (get-buffer mail-thread-buffer-name)
+            (kill-buffer mail-thread-buffer-name)))
+        (expect seen :to-equal (list other mail-thread-buffer-name)))))
+  (it "calls no THEN when nothing of the thread is in the store"
+    (let (called)
+      (cl-letf (((symbol-function 'mail-live-newest-id) #'ignore)
+                ((symbol-function 'mail-live-thread-ids) #'ignore)
+                ((symbol-function 'when-mail-loaded) (lambda (_what action) (funcall action))))
+        (open-mail-live-thread (live-tests--thread) "from:ann" (lambda () (setq called t))))
+      (expect called :to-be nil))))
 
 (describe "search-mail-live"
   (it "lists threads through notmuch as you type, and reads the pick"
@@ -449,7 +533,8 @@
                    (setq collection table props rest)
                    (propertize "line" 'mail-thread (live-tests--thread) 'mail-query "from:ann")))
                 ((symbol-function 'open-mail-live-thread)
-                 (lambda (thread query) (setq opened (list (plist-get thread :thread) query)))))
+                 (lambda (thread query &optional _then)
+                   (setq opened (list (plist-get thread :thread) query)))))
         (search-mail-live))
       (expect collection
               :to-equal '(collection mail-live-command
@@ -481,14 +566,21 @@
     (let ((mail-live-query "a later search")
           opened)
       (cl-letf (((symbol-function 'open-mail-live-thread)
-                 (lambda (thread query) (setq opened (list (plist-get thread :thread) query)))))
+                 (lambda (thread query &optional _then)
+                   (setq opened (list (plist-get thread :thread) query)))))
         (open-mail-live-candidate (live-tests--line "abc" "from:ann")))
       (expect opened :to-equal '("abc" "from:ann"))))
   (it "reads nothing for text that carries no thread"
     (let (opened)
       (cl-letf (((symbol-function 'open-mail-live-thread) (lambda (&rest _) (setq opened t))))
         (open-mail-live-candidate "typed text"))
-      (expect opened :to-be nil))))
+      (expect opened :to-be nil)))
+  (it "hands THEN on to the thread view"
+    (let (passed)
+      (cl-letf (((symbol-function 'open-mail-live-thread)
+                 (lambda (_thread _query then) (setq passed then))))
+        (open-mail-live-candidate (live-tests--line "abc") #'ignore))
+      (expect passed :to-be #'ignore))))
 
 (describe "open-mail-live-summary"
   (it "reads the threads of every line in one summary"
@@ -575,5 +667,62 @@
           (open-mail-live-export-h)
           (expect (buffer-live-p (current-buffer)) :to-be t)))
       (expect read :to-be nil))))
+
+;;; The collect buffer
+
+(defun live-tests--collect (&rest lines)
+  "Fill the current buffer with LINES as Embark collects them, one per line.
+Each line keeps its properties and is the line's tabulated-list id."
+  (dolist (line lines)
+    (insert (propertize line 'tabulated-list-id line) "\n"))
+  (goto-char (point-min)))
+
+(defun live-tests--shown-labels ()
+  "What the label region of each line in the current buffer shows."
+  (let (shown (pos (point-min)))
+    (while (setq pos (text-property-not-all pos (point-max) 'mail-labels nil))
+      (push (substring-no-properties (or (get-text-property pos 'display) "undrawn")) shown)
+      (setq pos (next-single-property-change pos 'mail-labels nil (point-max))))
+    (nreverse shown)))
+
+(describe "mail-live-draw-labels"
+  (it "shows the labels each line's thread carries now, one region per line"
+    (cl-letf (((symbol-function 'mail-live-date) (lambda (_) "Today, 17:59")))
+      (let* ((mail-label-colors nil)
+             (before (live-tests--tables '("job" "<1@x>")))
+             (now (live-tests--tables '("job" "<1@x>") '("kids" "<1@x>"))))
+        (with-temp-buffer
+          (live-tests--collect
+           (mail-live-candidate (live-tests--thread :query '("id:1@x" nil)) "q" before)
+           (mail-live-candidate (live-tests--thread :query '("id:2@x" nil)) "q" before))
+          (set-buffer-modified-p nil)
+          (spy-on 'mail-label-tables :and-call-fake (lambda () now))
+          (mail-live-draw-labels)
+          (expect (live-tests--shown-labels) :to-equal '("  job   kids  " " "))
+          (expect (buffer-modified-p) :to-be nil))))))
+
+(describe "mail-live-line-at-point"
+  (it "takes the collect line at point, and refuses a line without one"
+    (with-temp-buffer
+      (live-tests--collect (live-tests--line "abc"))
+      (expect (plist-get (get-text-property 0 'mail-thread (mail-live-line-at-point)) :thread)
+              :to-equal "abc")
+      (goto-char (point-max))
+      (expect (mail-live-line-at-point) :to-throw 'user-error))))
+
+(describe "run-on-mail-live-line"
+  (it "reads the line's thread, then calls the command interactively there"
+    (with-temp-buffer
+      (live-tests--collect (live-tests--line "abc"))
+      (let (opened called)
+        (cl-letf (((symbol-function 'open-mail-live-candidate)
+                   (lambda (line then)
+                     (setq opened (plist-get (get-text-property 0 'mail-thread line) :thread))
+                     (funcall then)))
+                  ((symbol-function 'forward-mail)
+                   (lambda () (interactive) (setq called (called-interactively-p 'any)))))
+          (run-on-mail-live-line #'forward-mail))
+        (expect opened :to-equal "abc")
+        (expect called :to-be t)))))
 
 ;;; live-tests.el ends here

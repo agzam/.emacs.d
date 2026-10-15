@@ -14,9 +14,11 @@
 (require 'mail-utils)
 (require 'mm-decode)
 (require 'rfc2047)
+(require 'tabulated-list)
 
 (defvar mail-inbox-group)
 (defvar mail-search-limit-max)
+(defvar mail-thread-buffer-name)
 
 (defvar mail-live-limit 100
   "Most threads a live search lists.")
@@ -58,10 +60,30 @@ the list as well."
   "TIME, in seconds since the epoch, as summary lines show a date."
   (gnus-user-date (format-time-string "%a, %d %b %Y %T %z" time)))
 
-(defun mail-live-candidate (thread query)
-  "THREAD, a notmuch thread summary QUERY found, as a line that carries both."
-  (let ((tags (plist-get thread :tags))
-        (total (or (plist-get thread :total) 1)))
+(defun mail-live-message-ids (thread)
+  "Message-ID of every message of THREAD, from the id: terms notmuch gives it."
+  (let (ids)
+    (dolist (query (plist-get thread :query))
+      (let ((start 0))
+        ;; notmuch quotes an id holding a space, ( or ", doubling the "
+        (while (and query (string-match "id:\\(?:\"\\(\\(?:[^\"]\\|\"\"\\)*\\)\"\\|\\([^ ]+\\)\\)"
+                                        query start))
+          (push (concat "<" (if (match-beginning 1)
+                                (string-replace "\"\"" "\"" (match-string 1 query))
+                              (match-string 2 query))
+                        ">")
+                ids)
+          (setq start (match-end 0)))))
+    (nreverse ids)))
+
+(defun mail-live-candidate (thread query &optional tables)
+  "THREAD, a notmuch thread summary QUERY found, as a line that carries both.
+The labels its messages carry in TABLES, `mail-label-tables', sit
+before the subject, where `mail-live-draw-labels' draws them again."
+  (let* ((tags (plist-get thread :tags))
+         (total (or (plist-get thread :total) 1))
+         (ids (mail-live-message-ids thread))
+         (chips (and tables (mail-label-chips-of ids tables))))
     (propertize
      (concat (if (member "unread" tags) "●" " ")
              (if (member "flagged" tags) "∗" " ")
@@ -73,19 +95,20 @@ the list as well."
              ;; notmuch sets the authors of matching messages apart with |
              (truncate-string-to-width
               (string-replace "|" "," (or (plist-get thread :authors) "")) 24 nil ?\s)
-             " "
              (if (< 1 total)
-                 (propertize (format "%d/%d " (plist-get thread :matched) total) 'face 'shadow)
+                 (propertize (format " %d/%d" (plist-get thread :matched) total) 'face 'shadow)
                "")
+             (propertize (if chips (concat " " chips " ") " ") 'mail-labels ids)
              (or (plist-get thread :subject) ""))
      'mail-thread thread 'mail-query query)))
 
 (defun mail-live-candidates (lines)
   "Candidates from LINES of notmuch's output, one per thread."
-  (seq-keep (lambda (line)
-              (when-let* ((thread (mail-live-thread line)))
-                (mail-live-candidate thread mail-live-query)))
-            lines))
+  (let ((tables (mail-label-tables)))
+    (seq-keep (lambda (line)
+                (when-let* ((thread (mail-live-thread line)))
+                  (mail-live-candidate thread mail-live-query tables)))
+              lines)))
 
 (defun mail-live-candidate-threads (candidates)
   "The threads CANDIDATES, lines of the live search, carry."
@@ -204,8 +227,9 @@ THEN gets the group's summary, or nil when none of THREADS is in the store."
                           (group (search-mail-now (string-join terms " or ") nil)))
                 (get-buffer (gnus-summary-buffer-name group)))))))
 
-(defun open-mail-live-thread (thread query)
-  "Read THREAD in the thread view, at its newest message QUERY matches."
+(defun open-mail-live-thread (thread query &optional then)
+  "Read THREAD in the thread view, at its newest message QUERY matches.
+THEN, when given, is called with the thread view selected."
   (let ((id (mail-live-newest-id thread query)))
     (read-mail-live-threads
      (list thread)
@@ -214,7 +238,11 @@ THEN gets the group's summary, or nil when none of THREADS is in the store."
          (with-current-buffer summary
            (when-let* ((article (and id (gnus-id-to-article id))))
              (gnus-summary-goto-subject article))
-           (open-mail-thread)))))))
+           (open-mail-thread))
+         (when-let* ((then)
+                     (window (get-buffer-window mail-thread-buffer-name)))
+           (select-window window)
+           (funcall then)))))))
 
 ;;;###autoload
 (defun search-mail-live ()
@@ -237,10 +265,11 @@ collect lists the threads to act on, and its export reads them whole."
 ;;; Embark actions on the listed threads
 
 ;;;###autoload
-(defun open-mail-live-candidate (candidate)
-  "Read the thread of CANDIDATE, a line of the live search, in the thread view."
+(defun open-mail-live-candidate (candidate &optional then)
+  "Read the thread of CANDIDATE, a line of the live search, in the thread view.
+THEN, when given, is called with the thread view selected."
   (when-let* ((thread (get-text-property 0 'mail-thread candidate)))
-    (open-mail-live-thread thread (get-text-property 0 'mail-query candidate))))
+    (open-mail-live-thread thread (get-text-property 0 'mail-query candidate) then)))
 
 ;;;###autoload
 (defun open-mail-live-summary (candidates)
@@ -277,5 +306,35 @@ a summary by its name, so `open-mail-live-export-h' opens the summary."
                               (lambda (_summary)
                                 (when (buffer-live-p export)
                                   (kill-buffer export)))))))
+
+;;; The collect buffer
+
+;;;###autoload
+(define-minor-mode mail-live-collect-mode
+  "Mail keys and labels in an Embark collect buffer of the live search's lines."
+  :keymap (make-sparse-keymap))
+
+;;;###autoload
+(defun mail-live-draw-labels ()
+  "Show on each line of this collect buffer the labels its thread carries now."
+  (let ((tables (mail-label-tables))
+        (pos (point-min)))
+    (with-silent-modifications
+      (while (setq pos (text-property-not-all pos (point-max) 'mail-labels nil))
+        (let ((end (next-single-property-change pos 'mail-labels nil (point-max)))
+              (chips (mail-label-chips-of (get-text-property pos 'mail-labels) tables)))
+          (put-text-property pos end 'display (if chips (concat " " chips " ") " "))
+          (setq pos end))))))
+
+;;;###autoload
+(defun mail-live-line-at-point ()
+  "The live search's line at point in a collect buffer."
+  (or (tabulated-list-get-id) (user-error "No thread on this line")))
+
+;;;###autoload
+(defun run-on-mail-live-line (command)
+  "Read the thread of the collect line at point as RET does, then call COMMAND."
+  (open-mail-live-candidate (mail-live-line-at-point)
+                            (lambda () (call-interactively command))))
 
 ;;; live.el ends here

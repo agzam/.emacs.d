@@ -528,6 +528,7 @@ Return `shown' when the summary's own copy went, nil when nothing changed."
        (or (string-prefix-p "nnmaildir+gmail:" group)
            (string-prefix-p "nnselect:" group))))
 
+;;;###autoload
 (defun mail-label-tables ()
   "Every label nnmaildir holds as (GROUP . MESSAGE-IDS), in menu order.
 MESSAGE-IDS is nnmaildir's own table of the folder, so no file is read."
@@ -560,10 +561,10 @@ MESSAGE-IDS is nnmaildir's own table of the folder, so no file is read."
              groups " "))
 
 ;;;###autoload
-(defun mail-label-chips-of (group message-ids)
-  "Chips of each label a message of MESSAGE-IDS carries, if GROUP shows labels."
-  (when-let* (((mail-labels-shown-p group))
-              (labels (mail-message-labels message-ids (mail-label-tables))))
+(defun mail-label-chips-of (message-ids &optional tables)
+  "Chips of each label a message of MESSAGE-IDS carries, or nil.
+TABLES are `mail-label-tables', read afresh when not given."
+  (when-let* ((labels (mail-message-labels message-ids (or tables (mail-label-tables)))))
     (mail-label-chips labels)))
 
 ;;;###autoload
@@ -612,7 +613,7 @@ A reply whose labels are those of the line above shows none."
 
 ;;;###autoload
 (defun refresh-mail-labels ()
-  "Draw the labels again in every summary that shows them and in the thread view."
+  "Draw the labels again in summaries, thread views and the live search's lines."
   (setq mail-label-refresh-timer nil)
   (dolist (buffer (buffer-list))
     (with-current-buffer buffer
@@ -620,7 +621,10 @@ A reply whose labels are those of the line above shows none."
                   (mail-labels-shown-p gnus-newsgroup-name))
              (jit-lock-refontify))
             ((derived-mode-p 'mail-thread-mode)
-             (mail-thread-update-header-line))))))
+             (mail-thread-draw-labels)
+             (mail-thread-update-header-line))
+            ((bound-and-true-p mail-live-collect-mode)
+             (mail-live-draw-labels))))))
 
 ;;;###autoload
 (defun refresh-mail-labels-soon (&rest _)

@@ -122,6 +122,8 @@ SUBJECT is the thread's, shown again only where a message changed it."
             (propertize (mail-thread-sender header) 'face 'gnus-header-from)
             "  "
             (propertize (gnus-user-date (mail-header-date header)) 'face 'shadow)
+            ;; `mail-thread-draw-labels' shows the message's labels here
+            (propertize " " 'mail-labels (mail-header-id header))
             (unless (string= (gnus-simplify-subject-re own)
                              (gnus-simplify-subject-re subject))
               (concat "  " (propertize own 'face 'gnus-header-subject))))))
@@ -236,12 +238,22 @@ on the next message stays there while a body lands above it."
         "and" (format "(%s)" query)))
 
 ;;;###autoload
+(defun mail-thread-draw-labels ()
+  "Show each message's labels on its line."
+  (let ((tables (mail-label-tables))
+        (pos (point-min)))
+    (with-silent-modifications
+      (while (setq pos (text-property-not-all pos (point-max) 'mail-labels nil))
+        (let ((chips (mail-label-chips-of (list (get-text-property pos 'mail-labels)) tables)))
+          (put-text-property pos (1+ pos) 'display (if chips (concat "  " chips) "")))
+        (setq pos (1+ pos))))))
+
+;;;###autoload
 (defun mail-thread-update-header-line ()
   "Show the thread's subject, its labels, and how many messages are on show."
   (let* ((subject (mail-thread-subject
                    (mail-thread-message-header (car mail-thread-messages))))
          (chips (mail-label-chips-of
-                 mail-thread-group
                  (mapcar (lambda (message) (mail-header-id (mail-thread-message-header message)))
                          mail-thread-messages)))
          (title (if chips (concat subject "  " chips) subject))
@@ -494,6 +506,7 @@ those wait in `mail-thread-waiting' for the fill, the rest stay a line."
                                (lambda (message)
                                  (memq (mail-thread-message-article message) unreads))
                                (mail-thread-fill-order shown)))
+    (mail-thread-draw-labels)
     (mail-thread-update-header-line)
     (set-buffer-modified-p nil)))
 
@@ -605,11 +618,16 @@ window is selected first, so a reply leaves point in its message buffer."
 
 ;;;###autoload
 (defun compose-new-mail ()
-  "Start a new message with the posting style of the group at hand."
-  (interactive nil gnus-group-mode gnus-summary-mode mail-thread-mode gnus-article-mode)
-  (if (derived-mode-p 'gnus-group-mode)
-      (call-interactively #'gnus-group-mail)
-    (run-in-mail-summary #'gnus-summary-mail-other-window)))
+  "Start a new message with the posting style of the group at hand.
+Outside a summary, a thread or an article, that is the group buffer's."
+  (interactive nil gnus-group-mode gnus-summary-mode mail-thread-mode gnus-article-mode
+               mail-live-collect-mode)
+  (if (derived-mode-p 'gnus-summary-mode 'mail-thread-mode 'gnus-article-mode)
+      (run-in-mail-summary #'gnus-summary-mail-other-window)
+    (unless (gnus-alive-p)
+      (gnus))
+    (with-current-buffer gnus-group-buffer
+      (call-interactively #'gnus-group-mail))))
 
 (provide 'mail-thread)
 ;;; thread.el ends here

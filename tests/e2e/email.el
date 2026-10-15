@@ -3035,7 +3035,8 @@ buffers, summary and queued files the cases leave are cleared after."
                       (cancel-timer timer))
                     (record "the live search lists the thread the typed query matches"
                             (seq-some (lambda (line)
-                                        (string-match-p "Ann, Bob +3/3 live plan\\'" line))
+                                        ;; its labels before the subject, as on summary lines
+                                        (string-match-p "Ann, Bob +3/3  Inbox  live plan\\'" line))
                                       listed)
                             :got (format "%S, stage %S" listed stage))
                     (record "C-SPC previews the thread's newest match beside the search"
@@ -3169,6 +3170,30 @@ buffers, summary and queued files the cases leave are cleared after."
                                  (seq-find (lambda (buffer)
                                              (eq (buffer-local-value 'major-mode buffer) 'embark-collect-mode))
                                            (buffer-list)))
+                               ;; what the label region of the collect buffer's
+                               ;; first line shows, drawn again or as collected
+                               (collect-labels (collect)
+                                 (with-current-buffer collect
+                                   (when-let* ((start (text-property-not-all
+                                                       (point-min) (point-max) 'mail-labels nil)))
+                                     (substring-no-properties
+                                      (or (get-text-property start 'display)
+                                          (buffer-substring
+                                           start (next-single-property-change
+                                                  start 'mail-labels nil (point-max))))))))
+                               ;; what the label slot of each message line shows
+                               (thread-labels ()
+                                 (when-let* ((view (get-buffer mail-thread-buffer-name)))
+                                   (with-current-buffer view
+                                     (mapcar (lambda (message)
+                                               (save-excursion
+                                                 (goto-char (mail-thread-message-marker message))
+                                                 (when-let* ((slot (text-property-not-all
+                                                                    (point) (line-end-position)
+                                                                    'mail-labels nil)))
+                                                   (substring-no-properties
+                                                    (or (get-text-property slot 'display) "undrawn")))))
+                                             mail-thread-messages))))
                                ;; KEYS on the collect buffer's first line; a key
                                ;; that opens a minibuffer would wait for input
                                (on-line (collect keys)
@@ -3186,6 +3211,16 @@ buffers, summary and queued files the cases leave are cleared after."
                                      (= 1 (length (buffer-local-value 'tabulated-list-entries collect))))
                                 :got (format "stage %S, %S" stage collect))
                         (when collect
+                          (record "a collected line shows its thread's labels, and , answers with the mail keys"
+                                  (and (buffer-local-value 'mail-live-collect-mode collect)
+                                       (equal (collect-labels collect) "  Inbox  ")
+                                       (with-current-buffer collect
+                                         (and (eq (key-binding (kbd ", /")) 'search-mail-live)
+                                              (functionp (key-binding (kbd ", l"))))))
+                                  :got (format "mode %S, labels %S, , / %S"
+                                               (buffer-local-value 'mail-live-collect-mode collect)
+                                               (collect-labels collect)
+                                               (with-current-buffer collect (key-binding (kbd ", /")))))
                           (let* ((before (search-summaries))
                                  (err (on-line collect "RET"))
                                  (view (get-buffer mail-thread-buffer-name)))
@@ -3196,6 +3231,23 @@ buffers, summary and queued files the cases leave are cleared after."
                                     :got (format "%S, view %S at %S" err (and view (get-buffer-window view))
                                                  (and view (with-current-buffer view
                                                              (ignore-errors (subject-at-point))))))
+                            (record "each message of the thread view shows its labels on its line"
+                                    (equal (thread-labels) '("   Inbox " "   Inbox " "   Inbox "))
+                                    :got (format "%S" (thread-labels)))
+                            ;; a label added elsewhere: Gnus files a copy into it
+                            (when-let* ((root (seq-find (lambda (file)
+                                                          (string-match-p "/1700000060\\.60\\." file))
+                                                        (messages-in inbox))))
+                              (with-temp-buffer
+                                (insert-file-contents root)
+                                (gnus-request-accept-article "nnmaildir+gmail:labelled" nil t t)))
+                            (email-e2e--idle 5 (lambda () (member "   Inbox   labelled " (thread-labels))))
+                            (record "a label added to a message shows at once on its thread view line and its collected line"
+                                    (and (equal (thread-labels)
+                                                '("   Inbox   labelled " "   Inbox " "   Inbox "))
+                                         (equal (collect-labels collect) "  Inbox   labelled  "))
+                                    :got (format "%S, collected %S" (thread-labels)
+                                                 (collect-labels collect)))
                             (when-let* ((window (and view (get-buffer-window view))))
                               (with-selected-window window
                                 (execute-kbd-macro "q")))
@@ -3217,6 +3269,43 @@ buffers, summary and queued files the cases leave are cleared after."
                                          (equal browsed (concat "https://mail.google.com/mail/u/0/#search/"
                                                                 "rfc822msgid%3Alive-plan-ann%40fixture.example")))
                                     :got (format "%S, %S" err browsed)))
+                          (let* ((browsed nil)
+                                 (before (search-summaries))
+                                 (err (cl-letf (((symbol-function 'browse-url)
+                                                 (lambda (url &rest _) (setq browsed url))))
+                                        (on-line collect ", o g"))))
+                            (record ", o g on a collected line opens its newest match in Gmail, reading nothing"
+                                    (and (null err)
+                                         (string-suffix-p "rfc822msgid%3Alive-plan-ann%40fixture.example"
+                                                          (or browsed ""))
+                                         (null (new-summary before)))
+                                    :got (format "%S, %S, summary %S" err browsed (new-summary before))))
+                          (let* ((before (search-summaries))
+                                 (composing (buffer-list))
+                                 (err (on-line collect ", f"))
+                                 (forward (seq-find (lambda (buffer)
+                                                      (and (not (memq buffer composing))
+                                                           (eq (buffer-local-value 'major-mode buffer)
+                                                               'message-mode)))
+                                                    (buffer-list))))
+                            (record ", f on a collected line reads its thread, then forwards the newest match"
+                                    (and (null err) forward
+                                         (string-match-p "live plan (Ann)"
+                                                         (with-current-buffer forward
+                                                           (or (message-fetch-field "Subject") "")))
+                                         (new-summary before))
+                                    :got (format "%S, %S" err
+                                                 (and forward (with-current-buffer forward
+                                                                (message-fetch-field "Subject")))))
+                            (when forward
+                              (with-current-buffer forward
+                                (set-buffer-modified-p nil)
+                                (let ((kill-buffer-query-functions nil))
+                                  (kill-buffer forward))))
+                            (when-let* ((window (get-buffer-window mail-thread-buffer-name)))
+                              (with-selected-window window
+                                (execute-kbd-macro "q")))
+                            (leave-summaries before))
                           (kill-buffer collect)))
                       (delete-other-windows)
                       (switch-to-buffer gnus-group-buffer)
