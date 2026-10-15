@@ -42,6 +42,7 @@
 (defvar mail-label-refresh-timer)
 (defvar mail-sync-check-interval)
 (defvar mail-live-preview-name)
+(defvar mail-live-history)
 
 (defun email-e2e--write-message (file from subject id &optional date references xref body)
   "Write a minimal RFC 822 message to FILE.
@@ -3058,7 +3059,201 @@ buffers, summary and queued files the cases leave are cleared after."
                         (execute-kbd-macro "q"))
                       (set-buffer (window-buffer (selected-window)))
                       (when (derived-mode-p 'gnus-summary-mode)
-                        (gnus-summary-exit-no-update t)))))
+                        (gnus-summary-exit-no-update t))))
+                  ;; the live search's lines under embark: a collect buffer
+                  ;; acts on each as its thread, and an export reads the
+                  ;; threads whole in a summary that keeps the name Gnus gave it
+                  (let* ((live-files (mapcar (lambda (name) (expand-file-name name inbox))
+                                             '("cur/1700000060.60.fixture:2,"
+                                               "cur/1700000061.61.fixture:2,S"
+                                               "cur/1700000062.62.fixture:2,S")))
+                         (export-files (mapcar (lambda (name) (expand-file-name name inbox))
+                                               '("cur/1700000063.63.fixture:2,S"
+                                                 "cur/1700000064.64.fixture:2,S")))
+                         (live-ids '("id:live-plan-ann@fixture.example"
+                                     "id:live-plan-bob@fixture.example"
+                                     "id:live-plan@fixture.example"))
+                         ;; newest first, as notmuch names them
+                         (export-ids '("id:export-plan-ann@fixture.example"
+                                       "id:export-plan@fixture.example"))
+                         (message-ids (lambda (ids)
+                                        (sort (mapcar (lambda (id)
+                                                        (concat "<" (string-remove-prefix "id:" id) ">"))
+                                                      ids)
+                                              #'string<))))
+                    (email-e2e--write-message (nth 0 export-files) "Cy <cy@example.com>" "export plan"
+                                              "export-plan" "Thu, 24 Sep 2026 09:00:00 +0000")
+                    (email-e2e--write-message (nth 1 export-files) "Ann <ann@example.com>"
+                                              "Re: export plan" "export-plan-ann"
+                                              "Thu, 24 Sep 2026 10:00:00 +0000"
+                                              "<export-plan@fixture.example>")
+                    ;; the export thread is the newer, so notmuch lists it first
+                    (with-temp-file (expand-file-name "live export" summaries)
+                      (insert "((:thread \"fixture-export\" :timestamp 1790100000"
+                              " :matched 1 :total 2 :authors \"Ann| Cy\" :subject \"export plan\""
+                              " :tags (\"inbox\"))\n"
+                              "(:thread \"fixture-live\" :timestamp 1790000000"
+                              " :matched 3 :total 3 :authors \"Ann, Bob\" :subject \"live plan\""
+                              " :tags (\"inbox\")))\n"))
+                    (pcase-dolist (`(,threads ,ids ,files)
+                                   `(("thread:fixture-export" ,export-ids ,export-files)
+                                     ("thread:fixture-export or thread:fixture-live"
+                                      ,(append export-ids live-ids)
+                                      ,(append export-files live-files))))
+                      (with-temp-file (expand-file-name threads newest)
+                        (insert (mapconcat (lambda (id) (concat id "\n")) ids "")))
+                      (with-temp-file (expand-file-name (string-join ids " or ") whole)
+                        (insert (mapconcat (lambda (file) (concat file "\n")) files ""))))
+                    (delete-other-windows)
+                    (switch-to-buffer gnus-group-buffer)
+                    (execute-kbd-macro (kbd "gR"))
+                    (loads-done)
+                    (cl-flet* ((live (query count keys)
+                                 ;; QUERY typed into the live search, then KEYS once
+                                 ;; it lists COUNT threads; embark's collect and
+                                 ;; export end the search with a quit
+                                 (let* ((stage 'typing)
+                                        (mail-live-history nil)
+                                        (timer (run-at-time
+                                                0.05 0.05
+                                                (lambda ()
+                                                  (when (active-minibuffer-window)
+                                                    (pcase stage
+                                                      ('typing
+                                                       (setq unread-command-events
+                                                             (append unread-command-events
+                                                                     (listify-key-sequence (kbd query)))
+                                                             stage 'listing))
+                                                      ('listing
+                                                       (when (<= count (or (bound-and-true-p vertico--total) 0))
+                                                         (setq unread-command-events
+                                                               (append unread-command-events
+                                                                       (listify-key-sequence (kbd keys)))
+                                                               stage 'acted)))))))))
+                                   (unwind-protect
+                                       (condition-case nil
+                                           (with-timeout (20 (setq stage (list 'timed-out stage)))
+                                             (call-interactively #'search-mail-live))
+                                         (quit nil))
+                                     (cancel-timer timer))
+                                   stage))
+                               (search-summaries ()
+                                 (seq-filter (lambda (buffer)
+                                               (with-current-buffer buffer
+                                                 (and (derived-mode-p 'gnus-summary-mode)
+                                                      (gnus-nnselect-group-p gnus-newsgroup-name))))
+                                             (buffer-list)))
+                               (new-summary (before)
+                                 (car (seq-difference (search-summaries) before)))
+                               ;; the export's summary, once the buffer standing in
+                               ;; for it is gone: the summary exists before Gnus
+                               ;; has filled it, and the idle poll would throw out
+                               ;; of the half-built one
+                               (exported (before)
+                                 (and (not (seq-some (lambda (buffer)
+                                                       (buffer-local-value 'mail-live-export buffer))
+                                                     (buffer-list)))
+                                      (new-summary before)))
+                               (summary-ids (summary)
+                                 (and summary
+                                      (with-current-buffer summary
+                                        (sort (mapcar (lambda (article)
+                                                        (mail-header-id (gnus-summary-article-header article)))
+                                                      gnus-newsgroup-articles)
+                                              #'string<))))
+                               (leave-summaries (before)
+                                 (dolist (summary (seq-difference (search-summaries) before))
+                                   (with-current-buffer summary
+                                     (gnus-summary-exit-no-update t))))
+                               (collected ()
+                                 (seq-find (lambda (buffer)
+                                             (eq (buffer-local-value 'major-mode buffer) 'embark-collect-mode))
+                                           (buffer-list)))
+                               ;; KEYS on the collect buffer's first line; a key
+                               ;; that opens a minibuffer would wait for input
+                               (on-line (collect keys)
+                                 (pop-to-buffer collect)
+                                 (goto-char (point-min))
+                                 (with-timeout (10 'timed-out)
+                                   (condition-case err
+                                       (progn (execute-kbd-macro (kbd keys)) nil)
+                                     ((error quit) err)))))
+                      (let* ((stage (live "live SPC plan" 1 "C-c C-s"))
+                             (collect (email-e2e--idle 10 #'collected)))
+                        (record "C-c C-s in the live search collects its lines as threads"
+                                (and collect
+                                     (eq (buffer-local-value 'embark--type collect) 'mail-thread)
+                                     (= 1 (length (buffer-local-value 'tabulated-list-entries collect))))
+                                :got (format "stage %S, %S" stage collect))
+                        (when collect
+                          (let* ((before (search-summaries))
+                                 (err (on-line collect "RET"))
+                                 (view (get-buffer mail-thread-buffer-name)))
+                            (record "RET on a collected line reads its thread in the thread view, at its newest match"
+                                    (and (null err) view (get-buffer-window view)
+                                         (equal (with-current-buffer view (subject-at-point))
+                                                "Re: live plan (Ann)"))
+                                    :got (format "%S, view %S at %S" err (and view (get-buffer-window view))
+                                                 (and view (with-current-buffer view
+                                                             (ignore-errors (subject-at-point))))))
+                            (when-let* ((window (and view (get-buffer-window view))))
+                              (with-selected-window window
+                                (execute-kbd-macro "q")))
+                            (leave-summaries before))
+                          (let* ((before (search-summaries))
+                                 (err (on-line collect "C-; s"))
+                                 (summary (new-summary before)))
+                            (record "C-; s on a collected line reads every message of its thread in a summary"
+                                    (and (null err)
+                                         (equal (summary-ids summary) (funcall message-ids live-ids)))
+                                    :got (format "%S, %S" err (summary-ids summary)))
+                            (leave-summaries before))
+                          (let* ((browsed nil)
+                                 (err (cl-letf (((symbol-function 'browse-url)
+                                                 (lambda (url &rest _) (setq browsed url))))
+                                        (on-line collect "C-; g"))))
+                            (record "C-; g on a collected line opens its newest match in Gmail"
+                                    (and (null err)
+                                         (equal browsed (concat "https://mail.google.com/mail/u/0/#search/"
+                                                                "rfc822msgid%3Alive-plan-ann%40fixture.example")))
+                                    :got (format "%S, %S" err browsed)))
+                          (kill-buffer collect)))
+                      (delete-other-windows)
+                      (switch-to-buffer gnus-group-buffer)
+                      ;; M-m selects the first line, the export thread
+                      (let* ((before (search-summaries))
+                             (stage (live "live SPC export" 2 "M-m C-c C-;"))
+                             (summary (email-e2e--idle 10 (lambda () (exported before)))))
+                        (record "C-c C-; on the line M-m selected reads that thread alone, whole"
+                                (equal (summary-ids summary) (funcall message-ids export-ids))
+                                :got (format "stage %S, %S" stage (summary-ids summary)))
+                        (leave-summaries before)
+                        ;; a stand-in left behind would hold the next case back
+                        (dolist (buffer (buffer-list))
+                          (when (buffer-local-value 'mail-live-export buffer)
+                            (kill-buffer buffer))))
+                      (delete-other-windows)
+                      (switch-to-buffer gnus-group-buffer)
+                      (let* ((before (search-summaries))
+                             (stage (live "live SPC export" 2 "C-c C-;"))
+                             (summary (email-e2e--idle 10 (lambda () (exported before))))
+                             (renamed (seq-filter (lambda (buffer)
+                                                    (string-prefix-p "*Embark Export" (buffer-name buffer)))
+                                                  (buffer-list))))
+                        (record "C-c C-; reads every listed thread, whole, in one summary shown under Gnus's name"
+                                (and summary
+                                     (equal (summary-ids summary)
+                                            (funcall message-ids (append export-ids live-ids)))
+                                     (equal (buffer-name summary)
+                                            (with-current-buffer summary
+                                              (gnus-summary-buffer-name gnus-newsgroup-name)))
+                                     (get-buffer-window summary)
+                                     (null renamed))
+                                :got (format "stage %S, %S named %S, shown %S, left %S" stage
+                                             (summary-ids summary) (and summary (buffer-name summary))
+                                             (and summary (get-buffer-window summary)) renamed))
+                        (leave-summaries before)
+                        (mapc #'kill-buffer renamed)))))
                 ;; the group buffer's own localleader over topics and
                 ;; subscriptions; moved is a group mail-topics leaves out
                 (delete-other-windows)

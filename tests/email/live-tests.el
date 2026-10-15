@@ -95,31 +95,38 @@
   (it "marks a thread unread and starred as summary lines do"
     (cl-letf (((symbol-function 'mail-live-date) (lambda (_) "Today, 17:59")))
       (expect (substring (mail-live-candidate
-                          (live-tests--thread :tags '("inbox" "unread" "flagged")))
+                          (live-tests--thread :tags '("inbox" "unread" "flagged")) "q")
                          0 2)
               :to-equal "●∗")
-      (expect (substring (mail-live-candidate (live-tests--thread)) 0 2) :to-equal "  ")))
+      (expect (substring (mail-live-candidate (live-tests--thread) "q") 0 2) :to-equal "  ")))
   (it "shows the date, the authors, the matched count and the subject"
     (cl-letf (((symbol-function 'mail-live-date) (lambda (_) "Today, 17:59")))
-      (expect (substring-no-properties (mail-live-candidate (live-tests--thread)))
+      (expect (substring-no-properties (mail-live-candidate (live-tests--thread) "q"))
               :to-equal (concat "   Today, 17:59     Ann, Bob, Cy" (make-string 12 ?\s)
                                 " 2/3 Release plan"))))
   (it "leaves the count off a thread of one message"
     (cl-letf (((symbol-function 'mail-live-date) (lambda (_) "Today, 17:59")))
-      (expect (mail-live-candidate (live-tests--thread :matched 1 :total 1))
+      (expect (mail-live-candidate (live-tests--thread :matched 1 :total 1) "q")
               :not :to-match " 1/1 ")))
   (it "cuts long authors to the width of the summary's sender column"
     (cl-letf (((symbol-function 'mail-live-date) (lambda (_) "Today, 17:59")))
       (expect (substring-no-properties
                (mail-live-candidate
-                (live-tests--thread :authors "Ann Aardvark, Bob Bobbington, Cy Cyrus")))
+                (live-tests--thread :authors "Ann Aardvark, Bob Bobbington, Cy Cyrus") "q"))
               :to-match "Ann Aardvark, Bob Bobbin 2/3 ")))
   (it "carries its thread for the preview and RET"
     (cl-letf (((symbol-function 'mail-live-date) (lambda (_) "Today, 17:59")))
       (expect (plist-get (get-text-property 0 'mail-thread
-                                            (mail-live-candidate (live-tests--thread)))
+                                            (mail-live-candidate (live-tests--thread) "q"))
                          :thread)
-              :to-equal "0000000000000abc"))))
+              :to-equal "0000000000000abc")))
+  (it "carries the query that found it, on every character"
+    ;; a collect buffer outlives the search, and the next one sets
+    ;; mail-live-query anew
+    (cl-letf (((symbol-function 'mail-live-date) (lambda (_) "Today, 17:59")))
+      (let ((line (mail-live-candidate (live-tests--thread) "from:ann")))
+        (expect (get-text-property 0 'mail-query line) :to-equal "from:ann")
+        (expect (get-text-property (1- (length line)) 'mail-query line) :to-equal "from:ann")))))
 
 (describe "mail-live-candidates"
   (it "makes one candidate per thread line and drops the rest"
@@ -130,7 +137,22 @@
                        '("((:thread \"a\" :total 1 :tags nil)"
                          "garbage"
                          "(:thread \"b\" :total 1 :tags nil))")))
-              :to-equal '("a" "b")))))
+              :to-equal '("a" "b"))))
+  (it "gives each candidate the query notmuch ran for it"
+    (cl-letf (((symbol-function 'mail-live-date) (lambda (_) "Today, 17:59")))
+      (let ((mail-live-query "from:ann"))
+        (expect (mapcar (lambda (candidate) (get-text-property 0 'mail-query candidate))
+                        (mail-live-candidates '("((:thread \"a\" :total 1 :tags nil))")))
+                :to-equal '("from:ann"))))))
+
+(describe "mail-live-candidate-threads"
+  (it "takes the thread of each line and skips a line without one"
+    (expect (mapcar (lambda (thread) (plist-get thread :thread))
+                    (mail-live-candidate-threads
+                     (list (propertize "a" 'mail-thread '(:thread "a"))
+                           "typed text"
+                           (propertize "b" 'mail-thread '(:thread "b")))))
+            :to-equal '("a" "b"))))
 
 (describe "mail-live-date"
   (it "dates a thread the way summary lines date a message"
@@ -302,11 +324,67 @@
 ;;; Reading the pick
 
 (describe "mail-live-thread-ids"
-  (it "asks notmuch for every message of the thread"
+  (it "asks notmuch for every message of the thread, newest first"
     (live-tests--with-notmuch "id:1@x\nid:2@x"
-      (expect (mail-live-thread-ids (live-tests--thread)) :to-equal '("id:1@x" "id:2@x"))
-      (expect (runs)
-              :to-equal '("--config=/config/file search --output=messages thread:0000000000000abc")))))
+      (let ((mail-search-limit-max 2000))
+        (expect (mail-live-thread-ids (list (live-tests--thread))) :to-equal '("id:1@x" "id:2@x"))
+        (expect (runs)
+                :to-equal '("--config=/config/file search --output=messages --sort=newest-first --limit=2000 thread:0000000000000abc")))))
+  (it "asks for the messages of several threads in one process"
+    (live-tests--with-notmuch "id:1@x"
+      (let ((mail-search-limit-max 2000))
+        (mail-live-thread-ids (list (live-tests--thread) '(:thread "0000000000000def")))
+        (expect (runs)
+                :to-equal '("--config=/config/file search --output=messages --sort=newest-first --limit=2000 thread:0000000000000abc or thread:0000000000000def")))))
+  (it "stops at the most messages a search shows"
+    ;; a query of more ids would outgrow one argument on Linux
+    (live-tests--with-notmuch "id:1@x"
+      (let ((mail-search-limit-max 7))
+        (mail-live-thread-ids (list (live-tests--thread)))
+        (expect (car (runs)) :to-match " --limit=7 ")))))
+
+(describe "read-mail-live-threads"
+  (it "searches every message of the threads and hands THEN their summary"
+    (let ((summary (get-buffer-create "*Summary nnselect:live-tests*"))
+          asked searched got)
+      (unwind-protect
+          (cl-letf (((symbol-function 'mail-live-thread-ids)
+                     (lambda (threads) (setq asked threads) '("id:2@x" "id:1@x" "id:9@x")))
+                    ((symbol-function 'when-mail-loaded) (lambda (_what action) (funcall action)))
+                    ((symbol-function 'search-mail-now)
+                     (lambda (query limit) (setq searched (list query limit)) "nnselect:live-tests")))
+            (read-mail-live-threads (list (live-tests--thread) '(:thread "def"))
+                                    (lambda (buffer) (setq got buffer))))
+        (kill-buffer summary))
+      (expect (mapcar (lambda (thread) (plist-get thread :thread)) asked)
+              :to-equal '("0000000000000abc" "def"))
+      (expect searched :to-equal '("id:2@x or id:1@x or id:9@x" nil))
+      (expect got :to-be summary)))
+  (it "hands THEN nil and searches nothing when notmuch names no message"
+    ;; an empty query would match all mail
+    (let (searched (got 'unset))
+      (cl-letf (((symbol-function 'mail-live-thread-ids) #'ignore)
+                ((symbol-function 'when-mail-loaded) (lambda (_what action) (funcall action)))
+                ((symbol-function 'search-mail-now) (lambda (&rest _) (setq searched t))))
+        (read-mail-live-threads (list (live-tests--thread)) (lambda (buffer) (setq got buffer))))
+      (expect searched :to-be nil)
+      (expect got :to-be nil)))
+  (it "hands THEN nil when the search group finds nothing"
+    (let ((got 'unset))
+      (cl-letf (((symbol-function 'mail-live-thread-ids) (lambda (_) '("id:1@x")))
+                ((symbol-function 'when-mail-loaded) (lambda (_what action) (funcall action)))
+                ((symbol-function 'search-mail-now) #'ignore))
+        (read-mail-live-threads (list (live-tests--thread)) (lambda (buffer) (setq got buffer))))
+      (expect got :to-be nil)))
+  (it "asks notmuch only once the groups are loaded, and says what waits"
+    (let (waited asked)
+      (cl-letf (((symbol-function 'mail-live-thread-ids) (lambda (_) (setq asked t) nil))
+                ((symbol-function 'when-mail-loaded)
+                 (lambda (what action) (push (list what (functionp action)) waited))))
+        (read-mail-live-threads (list (live-tests--thread)) #'ignore)
+        (read-mail-live-threads (list (live-tests--thread) '(:thread "def")) #'ignore))
+      (expect asked :to-be nil)
+      (expect (nreverse waited) :to-equal '(("for the thread" t) ("for the threads" t))))))
 
 (describe "open-mail-live-thread"
   (it "reads the thread's search group in the thread view, at its newest match"
@@ -360,7 +438,7 @@
 
 (describe "search-mail-live"
   (it "lists threads through notmuch as you type, and reads the pick"
-    (let ((mail-live-query "from:ann")
+    (let ((mail-live-query "from:bob")
           collection props opened)
       (cl-letf (((symbol-function 'consult--process-collection)
                  (lambda (builder &rest rest) (list 'collection builder rest)))
@@ -369,7 +447,7 @@
                 ((symbol-function 'consult--read)
                  (lambda (table &rest rest)
                    (setq collection table props rest)
-                   (propertize "line" 'mail-thread (live-tests--thread))))
+                   (propertize "line" 'mail-thread (live-tests--thread) 'mail-query "from:ann")))
                 ((symbol-function 'open-mail-live-thread)
                  (lambda (thread query) (setq opened (list (plist-get thread :thread) query)))))
         (search-mail-live))
@@ -379,6 +457,7 @@
       (expect (list (plist-get props :category) (plist-get props :require-match)
                     (plist-get props :sort) (functionp (plist-get props :state)))
               :to-equal '(mail-thread t nil t))
+      ;; the line's own query, not the last one sent
       (expect opened :to-equal '("0000000000000abc" "from:ann"))))
   (it "reads nothing when the search is left without a pick"
     (let (opened)
@@ -389,12 +468,112 @@
         (search-mail-live))
       (expect opened :to-be nil))))
 
+;;; Embark actions on the listed threads
+
+(defun live-tests--line (thread-id &optional query)
+  "A line of the live search over the thread THREAD-ID, found by QUERY."
+  (propertize (concat "line " thread-id)
+              'mail-thread (list :thread thread-id :subject thread-id)
+              'mail-query (or query "from:ann")))
+
+(describe "open-mail-live-candidate"
+  (it "reads the line's thread at the newest match of the line's own query"
+    (let ((mail-live-query "a later search")
+          opened)
+      (cl-letf (((symbol-function 'open-mail-live-thread)
+                 (lambda (thread query) (setq opened (list (plist-get thread :thread) query)))))
+        (open-mail-live-candidate (live-tests--line "abc" "from:ann")))
+      (expect opened :to-equal '("abc" "from:ann"))))
+  (it "reads nothing for text that carries no thread"
+    (let (opened)
+      (cl-letf (((symbol-function 'open-mail-live-thread) (lambda (&rest _) (setq opened t))))
+        (open-mail-live-candidate "typed text"))
+      (expect opened :to-be nil))))
+
+(describe "open-mail-live-summary"
+  (it "reads the threads of every line in one summary"
+    (let (read)
+      (cl-letf (((symbol-function 'read-mail-live-threads)
+                 (lambda (threads then)
+                   (setq read (mapcar (lambda (thread) (plist-get thread :thread)) threads))
+                   (funcall then nil))))
+        (open-mail-live-summary (list (live-tests--line "abc") (live-tests--line "def"))))
+      (expect read :to-equal '("abc" "def")))))
+
+(describe "open-mail-live-in-gmail"
+  (it "opens the thread's newest match of the line's query in Gmail"
+    (let (asked browsed)
+      (cl-letf (((symbol-function 'mail-live-newest-id)
+                 (lambda (thread query) (setq asked (list (plist-get thread :thread) query)) "<3@x>"))
+                ((symbol-function 'browse-url) (lambda (url &rest _) (setq browsed url))))
+        (open-mail-live-in-gmail (live-tests--line "abc" "from:ann")))
+      (expect asked :to-equal '("abc" "from:ann"))
+      (expect browsed :to-equal "https://mail.google.com/mail/u/0/#search/rfc822msgid%3A3%40x")))
+  (it "opens nothing when no message of the thread matches any more"
+    (let (browsed)
+      (cl-letf (((symbol-function 'mail-live-newest-id) #'ignore)
+                ((symbol-function 'browse-url) (lambda (&rest _) (setq browsed t))))
+        (open-mail-live-in-gmail (live-tests--line "abc")))
+      (expect browsed :to-be nil))))
+
 (describe "export-mail-live-search"
-  (it "reads every match of the typed query in a search group"
-    (let ((mail-live-query "from:ann")
-          searched)
-      (cl-letf (((symbol-function 'search-mail) (lambda (query &rest _) (setq searched query))))
-        (export-mail-live-search '("a line" "another")))
-      (expect searched :to-equal "from:ann"))))
+  (it "leaves current a buffer that stands in for the lines' summary"
+    ;; Embark renames the buffer its exporter leaves, and nnselect finds a
+    ;; summary by name, so the summary must not be that buffer
+    (let ((lines (list (live-tests--line "abc") (live-tests--line "def")))
+          (searched nil)
+          export)
+      (unwind-protect
+          (cl-letf (((symbol-function 'search-mail-now) (lambda (&rest _) (setq searched t)))
+                    ((symbol-function 'search-mail) (lambda (&rest _) (setq searched t))))
+            (with-temp-buffer
+              (let ((before (current-buffer)))
+                (export-mail-live-search lines)
+                (setq export (current-buffer))
+                (expect export :not :to-be before))
+              (expect (buffer-local-value 'mail-live-export export) :to-be lines)
+              (expect (buffer-local-value 'major-mode export) :to-be 'special-mode)
+              (expect (with-current-buffer export (buffer-string))
+                      :to-equal "Reading 2 threads in a summary...")))
+        (when (buffer-live-p export)
+          (kill-buffer export)))
+      (expect searched :to-be nil))))
+
+(describe "open-mail-live-export-h"
+  (it "reads the export's threads in a summary, then drops the export"
+    (let ((export (generate-new-buffer " *live-tests export*"))
+          read)
+      (unwind-protect
+          (cl-letf (((symbol-function 'read-mail-live-threads)
+                     (lambda (threads then)
+                       (setq read (mapcar (lambda (thread) (plist-get thread :thread)) threads))
+                       (funcall then (get-buffer-create " *live-tests summary*")))))
+            (with-current-buffer export
+              (setq mail-live-export (list (live-tests--line "abc") (live-tests--line "def")))
+              (open-mail-live-export-h)))
+        (when (buffer-live-p export)
+          (kill-buffer export))
+        (when-let* ((summary (get-buffer " *live-tests summary*")))
+          (kill-buffer summary)))
+      (expect read :to-equal '("abc" "def"))
+      (expect (buffer-live-p export) :to-be nil)))
+  (it "drops the export when no thread of it is in the store"
+    (let ((export (generate-new-buffer " *live-tests export*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'read-mail-live-threads)
+                     (lambda (_threads then) (funcall then nil))))
+            (with-current-buffer export
+              (setq mail-live-export (list (live-tests--line "abc")))
+              (open-mail-live-export-h)))
+        (expect (buffer-live-p export) :to-be nil)
+        (when (buffer-live-p export)
+          (kill-buffer export)))))
+  (it "leaves alone a buffer any other export made"
+    (let (read)
+      (cl-letf (((symbol-function 'read-mail-live-threads) (lambda (&rest _) (setq read t))))
+        (with-temp-buffer
+          (open-mail-live-export-h)
+          (expect (buffer-live-p (current-buffer)) :to-be t)))
+      (expect read :to-be nil))))
 
 ;;; live-tests.el ends here
