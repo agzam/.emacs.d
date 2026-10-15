@@ -7,8 +7,14 @@
                                   "helper.el")))
 (require 'buttercup)
 
-;; embark is never loaded here; the exporter spec binds this
+;; embark is never loaded here; the live search's embark spec binds these
 (defvar embark-exporters-alist)
+(defvar embark-keymap-alist)
+(defvar embark-default-action-overrides)
+(defvar embark-multitarget-actions)
+(defvar embark-after-export-hook)
+(defvar embark-general-map)
+(defvar mail-thread-embark-map)
 (defvar gnus-message-setup-hook)
 (defvar org-mime-obey-display-buffer-p)
 (defvar gnus-delay-default-delay)
@@ -383,7 +389,7 @@ KEYS holds a prefix's key and the key under it apart by a space, as
               :to-equal '((function sync-mail) (function search-mail-live)
                           (function compose-new-mail) (function open-mail-inbox)))))
 
-  (it "exports a live search as every match in a search group"
+  (it "makes a line of the live search act as its thread, and export it to a summary"
     ;; read back from the source: the form waits for embark, which the
     ;; suite never loads
     (let ((form (with-temp-buffer
@@ -394,11 +400,28 @@ KEYS holds a prefix's key and the key under it apart by a space, as
                     (while (and (setq form (ignore-errors (read (current-buffer))))
                                 (not (equal (seq-take form 2) '(after! embark)))))
                     form)))
-          (embark-exporters-alist nil))
+          (embark-exporters-alist nil)
+          (embark-keymap-alist nil)
+          (embark-default-action-overrides nil)
+          (embark-multitarget-actions '(embark-insert))
+          (embark-after-export-hook nil)
+          (embark-general-map (make-sparse-keymap)))
       (expect form :to-be-truthy)
+      ;; a defvar keeps a value from an earlier run of the form
+      (makunbound 'mail-thread-embark-map)
       (dolist (body (cddr form))
         (eval body t))
-      (expect (alist-get 'mail-thread embark-exporters-alist) :to-be 'export-mail-live-search)))
+      (expect (alist-get 'mail-thread embark-exporters-alist) :to-be 'export-mail-live-search)
+      ;; RET in a collect buffer would otherwise rerun the search on the line's text
+      (expect (alist-get 'mail-thread embark-default-action-overrides)
+              :to-be 'open-mail-live-candidate)
+      (expect (alist-get 'mail-thread embark-keymap-alist) :to-be 'mail-thread-embark-map)
+      (expect (keymap-parent mail-thread-embark-map) :to-be embark-general-map)
+      (expect (mapcar (lambda (key) (keymap-lookup mail-thread-embark-map key)) '("RET" "s" "g"))
+              :to-equal '(open-mail-live-candidate open-mail-live-summary open-mail-live-in-gmail))
+      ;; s on every line acted on reads them in one summary
+      (expect embark-multitarget-actions :to-equal '(open-mail-live-summary embark-insert))
+      (expect embark-after-export-hook :to-equal '(open-mail-live-export-h))))
 
   (it "adds, drops and moves groups, and edits topics, from the group buffer"
     (let ((leader (email-tests--localleader-pairs config 'gnus-group-mode-map)))
@@ -595,8 +618,10 @@ window and deletes the summary's."
                       follow-renamed-mail-a follow-renamed-mail-marks-a
                       check-mail-syncs start-mail-sync-check stop-mail-sync-check
                       ;; the live search goes through these
-                      when-mail-loaded search-mail-now)
-                     ("live.el" search-mail-live export-mail-live-search)
+                      when-mail-loaded search-mail-now gmail-message-url)
+                     ;; embark runs the actions, the exporter and the hook
+                     ("live.el" search-mail-live export-mail-live-search open-mail-live-export-h
+                      open-mail-live-candidate open-mail-live-summary open-mail-live-in-gmail)
                      ("labels.el" label-mail label-mail-threads
                       ;; the first summary line draws through these, and
                       ;; an advice, the thread view or a load calls the rest

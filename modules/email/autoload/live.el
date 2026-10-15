@@ -16,6 +16,7 @@
 (require 'rfc2047)
 
 (defvar mail-inbox-group)
+(defvar mail-search-limit-max)
 
 (defvar mail-live-limit 100
   "Most threads a live search lists.")
@@ -57,8 +58,8 @@ the list as well."
   "TIME, in seconds since the epoch, as summary lines show a date."
   (gnus-user-date (format-time-string "%a, %d %b %Y %T %z" time)))
 
-(defun mail-live-candidate (thread)
-  "THREAD, a notmuch thread summary, as a line to pick that carries it."
+(defun mail-live-candidate (thread query)
+  "THREAD, a notmuch thread summary QUERY found, as a line that carries both."
   (let ((tags (plist-get thread :tags))
         (total (or (plist-get thread :total) 1)))
     (propertize
@@ -77,14 +78,19 @@ the list as well."
                  (propertize (format "%d/%d " (plist-get thread :matched) total) 'face 'shadow)
                "")
              (or (plist-get thread :subject) ""))
-     'mail-thread thread)))
+     'mail-thread thread 'mail-query query)))
 
 (defun mail-live-candidates (lines)
   "Candidates from LINES of notmuch's output, one per thread."
   (seq-keep (lambda (line)
               (when-let* ((thread (mail-live-thread line)))
-                (mail-live-candidate thread)))
+                (mail-live-candidate thread mail-live-query)))
             lines))
+
+(defun mail-live-candidate-threads (candidates)
+  "The threads CANDIDATES, lines of the live search, carry."
+  (seq-keep (lambda (candidate) (get-text-property 0 'mail-thread candidate))
+            candidates))
 
 ;;; The newest match of a thread
 
@@ -100,11 +106,15 @@ the list as well."
                                                    (mail-live-in-thread thread query))))))
     (concat "<" (string-trim (string-remove-prefix "id:" line) "\"" "\"") ">")))
 
-(defun mail-live-thread-ids (thread)
-  "The id: term notmuch names each message of THREAD with."
+(defun mail-live-thread-ids (threads)
+  "The id: term of each message of THREADS, newest first.
+A search shows no more than `mail-search-limit-max' messages, and the
+cap keeps the query of their ids within one argument's length."
   (apply #'process-lines-ignore-status
-         (mail-live-notmuch "search" "--output=messages"
-                            (concat "thread:" (plist-get thread :thread)))))
+         (mail-live-notmuch "search" "--output=messages" "--sort=newest-first"
+                            (format "--limit=%d" mail-search-limit-max)
+                            (mapconcat (lambda (thread) (concat "thread:" (plist-get thread :thread)))
+                                       threads " or "))))
 
 (defun mail-live-newest-file (thread query)
   "File of THREAD's newest message QUERY matches, under its name now, or nil."
@@ -180,19 +190,27 @@ The window gets its buffer back when the search ends."
          (when-let* ((buffer (get-buffer mail-live-preview-name)))
            (kill-buffer buffer)))))))
 
-;;; Reading the pick
+;;; Reading threads
+
+(defun read-mail-live-threads (threads then)
+  "Read every message of THREADS in a search group, then call THEN.
+THEN gets the group's summary, or nil when none of THREADS is in the store."
+  (when-mail-loaded
+   (if (cdr threads) "for the threads" "for the thread")
+   (lambda ()
+     (funcall then
+              ;; gnus-search takes thread:X in a query for a key of its own
+              (when-let* ((terms (mail-live-thread-ids threads))
+                          (group (search-mail-now (string-join terms " or ") nil)))
+                (get-buffer (gnus-summary-buffer-name group)))))))
 
 (defun open-mail-live-thread (thread query)
   "Read THREAD in the thread view, at its newest message QUERY matches."
-  (let ((id (mail-live-newest-id thread query))
-        (terms (mail-live-thread-ids thread)))
-    (when-mail-loaded
-     "for the thread"
-     (lambda ()
-       ;; gnus-search takes thread:X in a query for a key of its own
-       (when-let* ((terms)
-                   (group (search-mail-now (string-join terms " or ") nil))
-                   (summary (get-buffer (gnus-summary-buffer-name group))))
+  (let ((id (mail-live-newest-id thread query)))
+    (read-mail-live-threads
+     (list thread)
+     (lambda (summary)
+       (when summary
          (with-current-buffer summary
            (when-let* ((article (and id (gnus-id-to-article id))))
              (gnus-summary-goto-subject article))
@@ -202,7 +220,7 @@ The window gets its buffer back when the search ends."
 (defun search-mail-live ()
   "Search all mail as you type, and read the picked thread in the thread view.
 C-SPC previews a thread's newest match beside the search.  Embark's
-export reads every match in a search group, as `search-mail' does."
+collect lists the threads to act on, and its export reads them whole."
   (interactive)
   (when-let* ((picked (consult--read
                        (consult--process-collection #'mail-live-command
@@ -213,13 +231,51 @@ export reads every match in a search group, as `search-mail' does."
                        :require-match t
                        :category 'mail-thread
                        :history '(:input mail-live-history)
-                       :sort nil))
-              (thread (get-text-property 0 'mail-thread picked)))
-    (open-mail-live-thread thread mail-live-query)))
+                       :sort nil)))
+    (open-mail-live-candidate picked)))
+
+;;; Embark actions on the listed threads
 
 ;;;###autoload
-(defun export-mail-live-search (_candidates)
-  "Read every match of the live search's query in a search group."
-  (search-mail mail-live-query))
+(defun open-mail-live-candidate (candidate)
+  "Read the thread of CANDIDATE, a line of the live search, in the thread view."
+  (when-let* ((thread (get-text-property 0 'mail-thread candidate)))
+    (open-mail-live-thread thread (get-text-property 0 'mail-query candidate))))
+
+;;;###autoload
+(defun open-mail-live-summary (candidates)
+  "Read every message of the threads of CANDIDATES in one summary."
+  (read-mail-live-threads (mail-live-candidate-threads candidates) #'ignore))
+
+;;;###autoload
+(defun open-mail-live-in-gmail (candidate)
+  "Open in Gmail the newest message of CANDIDATE's thread its query matches."
+  (when-let* ((thread (get-text-property 0 'mail-thread candidate))
+              (id (mail-live-newest-id thread (get-text-property 0 'mail-query candidate))))
+    (browse-url (gmail-message-url id))))
+
+(defvar-local mail-live-export nil
+  "Lines of the live search whose threads this buffer stands in for.")
+
+;;;###autoload
+(defun export-mail-live-search (candidates)
+  "Leave current a buffer that stands in for the summary of CANDIDATES.
+Embark renames the buffer an exporter leaves current, and nnselect finds
+a summary by its name, so `open-mail-live-export-h' opens the summary."
+  (set-buffer (generate-new-buffer "*mail export*"))
+  (special-mode)
+  (setq mail-live-export candidates)
+  (let ((inhibit-read-only t))
+    (insert (format "Reading %d threads in a summary..." (length candidates)))))
+
+;;;###autoload
+(defun open-mail-live-export-h ()
+  "Replace the buffer an export of the live search left with its summary."
+  (when-let* ((candidates mail-live-export))
+    (let ((export (current-buffer)))
+      (read-mail-live-threads (mail-live-candidate-threads candidates)
+                              (lambda (_summary)
+                                (when (buffer-live-p export)
+                                  (kill-buffer export)))))))
 
 ;;; live.el ends here

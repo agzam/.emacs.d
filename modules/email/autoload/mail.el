@@ -571,6 +571,7 @@ Gnus reverses only on a prefix argument."
   "MESSAGE-ID without its angle brackets."
   (string-trim message-id "<" ">"))
 
+;;;###autoload
 (defun gmail-message-url (message-id)
   "Gmail web URL of the message with MESSAGE-ID."
   (concat "https://mail.google.com/mail/u/0/#search/"

@@ -433,9 +433,21 @@ columns would go to the window left of Gnus."
   ;; moves in search results reach what the inbox shows
   (advice-add 'gnus-search-indexed-parse-output :around #'search-likeliest-copies-a))
 
-;; exporting a live search reads all its matches in a search group
+;; a line of the live search, in its minibuffer or a collect buffer, acts
+;; as its thread, and an export reads the threads whole in one summary
 (after! embark
-  (setf (alist-get 'mail-thread embark-exporters-alist) #'export-mail-live-search))
+  (defvar-keymap mail-thread-embark-map
+    :doc "Embark actions on a thread the live search lists."
+    :parent embark-general-map
+    "RET" #'open-mail-live-candidate
+    "s" #'open-mail-live-summary
+    "g" #'open-mail-live-in-gmail)
+  (setf (alist-get 'mail-thread embark-keymap-alist) 'mail-thread-embark-map
+        (alist-get 'mail-thread embark-default-action-overrides) #'open-mail-live-candidate
+        (alist-get 'mail-thread embark-exporters-alist) #'export-mail-live-search)
+  ;; s on several lines reads them in one summary
+  (add-to-list 'embark-multitarget-actions #'open-mail-live-summary)
+  (add-hook 'embark-after-export-hook #'open-mail-live-export-h))
 
 (use-package message
   :ensure nil
