@@ -37,6 +37,7 @@
   "Group mbsync mirrors from Gmail's All Mail, where archived mail lives.")
 
 (defvar mail-groups (list mail-inbox-group "nnmaildir+news:gmane.emacs.devel"
+                          "nnmaildir+news:gmane.emacs.orgmode"
                           "nnatom+www.reddit.com/r/emacs/new/.rss:r/emacs")
   "Groups Gnus subscribes to on startup, on top of every maildir group.")
 
@@ -45,7 +46,8 @@
 
 (defvar mail-bulk-groups
   '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs" "nnmaildir+gmail:org-mode"
-    "nnmaildir+gmail:new" "nnmaildir+news:gmane.emacs.devel")
+    "nnmaildir+gmail:new" "nnmaildir+news:gmane.emacs.devel"
+    "nnmaildir+news:gmane.emacs.orgmode")
   "Groups no sync rescans: tens of thousands of files each.")
 
 (defvar mail-topics
@@ -65,9 +67,10 @@
      ("nnmaildir+gmail:subscriptions"))
     ("Lists"
      ("nnmaildir+news:gmane.emacs.devel" . "emacs-devel, fetched from gmane")
+     ("nnmaildir+news:gmane.emacs.orgmode" . "emacs-orgmode, fetched from gmane")
      ("nnmaildir+gmail:emacs" . "emacs-devel, delivered to Gmail")
      ("nnatom+www.reddit.com/r/emacs/new/.rss:r/emacs" . "Reddit, every new post")
-     ("nnmaildir+gmail:org-mode" . "emacs-orgmode")
+     ("nnmaildir+gmail:org-mode" . "emacs-orgmode, delivered to Gmail")
      ("nnmaildir+gmail:clojure" . "Clojure groups, Clojurists Together")
      ("nnmaildir+gmail:new" . "Old label, nothing since 2024-11")))
   "Topics under Gnus's root topic, in order: (TOPIC (GROUP . DESCRIPTION)...).
@@ -132,7 +135,7 @@ Any other label's chip takes the face `mail-label'.")
         gnus-novice-user nil
         gnus-use-full-window nil
         ;; the bare name, then what `mail-topics' says the group holds
-        gnus-group-line-format "%M%S%p%P%5y %B%(%-18G%) %uC\n"
+        gnus-group-line-format "%M%S%p%P%5y %B%(%-20G%) %uC\n"
         gnus-suppress-duplicates t
         gnus-refer-thread-use-search t
         ;; entering a group must not open (and mark read) its first article
