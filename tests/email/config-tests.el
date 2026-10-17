@@ -826,9 +826,10 @@ window and deletes the summary's."
       (expect recentered :to-equal (list summary)))))
 
 (describe "email module subscriptions"
-  (it "subscribes the inbox, emacs-devel and r/emacs on startup"
+  (it "subscribes the inbox, emacs-devel, emacs-orgmode and r/emacs on startup"
     (expect mail-groups :to-equal
             '("nnmaildir+gmail:inbox" "nnmaildir+news:gmane.emacs.devel"
+              "nnmaildir+news:gmane.emacs.orgmode"
               "nnatom+www.reddit.com/r/emacs/new/.rss:r/emacs"))
     (expect (member mail-inbox-group mail-groups) :to-be-truthy)))
 
@@ -836,8 +837,15 @@ window and deletes the summary's."
   (it "draws each group by its bare name and the description mail-topics gives it"
     ;; %g draws nnmaildir+gmail:inbox, and %C reads a comment from the
     ;; newsrc only, never from config
-    (expect gnus-group-line-format :to-match "%(%-18G%) %uC\n\\'")
+    (expect gnus-group-line-format :to-match "%(%-20G%) %uC\n\\'")
     (expect (string-match-p "%g\\|%C" gnus-group-line-format) :to-be nil))
+  (it "keeps the name column wider than every name mail-topics lists, so descriptions line up"
+    (require 'gnus)
+    (string-match "%(%-\\([0-9]+\\)G%)" gnus-group-line-format)
+    (let ((width (string-to-number (match-string 1 gnus-group-line-format))))
+      (dolist (topic mail-topics)
+        (dolist (entry (cdr topic))
+          (expect (< (length (gnus-group-real-name (car entry))) width) :to-be t)))))
   (it "names each group once, under three topics, the startup subscriptions among them"
     (let ((groups (mapcan (lambda (topic) (mapcar #'car (cdr topic))) mail-topics)))
       (expect (mapcar #'car mail-topics) :to-equal '("Gmail" "Labels" "Lists"))
@@ -870,7 +878,14 @@ window and deletes the summary's."
     (expect mail-bulk-groups :to-have-same-items-as
             '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs"
               "nnmaildir+gmail:org-mode" "nnmaildir+gmail:new"
-              "nnmaildir+news:gmane.emacs.devel")))
+              "nnmaildir+news:gmane.emacs.devel" "nnmaildir+news:gmane.emacs.orgmode")))
+  (it "keeps every news group it subscribes on startup out of the routine scan"
+    ;; a scan reads every message it has no overview for: a year of a list
+    (let ((news (seq-filter (lambda (group) (string-prefix-p "nnmaildir+news:" group))
+                            mail-groups)))
+      (expect news :not :to-be nil)
+      (dolist (group news)
+        (expect (member group mail-bulk-groups) :to-be-truthy))))
   (it "leaves every bulk group inside the group buffer's list level"
     (require 'gnus)
     (expect (<= (1+ gnus-activate-level) gnus-level-subscribed) :to-be t)))
