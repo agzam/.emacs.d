@@ -2,11 +2,11 @@
 ;;; Commentary:
 ;; Gnus over a maildir that mbsync mirrors from Gmail: every label is an
 ;; nnmaildir group, notmuch is only the search index behind gnus-search,
-;; and a batch Emacs fetches gmane's lists into a maildir.  Outgoing mail always
-;; leaves as agzam.ibragimov - sending it through the inbox account
-;; with that address as an alias stamps "sent on behalf" - and a Gcc copy
-;; lands in the synced sent folder so threads in the mirrored store keep
-;; their replies.
+;; and batch Emacs runs fetch gmane's lists and subreddits into maildirs.
+;; Outgoing mail always leaves as agzam.ibragimov - sending it through the
+;; inbox account with that address as an alias stamps "sent on
+;; behalf" - and a Gcc copy lands in the synced sent folder so threads in
+;; the mirrored store keep their replies.
 ;;; Code:
 
 (defvar gmail-maildir (expand-file-name "~/.mail/gmail/")
@@ -17,6 +17,9 @@
 
 (defvar news-server "news.gmane.io"
   "NNTP server the news groups are fetched from.")
+
+(defvar reddit-maildir (expand-file-name "~/.mail/reddit/")
+  "Maildir root the Reddit fetch fills; subreddit NAME is the subdir r.NAME.")
 
 (defvar mail-from-address "agzam.ibragimov@gmail.com"
   "Address every outgoing message is sent from.")
@@ -37,8 +40,7 @@
   "Group mbsync mirrors from Gmail's All Mail, where archived mail lives.")
 
 (defvar mail-groups (list mail-inbox-group "nnmaildir+news:gmane.emacs.devel"
-                          "nnmaildir+news:gmane.emacs.orgmode"
-                          "nnatom+www.reddit.com/r/emacs/new/.rss:r/emacs")
+                          "nnmaildir+news:gmane.emacs.orgmode" "nnmaildir+reddit:r.emacs")
   "Groups Gnus subscribes to on startup, on top of every maildir group.")
 
 (defvar mail-remote-backends '(nntp nnatom)
@@ -46,7 +48,8 @@
 
 (defvar mail-bulk-groups
   '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs" "nnmaildir+gmail:org-mode"
-    "nnmaildir+news:gmane.emacs.devel" "nnmaildir+news:gmane.emacs.orgmode")
+    "nnmaildir+news:gmane.emacs.devel" "nnmaildir+news:gmane.emacs.orgmode"
+    "nnmaildir+reddit:r.emacs")
   "Groups no sync rescans: tens of thousands of files each.")
 
 (defvar mail-topics
@@ -68,7 +71,7 @@
      ("nnmaildir+news:gmane.emacs.devel" . "emacs-devel, fetched from gmane")
      ("nnmaildir+news:gmane.emacs.orgmode" . "emacs-orgmode, fetched from gmane")
      ("nnmaildir+gmail:emacs" . "emacs-devel, delivered to Gmail")
-     ("nnatom+www.reddit.com/r/emacs/new/.rss:r/emacs" . "Reddit, every new post")
+     ("nnmaildir+reddit:r.emacs" . "Reddit, posts and comments")
      ("nnmaildir+gmail:org-mode" . "emacs-orgmode, delivered to Gmail")
      ("nnmaildir+gmail:clojure" . "Clojure groups, Clojurists Together")))
   "Topics under Gnus's root topic, in order: (TOPIC (GROUP . DESCRIPTION)...).
@@ -94,8 +97,9 @@ Any other label's chip takes the face `mail-label'.")
 (defvar mail-treat-quotes t
   "Treatment condition for `highlight-mail-quotes', like the gnus-treat ones.")
 
-;; the news store fills while Emacs runs, whether Gnus runs or not
+;; the news and Reddit stores fill while Emacs runs, whether Gnus runs or not
 (add-hook 'emacs-startup-hook #'start-news-fetch-timer)
+(add-hook 'emacs-startup-hook #'start-reddit-fetch-timer)
 
 (use-package gnus
   :ensure nil
@@ -107,11 +111,8 @@ Any other label's chip takes the face `mail-label'.")
           ;; a search names a hit's group by its path under remove-prefix
           (nnmaildir "news" (directory ,news-maildir) (get-new-mail nil)
                      (gnus-search-engine gnus-search-notmuch (remove-prefix ,news-maildir)))
-          ;; the feed's own title, "newest submissions : emacs", would
-          ;; name the group
-          (nnatom "www.reddit.com/r/emacs/new/.rss"
-                  (nnatom-read-title-function ,(lambda (_) "r/emacs"))
-                  (nnatom-read-feed-function read-atom-feed)))
+          (nnmaildir "reddit" (directory ,reddit-maildir) (get-new-mail nil)
+                     (gnus-search-engine gnus-search-notmuch (remove-prefix ,reddit-maildir))))
         ;; asked for new groups, nnmaildir registers every label it has
         ;; not read, and such a label then opens empty
         gnus-check-new-newsgroups nil
@@ -158,7 +159,11 @@ Any other label's chip takes the face `mail-label'.")
           ("\\`nnmaildir\\+gmail:archive\\'" (display . 200))
           ;; a year of a list; a followup posts to the server it came from
           ("\\`nnmaildir\\+news:" (display . 500) (gnus-use-scoring t)
-           (post-method nntp ,news-server)))
+           (post-method nntp ,news-server))
+          ;; a thread's post can sit below the 500 its comments are in, and
+          ;; heads the thread once its header is fetched too; `some' would
+          ;; have nnmaildir hand over every header of the group each time
+          ("\\`nnmaildir\\+reddit:" (display . 500) (gnus-fetch-old-headers 2000)))
         ;; the function already puts the newest thread first; (not ...)
         ;; would sort oldest first
         gnus-thread-sort-functions '(gnus-thread-sort-by-most-recent-date)
@@ -202,10 +207,21 @@ Any other label's chip takes the face `mail-label'.")
   ;; a feed is read from its downloaded copy, so a group never waits on
   ;; the network; the download itself runs in the background
   (add-hook 'gnus-started-hook #'start-feed-fetches 95)
-  ;; the news store is filled the same way, by a batch Emacs
+  ;; the news and Reddit stores are filled the same way, by a batch Emacs
   (add-hook 'gnus-started-hook #'fetch-stale-news 95)
+  (add-hook 'gnus-started-hook #'fetch-stale-reddit 95)
+  ;; a fetch and a batch read of one folder would number its messages
+  ;; twice, so each waits for the other
+  (add-hook 'mail-load-parked-functions #'news-group-parked-p)
+  (add-hook 'mail-load-parked-functions #'reddit-group-parked-p)
+  (add-hook 'mail-load-finished-hook #'fetch-pending-news)
+  (add-hook 'mail-load-finished-hook #'fetch-pending-reddit)
+  (add-hook 'mail-sync-hook #'fetch-news)
+  (add-hook 'mail-sync-hook #'fetch-feeds)
+  (add-hook 'mail-sync-hook #'fetch-reddit)
   ;; Gnus gives up on a server whose directory is missing
   (add-hook 'gnus-before-startup-hook #'ensure-news-folders)
+  (add-hook 'gnus-before-startup-hook #'ensure-reddit-folders)
   (add-hook 'gnus-subscribe-newsgroup-functions #'defer-news-group-h)
 
   (defun bind-mail-keys (mode &rest _)

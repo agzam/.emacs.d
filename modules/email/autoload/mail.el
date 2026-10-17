@@ -9,7 +9,6 @@
 (require 'url-util)
 
 (defvar gmail-maildir)
-(defvar news-maildir)
 (defvar mail-sync-program)
 (defvar mail-inbox-group)
 (defvar mail-trash-group)
@@ -19,6 +18,9 @@
 (defvar gnus-topic-alist)
 
 ;;; Sync
+
+(defvar mail-sync-hook nil
+  "Hook `sync-mail' runs to fetch what lives outside Gmail.")
 
 (defun mail-sync-command (&optional full)
   "Command line for `mail-sync-program'; FULL runs every sync tier at once."
@@ -39,7 +41,7 @@
 
 ;;;###autoload
 (defun sync-mail (&optional full)
-  "Sync mail with Gmail, fetch the news and the feeds, all in the background.
+  "Sync mail with Gmail and run `mail-sync-hook', all in the background.
 With FULL, the mail sync runs every tier at once."
   (interactive "P")
   (let ((buf (get-buffer-create " *mail-sync*")))
@@ -49,8 +51,7 @@ With FULL, the mail sync runs every tier at once."
                   :buffer buf
                   :command (mail-sync-command full)
                   :sentinel #'mail-sync-sentinel))
-  (fetch-news)
-  (fetch-feeds))
+  (run-hooks 'mail-sync-hook))
 
 ;;; Syncs launchd runs
 
@@ -338,14 +339,15 @@ Returns the group's name, nil when nothing matched."
 
 ;;;###autoload
 (defun mail-file-group (file)
-  "Group of FILE, a message file in the Gmail store or the news store, or nil."
-  (seq-some (pcase-lambda (`(,root . ,prefix))
-              (when (string-prefix-p root file)
-                (concat prefix (car (split-string (substring file (length root)) "/")))))
-            (list (cons (file-name-as-directory (expand-file-name gmail-maildir))
-                        "nnmaildir+gmail:")
-                  (cons (file-name-as-directory (expand-file-name news-maildir))
-                        "nnmaildir+news:"))))
+  "Group of FILE, a message file in the store of an nnmaildir server, or nil."
+  (seq-some (lambda (method)
+              (when-let* (((eq (car method) 'nnmaildir))
+                          (root (file-name-as-directory
+                                 (expand-file-name (cadr (assq 'directory (cddr method))))))
+                          ((string-prefix-p root file)))
+                (format "nnmaildir+%s:%s" (cadr method)
+                        (car (split-string (substring file (length root)) "/")))))
+            gnus-secondary-select-methods))
 
 (defun mail-copy-rank (file)
   "Rank of FILE, one copy of a message; the lowest shows.
@@ -650,15 +652,28 @@ address appears there."
   (interactive nil gnus-summary-mode mail-thread-mode gnus-article-mode)
   (browse-url (gmail-message-url (mail-header-id (mail-header-on-screen)))))
 
+(defun archived-at-on-screen ()
+  "URL the Archived-At header of the message on screen names, or nil."
+  (pcase-let ((`(,summary . ,article) (mail-on-screen)))
+    (with-current-buffer summary
+      (when (gnus-request-head article gnus-newsgroup-name)
+        (with-current-buffer nntp-server-buffer
+          (when-let* ((value (mail-fetch-field "Archived-At")))
+            (string-trim value "[ \t\n<]+" "[ \t\n>]+")))))))
+
 ;;;###autoload
 (defun open-message-in-list-archive ()
-  "Open the message at point in its mailing list's public archive."
+  "Open the message at point where its Archived-At header points.
+Without one, open it in the public archive of the mailing list among its
+recipients."
   (interactive nil gnus-summary-mode mail-thread-mode gnus-article-mode)
-  (let* ((header (mail-header-on-screen))
-         (extra (mail-header-extra header))
-         (recipients (concat (cdr (assq 'To extra)) " " (cdr (assq 'Cc extra)))))
-    (if-let* ((url (list-archive-message-url (mail-header-id header) recipients)))
-        (browse-url url)
-      (user-error "No known mailing list among the recipients"))))
+  (if-let* ((url (or (archived-at-on-screen)
+                     (let* ((header (mail-header-on-screen))
+                            (extra (mail-header-extra header)))
+                       (list-archive-message-url
+                        (mail-header-id header)
+                        (concat (cdr (assq 'To extra)) " " (cdr (assq 'Cc extra))))))))
+      (browse-url url)
+    (user-error "No Archived-At header, and no known mailing list among the recipients")))
 
 ;;; mail.el ends here

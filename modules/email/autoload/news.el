@@ -146,4 +146,15 @@ starts it when done: both would number the posts it delivers."
     (setq news-fetch-timer
           (run-with-timer news-fetch-interval news-fetch-interval #'fetch-news))))
 
+;;;###autoload
+(defun news-group-parked-p (group)
+  "Non-nil when GROUP is a news group and a news fetch delivers into it now."
+  (and (news-group-p group) (process-live-p news-fetch-process)))
+
+;;;###autoload
+(defun fetch-pending-news ()
+  "Start the news fetch a batch read of a news group held back."
+  (when news-fetch-pending
+    (fetch-news)))
+
 ;;; news.el ends here

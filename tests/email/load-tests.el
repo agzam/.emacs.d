@@ -185,6 +185,7 @@ loader made are the spec's own."
 
   (it "holds a news group back while a news fetch delivers into it"
     (load-tests--with-state ((news-fetch-process 'fetch)
+                             (mail-load-parked-functions (list #'news-group-parked-p))
                              (made nil))
       (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
                 ((symbol-function 'process-live-p) (lambda (process) (eq process 'fetch)))
@@ -198,12 +199,28 @@ loader made are the spec's own."
   (it "keeps a news group waiting for its fetch pending, and nothing else waiting on it"
     ;; a search would wait the whole fetch otherwise
     (load-tests--with-state ((news-fetch-process 'fetch)
+                             (mail-load-parked-functions (list #'news-group-parked-p))
                              (mail-load-queue (list "nnmaildir+news:gmane.test")))
       (cl-letf (((symbol-function 'process-live-p) (lambda (process) (eq process 'fetch))))
         (expect (mail-group-pending-p "nnmaildir+news:gmane.test") :to-be-truthy)
         (expect (mail-load-busy-p) :to-be nil)
         (setq mail-load-queue (list "nnmaildir+news:gmane.test" "nnmaildir+gmail:inbox"))
         (expect (mail-load-busy-p) :to-be-truthy))))
+
+  (it "holds back a group any parked function names, and only that one"
+    (load-tests--with-state ((gnus-secondary-select-methods
+                              '((nnmaildir "gmail" (directory "/mail/gmail/"))
+                                (nnmaildir "reddit" (directory "/mail/reddit/"))))
+                             (mail-load-parked-functions
+                              (list #'ignore (lambda (group) (string-suffix-p ":r.test" group))))
+                             (made nil))
+      (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
+                ((symbol-function 'make-process)
+                 (lambda (&rest args) (push (plist-get args :command) made) 'batch))
+                ((symbol-function 'process-send-eof) #'ignore))
+        (load-mail-groups '("nnmaildir+reddit:r.test" "nnmaildir+gmail:inbox")))
+      (expect mail-load-running :to-equal '("nnmaildir+gmail:inbox"))
+      (expect mail-load-queue :to-equal '("nnmaildir+reddit:r.test"))))
 
   (it "starts nothing while Gnus is down"
     (load-tests--with-state ((made nil))
@@ -235,6 +252,22 @@ loader made are the spec's own."
       (mail-load-note '(loaded "nnmaildir+gmail:inbox" "/new"))
       (expect mail-load-tables :to-equal '(("nnmaildir+gmail:sent" . "/sent")
                                            ("nnmaildir+gmail:inbox" . "/new"))))))
+
+(describe "mail-load-sentinel"
+  (it "runs mail-load-finished-hook once the batch is forgotten, so a fetch can start"
+    (load-tests--with-state ((mail-load-process (start-process "load-tests" nil "true"))
+                             (mail-load-running (list "nnmaildir+gmail:inbox"))
+                             (seen nil)
+                             (mail-load-finished-hook
+                              (list (lambda () (push (list mail-load-process mail-load-running)
+                                                     seen)))))
+      (let ((process mail-load-process))
+        (with-timeout (10)
+          (while (process-live-p process)
+            (accept-process-output nil 0.05)))
+        (cl-letf (((symbol-function 'message) #'ignore))
+          (mail-load-sentinel process "finished\n")))
+      (expect seen :to-equal '((nil nil))))))
 
 ;;; Applying a table
 

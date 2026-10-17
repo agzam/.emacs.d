@@ -60,15 +60,28 @@ Returns the hashtable; the caller binds `gnus-group-list' itself."
     (expect (mail-sync-command t) :to-equal '("mail-sync" "full"))))
 
 (describe "sync-mail"
-  (it "starts the mail sync, the news fetch and the feed downloads, all in the background"
-    (let (made fetched)
+  (it "starts the mail sync in the background, then runs mail-sync-hook"
+    (let* (made
+           fetched
+           (mail-sync-hook (list (lambda () (push (length made) fetched)))))
       (cl-letf (((symbol-function 'make-process)
-                 (lambda (&rest args) (push (plist-get args :command) made) 'process))
-                ((symbol-function 'fetch-news) (lambda (&rest _) (push 'news fetched)))
-                ((symbol-function 'fetch-feeds) (lambda (&rest _) (push 'feeds fetched))))
+                 (lambda (&rest args) (push (plist-get args :command) made) 'process)))
         (sync-mail))
       (expect made :to-equal '(("mail-sync" "sync")))
-      (expect fetched :to-have-same-items-as '(news feeds)))))
+      ;; the hook ran once, after the sync had started
+      (expect fetched :to-equal '(1)))))
+
+(describe "mail-file-group"
+  (it "names a file's group after the nnmaildir server whose store holds it"
+    (let ((gnus-secondary-select-methods
+           '((nnmaildir "gmail" (directory "/m/gmail/") (get-new-mail nil))
+             (nnmaildir "reddit" (directory "/m/reddit"))
+             (nnatom "example.org/feed"))))
+      (expect (mail-file-group "/m/gmail/inbox/cur/1:2,S") :to-equal "nnmaildir+gmail:inbox")
+      ;; a directory named without its trailing slash still matches
+      (expect (mail-file-group "/m/reddit/r.emacs/cur/2:2,")
+              :to-equal "nnmaildir+reddit:r.emacs")
+      (expect (mail-file-group "/m/other/x/cur/3") :to-be nil))))
 
 (defmacro mail-tests--with-sentinel-stubs (code calls &rest body)
   "Run BODY with the sentinel's dependencies stubbed, PROC exiting with CODE.
@@ -628,6 +641,45 @@ and the news group have no folder in the store."
             (expect opened :to-equal (gmail-message-url "<seven@x>")))
         (kill-buffer summary)))))
 
+(defun mail-tests--open-in-archive (head)
+  "URL `open-message-in-list-archive' opens for article 7, whose head is HEAD.
+The article sits in a Reddit group, addressed to emacs-orgmode."
+  (let ((summary (generate-new-buffer " *mail-tests summary*"))
+        (nntp-server-buffer (generate-new-buffer " *mail-tests nntp*"))
+        opened)
+    (unwind-protect
+        (progn
+          (with-current-buffer summary
+            (setq-local gnus-newsgroup-name "nnmaildir+reddit:r.test")
+            (setq-local gnus-newsgroup-data
+                        (list (gnus-data-make
+                               7 gnus-read-mark 1
+                               (make-full-mail-header 7 "s" "a@x" "" "<seven@x>" "" 0 0 nil
+                                                      '((To . "emacs-orgmode@gnu.org")))
+                               0))))
+          (cl-letf (((symbol-function 'mail-on-screen) (lambda () (cons summary 7)))
+                    ((symbol-function 'gnus-request-head)
+                     (lambda (article group)
+                       (with-current-buffer nntp-server-buffer
+                         (erase-buffer)
+                         (insert head))
+                       (and (eql article 7) (equal group "nnmaildir+reddit:r.test"))))
+                    ((symbol-function 'browse-url) (lambda (url &rest _) (setq opened url))))
+            (with-temp-buffer
+              (open-message-in-list-archive)))
+          opened)
+      (kill-buffer summary)
+      (kill-buffer nntp-server-buffer))))
+
+(describe "open-message-in-list-archive"
+  (it "opens where the message's Archived-At header points"
+    (expect (mail-tests--open-in-archive
+             "Message-ID: <c1.p2@reddit.com>\nArchived-At: <https://www.reddit.com/c1/>\n")
+            :to-equal "https://www.reddit.com/c1/"))
+  (it "opens the list's archive without one"
+    (expect (mail-tests--open-in-archive "Message-ID: <seven@x>\n")
+            :to-equal "https://list.orgmode.org/orgmode/seven%40x/")))
+
 (defmacro mail-tests--searching (hits &rest body)
   "Run BODY with the search stubbed to open a summary of HITS articles.
 The search specs land in `captured', and what Gnus's count question
@@ -794,7 +846,9 @@ would have been bounded by in `large'."
           (root (file-name-as-directory (expand-file-name "gmail" parent)))
           (news-root (file-name-as-directory (expand-file-name "news" parent)))
           (gmail-maildir root)
-          (news-maildir news-root))
+          (news-maildir news-root)
+          (gnus-secondary-select-methods `((nnmaildir "gmail" (directory ,root))
+                                           (nnmaildir "news" (directory ,news-root)))))
      (ignore news-root)
      (unwind-protect
          (progn
@@ -883,6 +937,8 @@ notmuch's arguments in `runs'."
           (root (file-name-as-directory dir))
           (gmail-maildir root)
           (news-maildir (file-name-as-directory (make-temp-file "mail-tests-news" t)))
+          (gnus-secondary-select-methods `((nnmaildir "gmail" (directory ,root))
+                                           (nnmaildir "news" (directory ,news-maildir))))
           (gnus-search-notmuch-config-file "/config/file")
           (engine (make-instance 'gnus-search-notmuch
                                  :program (mail-tests--notmuch dir ,all)

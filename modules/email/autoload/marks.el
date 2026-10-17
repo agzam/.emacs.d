@@ -367,6 +367,11 @@ the unread mark on a starred unread article and drops the star."
 
 ;;; Executing
 
+(defun local-only-group-p (group)
+  "Non-nil when GROUP is a maildir group of a store Gmail never sees."
+  (and (string-prefix-p "nnmaildir+" group)
+       (not (string-prefix-p "nnmaildir+gmail:" group))))
+
 (defun mail-marked-articles (verb)
   "Articles queued for VERB, lowest number first."
   (sort (mapcar #'car (seq-filter (lambda (mark) (eq (cdr mark) verb)) mail-marks))
@@ -376,8 +381,9 @@ the unread mark on a starred unread article and drops the star."
 (defun mail-execute-marks ()
   "Run the queue: deletions go to the trash, archives leave the inbox.
 A message's inbox copy goes either way, whichever copy this summary
-shows, and an archive keeps every label.  A news post is deleted where
-it lies.  Gnus's commands act on the process mark, lent the queue."
+shows, and an archive keeps every label.  A message of a store Gmail
+never sees is deleted where it lies.  Gnus's commands act on the process
+mark, lent the queue."
   (interactive nil gnus-summary-mode)
   (unless mail-marks
     (user-error "Nothing is marked"))
@@ -387,10 +393,11 @@ it lies.  Gnus's commands act on the process mark, lent the queue."
     (load-mail-groups (list mail-trash-group) t)
     (user-error "%s is still loading; the queue stays"
                 (gnus-group-short-name mail-trash-group)))
-  (let* ((news-p (lambda (article) (news-group-p (mail-article-group article))))
-         ;; Gmail never sees a news post, so none goes to the trash
-         (posts (seq-filter news-p (mail-marked-articles 'delete)))
-         (deletes (seq-remove news-p (mail-marked-articles 'delete)))
+  (let* ((post-p (lambda (article) (local-only-group-p (mail-article-group article))))
+         ;; Gmail never sees a news post or a Reddit message, so none
+         ;; goes to the trash
+         (posts (seq-filter post-p (mail-marked-articles 'delete)))
+         (deletes (seq-remove post-p (mail-marked-articles 'delete)))
          (archives (mail-marked-articles 'archive))
          (inbox-p (lambda (article)
                     (equal (mail-article-group article) mail-inbox-group)))
@@ -432,7 +439,7 @@ it lies.  Gnus's commands act on the process mark, lent the queue."
       (mapc #'mail-mark-redraw (seq-difference archives here)))
     (gnus-summary-limit-to-marks (list gnus-canceled-mark) 'reverse)
     (message "Trashed %d, archived %d%s" (length deletes) (length archives)
-             (if posts (format ", deleted %d news posts" (length posts)) ""))))
+             (if posts (format ", deleted %d posts" (length posts)) ""))))
 
 (defun mail-queue-description ()
   "The queue in words, such as \"2 deletions and 1 archive\"."

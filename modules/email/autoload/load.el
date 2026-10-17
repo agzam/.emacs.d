@@ -10,7 +10,6 @@
 (defvar doom-emacs-dir)
 (defvar mail-inbox-group)
 (defvar mail-archive-group)
-(defvar news-fetch-process)
 
 ;; the table format lives with the batch side that writes it
 (require 'mail-load (expand-file-name "scripts/mail-load" doom-emacs-dir))
@@ -54,6 +53,12 @@
 (defvar mail-load-gc-threshold nil
   "The `gc-cons-threshold' the loads raised, until Emacs idles; nil otherwise.")
 
+(defvar mail-load-parked-functions nil
+  "Functions of a group that return non-nil while a fetch delivers into its folder.")
+
+(defvar mail-load-finished-hook nil
+  "Hook run when a batch read ends, to start the fetches it held back.")
+
 (cl-defstruct (mail-load-job (:constructor make-mail-load-job) (:copier nil))
   "A table being turned into an nnmaildir group, a slice at a time."
   group server buffer header grp nlist ready)
@@ -91,11 +96,9 @@
   (member group mail-load-running))
 
 (defun mail-load-parked-p (group)
-  "Non-nil when GROUP is a news group and a news fetch delivers into it now.
+  "Non-nil when a fetch delivers into GROUP's folder now.
 Its read waits for the fetch, whose end asks for it again."
-  (and (news-group-p group)
-       (boundp 'news-fetch-process)
-       (process-live-p news-fetch-process)))
+  (run-hook-with-args-until-success 'mail-load-parked-functions group))
 
 ;;;###autoload
 (defun mail-load-busy-p ()
@@ -167,7 +170,7 @@ twice."
 
 (defun start-mail-load ()
   "Start a batch Emacs on the queued groups unless one runs or Gnus is down.
-A news group waits while a news fetch delivers into it."
+A group waits while a fetch delivers into its folder."
   (when (and (gnus-alive-p) (not (process-live-p mail-load-process)))
     (let ((groups (seq-remove #'mail-load-parked-p mail-load-queue)))
       (when groups
@@ -219,8 +222,7 @@ A news group waits while a news fetch delivers into it."
       (message "Could not read %s: %s" group (string-trim event)))
     (setq mail-load-running nil
           mail-load-process nil)
-    (when (and (boundp 'news-fetch-pending) news-fetch-pending)
-      (fetch-news))
+    (run-hooks 'mail-load-finished-hook)
     (start-mail-load)
     (mail-load-schedule)))
 

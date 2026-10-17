@@ -782,6 +782,18 @@ can tell which articles each verb reached."
                 :to-equal `((delete (4 9) nil)
                             (drop "nnmaildir+news:gmane.test" (4 9))
                             (limit (,gnus-canceled-mark) reverse))))))
+  (it "in a Reddit group, deletes the messages where they lie too"
+    ;; Gmail never sees them, and the trash would upload them
+    (marks-tests-in-summary '((4 0))
+      (let ((gnus-newsgroup-name "nnmaildir+reddit:r.emacs")
+            (marks-tests-inbox nil))
+        (setq-local mail-marks '((4 . delete)))
+        (marks-tests-with-execute-stubs
+          (mail-execute-marks))
+        (expect (marks-tests-steps)
+                :to-equal `((delete (4) nil)
+                            (drop "nnmaildir+reddit:r.emacs" (4))
+                            (limit (,gnus-canceled-mark) reverse))))))
   (it "in search results, deletes a news hit where it lies and trashes a mail hit"
     (marks-tests-in-summary '((1 0) (2 0))
       (let ((gnus-newsgroup-name "nnselect:search")

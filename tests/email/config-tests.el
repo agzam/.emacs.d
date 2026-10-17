@@ -22,6 +22,10 @@
 (defvar org-mime-obey-display-buffer-p)
 (defvar gnus-delay-default-delay)
 (defvar gnus-demon-timestep)
+;; load.el and mail.el define these; the hook spec binds them
+(defvar mail-load-parked-functions)
+(defvar mail-load-finished-hook)
+(defvar mail-sync-hook)
 
 (defun email-tests--load ()
   "Load the module config with `use-package' reduced to its :init forms.
@@ -70,18 +74,18 @@ in this process, which the mail suite performs."
     (expect news-maildir :to-equal (expand-file-name "~/.mail/news/"))
     (expect news-server :to-equal "news.gmane.io")
     (expect (assq 'nntp gnus-secondary-select-methods) :to-be nil))
-  (it "reads every new r/emacs post from Reddit's feed, into a group named r/emacs"
-    ;; nnatom names the group after the feed's title otherwise
-    (require 'gnus)
-    (let* ((server (assq 'nnatom gnus-secondary-select-methods))
-           (title (cadr (assq 'nnatom-read-title-function (cddr server)))))
-      (expect (cadr server) :to-equal "www.reddit.com/r/emacs/new/.rss")
-      (expect (funcall title '(feed nil (title nil "newest submissions : emacs")))
-              :to-equal "r/emacs")
-      ;; Reddit answers url.el with 403 Blocked
-      (expect (cadr (assq 'nnatom-read-feed-function (cddr server))) :to-be 'read-atom-feed)
-      (expect (gnus-group-prefixed-name "r/emacs" server)
-              :to-equal (car (last mail-groups)))))
+  (it "reads the subreddits from the store a batch Emacs fills, threaded by reply"
+    ;; Reddit's feeds carry no References, so nnatom could not thread them
+    (let ((server (seq-find (lambda (method) (equal (cadr method) "reddit"))
+                            gnus-secondary-select-methods)))
+      (expect (car server) :to-be 'nnmaildir)
+      (expect (cadr (assq 'directory (cddr server))) :to-equal reddit-maildir)
+      (expect (assq 'get-new-mail (cddr server)) :to-equal '(get-new-mail nil))
+      (expect (cdr (assq 'gnus-search-engine (cddr server)))
+              :to-equal `(gnus-search-notmuch (remove-prefix ,reddit-maildir))))
+    (expect reddit-maildir :to-equal (expand-file-name "~/.mail/reddit/"))
+    (expect (assq 'nnatom gnus-secondary-select-methods) :to-be nil)
+    (expect (member "nnmaildir+reddit:r.emacs" mail-groups) :to-be-truthy))
   (it "never asks a server for new groups or saves the killed list"
     (expect gnus-check-new-newsgroups :to-be nil)
     (expect gnus-save-killed-list :to-be nil)
@@ -97,6 +101,8 @@ in this process, which the mail suite performs."
           (gnus-server-method-cache nil))
       (expect (slot-value (gnus-search-server-to-engine "nnmaildir:news") 'remove-prefix)
               :to-equal news-maildir)
+      (expect (slot-value (gnus-search-server-to-engine "nnmaildir:reddit") 'remove-prefix)
+              :to-equal reddit-maildir)
       (expect (slot-value (gnus-search-server-to-engine "nnmaildir:gmail") 'remove-prefix)
               :to-equal gmail-maildir)))
   (it "hands the search parser each message's inbox copy"
@@ -142,11 +148,20 @@ in this process, which the mail suite performs."
   (it "shows the archive as a newest slice, overriding the general entry"
     (email-tests--with-empty-newsrc
       (expect (gnus-group-find-parameter "nnmaildir+gmail:archive" 'display) :to-equal 200)))
-  (it "shows a news group's newest 500 posts, read and unread"
+  (it "shows a news or Reddit group's newest 500 messages, read and unread"
     (email-tests--with-empty-newsrc
       (expect (gnus-group-find-parameter "nnmaildir+news:gmane.emacs.devel" 'display)
               :to-equal 500)
+      (expect (gnus-group-find-parameter "nnmaildir+reddit:r.emacs" 'display) :to-equal 500)
       (expect (gnus-group-find-parameter "nnmaildir+gmail:inbox" 'display) :to-be 'all)))
+  (it "heads a Reddit thread with its post, though the post sits below the newest 500"
+    (email-tests--with-empty-newsrc
+      (with-temp-buffer
+        (gnus-summary-set-local-parameters "nnmaildir+reddit:r.emacs")
+        (expect gnus-fetch-old-headers :to-equal 2000))
+      (with-temp-buffer
+        (gnus-summary-set-local-parameters "nnmaildir+news:gmane.emacs.devel")
+        (expect gnus-fetch-old-headers :to-be nil))))
   (it "posts a followup from a news group to the server it came from"
     (require 'gnus-msg)
     (email-tests--with-empty-newsrc
@@ -696,7 +711,11 @@ window and deletes the summary's."
                       mail-article-group group-articles-by-id drop-gone-articles)
                      ;; a timer, a hook or a sibling file calls these
                      ("news.el" fetch-news fetch-stale-news start-news-fetch-timer
-                      ensure-news-folders news-group-p make-news-folder news-active-groups)
+                      ensure-news-folders news-group-p make-news-folder news-active-groups
+                      news-group-parked-p fetch-pending-news)
+                     ("reddit.el" fetch-reddit fetch-stale-reddit start-reddit-fetch-timer
+                      ensure-reddit-folders reddit-group-p reddit-group-parked-p
+                      fetch-pending-reddit)
                      ("load.el" load-mail-groups maildir-group-p mail-group-loaded-p
                       mail-group-pending-p mail-group-reading-p mail-load-busy-p
                       mail-full-group-name wait-for-mail-load load-unloaded-mail-groups
@@ -841,8 +860,7 @@ window and deletes the summary's."
   (it "subscribes the inbox, emacs-devel, emacs-orgmode and r/emacs on startup"
     (expect mail-groups :to-equal
             '("nnmaildir+gmail:inbox" "nnmaildir+news:gmane.emacs.devel"
-              "nnmaildir+news:gmane.emacs.orgmode"
-              "nnatom+www.reddit.com/r/emacs/new/.rss:r/emacs"))
+              "nnmaildir+news:gmane.emacs.orgmode" "nnmaildir+reddit:r.emacs"))
     (expect (member mail-inbox-group mail-groups) :to-be-truthy)))
 
 (describe "email module group buffer"
@@ -897,13 +915,15 @@ window and deletes the summary's."
     (expect mail-bulk-groups :to-have-same-items-as
             '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs"
               "nnmaildir+gmail:org-mode"
-              "nnmaildir+news:gmane.emacs.devel" "nnmaildir+news:gmane.emacs.orgmode")))
-  (it "keeps every news group it subscribes on startup out of the routine scan"
+              "nnmaildir+news:gmane.emacs.devel" "nnmaildir+news:gmane.emacs.orgmode"
+              "nnmaildir+reddit:r.emacs")))
+  (it "keeps every group a fetch fills that it subscribes on startup out of the routine scan"
     ;; a scan reads every message it has no overview for: a year of a list
-    (let ((news (seq-filter (lambda (group) (string-prefix-p "nnmaildir+news:" group))
-                            mail-groups)))
-      (expect news :not :to-be nil)
-      (dolist (group news)
+    (let ((fetched (seq-filter (lambda (group)
+                                 (string-match-p "\\`nnmaildir\\+\\(news\\|reddit\\):" group))
+                               mail-groups)))
+      (expect (length fetched) :to-equal 3)
+      (dolist (group fetched)
         (expect (member group mail-bulk-groups) :to-be-truthy))))
   (it "leaves every bulk group inside the group buffer's list level"
     (require 'gnus)
@@ -1000,7 +1020,7 @@ window and deletes the summary's."
       (expect gnus-started-hook
               :to-equal '(drop-vanished-mail-groups subscribe-mail-groups apply-mail-topics
                           load-all-mail-groups start-mail-sync-check start-mail-queue
-                          start-feed-fetches fetch-stale-news))))
+                          start-feed-fetches fetch-stale-news fetch-stale-reddit))))
   (it "renames and deletes a label's group in Gmail too, never its folder alone"
     ;; mbsync's sync state would point at a label Gmail lacks
     (require 'gnus-group)
@@ -1049,7 +1069,7 @@ window and deletes the summary's."
         (advice-remove 'gnus-summary-read-group #'wait-for-mail-group-a)
         (advice-remove 'gnus-summary-refer-thread #'wait-for-mail-loads-a)
         (advice-remove 'gnus-group-read-ephemeral-search-group #'wait-for-mail-loads-a))))
-  (it "creates the news store before Gnus opens its server"
+  (it "creates the news and Reddit stores before Gnus opens their servers"
     ;; Gnus gives up on a server whose directory is missing
     (require 'gnus-start)
     (let ((gnus-before-startup-hook nil))
@@ -1057,9 +1077,25 @@ window and deletes the summary's."
         (when (and (eq (car-safe form) 'add-hook)
                    (equal (cadr form) ''gnus-before-startup-hook))
           (eval form t)))
-      (expect gnus-before-startup-hook :to-equal '(ensure-news-folders))))
-  (it "fetches news while Emacs runs, whether Gnus runs or not"
-    (expect (memq #'start-news-fetch-timer emacs-startup-hook) :to-be-truthy))
+      (expect gnus-before-startup-hook :to-equal '(ensure-reddit-folders ensure-news-folders))))
+  (it "fetches news and Reddit while Emacs runs, whether Gnus runs or not"
+    (expect (memq #'start-news-fetch-timer emacs-startup-hook) :to-be-truthy)
+    (expect (memq #'start-reddit-fetch-timer emacs-startup-hook) :to-be-truthy))
+  (it "keeps each fetch and the batch read of its folders apart, and , u starts every fetch"
+    ;; both would number the messages a fetch delivers
+    (let ((mail-load-parked-functions nil)
+          (mail-load-finished-hook nil)
+          (mail-sync-hook nil))
+      (dolist (form (email-tests--config-forms 'gnus))
+        (when (and (eq (car-safe form) 'add-hook)
+                   (member (cadr form) '('mail-load-parked-functions 'mail-load-finished-hook
+                                         'mail-sync-hook)))
+          (eval form t)))
+      (expect mail-load-parked-functions
+              :to-have-same-items-as '(news-group-parked-p reddit-group-parked-p))
+      (expect mail-load-finished-hook
+              :to-have-same-items-as '(fetch-pending-news fetch-pending-reddit))
+      (expect mail-sync-hook :to-have-same-items-as '(fetch-news fetch-feeds fetch-reddit))))
   (it "loads the advice and the hook functions before any command of their file ran"
     (pcase-dolist (`(,file . ,fns)
                    '(("mail.el" defer-mail-server-scan-a scan-mail-group-on-miss-a)

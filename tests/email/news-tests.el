@@ -197,6 +197,26 @@ It records its arguments and whether its input ended in ROOT/ran."
         (expect said :to-match "News fetch failed")
         (expect news-fetched-at :to-be nil)))))
 
+(describe "news-group-parked-p"
+  (it "holds a news group back only while a news fetch runs"
+    (let ((news-fetch-process 'fetch))
+      (cl-letf (((symbol-function 'process-live-p) (lambda (process) (eq process 'fetch))))
+        (expect (news-group-parked-p "nnmaildir+news:gmane.test") :to-be-truthy)
+        (expect (news-group-parked-p "nnmaildir+gmail:inbox") :to-be nil))
+      (cl-letf (((symbol-function 'process-live-p) #'ignore))
+        (expect (news-group-parked-p "nnmaildir+news:gmane.test") :to-be nil)))))
+
+(describe "fetch-pending-news"
+  (it "starts the fetch a load held back, and none otherwise"
+    (let (fetched)
+      (cl-letf (((symbol-function 'fetch-news) (lambda () (push t fetched))))
+        (let ((news-fetch-pending nil))
+          (fetch-pending-news))
+        (expect fetched :to-be nil)
+        (let ((news-fetch-pending t))
+          (fetch-pending-news))
+        (expect fetched :to-equal '(t))))))
+
 (describe "fetch-stale-news"
   (it "fetches when no fetch ended well within the interval"
     (let ((news-fetch-interval 1800) fetched)

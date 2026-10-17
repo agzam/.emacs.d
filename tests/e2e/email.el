@@ -30,6 +30,12 @@
 (defvar news-fetch-script)
 (defvar news-fetch-process)
 (defvar news-fetched-at)
+(defvar reddit-maildir)
+(defvar reddit-fetch-directory)
+(defvar reddit-fetch-script)
+(defvar reddit-fetch-process)
+(defvar reddit-fetch-pending)
+(defvar reddit-fetched-at)
 (defvar mail-load-script)
 (defvar mail-load-directory)
 (defvar mail-table-directory)
@@ -174,6 +180,24 @@ FLAGS, when given, ends the name as a maildir suffix."
             (if references (concat "References: " references "\n") "")
             "\n"
             "body of " subject "\n")))
+
+(defun email-e2e--write-reddit-message (file id date &optional references flags)
+  "Write to FILE a message of r.test shaped as the Reddit fetch writes one.
+ID is its Message-ID's local part, REFERENCES its References, and FLAGS,
+when given, ends the name as a maildir suffix."
+  (with-temp-file (if flags (concat file ":2," flags) file)
+    (insert "From: \"u/ann\" <ann@reddit.invalid>\n"
+            "Subject: " (if references "Re: " "") "Reddit post\n"
+            "Date: " date "\n"
+            "Message-ID: <" id "@reddit.com>\n"
+            (if references
+                (format "References: %s\nIn-Reply-To: %s\n"
+                        references (car (last (split-string references))))
+              "")
+            "Archived-At: <https://www.reddit.com/r/test/" id "/>\n"
+            "MIME-Version: 1.0\n"
+            "Content-Type: text/html; charset=utf-8\n\n"
+            "<p>body of " id "</p>\n")))
 
 (defun email-e2e--write-feed (file posts)
   "Write to FILE an Atom feed shaped like Reddit's, holding POSTS.
@@ -705,6 +729,29 @@ buffers, summary and queued files the cases leave are cleared after."
          (news-fetch-script (expand-file-name "news-fetch.el" e2e-work-dir))
          (news-fetch-process nil)
          (news-fetched-at nil)
+         ;; a subreddit in a store of its own, which a stand-in for the
+         ;; batch fetch fills from reddit-outbox/ once reddit-go exists
+         (reddit-root (expand-file-name "reddit/" e2e-work-dir))
+         (reddit-group "nnmaildir+reddit:r.test")
+         (reddit-dir (expand-file-name "r.test/" reddit-root))
+         (reddit-outbox (expand-file-name "reddit-outbox/" e2e-work-dir))
+         (reddit-go (expand-file-name "reddit-go" e2e-work-dir))
+         (reddit-maildir reddit-root)
+         (reddit-fetch-directory (expand-file-name "reddit-fetch/" e2e-work-dir))
+         (reddit-fetch-script (expand-file-name "reddit-fetch.el" e2e-work-dir))
+         (reddit-fetch-process nil)
+         (reddit-fetch-pending nil)
+         (reddit-fetched-at nil)
+         ;; Gnus shows one message more than display, so the subreddit shows
+         ;; its two newest and leaves its post out, the way older posts
+         ;; fall out of 500
+         (gnus-parameters
+          (mapcar (lambda (entry)
+                    (if (equal (car entry) "\\`nnmaildir\\+reddit:")
+                        `(,(car entry) (display . 1)
+                          ,@(assq-delete-all 'display (copy-sequence (cdr entry))))
+                      entry))
+                  gnus-parameters))
          ;; the real batch reads the groups, held back while load-hold
          ;; exists, and saves its tables here
          (load-hold (expand-file-name "load-hold" e2e-work-dir))
@@ -729,7 +776,7 @@ buffers, summary and queued files the cases leave are cleared after."
          ;; the module's mail-groups would add gmane and Reddit, which
          ;; CI cannot reach
          (gmail-maildir root)
-         (mail-groups (list feed-group news-group))
+         (mail-groups (list feed-group news-group reddit-group))
          ;; html and moved are left out; trash and labelled start empty
          (mail-topics `(("Gmail" ("nnmaildir+gmail:inbox" . "Inbox")
                          ("nnmaildir+gmail:archive" . "All Mail")
@@ -739,7 +786,8 @@ buffers, summary and queued files the cases leave are cleared after."
                         ("Lists" ("nnmaildir+gmail:lists" . "A list thread")
                          ("nnmaildir+gmail:emacs" . "emacs-devel")
                          (,feed-group . "Reddit, every new post")
-                         (,news-group . "A news group"))))
+                         (,news-group . "A news group")
+                         (,reddit-group . "A subreddit"))))
          ;; moved sits with the bulk groups, so , m files into a group
          ;; nnmaildir has not read this session
          (mail-bulk-groups '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs"
@@ -751,6 +799,7 @@ buffers, summary and queued files the cases leave are cleared after."
           `((nnmaildir "gmail" (directory ,root) (get-new-mail nil))
             (nnmaildir "news" (directory ,news-root) (get-new-mail nil)
                        (gnus-search-engine gnus-search-notmuch (remove-prefix ,news-root)))
+            (nnmaildir "reddit" (directory ,reddit-root) (get-new-mail nil))
             (nnatom ,feed (nnatom-read-title-function ,(lambda (_) "r/emacs"))
                     (nnatom-read-feed-function read-atom-feed))))
          (gnus-startup-file (expand-file-name "newsrc" e2e-work-dir))
@@ -805,6 +854,35 @@ buffers, summary and queued files the cases leave are cleared after."
                 (dolist (file (directory-files ,news-outbox t "\\`[^.]"))
                   (rename-file file (expand-file-name
                                      (concat "gmane.test/new/" (file-name-nondirectory file))
+                                     store)))
+                (kill-emacs 0))
+             (current-buffer)))
+    ;; a read post, a comment on it, a reply to the comment and a second
+    ;; comment; the stand-in's fetch brings a reply to the reply
+    (dolist (sub '("cur" "new" "tmp"))
+      (make-directory (expand-file-name sub reddit-dir) t))
+    (make-directory reddit-outbox t)
+    (email-e2e--write-reddit-message (expand-file-name "cur/1700000050.50.fixture" reddit-dir)
+                                     "p1" "Mon, 28 Sep 2026 10:00:00 +0000" nil "S")
+    (email-e2e--write-reddit-message (expand-file-name "cur/1700000051.51.fixture" reddit-dir)
+                                     "c1.p1" "Mon, 28 Sep 2026 11:00:00 +0000"
+                                     "<p1@reddit.com>" "")
+    (email-e2e--write-reddit-message (expand-file-name "cur/1700000052.52.fixture" reddit-dir)
+                                     "c2.p1" "Mon, 28 Sep 2026 12:00:00 +0000"
+                                     "<p1@reddit.com> <c1.p1@reddit.com>" "")
+    (email-e2e--write-reddit-message (expand-file-name "cur/1700000054.54.fixture" reddit-dir)
+                                     "c4.p1" "Mon, 28 Sep 2026 14:00:00 +0000"
+                                     "<p1@reddit.com>" "")
+    (email-e2e--write-reddit-message (expand-file-name "1700000053.53.fixture" reddit-outbox)
+                                     "c3.p1" "Mon, 28 Sep 2026 13:00:00 +0000"
+                                     "<p1@reddit.com> <c1.p1@reddit.com> <c2.p1@reddit.com>")
+    (with-temp-file reddit-fetch-script
+      (prin1 `(defun reddit-fetch-main (store _base)
+                (while (not (file-exists-p ,reddit-go))
+                  (sleep-for 0.05))
+                (dolist (file (directory-files ,reddit-outbox t "\\`[^.]"))
+                  (rename-file file (expand-file-name
+                                     (concat "r.test/new/" (file-name-nondirectory file))
                                      store)))
                 (kill-emacs 0))
              (current-buffer)))
@@ -1211,6 +1289,7 @@ buffers, summary and queued files the cases leave are cleared after."
                                    ("nnmaildir+gmail:emacs" . "Lists")
                                    (,feed-group . "Lists")
                                    (,news-group . "Lists")
+                                   (,reddit-group . "Lists")
                                    "misc"))
                           :got (format "%S" layout))
                   ;; Gnus subscribed them into the root topic
@@ -1351,6 +1430,50 @@ buffers, summary and queued files the cases leave are cleared after."
                 (record ", u's fetch counts the news group's new post"
                         (eql (gnus-group-unread news-group) 3)
                         :got (format "unread %S" (gnus-group-unread news-group)))
+                ;; a Reddit post and its comments read as one thread, each
+                ;; under what it answers, the post heading it from outside
+                ;; the window
+                (gnus-group-jump-to-group reddit-group)
+                (execute-kbd-macro (kbd "RET"))
+                (let ((levels (and (derived-mode-p 'gnus-summary-mode)
+                                   (sort (mapcar (lambda (data)
+                                                   (cons (mail-header-id (gnus-data-header data))
+                                                         (gnus-data-level data)))
+                                                 gnus-newsgroup-data)
+                                         (lambda (a b)
+                                           (or (< (cdr a) (cdr b))
+                                               (and (= (cdr a) (cdr b))
+                                                    (string< (car a) (car b)))))))))
+                  (record "RET on the Reddit group threads each comment under the one it answers, under its post"
+                          (equal levels '(("<p1@reddit.com>" . 0) ("<c1.p1@reddit.com>" . 1)
+                                          ("<c4.p1@reddit.com>" . 1) ("<c2.p1@reddit.com>" . 2)))
+                          :got (format "%s: %S" major-mode levels)))
+                (let (opened)
+                  (when (derived-mode-p 'gnus-summary-mode)
+                    (gnus-summary-goto-subject
+                     (gnus-data-number
+                      (seq-find (lambda (data)
+                                  (equal (mail-header-id (gnus-data-header data))
+                                         "<c2.p1@reddit.com>"))
+                                gnus-newsgroup-data)))
+                    (cl-letf (((symbol-function 'browse-url)
+                               (lambda (url &rest _) (setq opened url))))
+                      (execute-kbd-macro (kbd ", o l"))))
+                  (record ", o l on a Reddit message opens it where its Archived-At points"
+                          (equal opened "https://www.reddit.com/r/test/c2.p1/")
+                          :got (format "%S" opened)))
+                (when (derived-mode-p 'gnus-summary-mode)
+                  (gnus-summary-exit-no-update))
+                ;; the start's fetch delivers once reddit-go exists, and
+                ;; its end reads the group again
+                (write-region "" nil reddit-go)
+                (with-timeout (15)
+                  (while (not (eql (gnus-group-unread reddit-group) 4))
+                    (accept-process-output nil 0.05)))
+                (record "a finished Reddit fetch brings its comments into the group Gnus read"
+                        (eql (gnus-group-unread reddit-group) 4)
+                        :got (format "unread %S, fetching %S" (gnus-group-unread reddit-group)
+                                     (process-live-p reddit-fetch-process)))
                 ;; the stand-in notmuch answers with the archive's copy,
                 ;; and a hit maps to its group only once that group loaded
                 (write-region "" nil load-hold)
@@ -3657,7 +3780,8 @@ buffers, summary and queued files the cases leave are cleared after."
         ;; periodic download
         (dolist (process (process-list))
           (when (or (string-prefix-p "feed " (process-name process))
-                    (string-prefix-p "news-fetch" (process-name process)))
+                    (string-prefix-p "news-fetch" (process-name process))
+                    (string-prefix-p "reddit-fetch" (process-name process)))
             (delete-process process)))
         (when (timerp (bound-and-true-p feed-fetch-timer))
           (cancel-timer feed-fetch-timer)
@@ -3675,7 +3799,7 @@ buffers, summary and queued files the cases leave are cleared after."
             (when-let* ((summary (get-buffer name)))
               (with-current-buffer summary
                 (gnus-summary-exit-no-update))))
-          (dolist (group (list feed-group news-group))
+          (dolist (group (list feed-group news-group reddit-group))
             (when-let* ((summary (get-buffer (gnus-summary-buffer-name group))))
               (with-current-buffer summary
                 (gnus-summary-exit-no-update))))
