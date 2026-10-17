@@ -22,7 +22,6 @@
 (defvar mail-archive-group)
 (defvar mail-label-colors)
 (defvar gnus-message-archive-group)
-(defvar gnus-tmp-level)
 
 (defvar mail-label-keys nil
   "Keys pinned to labels, as (NAME . KEY); other labels get theirs by themselves.")
@@ -542,12 +541,11 @@ MESSAGE-IDS is nnmaildir's own table of the folder, so no file is read."
                groups)
       (sort tables :key (lambda (table) (mail-label-sort-key (car table)))))))
 
-(defun mail-message-labels (message-ids tables &optional except)
-  "Groups of TABLES but EXCEPT holding a message of MESSAGE-IDS."
+(defun mail-message-labels (message-ids tables)
+  "Groups of TABLES holding a message of MESSAGE-IDS."
   ;; jit-lock calls this for every line it draws, so no closure per call
   (cl-loop for (group . ids) in tables
-           when (and (not (equal group except))
-                     (cl-loop for id in message-ids thereis (gethash id ids)))
+           when (cl-loop for id in message-ids thereis (gethash id ids))
            collect group))
 
 (defun mail-label-chips (groups)
@@ -571,39 +569,33 @@ TABLES are `mail-label-tables', read afresh when not given."
 (defun gnus-user-format-function-L (_header)
   "The `%uL' summary column: the slot `draw-mail-labels' shows the labels in."
   (if (mail-labels-shown-p gnus-newsgroup-name)
-      (propertize " " 'mail-labels (or (bound-and-true-p gnus-tmp-level) 0))
+      (propertize " " 'mail-labels t)
     ""))
 
 (defun mail-line-labels (pos tables)
-  "Labels of TABLES on the message of the summary line at POS, but the group read."
+  "Labels of TABLES on the message of the summary line at POS."
   (when-let* ((article (get-text-property pos 'gnus-number))
               (header (gnus-summary-article-header article)))
-    (mail-message-labels (list (mail-header-id header)) tables gnus-newsgroup-name)))
+    (mail-message-labels (list (mail-header-id header)) tables)))
 
 (defun draw-mail-labels (start end)
-  "Show the labels of the summary lines from START to END in their slots.
-A reply whose labels are those of the line above shows none."
+  "Show every label of each summary line from START to END in its slot."
   (save-excursion
     (goto-char start)
     (forward-line 0)
     (when (text-property-not-all (point) end 'mail-labels nil)
-      (let* ((tables (mail-label-tables))
-             (chips (make-hash-table :test #'equal))
-             (above (unless (bobp)
-                      (mail-line-labels (line-beginning-position 0) tables))))
+      (let ((tables (mail-label-tables))
+            (chips (make-hash-table :test #'equal)))
         (while (< (point) end)
-          (let ((slot (text-property-not-all (point) (line-end-position) 'mail-labels nil))
-                (labels (mail-line-labels (point) tables)))
-            (when slot
+          (when-let* ((slot (text-property-not-all (point) (line-end-position)
+                                                   'mail-labels nil)))
+            (let ((labels (mail-line-labels (point) tables)))
               (put-text-property slot (1+ slot) 'display
-                                 (if (or (null labels)
-                                         (and (< 0 (get-text-property slot 'mail-labels))
-                                              (equal labels above)))
-                                     ""
-                                   (or (gethash labels chips)
-                                       (puthash labels (concat (mail-label-chips labels) " ")
-                                                chips)))))
-            (setq above labels))
+                                 (if labels
+                                     (or (gethash labels chips)
+                                         (puthash labels (concat (mail-label-chips labels) " ")
+                                                  chips))
+                                   ""))))
           (forward-line 1))))))
 
 ;;;###autoload
