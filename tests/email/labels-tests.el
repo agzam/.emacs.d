@@ -13,7 +13,6 @@
 (defvar mail-trash-group "nnmaildir+gmail:trash")
 (defvar mail-archive-group "nnmaildir+gmail:archive")
 (defvar mail-label-colors nil)
-(defvar gnus-tmp-level)
 
 ;; labels.el's top-level (require 'consult) must no-op in the batch tier;
 ;; the specs stub consult--read
@@ -666,7 +665,7 @@ Each of LINES is (ARTICLE LEVEL): the thread's indent, the slot, the subject."
     (push (gnus-data-make article gnus-read-mark (1+ (point)) (labels-tests-header article) level)
           gnus-newsgroup-data)
     (insert (propertize (concat (make-string (* 2 level) ?\s)
-                                (propertize " " 'mail-labels level)
+                                (propertize " " 'mail-labels t)
                                 (format "subject %d\n" article))
                         'gnus-number article)))
   (setq gnus-newsgroup-data (nreverse gnus-newsgroup-data)))
@@ -745,16 +744,14 @@ Each of LINES is (ARTICLE LEVEL): the thread's indent, the slot, the subject."
     (expect (mail-labels-shown-p nil) :to-be nil)))
 
 (describe "gnus-user-format-function-L"
-  (it "leaves a slot that knows the line's thread level, in a Gmail folder or a search"
+  (it "leaves a one-space slot in a Gmail folder or a search"
     (dolist (group (list mail-inbox-group "nnselect:nnselect-87a5d8"))
-      (let ((gnus-newsgroup-name group)
-            (gnus-tmp-level 2))
-        (let ((slot (gnus-user-format-function-L (labels-tests-header 1))))
-          (expect (substring-no-properties slot) :to-equal " ")
-          (expect (get-text-property 0 'mail-labels slot) :to-equal 2)))))
+      (let* ((gnus-newsgroup-name group)
+             (slot (gnus-user-format-function-L (labels-tests-header 1))))
+        (expect (substring-no-properties slot) :to-equal " ")
+        (expect (get-text-property 0 'mail-labels slot) :to-be t))))
   (it "leaves nothing in a news group or a feed, whose lines stay as they were"
-    (let ((gnus-newsgroup-name "nnmaildir+news:gmane.emacs.devel")
-          (gnus-tmp-level 0))
+    (let ((gnus-newsgroup-name "nnmaildir+news:gmane.emacs.devel"))
       (expect (gnus-user-format-function-L (labels-tests-header 1)) :to-equal ""))))
 
 (describe "draw-mail-labels"
@@ -763,30 +760,32 @@ Each of LINES is (ARTICLE LEVEL): the thread's indent, the slot, the subject."
     (setq tables (labels-tests-tables '("Inbox" 1 2 5) '("job" 1 2 3 4 5) '("kids" 3 4)
                                       '("lists" 1 2 3 4 5)))
     (spy-on 'mail-label-tables :and-call-fake (lambda () tables)))
-  (it "shows each line's labels but the group read, Inbox among them outside the inbox"
+  (it "shows every label of a line in any group, the group read and Inbox among them"
     (with-temp-buffer
       (labels-tests-summary (labels-tests-group "lists") '((1 0) (6 0)))
       (draw-mail-labels (point-min) (point-max))
-      (expect (labels-tests-shown 1) :to-equal '("Inbox" "job"))
+      (expect (labels-tests-shown 1) :to-equal '("Inbox" "job" "lists"))
       ;; a line with no labels takes no room
       (expect (labels-tests-shown 6) :to-be nil))
     (with-temp-buffer
       (labels-tests-summary mail-inbox-group '((1 0)))
       (draw-mail-labels (point-min) (point-max))
-      (expect (labels-tests-shown 1) :to-equal '("job" "lists"))))
-  (it "shows a reply no labels when the line above has the same, and a thread's root always"
+      (expect (labels-tests-shown 1) :to-equal '("Inbox" "job" "lists"))))
+  (it "shows each line its own labels, a reply with the labels of the line above too"
     (with-temp-buffer
       (labels-tests-summary (labels-tests-group "lists") '((1 0) (2 1) (3 1) (4 0) (5 1)))
       (draw-mail-labels (point-min) (point-max))
       (expect (mapcar #'labels-tests-shown '(1 2 3 4 5))
-              :to-equal '(("Inbox" "job") nil ("job" "kids") ("job" "kids") ("Inbox" "job")))))
-  (it "starts from the top of the line jit-lock starts in, and reads the line above it"
+              :to-equal '(("Inbox" "job" "lists") ("Inbox" "job" "lists")
+                          ("job" "kids" "lists") ("job" "kids" "lists")
+                          ("Inbox" "job" "lists")))))
+  (it "starts from the top of the line jit-lock starts in"
     (with-temp-buffer
       (labels-tests-summary (labels-tests-group "lists") '((1 0) (2 1)))
       (goto-char (point-min))
       (forward-line 1)
       (draw-mail-labels (+ 3 (point)) (point-max))
-      (expect (labels-tests-shown 2) :to-be nil)
+      (expect (labels-tests-shown 2) :to-equal '("Inbox" "job" "lists"))
       (expect (get-text-property 1 'display) :to-be nil)))
   (it "reads no table for a summary with no slots, a news group's"
     (with-temp-buffer

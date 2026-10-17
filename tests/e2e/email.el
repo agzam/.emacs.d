@@ -2418,8 +2418,8 @@ buffers, summary and queued files the cases leave are cleared after."
                                   :got (format "%S, labelled %S" menu
                                                (message-ids (messages-in labelled))))
                           (let ((chips (line-chips to-label)))
-                            (record "the line shows the label the menu added at once, in its Gmail colors, its own group left out"
-                                    (and (equal (chip-names to-label) '("labelled"))
+                            (record "the line shows the label the menu added at once, in its Gmail colors, next to its own group's"
+                                    (and (equal (chip-names to-label) '("labelled" "lists"))
                                          (equal (get-text-property 1 'face chips)
                                                 '(:background "#9b811e" :foreground "white")))
                                     :got (format "%S" chips))))
@@ -2464,7 +2464,7 @@ buffers, summary and queued files the cases leave are cleared after."
                                   :got (format "%S, labelled %S" picked
                                                (message-ids (messages-in labelled)))))
                         (record "the line drops the chip of a label taken off"
-                                (null (chip-names plan))
+                                (equal (chip-names plan) '("lists"))
                                 :got (format "%S" (line-chips plan)))
                         ;; expreg-transient opens with visual state and replays
                         ;; a , it lets through, except inside a keyboard macro,
@@ -2503,9 +2503,9 @@ buffers, summary and queued files the cases leave are cleared after."
                                     :got (format "%S then %S, travel %S" menu reopened
                                                  (and (file-directory-p travel)
                                                       (message-ids (messages-in travel)))))
-                            (record "a reply whose labels are those of the line above shows none, its root shows them"
-                                    (and (equal (chip-names plan) '("labelled" "travel"))
-                                         (null (chip-names answer)))
+                            (record "a reply shows its labels even when the line above has the same"
+                                    (and (equal (chip-names plan) '("labelled" "lists" "travel"))
+                                         (equal (chip-names answer) '("labelled" "lists" "travel")))
                                     :got (format "%S then %S" (line-chips plan) (line-chips answer)))
                             ;; in the label's own summary the message leaves
                             ;; once the label is off
@@ -2515,8 +2515,8 @@ buffers, summary and queued files the cases leave are cleared after."
                             ;; entering it needs Gnus to know the copies
                             (gnus-summary-read-group "nnmaildir+gmail:travel" t t)
                             (let ((root (email-e2e--article "list plan")))
-                              (record "a label's own summary shows every label of a line but its own"
-                                      (equal (chip-names root) '("labelled" "lists"))
+                              (record "a label's own summary shows every label of a line, its own too"
+                                      (equal (chip-names root) '("labelled" "lists" "travel"))
                                       :got (format "%S" (line-chips root))))
                             (let ((first (gnus-summary-article-number)))
                               (execute-kbd-macro (kbd ", l"))
@@ -2756,8 +2756,9 @@ buffers, summary and queued files the cases leave are cleared after."
                     (let ((after (line-chips label)))
                       (record "a label's line shows Inbox while the inbox holds the message, and drops it once archived"
                               (and (equal (split-string (substring-no-properties (or before "")))
-                                          '("Inbox"))
-                                   (equal after ""))
+                                          '("Inbox" "lists"))
+                                   (equal (split-string (substring-no-properties (or after "")))
+                                          '("lists")))
                               :got (format "%S then %S" before after))))
                   (gnus-summary-goto-subject (email-e2e--article "to label"))
                   (condition-case nil
@@ -2775,8 +2776,9 @@ buffers, summary and queued files the cases leave are cleared after."
                   (let ((summary (current-buffer))
                         (carry (email-e2e--article "twin-carry"))
                         (drop (email-e2e--article "twin-drop")))
-                    (record "the inbox leaves Inbox off its own lines"
-                            (equal (line-chips carry) "")
+                    (record "the inbox shows Inbox on its own lines"
+                            (equal (split-string (substring-no-properties (or (line-chips carry) "")))
+                                   '("Inbox"))
                             :got (format "%S" (line-chips carry)))
                     (search-for "twin-carry")
                     (execute-kbd-macro "!q")
