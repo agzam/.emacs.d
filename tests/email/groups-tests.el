@@ -11,6 +11,8 @@
 (defvar mail-topics)
 (defvar mail-bulk-groups)
 (defvar mail-remote-backends)
+;; config.el's value, which the specs that bind no label topic run under
+(defvar mail-label-topic "Labels")
 
 (load-module-file "scripts/mail-load.el")
 (load-module-file "modules/email/autoload/load.el")
@@ -175,6 +177,61 @@
                     :to-be nil)
             (expect listed :to-be (get-buffer gnus-group-buffer)))
         (kill-buffer gnus-group-buffer)))))
+
+(defmacro groups-tests-applying (alist &rest body)
+  "Run `apply-mail-topics' over ALIST, Gnus knowing every group, then BODY.
+`mail-topics' has a Labels topic, the topic a new label goes under.  The
+newsrc lists ALIST's groups and the label hidden, which no topic holds."
+  (declare (indent 1))
+  `(let* ((mail-topics (append groups-tests-topics '(("Labels" ("nnmaildir+gmail:job")))))
+          (mail-label-topic "Labels")
+          (gnus-topic-topology (copy-tree '(("Gnus" visible) (("Gmail" visible))
+                                            (("Lists" visible)) (("Labels" visible)))))
+          (gnus-topic-alist (copy-tree ,alist))
+          (gnus-group-list (append (mapcan (lambda (topic) (copy-sequence (cdr topic)))
+                                           gnus-topic-alist)
+                                   '("nnmaildir+gmail:hidden")))
+          (gnus-newsrc-hashtb (make-hash-table :test #'equal))
+          (gnus-permanently-visible-groups nil)
+          (gnus-group-buffer " *groups-tests group*"))
+     (dolist (group gnus-group-list)
+       (puthash group '(0 nil) gnus-newsrc-hashtb))
+     (cl-letf (((symbol-function 'gnus-group-list-groups) #'ignore))
+       (apply-mail-topics))
+     ,@body))
+
+(describe "apply-mail-topics on a label Gnus subscribed"
+  (it "files a Gmail label from the root topic under the label topic"
+    ;; Gnus subscribes with point on the first line, the root topic's
+    (groups-tests-applying '(("Gnus" "nnmaildir+gmail:travel" "nndraft:drafts")
+                             ("Gmail" "nnmaildir+gmail:inbox") ("Lists")
+                             ("Labels" "nnmaildir+gmail:job"))
+      (expect (seq-take (cdr (assoc "Labels" gnus-topic-alist)) 2)
+              :to-equal '("nnmaildir+gmail:job" "nnmaildir+gmail:travel"))
+      ;; what is not a Gmail label stays where Gnus put it
+      (expect (cdr (assoc "Gnus" gnus-topic-alist)) :to-equal '("nndraft:drafts"))))
+  (it "files a Gmail label no topic holds, which the group buffer would hide, under it too"
+    (groups-tests-applying '(("Gnus") ("Gmail" "nnmaildir+gmail:inbox") ("Lists")
+                             ("Labels" "nnmaildir+gmail:job"))
+      (expect (cdr (assoc "Labels" gnus-topic-alist))
+              :to-equal '("nnmaildir+gmail:job" "nnmaildir+gmail:hidden"))
+      (expect (cdr (assoc "Gmail" gnus-topic-alist)) :to-equal '("nnmaildir+gmail:inbox"))))
+  (it "leaves a label moved into another topic where it is"
+    (groups-tests-applying '(("Gnus") ("Gmail" "nnmaildir+gmail:inbox")
+                             ("Lists" "nnmaildir+gmail:travel") ("Labels" "nnmaildir+gmail:job"))
+      (expect (cdr (assoc "Lists" gnus-topic-alist)) :to-equal '("nnmaildir+gmail:travel"))))
+  (it "leaves the root topic be when there is no label topic"
+    (let ((mail-topics groups-tests-topics)
+          (mail-label-topic "Labels")
+          (gnus-topic-topology (copy-tree '(("Gnus" visible))))
+          (gnus-topic-alist (copy-tree '(("Gnus" "nnmaildir+gmail:travel"))))
+          (gnus-newsrc-hashtb (make-hash-table :test #'equal))
+          (gnus-permanently-visible-groups nil)
+          (gnus-group-buffer " *groups-tests group*"))
+      (puthash "nnmaildir+gmail:travel" '(0 nil) gnus-newsrc-hashtb)
+      (cl-letf (((symbol-function 'gnus-group-list-groups) #'ignore))
+        (apply-mail-topics))
+      (expect (cdr (assoc "Gnus" gnus-topic-alist)) :to-equal '("nnmaildir+gmail:travel")))))
 
 (describe "put-group-in-topic"
   (it "moves a group out of every topic holding it and into the end of another"

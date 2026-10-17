@@ -711,7 +711,11 @@ buffers, summary and queued files the cases leave are cleared after."
          (mail-load-script (expand-file-name "mail-load.el" e2e-work-dir))
          (mail-load-directory (expand-file-name "mail-load/" e2e-work-dir))
          (mail-table-directory (expand-file-name "mail-tables/" e2e-work-dir))
-         (mail-sync-program "true")
+         ;; stands in for mail-sync: a sync does nothing, and remove and
+         ;; rename move a label's folder as mail-sync does once Gmail agreed
+         (mail-sync-program (expand-file-name "mail-sync" e2e-work-dir))
+         (mail-sync-log (expand-file-name "mail-sync-log" e2e-work-dir))
+         (removed (expand-file-name "removed/" e2e-work-dir))
          ;; the flow looks for mbsync's changes itself, never on a timer
          (mail-sync-check-interval 3600)
          ;; a reply reads no notmuch and writes no saved addresses
@@ -759,6 +763,15 @@ buffers, summary and queued files the cases leave are cleared after."
     (dolist (dir (list inbox trash html starred lists moved labelled archive emacs))
       (dolist (sub '("cur" "new" "tmp"))
         (make-directory (expand-file-name sub dir) t)))
+    (make-directory removed t)
+    (with-temp-file mail-sync-program
+      (insert "#!/bin/sh\n"
+              "echo \"$*\" >> '" mail-sync-log "'\n"
+              "case \"$1\" in\n"
+              "  remove) mv '" root "'\"$2\" '" removed "'\"$2\";;\n"
+              "  rename) mv '" root "'\"$2\" '" root "'\"$3\";;\n"
+              "esac\n"))
+    (set-file-modes mail-sync-program #o755)
     (email-e2e--write-feed served '(("first" "First fixture post" "10")
                                     ("second" "Second fixture post" "11")))
     (with-temp-file feed-fetch-program
@@ -951,6 +964,20 @@ buffers, summary and queued files the cases leave are cleared after."
               (read-groups ()
                 (when-let* ((server (alist-get "gmail" nnmaildir--servers nil nil #'equal)))
                   (sort (hash-table-keys (nnmaildir--srv-groups server)) #'string<)))
+              ;; what the mail-sync stand-in was asked, a line a run
+              (mail-sync-calls ()
+                (when (file-exists-p mail-sync-log)
+                  (with-temp-buffer
+                    (insert-file-contents mail-sync-log)
+                    (split-string (buffer-string) "\n" t))))
+              ;; a label change mail-sync runs, until its sentinel is done
+              (label-change-done ()
+                (with-timeout (10 nil)
+                  (while (seq-some (lambda (buffer)
+                                     (string-prefix-p " *mail-label-change*" (buffer-name buffer)))
+                                   (buffer-list))
+                    (accept-process-output nil 0.05)))
+                t)
               ;; the group buffer from the top: a topic line as its name,
               ;; a group line as (GROUP TOPIC TEXT)
               (group-lines ()
@@ -1186,6 +1213,12 @@ buffers, summary and queued files the cases leave are cleared after."
                                    (,news-group . "Lists")
                                    "misc"))
                           :got (format "%S" layout))
+                  ;; Gnus subscribed them into the root topic
+                  (record "the start files the labels mail-topics leaves out under Labels"
+                          (equal (list (gnus-group-topic "nnmaildir+gmail:html")
+                                       (gnus-group-topic "nnmaildir+gmail:moved"))
+                                 '("Labels" "Labels"))
+                          :got (format "%S" gnus-topic-alist))
                   (record "a group line shows the bare name and the description mail-topics gives"
                           (and inbox (string-match-p "\\` +2 +inbox +Inbox\\'" inbox))
                           :got (format "%S" inbox))
@@ -2503,6 +2536,9 @@ buffers, summary and queued files the cases leave are cleared after."
                                     :got (format "%S then %S, travel %S" menu reopened
                                                  (and (file-directory-p travel)
                                                       (message-ids (messages-in travel)))))
+                            (record "a label made with + goes under Labels"
+                                    (equal (gnus-group-topic "nnmaildir+gmail:travel") "Labels")
+                                    :got (format "%S" gnus-topic-alist))
                             (record "a reply shows its labels even when the line above has the same"
                                     (and (equal (chip-names plan) '("labelled" "lists" "travel"))
                                          (equal (chip-names answer) '("labelled" "lists" "travel")))
@@ -3365,8 +3401,10 @@ buffers, summary and queued files the cases leave are cleared after."
                         (and (equal (cdr (assoc "Gmail" gnus-topic-alist))
                                     '("nnmaildir+gmail:inbox" "nnmaildir+gmail:archive"
                                       "nnmaildir+gmail:trash"))
+                             ;; html and travel went under Labels when subscribed
                              (equal (cdr (assoc "Labels" gnus-topic-alist))
                                     '("nnmaildir+gmail:starred" "nnmaildir+gmail:labelled"
+                                      "nnmaildir+gmail:html" "nnmaildir+gmail:travel"
                                       "nnmaildir+gmail:moved")))
                         :got (format "%S" gnus-topic-alist))
                 (gnus-group-jump-to-group "nnmaildir+gmail:moved")
@@ -3448,6 +3486,104 @@ buffers, summary and queued files the cases leave are cleared after."
                   (record "a label that appeared after the start loads once its batch runs"
                           (member "fresh" (read-groups))
                           :got (format "%S" (read-groups))))
+                ;; a launchd sync while Gnus runs: a label made in Gmail
+                ;; arrives as a folder, and the next look gives it a group
+                (let ((arrived (expand-file-name "arrived/" root))
+                      (said nil))
+                  (dolist (sub '("cur" "new" "tmp"))
+                    (make-directory (expand-file-name sub arrived) t))
+                  (email-e2e--write-message (expand-file-name "cur/1700000080.80.fixture:2," arrived)
+                                            "Ivy <ivy@example.com>" "arrived" "arrived")
+                  (let ((err (condition-case err (progn (check-mail-syncs) nil) (error err))))
+                    (loads-done)
+                    (with-current-buffer gnus-group-buffer
+                      (gnus-group-list-groups))
+                    (record "a label made in Gmail gets its group under Labels at the next look, read"
+                            (and (null err)
+                                 (equal (gnus-group-topic "nnmaildir+gmail:arrived") "Labels")
+                                 (member "arrived" (read-groups))
+                                 (eql (gnus-group-unread "nnmaildir+gmail:arrived") 1)
+                                 (assoc "nnmaildir+gmail:arrived" (seq-remove #'stringp (group-lines))))
+                            :got (format "err %S, topic %S, read %S, unread %S" err
+                                         (gnus-group-topic "nnmaildir+gmail:arrived")
+                                         (read-groups)
+                                         (gnus-group-unread "nnmaildir+gmail:arrived"))))
+                  ;; Gmail dropped it again, and mail-sync set its folder aside
+                  (rename-file (directory-file-name arrived) (expand-file-name "arrived" removed))
+                  (let* ((note (lambda (format &rest args)
+                                 (when format
+                                   (push (apply #'format-message format args) said))))
+                         (err (progn
+                                (advice-add 'message :before note)
+                                (unwind-protect
+                                    (condition-case err (progn (check-mail-syncs) nil) (error err))
+                                  (advice-remove 'message note)))))
+                    (record "a label dropped in Gmail leaves the group buffer and the chips at the next look"
+                            (and (null err)
+                                 (not (gnus-group-entry "nnmaildir+gmail:arrived"))
+                                 (not (assoc "nnmaildir+gmail:arrived"
+                                             (seq-remove #'stringp (group-lines))))
+                                 (not (member "arrived" (read-groups)))
+                                 (not (assoc "nnmaildir+gmail:arrived" (mail-label-tables)))
+                                 (member "Groups gone with their folders: arrived" said)
+                                 (not (seq-some (lambda (line) (string-match-p "Could not" line))
+                                                said)))
+                            :got (format "err %S, entry %S, read %S, said %S" err
+                                         (and (gnus-group-entry "nnmaildir+gmail:arrived") t)
+                                         (read-groups) said))))
+                ;; labels made, renamed and deleted from the group buffer; the
+                ;; stand-in moves the folder as mail-sync does
+                (delete-other-windows)
+                (switch-to-buffer gnus-group-buffer)
+                (gnus-group-jump-to-group "nnmaildir+gmail:lists")
+                (let ((minibuffer-history nil))
+                  (execute-kbd-macro (kbd ", l n made RET")))
+                (loads-done)
+                (record ", l n makes a label's folder, and its group under Labels with point on it"
+                        (and (file-directory-p (expand-file-name "made/cur" root))
+                             (equal (gnus-group-topic "nnmaildir+gmail:made") "Labels")
+                             (equal (gnus-group-group-name) "nnmaildir+gmail:made")
+                             ;; Gmail gets it at the next sync, not from Emacs
+                             (not (seq-some (lambda (call) (string-match-p "made" call))
+                                            (mail-sync-calls))))
+                        :got (format "folder %S, topic %S, point on %S, mail-sync %S"
+                                     (file-directory-p (expand-file-name "made" root))
+                                     (gnus-group-topic "nnmaildir+gmail:made")
+                                     (gnus-group-group-name) (mail-sync-calls)))
+                ;; in a topic of its own, which the rename keeps
+                (execute-kbd-macro (kbd ", m Lists RET"))
+                (gnus-group-jump-to-group "nnmaildir+gmail:made")
+                ;; Gnus's prompt starts from the old name, point before it
+                (let ((minibuffer-history nil)
+                      (gnus-group-history nil))
+                  (execute-kbd-macro (kbd "r 2 RET")))
+                (label-change-done)
+                (loads-done)
+                (record "r renames a label through mail-sync, and its group keeps its topic"
+                        (and (member "rename made 2made" (mail-sync-calls))
+                             (file-directory-p (expand-file-name "2made/cur" root))
+                             (not (file-exists-p (expand-file-name "made" root)))
+                             (not (gnus-group-entry "nnmaildir+gmail:made"))
+                             (equal (gnus-group-topic "nnmaildir+gmail:2made") "Lists"))
+                        :got (format "mail-sync %S, folders %S, made %S, 2made in %S"
+                                     (mail-sync-calls) (directory-files root nil "made")
+                                     (and (gnus-group-entry "nnmaildir+gmail:made") t)
+                                     (gnus-group-topic "nnmaildir+gmail:2made")))
+                (gnus-group-jump-to-group "nnmaildir+gmail:2made")
+                (let ((use-short-answers t))
+                  (execute-kbd-macro (kbd ", l d y")))
+                (label-change-done)
+                (loads-done)
+                (record ", l d deletes a label through mail-sync once asked, and its group goes"
+                        (and (member "remove 2made" (mail-sync-calls))
+                             (file-directory-p (expand-file-name "2made" removed))
+                             (not (file-exists-p (expand-file-name "2made" root)))
+                             (not (gnus-group-entry "nnmaildir+gmail:2made"))
+                             (not (gnus-group-topic "nnmaildir+gmail:2made")))
+                        :got (format "mail-sync %S, removed %S, entry %S, topic %S"
+                                     (mail-sync-calls) (directory-files removed)
+                                     (and (gnus-group-entry "nnmaildir+gmail:2made") t)
+                                     (gnus-group-topic "nnmaildir+gmail:2made")))
                 ;; Org in the body, sent through real keys
                 (email-e2e--org-compose #'record)
                 ;; C-c C-c queues, the queue sends, e takes a message back

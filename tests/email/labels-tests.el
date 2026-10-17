@@ -13,6 +13,7 @@
 (defvar mail-trash-group "nnmaildir+gmail:trash")
 (defvar mail-archive-group "nnmaildir+gmail:archive")
 (defvar mail-label-colors nil)
+(defvar mail-sync-program "mail-sync")
 
 ;; labels.el's top-level (require 'consult) must no-op in the batch tier;
 ;; the specs stub consult--read
@@ -586,17 +587,25 @@
   (it "makes the label's folder and group, and turns it on"
     (let ((gmail-maildir root)
           (gnus-message-archive-group "nnmaildir+gmail:sent")
-          (scope (mail-label-scope-make :articles '(1) :want nil :carriers nil)))
+          (scope (mail-label-scope-make :articles '(1) :want nil :carriers nil))
+          (read nil))
       (cl-letf (((symbol-function 'transient-scope) (lambda (&rest _) scope))
                 ((symbol-function 'read-string) (lambda (&rest _) " travel "))
-                ((symbol-function 'subscribe-mail-group) (lambda (group) (push group subscribed)))
-                ((symbol-function 'load-mail-groups) #'ignore)
+                ;; every folder Gnus lacks, the new one's topic included
+                ((symbol-function 'subscribe-mail-groups)
+                 (lambda ()
+                   (setq subscribed (seq-filter (lambda (group) (string-suffix-p ":travel" group))
+                                                (maildir-groups)))))
+                ((symbol-function 'load-mail-groups)
+                 (lambda (groups &optional first) (setq read (list groups first))))
                 ((symbol-function 'transient-setup)
                  (lambda (&rest args) (setq reopened args))))
         (mail-label-create))
       (dolist (sub '("cur" "new" "tmp"))
         (expect (file-directory-p (expand-file-name (concat "travel/" sub) root)) :to-be t))
       (expect subscribed :to-equal (list (labels-tests-group "travel")))
+      ;; ahead of every other read, since the menu fills it next
+      (expect read :to-equal (list (list (labels-tests-group "travel")) t))
       (expect (alist-get (labels-tests-group "travel") (mail-label-scope-want scope)
                          nil nil #'equal)
               :to-be 'all)
@@ -604,15 +613,244 @@
               :to-be-truthy)
       ;; the menu stays open, so closing it later applies the label
       (expect reopened :to-be nil)))
-  (it "refuses a name Gmail and Gnus would read apart, and one that exists"
+  (it "refuses a name Gmail and Gnus would read apart, one mbsync skips, and one that exists"
     (let ((gmail-maildir root)
           (gnus-message-archive-group "nnmaildir+gmail:sent"))
-      (dolist (name '("two words" "a/b" "" "Job"))
+      (dolist (name '("two words" "a/b" "" "Job" "new"))
         (cl-letf (((symbol-function 'transient-scope)
                    (lambda (&rest _) (mail-label-scope-make)))
                   ((symbol-function 'read-string) (lambda (&rest _) name)))
           (expect (mail-label-create) :to-throw 'user-error)))
       (expect (directory-files root nil "\\`[^.]") :to-equal '("inbox" "job")))))
+
+(describe "mail-label-name-problem"
+  :var (root)
+  (before-each
+    (setq root (file-name-as-directory (make-temp-file "labels-tests-store" t)))
+    (dolist (folder '("inbox" "sent" "archive" "job"))
+      (make-directory (expand-file-name folder root))))
+  (after-each
+    (delete-directory root t))
+  (it "takes ASCII letters, digits, - and _"
+    (let ((gmail-maildir root))
+      (dolist (name '("travel" "Q4-2026_x"))
+        (expect (mail-label-name-problem name) :to-be nil))))
+  (it "refuses what mail-sync would send Gmail apart from the folder's name"
+    ;; . is the folder of a nested label, and IMAP takes no raw UTF-8
+    (let ((gmail-maildir root))
+      (dolist (name '("two words" "a/b" "a.b" "" "caf\u00e9" "say\"hi"))
+        (expect (mail-label-name-problem name)
+                :to-equal "A label name takes ASCII letters, digits, - and _"))))
+  (it "refuses cur, new and tmp, which mbsync's maildir listing skips"
+    (let ((gmail-maildir root))
+      (dolist (name '("cur" "new" "tmp"))
+        (expect (mail-label-name-problem name)
+                :to-equal "mbsync syncs no label named cur, new or tmp"))))
+  (it "refuses the name of any folder in any case, the inbox, Sent and All Mail's too"
+    (let ((gmail-maildir root))
+      (dolist (name '("INBOX" "Sent" "archive" "JOB"))
+        (expect (mail-label-name-problem name) :to-equal (format "Label %s exists" name))))))
+
+(describe "new-mail-label"
+  (it "makes the label and shows its line"
+    (let (calls)
+      (cl-letf (((symbol-function 'make-mail-label)
+                 (lambda (name) (push (list 'make name) calls) (labels-tests-group name)))
+                ((symbol-function 'gnus-group-jump-to-group)
+                 (lambda (group &rest _) (push (list 'jump group) calls)))
+                ((symbol-function 'message) #'ignore))
+        (new-mail-label "travel"))
+      (expect (nreverse calls)
+              :to-equal (list '(make "travel") (list 'jump (labels-tests-group "travel")))))))
+
+(describe "mail-label-change-problem"
+  (it "takes a label, a nested one too"
+    (let ((gnus-message-archive-group "nnmaildir+gmail:sent"))
+      (dolist (group '("travel" "work.qlik" "Health"))
+        (expect (mail-label-change-problem (labels-tests-group group)) :to-be nil))))
+  (it "refuses the inbox, Sent, Trash and All Mail, which are no labels"
+    (let ((gnus-message-archive-group "nnmaildir+gmail:sent"))
+      (dolist (group (list mail-inbox-group mail-trash-group mail-archive-group
+                           gnus-message-archive-group))
+        (expect (mail-label-change-problem group) :to-match "is not a label\\'"))))
+  (it "refuses no group, and a group of another server"
+    (expect (mail-label-change-problem nil) :to-equal "No group here")
+    (expect (mail-label-change-problem "nnmaildir+news:gmane.emacs.devel")
+            :to-match "is not a Gmail label\\'"))
+  (it "refuses a label whose name mail-sync could not send"
+    (let ((gnus-message-archive-group "nnmaildir+gmail:sent"))
+      (expect (mail-label-change-problem (labels-tests-group "caf\u00e9"))
+              :to-match "\\`Change caf\u00e9 in Gmail"))))
+
+(defun labels-tests-program (exit &rest lines)
+  "A stand-in mail-sync that logs its arguments, prints LINES and exits EXIT.
+Returns (PROGRAM . LOG)."
+  (let* ((log (make-temp-file "labels-tests-args"))
+         (program (make-temp-file "labels-tests-mail-sync" nil nil
+                                  (concat "#!/bin/sh\n"
+                                          "echo \"$@\" > '" log "'\n"
+                                          (mapconcat (lambda (line) (format "echo '%s'\n" line))
+                                                     lines "")
+                                          (format "exit %d\n" exit)))))
+    (set-file-modes program #o755)
+    (cons program log)))
+
+(defun labels-tests-wait (process)
+  "Wait until PROCESS is gone and its sentinel ran."
+  (with-timeout (10 nil)
+    (while (or (process-live-p process) (buffer-live-p (process-buffer process)))
+      (accept-process-output nil 0.05))))
+
+(describe "run-mail-label-change"
+  (it "runs mail-sync on the arguments, follows the folders, then calls back"
+    (pcase-let* ((`(,program . ,log) (labels-tests-program 0 "mail-sync: label travel deleted"))
+                 (mail-sync-program program)
+                 (calls nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'follow-mail-folders) (lambda () (push 'follow calls))))
+            (labels-tests-wait (run-mail-label-change '("remove" "travel")
+                                                      (lambda () (push 'done calls))))
+            (expect (nreverse calls) :to-equal '(follow done))
+            (expect (with-temp-buffer (insert-file-contents log) (buffer-string))
+                    :to-equal "remove travel\n"))
+        (delete-file program)
+        (delete-file log))))
+  (it "says what mail-sync printed last when it fails, and calls nothing back"
+    (pcase-let* ((`(,program . ,log) (labels-tests-program 1 "checking" "mail-sync: Gmail kept label travel"))
+                 (mail-sync-program program)
+                 (calls nil)
+                 (said nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'follow-mail-folders) (lambda () (push 'follow calls)))
+                    ((symbol-function 'message)
+                     (lambda (format &rest args) (setq said (apply #'format format args)))))
+            (let ((process (run-mail-label-change '("remove" "travel")
+                                                  (lambda () (push 'done calls)))))
+              (labels-tests-wait process)
+              (expect calls :to-be nil)
+              (expect said :to-equal "Labels: remove failed: mail-sync: Gmail kept label travel")
+              ;; nothing of the run is left behind
+              (expect (buffer-live-p (process-buffer process)) :to-be nil)))
+        (delete-file program)
+        (delete-file log)))))
+
+(describe "delete-mail-label"
+  (it "refuses a group that is no label, asking nothing and running nothing"
+    (let (asked ran)
+      (cl-letf (((symbol-function 'yes-or-no-p) (lambda (prompt) (setq asked prompt) t))
+                ((symbol-function 'run-mail-label-change) (lambda (&rest args) (setq ran args))))
+        (expect (delete-mail-label mail-inbox-group) :to-throw 'user-error))
+      (expect (list asked ran) :to-equal '(nil nil))))
+  (it "asks first, by the label's name, and runs nothing on no"
+    (let (asked ran)
+      (cl-letf (((symbol-function 'yes-or-no-p) (lambda (prompt) (setq asked prompt) nil))
+                ((symbol-function 'run-mail-label-change) (lambda (&rest args) (setq ran args))))
+        (delete-mail-label (labels-tests-group "travel")))
+      (expect asked :to-match "\\`Delete label travel in Gmail")
+      (expect asked :to-match "keep their other labels")
+      (expect ran :to-be nil)))
+  (it "runs mail-sync remove on the label, then says it is gone"
+    (let (ran said)
+      (cl-letf (((symbol-function 'yes-or-no-p) (lambda (_) t))
+                ((symbol-function 'run-mail-label-change)
+                 (lambda (args done) (setq ran args) (funcall done)))
+                ((symbol-function 'message)
+                 (lambda (format &rest args) (setq said (apply #'format format args)))))
+        (delete-mail-label (labels-tests-group "work.qlik")))
+      (expect ran :to-equal '("remove" "work.qlik"))
+      (expect said :to-equal "Deleted label work.qlik"))))
+
+(defmacro labels-tests-renaming (topic level &rest body)
+  "Run BODY with travel in TOPIC at LEVEL, mail-sync's run stubbed.
+The stub logs its arguments to `ran', and Gnus's calls go to `calls'."
+  (declare (indent 2))
+  `(let* ((gnus-newsrc-hashtb (make-hash-table :test #'equal))
+          (gnus-topic-alist (list (list "Gnus") (list ,topic (labels-tests-group "travel"))))
+          (gmail-maildir "/nonexistent-labels-tests/")
+          (ran nil)
+          (calls nil)
+          (said nil))
+     (puthash (labels-tests-group "travel")
+              (list nil (gnus-info-make (labels-tests-group "travel") ,level nil nil nil))
+              gnus-newsrc-hashtb)
+     (cl-letf (((symbol-function 'run-mail-label-change)
+                (lambda (args done) (setq ran (list args done))))
+               ((symbol-function 'gnus-group-change-level)
+                (lambda (&rest args) (push (cons 'level args) calls)))
+               ((symbol-function 'put-group-in-topic)
+                (lambda (&rest args) (push (cons 'topic args) calls)))
+               ((symbol-function 'apply-mail-topics) (lambda () (push '(arranged) calls)))
+               ((symbol-function 'message)
+                (lambda (format &rest args) (setq said (apply #'format format args)))))
+       ,@body)))
+
+(describe "rename-mail-label"
+  (it "runs mail-sync rename on the old name and the new"
+    (labels-tests-renaming "Labels" 3
+      (rename-mail-label (labels-tests-group "travel") "trips")
+      (expect (car ran) :to-equal '("rename" "travel" "trips"))))
+  (it "refuses a new name that is taken or that mbsync skips, and runs nothing"
+    (labels-tests-renaming "Labels" 3
+      (cl-letf (((symbol-function 'maildir-groups)
+                 (lambda () (list (labels-tests-group "travel") (labels-tests-group "job")))))
+        (dolist (name '("Job" "new" "two words"))
+          (expect (rename-mail-label (labels-tests-group "travel") name) :to-throw 'user-error)))
+      (expect ran :to-be nil)))
+  (it "gives the new group the old one's topic and level once mail-sync is done"
+    (labels-tests-renaming "Lists" 4
+      (rename-mail-label (labels-tests-group "travel") "trips")
+      ;; the folders' new group, subscribed at the default level
+      (puthash (labels-tests-group "trips")
+               (list nil (gnus-info-make (labels-tests-group "trips") 3 nil nil nil))
+               gnus-newsrc-hashtb)
+      (funcall (cadr ran))
+      (expect (nreverse calls)
+              :to-equal (list (list 'level (labels-tests-group "trips") 4 3)
+                              (list 'topic (labels-tests-group "trips") "Lists")
+                              '(arranged)))
+      (expect said :to-equal "Renamed label travel to trips")))
+  (it "says the next sync fetches the label when mail-sync set its folder aside"
+    ;; Gmail gave the renamed label new UIDs
+    (labels-tests-renaming "Labels" 3
+      (rename-mail-label (labels-tests-group "travel") "trips")
+      (funcall (cadr ran))
+      (expect calls :to-be nil)
+      (expect said :to-equal "Renamed label travel to trips; the next sync fetches it"))))
+
+(describe "rename-mail-label-a"
+  (it "renames a Gmail group through mail-sync, by its bare new name"
+    (let (renamed handed)
+      (cl-letf (((symbol-function 'rename-mail-label) (lambda (&rest args) (setq renamed args))))
+        (rename-mail-label-a (lambda (&rest args) (setq handed args))
+                             (labels-tests-group "travel") (labels-tests-group "trips")))
+      (expect renamed :to-equal (list (labels-tests-group "travel") "trips"))
+      (expect handed :to-be nil)))
+  (it "hands any other group to Gnus, and no group too"
+    (let (renamed handed)
+      (cl-letf (((symbol-function 'rename-mail-label) (lambda (&rest args) (setq renamed args))))
+        (rename-mail-label-a (lambda (&rest args) (push args handed))
+                             "nnmaildir+news:gmane.emacs.devel" "nnmaildir+news:devel")
+        (rename-mail-label-a (lambda (&rest args) (push args handed)) nil "x"))
+      (expect renamed :to-be nil)
+      (expect (nreverse handed)
+              :to-equal '(("nnmaildir+news:gmane.emacs.devel" "nnmaildir+news:devel")
+                          (nil "x"))))))
+
+(describe "delete-mail-label-a"
+  (it "deletes a Gmail group through mail-sync, whatever Gnus was asked"
+    (let (deleted handed)
+      (cl-letf (((symbol-function 'delete-mail-label) (lambda (group) (setq deleted group))))
+        (delete-mail-label-a (lambda (&rest args) (setq handed args))
+                             (labels-tests-group "travel") t))
+      (expect deleted :to-equal (labels-tests-group "travel"))
+      (expect handed :to-be nil)))
+  (it "hands any other group to Gnus with its arguments"
+    (let (deleted handed)
+      (cl-letf (((symbol-function 'delete-mail-label) (lambda (group) (setq deleted group))))
+        (delete-mail-label-a (lambda (&rest args) (setq handed args))
+                             "nnmaildir+news:gmane.emacs.devel" t))
+      (expect deleted :to-be nil)
+      (expect handed :to-equal '("nnmaildir+news:gmane.emacs.devel" t)))))
 
 (describe "accept-mail-without-nul-a"
   (it "files the article without its NUL bytes, written instead of linked"

@@ -46,8 +46,7 @@
 
 (defvar mail-bulk-groups
   '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs" "nnmaildir+gmail:org-mode"
-    "nnmaildir+gmail:new" "nnmaildir+news:gmane.emacs.devel"
-    "nnmaildir+news:gmane.emacs.orgmode")
+    "nnmaildir+news:gmane.emacs.devel" "nnmaildir+news:gmane.emacs.orgmode")
   "Groups no sync rescans: tens of thousands of files each.")
 
 (defvar mail-topics
@@ -71,12 +70,14 @@
      ("nnmaildir+gmail:emacs" . "emacs-devel, delivered to Gmail")
      ("nnatom+www.reddit.com/r/emacs/new/.rss:r/emacs" . "Reddit, every new post")
      ("nnmaildir+gmail:org-mode" . "emacs-orgmode, delivered to Gmail")
-     ("nnmaildir+gmail:clojure" . "Clojure groups, Clojurists Together")
-     ("nnmaildir+gmail:new" . "Old label, nothing since 2024-11")))
+     ("nnmaildir+gmail:clojure" . "Clojure groups, Clojurists Together")))
   "Topics under Gnus's root topic, in order: (TOPIC (GROUP . DESCRIPTION)...).
 Every start puts these groups back into their topic, in this order, and
-they are listed even with nothing unread.  Groups and topics this does
-not name stay where they were moved.")
+lists them even with nothing unread.  Other groups and topics stay put,
+but a label in the root topic goes under `mail-label-topic'.")
+
+(defvar mail-label-topic "Labels"
+  "Topic of `mail-topics' that a Gmail label Gnus subscribed moves under.")
 
 (defvar mail-label-colors
   '(("clojure" "#3e9a5e" "white")
@@ -174,7 +175,13 @@ Any other label's chip takes the face `mail-label'.")
         gnus-sum-thread-tree-single-leaf "└─▶ ")
   :config
   (add-hook 'gnus-group-mode-hook #'gnus-topic-mode)
+  ;; a label dropped while Gnus was down leaves its group without a folder
+  (add-hook 'gnus-started-hook #'drop-vanished-mail-groups -10)
   (add-hook 'gnus-started-hook #'subscribe-mail-groups)
+  ;; Gnus would rename or delete a label's folder alone, and mbsync's
+  ;; sync state would point at a label Gmail lacks
+  (advice-add 'gnus-group-rename-group :around #'rename-mail-label-a)
+  (advice-add 'gnus-group-delete-group :around #'delete-mail-label-a)
   ;; topics are newsrc state, so config applies over it at every start,
   ;; once the subscriptions exist
   (add-hook 'gnus-started-hook #'apply-mail-topics 50)
@@ -284,6 +291,11 @@ are applied again from `evil-collection-setup-hook'."
              :desc "add group"       "a" #'add-mail-group
              :desc "unsubscribe"     "d" #'gnus-group-unsubscribe
              :desc "move to topic"   "m" #'gnus-topic-move-group
+             ;; in Gmail too; r renames a label the same way
+             (:prefix ("l" . "label")
+              :desc "new"    "n" #'new-mail-label
+              :desc "rename" "r" #'rename-mail-label
+              :desc "delete" "d" #'delete-mail-label)
              (:prefix ("t" . "topic")
               :desc "new"    "n" #'gnus-topic-create-topic
               :desc "rename" "r" #'gnus-topic-rename

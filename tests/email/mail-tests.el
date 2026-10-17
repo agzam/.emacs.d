@@ -80,17 +80,19 @@ from the server-wide scan that froze the frame."
              ((symbol-function 'process-buffer)
               (lambda (_) (get-buffer-create " *mail-tests log*")))
              ((symbol-function 'refresh-mail-groups) (lambda () (push 'refresh ,calls)))
+             ((symbol-function 'follow-mail-folders) (lambda () (push 'follow ,calls)))
              ((symbol-function 'gnus-group-get-new-news)
               (lambda (&rest _) (push 'scan-every-group ,calls))))
      ,@body))
 
 (describe "mail-sync-sentinel"
-  (it "refreshes the routine mail groups after a clean exit while Gnus runs"
+  (it "follows the folders, then refreshes the routine groups, after a clean exit"
+    ;; a label made or dropped in Gmail gains or loses its group first
     (let (calls)
       (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t)))
         (mail-tests--with-sentinel-stubs 0 calls
           (mail-sync-sentinel 'proc "finished\n")))
-      (expect calls :to-equal '(refresh))))
+      (expect (nreverse calls) :to-equal '(follow refresh))))
   (it "asks for nothing when Gnus is not running"
     (let (calls)
       (cl-letf (((symbol-function 'gnus-alive-p) (lambda () nil)))
@@ -265,8 +267,14 @@ Scans, loads and refreshes log into CALLS."
         (unwind-protect
             (mail-tests--with-gnus-stubs calls
               (cl-letf (((symbol-function 'defer-bulk-mail-groups)
-                         (lambda () (setq deferred t))))
-                (subscribe-mail-groups))
+                         (lambda () (setq deferred t)))
+                        ((symbol-function 'apply-mail-topics)
+                         (lambda () (push '(arranged) calls))))
+                (expect (sort (subscribe-mail-groups) #'string<)
+                        :to-equal '("nnmaildir+gmail:archive"
+                                    "nnmaildir+gmail:emacs"
+                                    "nnmaildir+gmail:sent"
+                                    "nntp+news.gmane.io:gmane.emacs.devel")))
               ;; inbox is already in the newsrc, the dot-dir is not a group
               (expect (sort (mapcar #'cadr (seq-filter (lambda (call) (eq (car call) 'subscribe))
                                                        calls))
@@ -277,11 +285,57 @@ Scans, loads and refreshes log into CALLS."
                                   "nntp+news.gmane.io:gmane.emacs.devel"))
               ;; a fresh subscription lands at the default level, so the
               ;; bulk groups have to be moved out of the scan afterwards
-              (expect deferred :to-be t))
+              (expect deferred :to-be t)
+              ;; Gnus subscribes into the root topic, which the topics undo
+              (expect (car calls) :to-equal '(arranged))
+              (expect (seq-count (lambda (call) (equal call '(arranged))) calls) :to-be 1))
+          (kill-buffer gnus-group-buffer)
+          (delete-directory gmail-maildir t)))))
+  (it "returns nothing and arranges no topic when Gnus knows every group"
+    (let ((calls nil)
+          (gmail-maildir (make-temp-file "mail-tests-maildir" t))
+          (mail-groups '("nnmaildir+gmail:inbox"))
+          (gnus-newsrc-hashtb (make-hash-table :test #'equal))
+          (gnus-group-buffer " *mail-tests group*"))
+      (puthash "nnmaildir+gmail:inbox" '(entry (info)) gnus-newsrc-hashtb)
+      (make-directory (expand-file-name "inbox" gmail-maildir))
+      (with-current-buffer (get-buffer-create gnus-group-buffer)
+        (unwind-protect
+            (mail-tests--with-gnus-stubs calls
+              (cl-letf (((symbol-function 'defer-bulk-mail-groups) #'ignore)
+                        ((symbol-function 'apply-mail-topics)
+                         (lambda () (push '(arranged) calls))))
+                (expect (subscribe-mail-groups) :to-be nil))
+              (expect calls :to-be nil))
           (kill-buffer gnus-group-buffer)
           (delete-directory gmail-maildir t))))))
 
 (describe "subscribe-mail-group"
+  (it "subscribes no group the user killed this session"
+    ;; a label hidden with dd would come back at the next look otherwise
+    (let ((gnus-newsrc-hashtb (make-hash-table :test #'equal))
+          (gnus-killed-list '("nnmaildir+gmail:job"))
+          (gnus-group-buffer " *mail-tests group*")
+          (calls nil))
+      (with-current-buffer (get-buffer-create gnus-group-buffer)
+        (unwind-protect
+            (mail-tests--with-gnus-stubs calls
+              (expect (subscribe-mail-group "nnmaildir+gmail:job") :to-be nil)
+              (expect calls :to-be nil))
+          (kill-buffer gnus-group-buffer)))))
+  (it "says whether it subscribed"
+    (let ((gnus-newsrc-hashtb (make-hash-table :test #'equal))
+          (gnus-killed-list nil)
+          (gnus-group-buffer " *mail-tests group*")
+          (calls nil))
+      (puthash "nnmaildir+gmail:inbox" '(entry (info)) gnus-newsrc-hashtb)
+      (with-current-buffer (get-buffer-create gnus-group-buffer)
+        (unwind-protect
+            (mail-tests--with-gnus-stubs calls
+              (expect (subscribe-mail-group "nnmaildir+gmail:job") :to-be-truthy)
+              (expect (subscribe-mail-group "nnmaildir+gmail:inbox") :to-be nil)
+              (expect calls :to-equal '((subscribe "nnmaildir+gmail:job"))))
+          (kill-buffer gnus-group-buffer)))))
   (it "subscribes with the method gnus-secondary-select-methods defines for the server"
     ;; Gnus resolves a server it has not opened to its bare method, and
     ;; the group would lose the server's definitions for good
@@ -299,6 +353,135 @@ Scans, loads and refreshes log into CALLS."
               (expect used :to-equal
                       '(nnatom "www.example.org/feed" (nnatom-read-feed-function ignore))))
           (kill-buffer gnus-group-buffer))))))
+
+(defmacro mail-tests--with-store (folders calls &rest body)
+  "Run BODY over a Gmail store holding FOLDERS, Gnus's calls logged into CALLS.
+The newsrc lists inbox, job, gone and a news group at their levels; gone
+and the news group have no folder in the store."
+  (declare (indent 2))
+  `(let* ((gmail-maildir (file-name-as-directory (make-temp-file "mail-tests-store" t)))
+          (gnus-newsrc-hashtb
+           (mail-tests--newsrc '(("nnmaildir+gmail:inbox" 3 (nnmaildir "gmail"))
+                                 ("nnmaildir+gmail:job" 3 (nnmaildir "gmail"))
+                                 ("nnmaildir+gmail:gone" 4 (nnmaildir "gmail"))
+                                 ("nnmaildir+news:gmane.emacs.devel" 4 (nnmaildir "news")))))
+          (gnus-group-list '("nnmaildir+gmail:inbox" "nnmaildir+gmail:job" "nnmaildir+gmail:gone"
+                             "nnmaildir+news:gmane.emacs.devel"))
+          (gnus-newsrc-alist (cons '("dummy.group" 0 nil)
+                                   (mapcar (lambda (g) (nth 1 (gnus-group-entry g)))
+                                           gnus-group-list)))
+          (gnus-active-hashtb (make-hash-table :test #'equal))
+          (gnus-killed-list nil)
+          (gnus-zombie-list nil)
+          (gnus-group-change-level-function nil)
+          (gnus-topic-alist (list (list "Gnus") (list "Labels" "nnmaildir+gmail:job"
+                                                      "nnmaildir+gmail:gone")
+                                  (list "Gmail" "nnmaildir+gmail:inbox")))
+          (mail-sync-states (make-hash-table :test #'equal))
+          (gnus-group-buffer " *mail-tests group*"))
+     (dolist (folder ,folders)
+       (make-directory (expand-file-name folder gmail-maildir)))
+     (puthash "nnmaildir+gmail:gone" '(1 0) mail-sync-states)
+     (puthash "nnmaildir+gmail:gone" '(1 . 9) gnus-active-hashtb)
+     (get-buffer-create gnus-group-buffer)
+     (unwind-protect
+         (cl-letf (((symbol-function 'forget-mail-group)
+                    (lambda (group) (push (list 'forget group) ,calls)))
+                   ((symbol-function 'gnus-group-list-groups)
+                    (lambda (&rest _) (push (list 'redraw (buffer-name)) ,calls)))
+                   ((symbol-function 'refresh-mail-labels-soon)
+                    (lambda (&rest _) (push '(labels) ,calls))))
+           ,@body)
+       (kill-buffer gnus-group-buffer)
+       (delete-directory gmail-maildir t))))
+
+(describe "drop-vanished-mail-groups"
+  (it "kills each Gmail group whose folder is gone, and leaves the rest"
+    (let (calls)
+      (mail-tests--with-store '("inbox" "job") calls
+        (cl-letf (((symbol-function 'message) #'ignore))
+          (expect (drop-vanished-mail-groups) :to-equal '("nnmaildir+gmail:gone")))
+        (expect (gnus-group-entry "nnmaildir+gmail:gone") :to-be nil)
+        (expect gnus-group-list
+                :to-equal '("nnmaildir+gmail:inbox" "nnmaildir+gmail:job"
+                            "nnmaildir+news:gmane.emacs.devel"))
+        (expect (assoc "nnmaildir+gmail:gone" gnus-newsrc-alist) :to-be nil)
+        ;; a news group's folder lives in another store
+        (expect (gnus-group-level "nnmaildir+news:gmane.emacs.devel") :to-equal 4))))
+  (it "forgets what was read of a killed group, its sync state time too"
+    (let (calls)
+      (mail-tests--with-store '("inbox" "job") calls
+        (cl-letf (((symbol-function 'message) #'ignore))
+          (drop-vanished-mail-groups))
+        (expect (assoc 'forget calls) :to-equal '(forget "nnmaildir+gmail:gone"))
+        (expect (seq-count (lambda (call) (eq (car call) 'forget)) calls) :to-be 1)
+        (expect (gethash "nnmaildir+gmail:gone" mail-sync-states 'none) :to-be 'none)
+        (expect (gnus-active "nnmaildir+gmail:gone") :to-be nil))))
+  (it "leaves no killed mark, so a label made again under the name is subscribed again"
+    (let (calls)
+      (mail-tests--with-store '("inbox" "job") calls
+        (cl-letf (((symbol-function 'message) #'ignore))
+          (drop-vanished-mail-groups))
+        (expect gnus-killed-list :to-be nil))))
+  (it "takes a killed group out of every topic"
+    (let (calls)
+      (mail-tests--with-store '("inbox" "job") calls
+        (cl-letf (((symbol-function 'message) #'ignore))
+          (drop-vanished-mail-groups))
+        (expect gnus-topic-alist
+                :to-equal '(("Gnus") ("Labels" "nnmaildir+gmail:job")
+                            ("Gmail" "nnmaildir+gmail:inbox"))))))
+  (it "redraws the group buffer and the labels, and says which groups went"
+    (let (calls said)
+      (mail-tests--with-store '("inbox" "job") calls
+        (cl-letf (((symbol-function 'message)
+                   (lambda (format &rest args) (setq said (apply #'format format args)))))
+          (drop-vanished-mail-groups))
+        (expect (assoc 'redraw calls) :to-equal '(redraw " *mail-tests group*"))
+        (expect (assoc 'labels calls) :to-be-truthy)
+        (expect said :to-equal "Groups gone with their folders: gone"))))
+  (it "kills nothing while the inbox folder is missing"
+    ;; a store unmounted or not synced yet has no folder at all
+    (let (calls)
+      (mail-tests--with-store '("job") calls
+        (expect (drop-vanished-mail-groups) :to-be nil)
+        (expect (gnus-group-entry "nnmaildir+gmail:gone") :to-be-truthy)
+        (expect calls :to-be nil))))
+  (it "kills and redraws nothing while every folder is there"
+    (let (calls)
+      (mail-tests--with-store '("inbox" "job" "gone") calls
+        (expect (drop-vanished-mail-groups) :to-be nil)
+        (expect (length gnus-group-list) :to-be 4)
+        (expect calls :to-be nil)))))
+
+(describe "follow-mail-folders"
+  (it "kills the groups whose folder went, then subscribes and reads the new ones"
+    (let (calls)
+      (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
+                ((symbol-function 'drop-vanished-mail-groups) (lambda () (push 'drop calls)))
+                ((symbol-function 'subscribe-mail-groups)
+                 (lambda () (push 'subscribe calls) '("nnmaildir+gmail:fresh")))
+                ((symbol-function 'load-mail-groups)
+                 (lambda (groups &rest _) (push (list 'load groups) calls))))
+        (follow-mail-folders))
+      (expect (nreverse calls)
+              :to-equal '(drop subscribe (load ("nnmaildir+gmail:fresh"))))))
+  (it "reads nothing when no folder is new"
+    (let (calls)
+      (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
+                ((symbol-function 'drop-vanished-mail-groups) #'ignore)
+                ((symbol-function 'subscribe-mail-groups) #'ignore)
+                ((symbol-function 'load-mail-groups)
+                 (lambda (&rest args) (push args calls))))
+        (follow-mail-folders))
+      (expect calls :to-be nil)))
+  (it "does nothing while Gnus is down"
+    (let (calls)
+      (cl-letf (((symbol-function 'gnus-alive-p) #'ignore)
+                ((symbol-function 'drop-vanished-mail-groups) (lambda () (push 'drop calls)))
+                ((symbol-function 'subscribe-mail-groups) (lambda () (push 'subscribe calls))))
+        (follow-mail-folders))
+      (expect calls :to-be nil))))
 
 (defmacro mail-tests--with-empty-loader (&rest body)
   "Run BODY with nothing loading and nothing waiting."
@@ -1045,6 +1228,7 @@ Returns the groups it read again."
   (let ((mail-sync-states states)
         loaded)
     (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
+              ((symbol-function 'follow-mail-folders) #'ignore)
               ((symbol-function 'scanned-mail-groups) (lambda () (mapcar #'car times)))
               ((symbol-function 'mail-sync-state-time) (lambda (group) (cdr (assoc group times))))
               ((symbol-function 'load-mail-groups) (lambda (groups) (setq loaded groups))))
@@ -1073,7 +1257,18 @@ Returns the groups it read again."
       (cl-letf (((symbol-function 'gnus-alive-p) #'ignore))
         (spy-on 'scanned-mail-groups)
         (check-mail-syncs)
-        (expect 'scanned-mail-groups :not :to-have-been-called)))))
+        (expect 'scanned-mail-groups :not :to-have-been-called))))
+  (it "follows the folders a launchd sync changed before it reads the state files"
+    ;; a label Gmail dropped has no state file to read, and a new one needs its group
+    (let ((mail-sync-states (make-hash-table :test #'equal))
+          calls)
+      (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
+                ((symbol-function 'follow-mail-folders) (lambda () (push 'follow calls)))
+                ((symbol-function 'scanned-mail-groups)
+                 (lambda () (push 'scanned calls) '("nnmaildir+gmail:inbox")))
+                ((symbol-function 'mail-sync-state-time) (lambda (_) '(1 0))))
+        (check-mail-syncs))
+      (expect (nreverse calls) :to-equal '(follow scanned)))))
 
 (describe "mail-sync-state-time"
   (it "reads when mbsync last wrote the state file in the group's folder"

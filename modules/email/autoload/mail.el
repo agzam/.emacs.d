@@ -16,6 +16,7 @@
 (defvar mail-archive-group)
 (defvar mail-groups)
 (defvar mail-bulk-groups)
+(defvar gnus-topic-alist)
 
 ;;; Sync
 
@@ -24,13 +25,14 @@
   (list mail-sync-program (if full "full" "sync")))
 
 (defun mail-sync-sentinel (proc event)
-  "Report PROC's EVENT and refresh the routine mail groups after a clean exit."
+  "Report PROC's EVENT; after a clean exit, follow the folders and refresh."
   (when (memq (process-status proc) '(exit signal))
     (if (and (eq (process-status proc) 'exit)
              (zerop (process-exit-status proc)))
         (progn
           (message "Mail synced")
           (when (gnus-alive-p)
+            (follow-mail-folders)
             (refresh-mail-groups)))
       (message "Mail sync failed: %s (see %s)"
                (string-trim event) (buffer-name (process-buffer proc))))))
@@ -72,8 +74,10 @@ With FULL, the mail sync runs every tier at once."
 (defun check-mail-syncs ()
   "Read again, in the background, each routine group whose folder mbsync changed.
 mbsync rewrites a folder's state file only when it changed the folder.
-The first look at a group only notes the time."
+The first look at a group only notes the time.  A label made or dropped
+since the last look gains or loses its group first."
   (when (gnus-alive-p)
+    (follow-mail-folders)
     (when-let* ((changed (seq-filter
                           (lambda (group)
                             (let ((then (gethash group mail-sync-states 'unseen))
@@ -104,10 +108,10 @@ The first look at a group only notes the time."
 
 ;;;###autoload
 (defun subscribe-mail-group (group)
-  "Subscribe GROUP unless the newsrc already lists it.
+  "Subscribe GROUP unless the newsrc lists it or it was killed; t if it did.
 Gnus resolves a server it has not opened to a bare method and keeps that
 in the newsrc, dropping what `gnus-secondary-select-methods' defines."
-  (unless (gnus-group-entry group)
+  (unless (or (gnus-group-entry group) (member group gnus-killed-list))
     (with-current-buffer gnus-group-buffer
       (let ((gnus-override-subscribe-method
              (seq-find (lambda (method)
@@ -135,12 +139,53 @@ A routine scan then leaves them alone; they still list and enter normally."
 
 ;;;###autoload
 (defun subscribe-mail-groups ()
-  "Subscribe every maildir group plus `mail-groups', skipping known ones.
+  "Subscribe every maildir group plus `mail-groups' Gnus lacks; return those.
 Subscribing activates, and gnus-search silently drops a hit whose group
 nnmaildir never opened - notmuch returns whichever duplicate it likes.
-The bulk groups are then moved out of the routine scan."
-  (mapc #'subscribe-mail-group (append (maildir-groups) mail-groups))
-  (defer-bulk-mail-groups))
+The bulk groups move out of the routine scan, a new label into its topic."
+  (let ((new (seq-filter #'subscribe-mail-group (append (maildir-groups) mail-groups))))
+    (defer-bulk-mail-groups)
+    (when new
+      (apply-mail-topics))
+    new))
+
+;;;###autoload
+(defun drop-vanished-mail-groups ()
+  "Kill each Gmail group whose folder is gone, and forget what was read of it.
+A label dropped in Gmail, or deleted or renamed here, leaves no folder.
+Nothing goes while the inbox folder is missing.  Return the groups killed."
+  (when-let* (((file-directory-p (expand-file-name (gnus-group-real-name mail-inbox-group)
+                                                   gmail-maildir)))
+              (gone (seq-filter (lambda (group)
+                                  (and (string-prefix-p "nnmaildir+gmail:" group)
+                                       (not (file-directory-p
+                                             (expand-file-name (gnus-group-real-name group)
+                                                               gmail-maildir)))))
+                                gnus-group-list)))
+    (dolist (group gone)
+      (forget-mail-group group)
+      (remhash group mail-sync-states)
+      (gnus-group-change-level group gnus-level-killed (gnus-group-level group))
+      ;; a label made again under this name is subscribed again
+      (setq gnus-killed-list (delete group gnus-killed-list))
+      (gnus-set-active group nil)
+      (dolist (topic gnus-topic-alist)
+        (setcdr topic (delete group (cdr topic)))))
+    (when (gnus-buffer-live-p gnus-group-buffer)
+      (with-current-buffer gnus-group-buffer
+        (gnus-group-list-groups)))
+    (refresh-mail-labels-soon)
+    (message "Groups gone with their folders: %s"
+             (mapconcat #'gnus-group-short-name gone ", "))
+    gone))
+
+;;;###autoload
+(defun follow-mail-folders ()
+  "Kill each Gmail group whose folder went, and subscribe and read each new one."
+  (when (gnus-alive-p)
+    (drop-vanished-mail-groups)
+    (when-let* ((new (subscribe-mail-groups)))
+      (load-mail-groups new))))
 
 ;;;###autoload
 (defun refresh-mail-group (group)

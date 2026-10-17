@@ -377,6 +377,26 @@ loader made are the spec's own."
         (delete-directory store t)
         (delete-directory tables t))))
 
+  (it "drops a table whose folder went while the batch read it"
+    ;; mail-sync set the folder aside, and its group is gone
+    (load-tests--with-state ((store (load-tests--store 2))
+                             (tables (make-temp-file "load-tests-tables" t))
+                             (calls nil))
+      (unwind-protect
+          (let ((file (load-tests--table store tables))
+                (server (load-tests--open store)))
+            (load-tests--info "nnmaildir+gmail:inbox")
+            (mail-load-note (list 'loaded "nnmaildir+gmail:inbox" file))
+            (delete-directory (expand-file-name "inbox" store) t)
+            (load-tests--with-gnus-stubs calls
+              (load-tests--apply-all))
+            (expect (gethash "inbox" (nnmaildir--srv-groups server)) :to-be nil)
+            (expect calls :to-be nil)
+            ;; nor read again
+            (expect mail-load-queue :to-be nil))
+        (delete-directory store t)
+        (delete-directory tables t))))
+
   (it "drops a table whose server Gnus closed meanwhile"
     (load-tests--with-state ((store (load-tests--store 1))
                              (tables (make-temp-file "load-tests-tables" t))
@@ -602,6 +622,42 @@ loader made are the spec's own."
       (cl-letf (((symbol-function 'load-mail-groups) (lambda (groups) (push groups asked))))
         (load-unloaded-mail-groups))
       (expect asked :to-equal '(("nnmaildir+gmail:new-label"))))))
+
+(describe "forget-mail-group"
+  (it "drops the group from nnmaildir's server, the loads waiting and the saved tables"
+    (load-tests--with-state ((mail-table-directory
+                              (file-name-as-directory (make-temp-file "load-tests-tables" t))))
+      (unwind-protect
+          (let* ((server (load-tests--server "gone" "kept"))
+                 (table (mail-table-file mail-table-directory "nnmaildir+gmail:gone"))
+                 (kept (mail-table-file mail-table-directory "nnmaildir+gmail:kept"))
+                 (buffer (generate-new-buffer " *load-tests table*")))
+            (setf (nnmaildir--srv-curgrp server) (gethash "gone" (nnmaildir--srv-groups server)))
+            (make-directory (file-name-directory table) t)
+            (write-region "" nil table)
+            (write-region "" nil kept)
+            (setq mail-load-queue (list "nnmaildir+gmail:gone" "nnmaildir+gmail:kept")
+                  mail-load-tables (list (cons "nnmaildir+gmail:gone" table)
+                                         (cons "nnmaildir+gmail:kept" kept))
+                  mail-load-job (make-mail-load-job :group "nnmaildir+gmail:gone" :buffer buffer))
+            (forget-mail-group "nnmaildir+gmail:gone")
+            (expect (hash-table-keys (nnmaildir--srv-groups server)) :to-equal '("kept"))
+            (expect (nnmaildir--srv-curgrp server) :to-be nil)
+            (expect mail-load-queue :to-equal '("nnmaildir+gmail:kept"))
+            (expect (mapcar #'car mail-load-tables) :to-equal '("nnmaildir+gmail:kept"))
+            (expect (list mail-load-job (buffer-live-p buffer)) :to-equal '(nil nil))
+            (expect (list (file-exists-p table) (file-exists-p kept)) :to-equal '(nil t)))
+        (delete-directory mail-table-directory t))))
+  (it "keeps the server's current group when another group goes"
+    (load-tests--with-state ((mail-table-directory
+                              (file-name-as-directory (make-temp-file "load-tests-tables" t))))
+      (unwind-protect
+          (let* ((server (load-tests--server "gone" "kept"))
+                 (current (gethash "kept" (nnmaildir--srv-groups server))))
+            (setf (nnmaildir--srv-curgrp server) current)
+            (forget-mail-group "nnmaildir+gmail:gone")
+            (expect (nnmaildir--srv-curgrp server) :to-be current))
+        (delete-directory mail-table-directory t)))))
 
 (describe "stop-mail-load"
   (it "drops every load, the batch and the work waiting"

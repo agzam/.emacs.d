@@ -476,6 +476,13 @@ KEYS holds a prefix's key and the key under it apart by a space, as
       ;; group list a news fetch saved
       (expect (assoc "b" leader) :to-be nil)))
 
+  (it "makes, renames and deletes labels from the group buffer, in Gmail too"
+    (let ((leader (email-tests--localleader-pairs config 'gnus-group-mode-map)))
+      (expect (mapcar (lambda (keys) (assoc keys leader)) '("l n" "l r" "l d"))
+              :to-equal '(("l n" function new-mail-label)
+                          ("l r" function rename-mail-label)
+                          ("l d" function delete-mail-label)))))
+
   (it "refreshes the routine groups from the group buffer's gR"
     ;; gR is gnus-group-get-new-news, which asks nnmaildir for a
     ;; server-wide scan; gr stays Gnus's own per-group rescan
@@ -656,6 +663,8 @@ window and deletes the summary's."
                       subscribe-mail-group mail-file-group current-mail-file
                       follow-renamed-mail-a follow-renamed-mail-marks-a
                       check-mail-syncs start-mail-sync-check stop-mail-sync-check
+                      ;; Gnus's start and the label commands follow the folders
+                      drop-vanished-mail-groups follow-mail-folders
                       ;; the live search goes through these
                       when-mail-loaded search-mail-now gmail-message-url)
                      ;; embark runs the actions, the exporter and the hook; the
@@ -669,10 +678,13 @@ window and deletes the summary's."
                       gnus-user-format-function-L draw-mail-labels-h mail-labels-shown-p
                       mail-label-chips-of refresh-mail-labels refresh-mail-labels-soon
                       ;; the live search's lines read the tables once per batch
-                      mail-label-tables)
+                      mail-label-tables
+                      ;; the group buffer's keys and Gnus's own rename and delete
+                      new-mail-label rename-mail-label delete-mail-label
+                      rename-mail-label-a delete-mail-label-a)
                      ;; the first group line draws through the format function
                      ("groups.el" gnus-user-format-function-C apply-mail-topics
-                      add-mail-group defer-news-group-h
+                      put-group-in-topic add-mail-group defer-news-group-h
                       read-atom-feed fetch-feeds start-feed-fetches)
                      ("marks.el" mail-mark-thread-read quit-mail-summary
                       note-entry-marks-h carry-search-marks-h
@@ -688,7 +700,7 @@ window and deletes the summary's."
                      ("load.el" load-mail-groups maildir-group-p mail-group-loaded-p
                       mail-group-pending-p mail-group-reading-p mail-load-busy-p
                       mail-full-group-name wait-for-mail-load load-unloaded-mail-groups
-                      mail-group-server mail-group-store)
+                      mail-group-server mail-group-store forget-mail-group)
                      ;; C-c C-c, Gnus's hooks, its demon and an advice call these
                      ("delay.el" send-later send-due-mail send-queued-article-a
                       start-mail-queue stop-mail-queue)
@@ -856,6 +868,13 @@ window and deletes the summary's."
         (expect (and (stringp (car entry))
                      (or (null (cdr entry)) (stringp (cdr entry))))
                 :to-be t))))
+  (it "files a label Gnus subscribes under Labels, a topic it names"
+    (expect mail-label-topic :to-equal "Labels")
+    (expect (assoc mail-label-topic mail-topics) :to-be-truthy))
+  (it "names no label Gmail dropped"
+    ;; a stale name would keep its line, empty, in the group buffer
+    (let ((groups (mapcan (lambda (topic) (mapcar #'car (cdr topic))) mail-topics)))
+      (expect (member "nnmaildir+gmail:new" groups) :to-be nil)))
   (it "keeps a news group or a feed Gnus subscribes out of the startup scan"
     ;; every start would read a year of the list or fetch the feed otherwise
     (require 'gnus-start)
@@ -877,7 +896,7 @@ window and deletes the summary's."
     (expect (member mail-inbox-group mail-bulk-groups) :to-be nil)
     (expect mail-bulk-groups :to-have-same-items-as
             '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs"
-              "nnmaildir+gmail:org-mode" "nnmaildir+gmail:new"
+              "nnmaildir+gmail:org-mode"
               "nnmaildir+news:gmane.emacs.devel" "nnmaildir+news:gmane.emacs.orgmode")))
   (it "keeps every news group it subscribes on startup out of the routine scan"
     ;; a scan reads every message it has no overview for: a year of a list
@@ -979,9 +998,22 @@ window and deletes the summary's."
                    (equal (cadr form) ''gnus-started-hook))
           (eval form t)))
       (expect gnus-started-hook
-              :to-equal '(subscribe-mail-groups apply-mail-topics load-all-mail-groups
-                          start-mail-sync-check start-mail-queue start-feed-fetches
-                          fetch-stale-news))))
+              :to-equal '(drop-vanished-mail-groups subscribe-mail-groups apply-mail-topics
+                          load-all-mail-groups start-mail-sync-check start-mail-queue
+                          start-feed-fetches fetch-stale-news))))
+  (it "renames and deletes a label's group in Gmail too, never its folder alone"
+    ;; mbsync's sync state would point at a label Gmail lacks
+    (require 'gnus-group)
+    (unwind-protect
+        (progn
+          (dolist (form (email-tests--config-forms 'gnus))
+            (when (and (eq (car-safe form) 'advice-add)
+                       (member (cadr form) '('gnus-group-rename-group 'gnus-group-delete-group)))
+              (eval form t)))
+          (expect (advice-member-p #'rename-mail-label-a 'gnus-group-rename-group) :to-be-truthy)
+          (expect (advice-member-p #'delete-mail-label-a 'gnus-group-delete-group) :to-be-truthy))
+      (advice-remove 'gnus-group-rename-group #'rename-mail-label-a)
+      (advice-remove 'gnus-group-delete-group #'delete-mail-label-a)))
   (it "drops every load and stops looking for syncs when Gnus leaves"
     (require 'gnus)
     (let ((gnus-exit-gnus-hook nil))

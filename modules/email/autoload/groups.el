@@ -7,6 +7,7 @@
 
 (defvar doom-cache-dir)
 (defvar mail-topics)
+(defvar mail-label-topic)
 (defvar mail-bulk-groups)
 (defvar mail-remote-backends)
 (defvar gnus-tmp-group)
@@ -71,18 +72,28 @@ ahead of any other; every other topic loses only the groups TOPICS names."
 
 ;;;###autoload
 (defun apply-mail-topics ()
-  "Put the groups `mail-topics' names into its topics, list them always, redraw."
+  "Put the groups `mail-topics' names into its topics, list them always, redraw.
+A Gmail label Gnus subscribed sits in the root topic or in none, which
+hides it, and moves under `mail-label-topic'."
   (interactive nil gnus-group-mode)
   (pcase-let ((`(,topology . ,alist)
                (arrange-mail-topics gnus-topic-topology gnus-topic-alist mail-topics
                                     (lambda (group) (gnus-group-entry group)))))
     (setq gnus-topic-topology topology
           gnus-topic-alist alist))
+  (when (assoc mail-label-topic gnus-topic-alist)
+    (let ((root (cdr (assoc (caar gnus-topic-topology) gnus-topic-alist)))
+          (filed (apply #'append (mapcar #'cdr gnus-topic-alist))))
+      (dolist (group gnus-group-list)
+        (when (and (string-prefix-p "nnmaildir+gmail:" group)
+                   (or (member group root) (not (member group filed))))
+          (put-group-in-topic group mail-label-topic)))))
   (setq gnus-permanently-visible-groups (mail-topics-regexp))
   (when (gnus-buffer-live-p gnus-group-buffer)
     (with-current-buffer gnus-group-buffer
       (gnus-group-list-groups))))
 
+;;;###autoload
 (defun put-group-in-topic (group topic)
   "Move GROUP out of every topic and into TOPIC, last."
   (dolist (entry gnus-topic-alist)

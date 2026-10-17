@@ -10,6 +10,7 @@
 (require 'gnus-group)
 (require 'gnus-search)
 (require 'gnus-sum)
+(require 'gnus-topic)
 (require 'nnmaildir)
 (require 'seq)
 (require 'subr-x)
@@ -17,6 +18,7 @@
 
 (defvar doom-state-dir)
 (defvar gmail-maildir)
+(defvar mail-sync-program)
 (defvar mail-inbox-group)
 (defvar mail-trash-group)
 (defvar mail-archive-group)
@@ -356,21 +358,40 @@ Embark's select picks several; a name no label has picks none."
       (when-let* ((group (cdr (assoc name names))))
         (mail-label-cycle scope group)))))
 
+(defun mail-label-name-problem (name)
+  "Why NAME cannot name a new label, or nil when it can.
+mail-sync sends a name to Gmail as it is, and mbsync's maildir listing
+skips the folders cur, new and tmp."
+  (cond ((not (string-match-p "\\`[a-zA-Z0-9_-]+\\'" name))
+         "A label name takes ASCII letters, digits, - and _")
+        ((member name '("cur" "new" "tmp"))
+         "mbsync syncs no label named cur, new or tmp")
+        ((seq-some (lambda (group) (string-equal-ignore-case (gnus-group-real-name group) name))
+                   (maildir-groups))
+         (format "Label %s exists" name))))
+
+(defun read-new-mail-label (prompt)
+  "Read with PROMPT a name that no label has and mbsync can sync."
+  (let ((name (string-trim (read-string prompt))))
+    (when-let* ((problem (mail-label-name-problem name)))
+      (user-error "%s" problem))
+    name))
+
+(defun make-mail-label (name)
+  "Make the folder and group of the label NAME, and return the group.
+The next sync makes it a Gmail label."
+  (let ((group (concat "nnmaildir+gmail:" name)))
+    (dolist (sub '("cur" "new" "tmp"))
+      (make-directory (expand-file-name sub (expand-file-name name gmail-maildir)) t))
+    (subscribe-mail-groups)
+    (load-mail-groups (list group) t)
+    group))
+
 (defun mail-label-create ()
   "Make a new label and turn it on for the menu's messages."
   (interactive)
   (let* ((scope (transient-scope 'mail-label-menu))
-         (name (string-trim (read-string "New label: ")))
-         (group (concat "nnmaildir+gmail:" name)))
-    (unless (string-match-p "\\`[[:alnum:]_-]+\\'" name)
-      (user-error "A label name takes letters, digits, - and _"))
-    (when (seq-some (lambda (old) (string-equal-ignore-case (mail-label-name old) name))
-                    (mail-label-groups))
-      (user-error "Label %s exists" name))
-    (dolist (sub '("cur" "new" "tmp"))
-      (make-directory (expand-file-name sub (expand-file-name name gmail-maildir)) t))
-    (subscribe-mail-group group)
-    (load-mail-groups (list group) t)
+         (group (make-mail-label (read-new-mail-label "New label: "))))
     (setf (mail-label-scope-groups scope) (mail-label-groups)
           (alist-get group (mail-label-scope-carriers scope) nil nil #'equal) nil
           (alist-get group (mail-label-scope-want scope) nil nil #'equal) 'all)))
@@ -510,6 +531,107 @@ Return `shown' when the summary's own copy went, nil when nothing changed."
                                (lambda () (seq-every-p #'mail-group-loaded-p unloaded))
                                (lambda () (mail-label-start job))))
           (t (mail-label-start job)))))
+
+;;; Labels in the group buffer
+;;
+;; mail-sync renames or deletes a label in Gmail and moves its folder, and
+;; the groups then follow the folders.
+
+;;;###autoload
+(defun new-mail-label (name)
+  "Make the label NAME, which the next sync makes a Gmail label."
+  (interactive (list (read-new-mail-label "New label: ")) gnus-group-mode)
+  (gnus-group-jump-to-group (make-mail-label name))
+  (message "Made label %s; the next sync takes it to Gmail" name))
+
+(defun mail-label-change-problem (group)
+  "Why mail-sync cannot rename or delete GROUP, or nil when it can."
+  (cond ((null group) "No group here")
+        ((not (string-prefix-p "nnmaildir+gmail:" group))
+         (format "%s is not a Gmail label" group))
+        ((or (equal group mail-inbox-group) (not (mail-label-group-p group)))
+         (format "%s is not a label" (mail-label-name group)))
+        ((string-match-p "[^[:ascii:]]" group)
+         (format "Change %s in Gmail: mail-sync sends ASCII names only"
+                 (gnus-group-real-name group)))))
+
+(defun run-mail-label-change (args done)
+  "Run `mail-sync-program' with ARGS in the background, then call DONE.
+DONE runs after a clean exit, once the groups follow the folders; a
+failure says what the program printed last."
+  (make-process
+   :name "mail-label-change" :buffer (generate-new-buffer " *mail-label-change*")
+   :command (cons mail-sync-program args) :noquery t
+   :sentinel (lambda (process _event)
+               (when (memq (process-status process) '(exit signal))
+                 (let ((said (with-current-buffer (process-buffer process)
+                               (car (last (split-string (buffer-string) "\n" t))))))
+                   (kill-buffer (process-buffer process))
+                   (if (and (eq (process-status process) 'exit)
+                            (zerop (process-exit-status process)))
+                       (progn
+                         (follow-mail-folders)
+                         (funcall done))
+                     (message "Labels: %s failed: %s" (car args) said)))))))
+
+;;;###autoload
+(defun delete-mail-label (group)
+  "Delete the label GROUP in Gmail and here; its messages keep their other labels."
+  (interactive (list (gnus-group-group-name)) gnus-group-mode)
+  (when-let* ((problem (mail-label-change-problem group)))
+    (user-error "%s" problem))
+  (let ((name (gnus-group-real-name group)))
+    (when (yes-or-no-p (format "Delete label %s in Gmail (its messages keep their other labels)? "
+                               name))
+      (message "Deleting label %s..." name)
+      (run-mail-label-change (list "remove" name)
+                             (lambda () (message "Deleted label %s" name))))))
+
+;;;###autoload
+(defun rename-mail-label (group new)
+  "Rename the label GROUP to NEW in Gmail and here; the group keeps its place."
+  (interactive
+   (let ((group (gnus-group-group-name)))
+     (when-let* ((problem (mail-label-change-problem group)))
+       (user-error "%s" problem))
+     (list group (read-new-mail-label (format "Rename %s to: " (gnus-group-real-name group)))))
+   gnus-group-mode)
+  (when-let* ((problem (or (mail-label-change-problem group) (mail-label-name-problem new))))
+    (user-error "%s" problem))
+  (let ((name (gnus-group-real-name group))
+        (renamed (concat "nnmaildir+gmail:" new))
+        (topic (gnus-group-topic group))
+        (level (gnus-group-level group)))
+    (message "Renaming label %s to %s..." name new)
+    (run-mail-label-change
+     (list "rename" name new)
+     (lambda ()
+       (if (not (gnus-group-entry renamed))
+           ;; mail-sync set the folder aside: Gmail renumbered the label
+           (message "Renamed label %s to %s; the next sync fetches it" name new)
+         (unless (eql level (gnus-group-level renamed))
+           (gnus-group-change-level renamed level (gnus-group-level renamed)))
+         (when topic
+           (put-group-in-topic renamed topic)
+           (apply-mail-topics))
+         (message "Renamed label %s to %s" name new))))))
+
+;;;###autoload
+(defun rename-mail-label-a (fn group new-name)
+  "Call FN to rename GROUP to NEW-NAME; a Gmail group renames in Gmail too.
+Renaming its folder alone would leave mbsync's sync state pointing at a
+Gmail label of the old name."
+  (if (and group (string-prefix-p "nnmaildir+gmail:" group))
+      (rename-mail-label group (gnus-group-real-name new-name))
+    (funcall fn group new-name)))
+
+;;;###autoload
+(defun delete-mail-label-a (fn group &rest args)
+  "Call FN on GROUP and ARGS; a Gmail group is deleted in Gmail too.
+nnmaildir would delete the files and leave mbsync's sync state behind."
+  (if (and group (string-prefix-p "nnmaildir+gmail:" group))
+      (delete-mail-label group)
+    (apply fn group args)))
 
 ;;; On the summary line
 ;;
