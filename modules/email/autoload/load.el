@@ -340,8 +340,9 @@ A maildir that changed while the batch read it is read again."
          (old (gethash name groups))
          (loaded (mail-load-job-grp job))
          (fresh (mail-table-fresh-p dir header)))
-    ;; a Gnus restart meanwhile opened a server of its own
-    (when (and groups (eq server (mail-group-server group)))
+    ;; a Gnus restart meanwhile opened a server of its own, and a folder
+    ;; that went meanwhile has no group left to fill
+    (when (and groups (eq server (mail-group-server group)) (file-directory-p dir))
       (mail-table-finish-group loaded (mail-load-job-nlist job))
       (when old
         (mail-load-keep-newer loaded old dir))
@@ -532,6 +533,26 @@ A label mbsync created since the start is one."
   (load-mail-groups (seq-remove (lambda (group)
                                   (or (mail-group-loaded-p group) (mail-group-pending-p group)))
                                 (seq-filter #'maildir-group-p gnus-group-list))))
+
+;;;###autoload
+(defun forget-mail-group (group)
+  "Drop GROUP from nnmaildir's groups, the loads waiting and the saved tables.
+Its folder is gone; a batch reading it now reports a table nothing applies."
+  (when-let* ((server (mail-group-server group))
+              (groups (nnmaildir--srv-groups server))
+              (name (cdr (mail-table-group-parts group))))
+    (when (eq (gethash name groups) (nnmaildir--srv-curgrp server))
+      (setf (nnmaildir--srv-curgrp server) nil))
+    (remhash name groups))
+  (setq mail-load-queue (remove group mail-load-queue)
+        mail-load-tables (seq-remove (lambda (entry) (equal (car entry) group))
+                                     mail-load-tables))
+  (when (and mail-load-job (equal group (mail-load-job-group mail-load-job)))
+    (kill-buffer (mail-load-job-buffer mail-load-job))
+    (setq mail-load-job nil))
+  (let ((table (mail-table-file mail-table-directory group)))
+    (when (file-exists-p table)
+      (delete-file table))))
 
 ;;;###autoload
 (defun stop-mail-load ()
