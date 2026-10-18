@@ -403,6 +403,18 @@ is the only treatment."
       (expect (mail-thread-guides 9) :to-equal "│ │ │ │ │ │ ")
       (expect (mail-thread-guides 58) :to-equal "│ │ │ │ │ │ "))))
 
+(describe "mail-thread-wrap-prefix"
+  (it "puts the bars alone where visual-wrap left no prefix"
+    (expect (mail-thread-wrap-prefix "│ " nil) :to-equal "│ ")
+    (expect (mail-thread-wrap-prefix "│ " "") :to-equal "│ "))
+  (it "puts the bars before a prefix visual-wrap repeats"
+    (expect (mail-thread-wrap-prefix "│ " "    ") :to-equal "│     "))
+  (it "turns visual-wrap's stretch from the window edge into one after the bars"
+    (let ((prefix (mail-thread-wrap-prefix "│ " '(space :align-to (+ (22) (0 . width))))))
+      (expect (substring-no-properties prefix) :to-equal "│  ")
+      (expect (get-text-property 2 'display prefix)
+              :to-equal '(space :width (+ (22) (0 . width)))))))
+
 (describe "the guide bars in the thread view"
   (it "start each message's line at its depth"
     (let ((thread-tests-entries thread-tests-branches))
@@ -434,13 +446,14 @@ is the only treatment."
     (expect (thread-tests-wrap-prefixes 2 "a plain line") :to-equal '("│ │ ")))
   (it "go before the indentation visual-wrap repeats"
     (expect (thread-tests-wrap-prefixes 2 "    an indented line") :to-equal '("│ │     ")))
-  (it "turn visual-wrap's stretch from the window edge into one after them"
+  (it "go before whatever visual-wrap makes of a quote marker"
+    ;; Emacs 30 repeats it as spaces, later ones as a stretch
     (let ((root (car (thread-tests-wrap-prefixes 0 "> a quoted line")))
           (reply (car (thread-tests-wrap-prefixes 2 "> a quoted line"))))
-      (expect (car-safe root) :to-be 'space)
-      (expect (substring-no-properties reply) :to-equal "│ │  ")
-      (expect (get-text-property 4 'display reply)
-              :to-equal `(space :width ,(plist-get (cdr root) :align-to)))))
+      (expect root :to-be-truthy)
+      (expect (equal-including-properties
+               reply (mail-thread-wrap-prefix (mail-thread-guides 2) root))
+              :to-be t)))
   (it "stay single when a line is fontified again"
     (with-temp-buffer
       (mail-thread-mode)
