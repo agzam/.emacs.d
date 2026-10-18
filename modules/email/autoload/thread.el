@@ -25,11 +25,11 @@
   "Buffer every thread is rendered into.")
 
 (cl-defstruct (mail-thread-message (:constructor mail-thread-message-create))
-  "One message of the thread on screen."
-  article header marker)
+  "One message of the thread on screen, DEPTH replies below a root."
+  article header marker (depth 0))
 
 (defvar-local mail-thread-messages nil
-  "Messages of the thread in this buffer, oldest first.")
+  "Messages of the thread in this buffer, in reply order.")
 
 (defvar-local mail-thread-summary-buffer nil
   "Summary buffer the thread was opened from.")
@@ -52,25 +52,62 @@
 (defvar-local mail-thread-filter-process nil
   "The notmuch process answering the latest filter query.")
 
+(defvar mail-thread-max-indent 6
+  "Levels the thread view indents at most.")
+
 ;;; Reading the thread out of the summary
 
 (defun mail-thread-entries ()
-  "Thread at point as (ARTICLE . HEADER) pairs, oldest first.
-Called in a summary buffer.  The summary sorts threads newest first;
-inside one, reading order is chronological."
-  (let ((entries
-         (delq nil
-               (mapcar (lambda (article)
-                         (unless (memq article gnus-newsgroup-sparse)
-                           (when-let* ((header (gnus-summary-article-header article)))
-                             (cons article header))))
-                       (save-excursion
-                         (gnus-summary-top-thread)
-                         (gnus-summary-articles-in-thread))))))
-    (sort entries
-          (lambda (a b)
-            (time-less-p (gnus-date-get-time (mail-header-date (cdr a)))
-                         (gnus-date-get-time (mail-header-date (cdr b))))))))
+  "Thread at point as (ARTICLE . HEADER) pairs, in summary order.
+Called in a summary buffer.  The placeholders Gnus makes up for missing
+parents stay out."
+  (delq nil
+        (mapcar (lambda (article)
+                  (unless (memq article gnus-newsgroup-sparse)
+                    (when-let* ((header (gnus-summary-article-header article)))
+                      (cons article header))))
+                (save-excursion
+                  (gnus-summary-top-thread)
+                  (gnus-summary-articles-in-thread)))))
+
+(defun mail-thread-oldest-first (entries)
+  "ENTRIES, (ARTICLE . HEADER) pairs, sorted by date."
+  (sort entries :key (lambda (entry) (gnus-date-get-time (mail-header-date (cdr entry))))
+        :lessp #'time-less-p))
+
+(defun mail-thread-arrange (entries)
+  "ENTRIES in reply order, each pair as (DEPTH ARTICLE . HEADER).
+A message follows the one it answers, siblings oldest first.  It answers
+the nearest of its References that ENTRIES hold; one answering none of
+them is a root at depth 0."
+  (let ((by-id (make-hash-table :test #'equal))
+        (replies (make-hash-table :test #'eq))
+        (seen (make-hash-table :test #'eq))
+        roots arranged)
+    (dolist (entry entries)
+      (puthash (mail-header-id (cdr entry)) entry by-id))
+    (dolist (entry entries)
+      (if-let* ((parent (seq-some (lambda (id) (gethash id by-id))
+                                  (reverse (gnus-split-references
+                                            (mail-header-references (cdr entry)))))))
+          (push entry (gethash parent replies))
+        (push entry roots)))
+    (cl-flet ((walk (root)
+                (let ((stack (list (cons 0 root))))
+                  (while stack
+                    (pcase-let ((`(,depth . ,entry) (pop stack)))
+                      (unless (gethash entry seen)
+                        (puthash entry t seen)
+                        (push (cons depth entry) arranged)
+                        (setq stack (nconc (mapcar (lambda (reply) (cons (1+ depth) reply))
+                                                   (mail-thread-oldest-first
+                                                    (gethash entry replies)))
+                                           stack))))))))
+      (mapc #'walk (mail-thread-oldest-first roots))
+      ;; messages whose References loop have no root above them
+      (while-let ((strays (seq-remove (lambda (entry) (gethash entry seen)) entries)))
+        (walk (car (mail-thread-oldest-first strays)))))
+    (nreverse arranged)))
 
 ;;; Rendering one message
 
@@ -128,6 +165,47 @@ SUBJECT is the thread's, shown again only where a message changed it."
                              (gnus-simplify-subject-re subject))
               (concat "  " (propertize own 'face 'gnus-header-subject))))))
 
+;;; Indenting by depth
+
+(defun mail-thread-guides (depth)
+  "Guide bars left of each line of a message DEPTH replies deep, or nil.
+They stop at `mail-thread-max-indent' levels."
+  (when (< 0 depth)
+    ;; dimmer than `shadow': the bars only hint at the indent
+    (propertize (apply #'concat (make-list (min depth mail-thread-max-indent) "│ "))
+                'face 'vertical-border)))
+
+(defun mail-thread-indent (message start end)
+  "Draw MESSAGE's guide bars left of each line from START to END."
+  (put-text-property start end 'line-prefix
+                     (mail-thread-guides (mail-thread-message-depth message))))
+
+(defun mail-thread-wrap-prefix (guides prefix)
+  "GUIDES followed by PREFIX, the `wrap-prefix' visual-wrap gave a line.
+Its stretch aligns to the window edge, and the line starts after GUIDES."
+  (pcase prefix
+    ((pred stringp) (concat guides prefix))
+    (`(space :align-to ,width)
+     (concat guides (propertize " " 'display `(space :width ,width))))
+    (_ guides)))
+
+(defun mail-thread-wrap-guides (start end)
+  "Draw the guide bars on the continuation lines from START to END too.
+Runs after `visual-wrap-prefix-function', which resets each line's
+`wrap-prefix' there first."
+  (goto-char end)
+  (unless (bolp) (forward-line 1))
+  (setq end (point))
+  (goto-char start)
+  (forward-line 0)
+  (setq start (point))
+  (while (< (point) end)
+    (when-let* ((guides (get-text-property (point) 'line-prefix)))
+      (put-text-property (point) (pos-eol) 'wrap-prefix
+                         (mail-thread-wrap-prefix guides (get-text-property (point) 'wrap-prefix))))
+    (forward-line))
+  `(jit-lock-bounds ,start . ,end))
+
 ;;; Folding
 
 (defun mail-thread-body-start (message)
@@ -172,11 +250,13 @@ a fallback font draws it at the wrong size."
 Markers where the body goes end up after it, so a point or window start
 on the next message stays there while a body lands above it."
   (goto-char (mail-thread-body-start message))
-  (insert-before-markers
-   (or (mail-thread-render mail-thread-group
-                           (mail-thread-message-article message))
-       "[the store no longer holds this message]")
-   "\n\n"))
+  (let ((start (point)))
+    (insert-before-markers
+     (or (mail-thread-render mail-thread-group
+                             (mail-thread-message-article message))
+         "[the store no longer holds this message]")
+     "\n\n")
+    (mail-thread-indent message start (point))))
 
 (defun mail-thread-expand (message)
   "Show MESSAGE's body and mark its article read."
@@ -218,7 +298,7 @@ on the next message stays there while a body lands above it."
             (overlays-at (mail-thread-message-marker message))))
 
 (defun mail-thread-shown-messages ()
-  "Messages the filter leaves on show, oldest first."
+  "Messages the filter leaves on show, in reply order."
   (seq-remove #'mail-thread-hidden-p mail-thread-messages))
 
 (defun mail-thread-message-id (message)
@@ -477,23 +557,29 @@ attachments are opened here."
   ;; HTML paragraphs come unfilled, and the window decides where they wrap
   (visual-line-mode)
   (visual-wrap-prefix-mode)
+  ;; after visual-wrap's own function, at depth 90
+  (add-hook 'jit-lock-functions #'mail-thread-wrap-guides 95 t)
+  (jit-lock-register #'mail-thread-wrap-guides)
   ;; a fill must not outlive the thread it was started for
   (add-hook 'kill-buffer-hook #'mail-thread-stop-fill nil t)
   (add-hook 'change-major-mode-hook #'mail-thread-stop-fill nil t))
 
 (defun mail-thread-build (entries entry unreads)
-  "Insert every message of ENTRIES, rendering the one the summary was on.
-ENTRY is that article and UNREADS the articles the summary holds unread;
-those wait in `mail-thread-waiting' for the fill, the rest stay a line."
-  (let ((subject (mail-thread-subject (cdar entries)))
-        (inhibit-read-only t)
-        messages shown)
-    (pcase-dolist (`(,article . ,header) entries)
+  "Insert every message of ENTRIES in reply order, rendering ENTRY's.
+ENTRY is the article the summary was on and UNREADS the articles it
+holds unread; those wait in `mail-thread-waiting' for the fill, the rest
+stay a line."
+  (let* ((arranged (mail-thread-arrange entries))
+         (subject (mail-thread-subject (cddar arranged)))
+         (inhibit-read-only t)
+         messages shown)
+    (pcase-dolist (`(,depth ,article . ,header) arranged)
       (let ((message (mail-thread-message-create
-                      :article article :header header
+                      :article article :header header :depth depth
                       :marker (point-marker))))
         (push message messages)
         (insert (mail-thread-message-line message subject (eql article entry)) "\n")
+        (mail-thread-indent message (mail-thread-message-marker message) (point))
         ;; a body unfolded later is inserted right where the next
         ;; message's marker sits, and that marker has to end up after it
         (set-marker-insertion-type (mail-thread-message-marker message) t)

@@ -15,7 +15,9 @@
 (load-module-file "modules/email/autoload/thread.el")
 (load-module-file "modules/email/autoload/quotes.el")
 (load-module-file "modules/email/autoload/html.el")
-;; the header line names the thread's labels
+;; the header line names the thread's labels; labels.el's (require
+;; 'consult) must no-op in the batch tier
+(provide 'consult)
 (load-module-file "scripts/mail-load.el")
 (load-module-file "modules/email/autoload/load.el")
 (load-module-file "modules/email/autoload/labels.el")
@@ -36,6 +38,27 @@ SUBJECT, FROM, DATE, ID and REFERENCES are its fields."
                   12 "Re: Plan, and the budget" "Ann <ann@example.com>"
                   "Mon, 21 Sep 2026 12:00:00 +0000" "<3@x>" "<1@x> <2@x>")))
   "Three messages of one thread, oldest first.")
+
+(defun thread-tests-entry (number hour id &optional references)
+  "Entry of the article NUMBER sent at HOUR, its Message-ID ID.
+REFERENCES names the messages it answers."
+  (cons number (thread-tests-header
+                number "Re: Plan" "Ann <ann@example.com>"
+                (format "Mon, 21 Sep 2026 %02d:00:00 +0000" hour) id references)))
+
+(defvar thread-tests-branches
+  (list (thread-tests-entry 20 10 "<r@x>")
+        (thread-tests-entry 21 11 "<a@x>" "<r@x>")
+        (thread-tests-entry 24 16 "<a1@x>" "<r@x> <a@x>")
+        (thread-tests-entry 23 13 "<c@x>" "<r@x>")
+        (thread-tests-entry 22 12 "<b@x>" "<r@x>"))
+  "A root, its three answers and an answer to the first, in the summary's order.
+The summary puts the subthread holding the newest message first.")
+
+(defun thread-tests-arranged (entries)
+  "ENTRIES in the order `mail-thread-arrange' gives, each as (ARTICLE . DEPTH)."
+  (mapcar (pcase-lambda (`(,depth ,article . ,_)) (cons article depth))
+          (mail-thread-arrange entries)))
 
 (defvar thread-tests-gmane-article
   (concat "From: Ann <ann@example.com>\n"
@@ -169,6 +192,39 @@ is the only treatment."
       (kill-buffer summary)
       (kill-buffer buffer))))
 
+(defun thread-tests-wrap-prefixes (depth &rest lines)
+  "Each of LINES's `wrap-prefix', drawn DEPTH replies deep and fontified."
+  (with-temp-buffer
+    (mail-thread-mode)
+    (let ((inhibit-read-only t))
+      (insert (propertize (mapconcat (lambda (line) (concat line "\n")) lines "")
+                          'line-prefix (mail-thread-guides depth))))
+    (jit-lock-fontify-now)
+    (goto-char (point-min))
+    (let (prefixes)
+      (while (not (eobp))
+        (push (get-text-property (point) 'wrap-prefix) prefixes)
+        (forward-line))
+      (nreverse prefixes))))
+
+(defun thread-tests-guides-from (start end)
+  "Distinct `line-prefix' values of the lines from START to END, as plain text."
+  (save-excursion
+    (goto-char start)
+    (let (guides)
+      (while (< (point) end)
+        (cl-pushnew (when-let* ((prefix (get-text-property (point) 'line-prefix)))
+                      (substring-no-properties prefix))
+                    guides :test #'equal)
+        (forward-line))
+      (nreverse guides))))
+
+(defun thread-tests-line (message)
+  "Text of MESSAGE's line in the thread buffer."
+  (save-excursion
+    (goto-char (mail-thread-message-marker message))
+    (buffer-substring-no-properties (point) (pos-eol))))
+
 (defun thread-tests-line-labels (message)
   "What the label slot on MESSAGE's line shows, or nil before it is drawn."
   (save-excursion
@@ -225,11 +281,57 @@ is the only treatment."
         (expect (text-property-not-all (1+ slot) (length line) 'mail-labels nil line)
                 :to-be nil)))))
 
+(describe "mail-thread-arrange"
+  (it "puts each answer right under the message it answers, siblings oldest first"
+    (expect (thread-tests-arranged thread-tests-branches)
+            :to-equal '((20 . 0) (21 . 1) (24 . 2) (22 . 1) (23 . 1))))
+  (it "takes the last of the References for the message answered"
+    (expect (thread-tests-arranged thread-tests-entries)
+            :to-equal '((10 . 0) (11 . 1) (12 . 2))))
+  (it "counts no level for a message the thread lacks"
+    ;; Gnus's placeholder for the missing parent is not among the entries
+    (expect (thread-tests-arranged
+             (list (thread-tests-entry 31 12 "<c@x>" "<r@x> <gone@x>")
+                   (thread-tests-entry 30 10 "<r@x>")))
+            :to-equal '((30 . 0) (31 . 1))))
+  (it "puts the answers to a message the thread lacks side by side at the top, oldest first"
+    ;; Gnus gathers them by their References under one false root
+    (expect (thread-tests-arranged
+             (list (thread-tests-entry 40 11 "<a@x>" "<gone@x>")
+                   (thread-tests-entry 42 13 "<b1@x>" "<gone@x> <b@x>")
+                   (thread-tests-entry 41 12 "<b@x>" "<gone@x>")))
+            :to-equal '((40 . 0) (41 . 0) (42 . 1))))
+  (it "keeps every message of a References loop"
+    (expect (thread-tests-arranged
+             (list (thread-tests-entry 51 11 "<y@x>" "<x@x>")
+                   (thread-tests-entry 50 10 "<x@x>" "<y@x>")
+                   (thread-tests-entry 52 12 "<z@x>" "<z@x>")))
+            :to-equal '((50 . 0) (51 . 1) (52 . 0)))))
+
 (describe "mail-thread-build"
-  (it "keeps the messages in date order"
-    (thread-tests-with-buffer 11 nil
-      (expect (mapcar #'mail-thread-message-article mail-thread-messages)
-              :to-equal '(10 11 12))))
+  (it "lays the messages out in reply order, each knowing its depth"
+    (let ((thread-tests-entries thread-tests-branches))
+      (thread-tests-with-buffer 21 nil
+        (expect (mapcar (lambda (message)
+                          (cons (mail-thread-message-article message)
+                                (mail-thread-message-depth message)))
+                        mail-thread-messages)
+                :to-equal '((20 . 0) (21 . 1) (24 . 2) (22 . 1) (23 . 1)))
+        (expect (mapcar (lambda (message)
+                          (marker-position (mail-thread-message-marker message)))
+                        mail-thread-messages)
+                :to-equal (sort (mapcar (lambda (message)
+                                          (marker-position (mail-thread-message-marker message)))
+                                        mail-thread-messages))))))
+  (it "names the thread after its root, wherever the summary put it"
+    (let ((thread-tests-entries
+           (list (thread-tests-entry 61 11 "<a@x>" "<r@x>")
+                 (cons 60 (thread-tests-header 60 "Root subject" "Ann <ann@example.com>"
+                                               "Mon, 21 Sep 2026 10:00:00 +0000" "<r@x>")))))
+      (thread-tests-with-buffer 60 nil
+        (expect header-line-format :to-equal "Root subject   2 messages")
+        (expect (thread-tests-line (thread-tests-message 60)) :not :to-match "Root subject")
+        (expect (thread-tests-line (thread-tests-message 61)) :to-match "Re: Plan"))))
   (it "renders only the message the summary was on"
     ;; every unread gmane message is an NNTP round trip; the buffer must
     ;; not wait for them
@@ -288,6 +390,66 @@ is the only treatment."
       (expect (length (seq-filter (lambda (line) (string-match-p "\\`[▼▶]" line))
                                   (split-string (buffer-string) "\n")))
               :to-equal 3))))
+
+(describe "mail-thread-guides"
+  (it "draws a bar per level in the window divider's dim face, and nothing for a root"
+    (expect (mail-thread-guides 0) :to-be nil)
+    (expect (mail-thread-guides 1) :to-equal "│ ")
+    (expect (mail-thread-guides 3) :to-equal "│ │ │ ")
+    (expect (get-text-property 0 'face (mail-thread-guides 3)) :to-be 'vertical-border))
+  (it "stops at the cap, a deeper message indented as far and no further"
+    (let ((mail-thread-max-indent 6))
+      (expect (mail-thread-guides 6) :to-equal "│ │ │ │ │ │ ")
+      (expect (mail-thread-guides 9) :to-equal "│ │ │ │ │ │ ")
+      (expect (mail-thread-guides 58) :to-equal "│ │ │ │ │ │ "))))
+
+(describe "the guide bars in the thread view"
+  (it "start each message's line at its depth"
+    (let ((thread-tests-entries thread-tests-branches))
+      (thread-tests-with-buffer 21 nil
+        (expect (mapcar (lambda (message)
+                          (thread-tests-guides-from (mail-thread-message-marker message)
+                                                    (mail-thread-body-start message)))
+                        mail-thread-messages)
+                :to-equal '((nil) ("│ ") ("│ │ ") ("│ ") ("│ "))))))
+  (it "start every line of a body, the blank line after it too"
+    (let ((thread-tests-entries thread-tests-branches))
+      (thread-tests-with-buffer 21 nil
+        (let ((message (thread-tests-message 21)))
+          (expect (count-lines (mail-thread-body-start message) (mail-thread-body-end message))
+                  :to-equal 3)
+          (expect (thread-tests-guides-from (mail-thread-body-start message)
+                                            (mail-thread-body-end message))
+                  :to-equal '("│ "))))))
+  (it "start the lines of a body the fill renders later"
+    (let ((thread-tests-entries thread-tests-branches))
+      (thread-tests-with-buffer 21 '(24)
+        (thread-tests-fill)
+        (let ((message (thread-tests-message 24)))
+          (expect (mail-thread-message-open-p message) :to-be-truthy)
+          (expect (thread-tests-guides-from (mail-thread-body-start message)
+                                            (mail-thread-body-end message))
+                  :to-equal '("│ │ "))))))
+  (it "go on along a wrapped line"
+    (expect (thread-tests-wrap-prefixes 2 "a plain line") :to-equal '("│ │ ")))
+  (it "go before the indentation visual-wrap repeats"
+    (expect (thread-tests-wrap-prefixes 2 "    an indented line") :to-equal '("│ │     ")))
+  (it "turn visual-wrap's stretch from the window edge into one after them"
+    (let ((root (car (thread-tests-wrap-prefixes 0 "> a quoted line")))
+          (reply (car (thread-tests-wrap-prefixes 2 "> a quoted line"))))
+      (expect (car-safe root) :to-be 'space)
+      (expect (substring-no-properties reply) :to-equal "│ │  ")
+      (expect (get-text-property 4 'display reply)
+              :to-equal `(space :width ,(plist-get (cdr root) :align-to)))))
+  (it "stay single when a line is fontified again"
+    (with-temp-buffer
+      (mail-thread-mode)
+      (let ((inhibit-read-only t))
+        (insert (propertize "a plain line\n" 'line-prefix (mail-thread-guides 2))))
+      (jit-lock-fontify-now)
+      (jit-lock-refontify)
+      (jit-lock-fontify-now)
+      (expect (get-text-property (point-min) 'wrap-prefix) :to-equal "│ │ "))))
 
 (describe "mail-thread-toggle-message"
   (it "renders a folded message on the first unfold only"
@@ -458,7 +620,7 @@ is the only treatment."
       (expect (mail-thread-previous-message) :to-throw 'user-error))))
 
 (describe "mail-thread-entries"
-  (it "returns the whole thread oldest first, dropping what Gnus made up"
+  (it "returns the whole thread in summary order, dropping what Gnus made up"
     ;; gnus-fetch-old-headers invents a header for a parent the store
     ;; does not hold; requesting it raises
     (let* ((ghost (thread-tests-header 9 "Plan" "Ghost <ghost@example.com>"
@@ -471,7 +633,7 @@ is the only treatment."
       (cl-letf (((symbol-function 'gnus-summary-top-thread) (lambda () 9))
                 ((symbol-function 'gnus-summary-articles-in-thread)
                  (lambda (&rest _) '(12 9 10 11))))
-        (expect (mapcar #'car (mail-thread-entries)) :to-equal '(10 11 12))))))
+        (expect (mapcar #'car (mail-thread-entries)) :to-equal '(12 10 11))))))
 
 (describe "mail-thread-render"
   (it "reads the raw article it renders, not the one Gnus showed last"

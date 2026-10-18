@@ -181,10 +181,11 @@ FLAGS, when given, ends the name as a maildir suffix."
             "\n"
             "body of " subject "\n")))
 
-(defun email-e2e--write-reddit-message (file id date &optional references flags)
+(defun email-e2e--write-reddit-message (file id date &optional references flags html)
   "Write to FILE a message of r.test shaped as the Reddit fetch writes one.
-ID is its Message-ID's local part, REFERENCES its References, and FLAGS,
-when given, ends the name as a maildir suffix."
+ID is its Message-ID's local part, REFERENCES its References, FLAGS,
+when given, ends the name as a maildir suffix, and HTML, when given,
+replaces the body."
   (with-temp-file (if flags (concat file ":2," flags) file)
     (insert "From: \"u/ann\" <ann@reddit.invalid>\n"
             "Subject: " (if references "Re: " "") "Reddit post\n"
@@ -197,7 +198,7 @@ when given, ends the name as a maildir suffix."
             "Archived-At: <https://www.reddit.com/r/test/" id "/>\n"
             "MIME-Version: 1.0\n"
             "Content-Type: text/html; charset=utf-8\n\n"
-            "<p>body of " id "</p>\n")))
+            (or html (concat "<p>body of " id "</p>")) "\n")))
 
 (defun email-e2e--write-feed (file posts)
   "Write to FILE an Atom feed shaped like Reddit's, holding POSTS.
@@ -858,7 +859,8 @@ buffers, summary and queued files the cases leave are cleared after."
                 (kill-emacs 0))
              (current-buffer)))
     ;; a read post, a comment on it, a reply to the comment and a second
-    ;; comment; the stand-in's fetch brings a reply to the reply
+    ;; comment; the stand-in's fetch brings a reply to the reply.  The
+    ;; reply's paragraph and quote are longer than any window is wide
     (dolist (sub '("cur" "new" "tmp"))
       (make-directory (expand-file-name sub reddit-dir) t))
     (make-directory reddit-outbox t)
@@ -869,7 +871,12 @@ buffers, summary and queued files the cases leave are cleared after."
                                      "<p1@reddit.com>" "")
     (email-e2e--write-reddit-message (expand-file-name "cur/1700000052.52.fixture" reddit-dir)
                                      "c2.p1" "Mon, 28 Sep 2026 12:00:00 +0000"
-                                     "<p1@reddit.com> <c1.p1@reddit.com>" "")
+                                     "<p1@reddit.com> <c1.p1@reddit.com>" ""
+                                     (concat "<p>long comment "
+                                             (string-join (make-list 30 "wrapping") " ")
+                                             "</p><blockquote><p>long quote "
+                                             (string-join (make-list 30 "quoted") " ")
+                                             "</p></blockquote>"))
     (email-e2e--write-reddit-message (expand-file-name "cur/1700000054.54.fixture" reddit-dir)
                                      "c4.p1" "Mon, 28 Sep 2026 14:00:00 +0000"
                                      "<p1@reddit.com>" "")
@@ -1217,7 +1224,21 @@ buffers, summary and queued files the cases leave are cleared after."
                     (let ((start (line-beginning-position)))
                       (search-forward "paragraph end")
                       (list (count-lines start (point))
-                            (count-screen-lines start (point))))))))
+                            (count-screen-lines start (point)))))))
+              ;; the screen column where the line holding TEXT shows its
+              ;; text: LEAD characters in on the first screen line, then
+              ;; where each continuation line starts
+              (wrap-columns (text lead)
+                (save-excursion
+                  (goto-char (point-min))
+                  (when (search-forward text nil t)
+                    (let ((end (line-end-position))
+                          (columns (list (car (posn-x-y (posn-at-point
+                                                         (+ (line-beginning-position) lead)))))))
+                      (goto-char (line-beginning-position))
+                      (while (and (= 1 (vertical-motion 1)) (< (point) end))
+                        (push (car (posn-x-y (posn-at-point))) columns))
+                      (nreverse columns))))))
       (unwind-protect
           (condition-case e
               (progn
@@ -1474,6 +1495,55 @@ buffers, summary and queued files the cases leave are cleared after."
                         (eql (gnus-group-unread reddit-group) 4)
                         :got (format "unread %S, fetching %S" (gnus-group-unread reddit-group)
                                      (process-live-p reddit-fetch-process)))
+                ;; the thread view lays the thread out as Reddit does, each
+                ;; comment under the one it answers, the summary's newest
+                ;; subthread first notwithstanding
+                (gnus-group-jump-to-group reddit-group)
+                (execute-kbd-macro (kbd "RET"))
+                (when (derived-mode-p 'gnus-summary-mode)
+                  (gnus-summary-goto-subject
+                   (gnus-data-number
+                    (seq-find (lambda (data)
+                                (equal (mail-header-id (gnus-data-header data))
+                                       "<c2.p1@reddit.com>"))
+                              gnus-newsgroup-data)))
+                  (execute-kbd-macro (kbd "RET")))
+                (redisplay t)
+                (let ((layout (and (derived-mode-p 'mail-thread-mode)
+                                   (mapcar (lambda (message)
+                                             (list (mail-header-id (mail-thread-message-header message))
+                                                   (when-let* ((guides (get-text-property
+                                                                        (mail-thread-message-marker message)
+                                                                        'line-prefix)))
+                                                     (substring-no-properties guides))))
+                                           mail-thread-messages))))
+                  (record "RET on a Reddit comment lists its thread in reply order, a guide bar a level"
+                          (equal layout '(("<p1@reddit.com>" nil)
+                                          ("<c1.p1@reddit.com>" "│ ")
+                                          ("<c2.p1@reddit.com>" "│ │ ")
+                                          ("<c3.p1@reddit.com>" "│ │ │ ")
+                                          ("<c4.p1@reddit.com>" "│ ")))
+                          :got (format "%s: %S" major-mode layout)))
+                (let ((bars (string-width (mail-thread-guides 2)))
+                      (plain (wrap-columns "long comment" 0))
+                      (quoted (wrap-columns "long quote" 2)))
+                  (record "a long line two deep wraps right of its two guide bars"
+                          (and (< 1 (length plain))
+                               (seq-every-p (lambda (column) (eql column bars)) plain))
+                          :got (format "columns %S, bars %d wide, wrap-prefix %S" plain bars
+                                       (save-excursion
+                                         (goto-char (point-min))
+                                         (and (search-forward "long comment" nil t)
+                                              (get-text-property (point) 'wrap-prefix)))))
+                  (record "a long quote two deep wraps right of its > marker"
+                          (and (< 1 (length quoted))
+                               (seq-every-p (lambda (column) (eql column (+ bars 2))) quoted))
+                          :got (format "columns %S, bars %d wide" quoted bars)))
+                (when (derived-mode-p 'mail-thread-mode)
+                  (execute-kbd-macro "q"))
+                (set-buffer (window-buffer (selected-window)))
+                (when (derived-mode-p 'gnus-summary-mode)
+                  (gnus-summary-exit-no-update))
                 ;; the stand-in notmuch answers with the archive's copy,
                 ;; and a hit maps to its group only once that group loaded
                 (write-region "" nil load-hold)
