@@ -57,6 +57,9 @@ in this process, which the mail suite performs."
       (insert-file-contents
        (expand-file-name "modules/email/autoload/similar.el" test-config-root))
       (expect (buffer-string) :to-match "^;;;###autoload\n(defun own-address-p ")))
+  (it "runs the gpg the isyncrc's commands run, so gpg-agent keeps one version"
+    (require 'epg-config)
+    (expect epg-gpg-program :to-equal "gpg"))
   (it "leaves the inbox address to custom.el, out of this public repo"
     (with-temp-buffer
       (insert-file-contents (expand-file-name "modules/email/config.el" test-config-root))

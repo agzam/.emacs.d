@@ -103,6 +103,12 @@ Any other label's chip takes the face `mail-label'.")
 ;; `init-server-h' starts at depth 0
 (add-hook 'doom-after-init-hook #'start-mail-sync-timer 90)
 
+;; the gpg the isyncrc's UserCmd and PassCmd run: whichever gpg starts
+;; gpg-agent sets its version for every caller, and epg's default prefers
+;; any gpg2, such as GPG Suite's older one
+(after! epg-config
+  (setq epg-gpg-program "gpg"))
+
 (use-package gnus
   :ensure nil
   :defer t
