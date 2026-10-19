@@ -237,6 +237,8 @@ are applied again from `evil-collection-setup-hook'."
             ;; both quote the message; the capital answers everyone
             :n "r" #'reply-to-sender
             :n "R" #'reply-to-everyone
+            ;; no state, so insert state reaches it too
+            "C-c C-o" #'open-mail-on-web
             (:localleader
              :desc "sync"             "u" #'sync-mail
              :desc "search all mail"  "/" #'search-mail-live

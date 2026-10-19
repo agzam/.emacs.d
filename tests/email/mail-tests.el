@@ -40,18 +40,100 @@ Returns the hashtable; the caller binds `gnus-group-list' itself."
     (expect (gmail-message-url "abc@example.com")
             :to-match "rfc822msgid%3Aabc%40example.com\\'")))
 
+(describe "yhetil-message-url"
+  (it "points at the message's own page in the inbox"
+    (expect (yhetil-message-url "emacs-devel" "<id@x>")
+            :to-equal "https://yhetil.org/emacs-devel/id%40x/"))
+  (it "points at its thread, nested by reply, with the message in view"
+    (expect (yhetil-message-url "emacs-devel" "<id@x>" t)
+            :to-equal "https://yhetil.org/emacs-devel/id%40x/t/#u"))
+  (it "escapes the + and / a Message-ID may hold"
+    (expect (yhetil-message-url "emacs-devel" "<jwv1.fsf-monnier+emacs/x@gnu.org>" t)
+            :to-equal "https://yhetil.org/emacs-devel/jwv1.fsf-monnier%2Bemacs%2Fx%40gnu.org/t/#u")))
+
+(defun mail-tests--inbox (head)
+  "What `emacs-list-inbox' says of a message whose head is HEAD."
+  (with-temp-buffer
+    (insert head)
+    (emacs-list-inbox)))
+
+(describe "emacs-list-inbox"
+  (it "names the yhetil inbox of each Emacs list a List-Id names"
+    (expect (mapcar (lambda (list)
+                      (mail-tests--inbox (format "List-Id: A list <%s.gnu.org>\n" list)))
+                    '("emacs-devel" "help-gnu-emacs" "bug-gnu-emacs" "emacs-orgmode"
+                      "emacs-tangents"))
+            :to-equal '("emacs-devel" "emacs-user" "emacs-bugs" "orgmode" "emacs-tangents")))
+  (it "finds the list among To and Cc on an own sent copy, which carries no List-Id"
+    (expect (mail-tests--inbox
+             "To: Eli <eliz@gnu.org>\nCc: Someone <s@y.org>, help-gnu-emacs@gnu.org\n")
+            :to-equal "emacs-user"))
+  (it "reads a list address written with capitals"
+    (expect (mail-tests--inbox "To: Emacs-devel@gnu.org\n") :to-equal "emacs-devel"))
+  (it "takes the list the copy came through over another one in Cc"
+    (expect (mail-tests--inbox "Cc: emacs-devel@gnu.org\nList-Id: <emacs-orgmode.gnu.org>\n")
+            :to-equal "orgmode"))
+  (it "knows no inbox for a person at gnu.org or a list outside Emacs"
+    (expect (mail-tests--inbox "List-Id: <guix-devel.gnu.org>\nTo: eliz@gnu.org\n")
+            :to-be nil)))
+
+(defconst mail-tests--gmane-head
+  (concat "Message-ID: <id@x>\n"
+          "Newsgroups: gmane.emacs.devel\n"
+          "List-Id: \"Emacs development discussions.\" <emacs-devel.gnu.org>\n"
+          "Archived-At: <http://permalink.gmane.org/gmane.emacs.devel/336074>\n")
+  "Head of a gmane post of emacs-devel, as the news store holds one.")
+
 (describe "list-archive-message-url"
-  (it "points gnu.org lists at yhetil"
-    (expect (list-archive-message-url "<id@x>" "emacs-devel@gnu.org, Someone <s@y.org>")
-            :to-equal "https://yhetil.org/emacs-devel/id%40x"))
-  (it "points the org-mode list at list.orgmode.org"
-    (expect (list-archive-message-url "<id@x>" "emacs-orgmode@gnu.org")
-            :to-equal "https://list.orgmode.org/orgmode/id%40x/"))
+  (it "takes the archive the message's Archived-At names"
+    (expect (list-archive-message-url
+             "Message-ID: <c1@reddit.com>\nArchived-At: <https://www.reddit.com/c1/>\n")
+            :to-equal "https://www.reddit.com/c1/"))
+  (it "points Emacs list mail at the message's page in its yhetil inbox"
+    (expect (list-archive-message-url "Message-ID: <id@x>\nTo: emacs-orgmode@gnu.org\n")
+            :to-equal "https://yhetil.org/orgmode/id%40x/"))
+  (it "passes over gmane's dead Archived-At for the list's archive"
+    (expect (list-archive-message-url mail-tests--gmane-head)
+            :to-equal "https://yhetil.org/emacs-devel/id%40x/"))
   (it "points google groups at the topic search"
-    (expect (list-archive-message-url "<id@x>" "clojure@googlegroups.com")
+    (expect (list-archive-message-url "Message-ID: <id@x>\nTo: clojure@googlegroups.com\n")
             :to-equal "https://groups.google.com/forum/#!topicsearchin/clojure/messageid$3A%22id%40x%22"))
-  (it "returns nil when no list address is among the recipients"
-    (expect (list-archive-message-url "<id@x>" "someone@example.com") :to-be nil)))
+  (it "returns nil for no list it knows and no live Archived-At"
+    (expect (list-archive-message-url "Message-ID: <id@x>\nTo: someone@example.com\n")
+            :to-be nil)
+    (expect (list-archive-message-url
+             (concat "Message-ID: <id@x>\nList-Id: <ding.gnus.org>\n"
+                     "Archived-At: <http://permalink.gmane.org/gmane.emacs.gnus.general/1>\n"))
+            :to-be nil)))
+
+(describe "mail-web-url"
+  (it "opens a gmane post of an Emacs list in its yhetil thread, not at its dead Archived-At"
+    (expect (mail-web-url "nnmaildir+news:gmane.emacs.devel" mail-tests--gmane-head)
+            :to-equal "https://yhetil.org/emacs-devel/id%40x/t/#u"))
+  (it "opens Emacs list mail Gmail holds on yhetil too"
+    (expect (mail-web-url "nnmaildir+gmail:archive"
+                          (concat "Message-ID: <id@x>\n"
+                                  "List-Id: Users list for the GNU Emacs text editor"
+                                  " <help-gnu-emacs.gnu.org>\n"))
+            :to-equal "https://yhetil.org/emacs-user/id%40x/t/#u"))
+  (it "opens an own sent copy to an Emacs list on yhetil"
+    (expect (mail-web-url "nnmaildir+gmail:sent" "Message-ID: <id@x>\nTo: emacs-devel@gnu.org\n")
+            :to-equal "https://yhetil.org/emacs-devel/id%40x/t/#u"))
+  (it "opens a Reddit message where its Archived-At points"
+    (expect (mail-web-url "nnmaildir+reddit:r.emacs"
+                          (concat "Message-ID: <c1.p1@reddit.com>\n"
+                                  "Archived-At: <https://www.reddit.com/r/emacs/comments/p1/t/c1/>\n"))
+            :to-equal "https://www.reddit.com/r/emacs/comments/p1/t/c1/"))
+  (it "opens other Gmail mail in Gmail, though its list names an archive"
+    (expect (mail-web-url "nnmaildir+gmail:inbox"
+                          (concat "Message-ID: <id@x>\nTo: me@example.com\n"
+                                  "Archived-At: <https://lists.sr.ht/~u/list/%3Cid@x%3E>\n"))
+            :to-equal (gmail-message-url "<id@x>")))
+  (it "knows no page for a news post of a list outside Emacs, whose Archived-At is dead"
+    (expect (mail-web-url "nnmaildir+news:gmane.emacs.gnus.general"
+                          (concat "Message-ID: <id@x>\nList-Id: <ding.gnus.org>\n"
+                                  "Archived-At: <http://permalink.gmane.org/gmane.emacs.gnus.general/1>\n"))
+            :to-be nil)))
 
 (describe "mail-sync-command"
   (it "runs the incremental sync by default"
@@ -641,44 +723,66 @@ and the news group have no folder in the store."
             (expect opened :to-equal (gmail-message-url "<seven@x>")))
         (kill-buffer summary)))))
 
-(defun mail-tests--open-in-archive (head)
-  "URL `open-message-in-list-archive' opens for article 7, whose head is HEAD.
-The article sits in a Reddit group, addressed to emacs-orgmode."
-  (let ((summary (generate-new-buffer " *mail-tests summary*"))
+(defun mail-tests--open (command head &optional group search)
+  "URL COMMAND opens for article 7, whose HEAD sits in GROUP.
+GROUP defaults to a Reddit group.  SEARCH names the search group the
+summary shows the article in, if any.  A nil HEAD cannot be read."
+  (let ((group (or group "nnmaildir+reddit:r.test"))
+        (summary (generate-new-buffer " *mail-tests summary*"))
         (nntp-server-buffer (generate-new-buffer " *mail-tests nntp*"))
         opened)
     (unwind-protect
         (progn
           (with-current-buffer summary
-            (setq-local gnus-newsgroup-name "nnmaildir+reddit:r.test")
-            (setq-local gnus-newsgroup-data
-                        (list (gnus-data-make
-                               7 gnus-read-mark 1
-                               (make-full-mail-header 7 "s" "a@x" "" "<seven@x>" "" 0 0 nil
-                                                      '((To . "emacs-orgmode@gnu.org")))
-                               0))))
+            (setq-local gnus-newsgroup-name (or search group)))
           (cl-letf (((symbol-function 'mail-on-screen) (lambda () (cons summary 7)))
+                    ((symbol-function 'mail-article-group)
+                     (lambda (article)
+                       (and (eq (current-buffer) summary) (eql article 7) group)))
                     ((symbol-function 'gnus-request-head)
-                     (lambda (article group)
+                     (lambda (article name)
                        (with-current-buffer nntp-server-buffer
                          (erase-buffer)
-                         (insert head))
-                       (and (eql article 7) (equal group "nnmaildir+reddit:r.test"))))
+                         (insert (or head "")))
+                       (and head (eql article 7) (equal name (or search group)))))
                     ((symbol-function 'browse-url) (lambda (url &rest _) (setq opened url))))
             (with-temp-buffer
-              (open-message-in-list-archive)))
+              (funcall command)))
           opened)
       (kill-buffer summary)
       (kill-buffer nntp-server-buffer))))
 
+(describe "open-mail-on-web"
+  (it "opens where the message on screen lives on the web"
+    (expect (mail-tests--open #'open-mail-on-web mail-tests--gmane-head
+                              "nnmaildir+news:gmane.emacs.devel")
+            :to-equal "https://yhetil.org/emacs-devel/id%40x/t/#u"))
+  (it "tells a search result's Gmail mail by the group holding its file"
+    (expect (mail-tests--open #'open-mail-on-web "Message-ID: <id@x>\nTo: me@example.com\n"
+                              "nnmaildir+gmail:inbox" "nnselect:search-1")
+            :to-equal (gmail-message-url "<id@x>")))
+  (it "says it knows no page, naming the message's group"
+    (expect (mail-tests--open #'open-mail-on-web "Message-ID: <id@x>\n"
+                              "nnmaildir+news:gmane.test")
+            :to-throw 'user-error
+            '("No web page known for this message of nnmaildir+news:gmane.test")))
+  (it "says so when the message cannot be read"
+    (expect (mail-tests--open #'open-mail-on-web nil "nnmaildir+gmail:inbox")
+            :to-throw 'user-error '("Cannot read this message"))))
+
 (describe "open-message-in-list-archive"
   (it "opens where the message's Archived-At header points"
-    (expect (mail-tests--open-in-archive
-             "Message-ID: <c1.p2@reddit.com>\nArchived-At: <https://www.reddit.com/c1/>\n")
+    (expect (mail-tests--open #'open-message-in-list-archive
+                              "Message-ID: <c1.p2@reddit.com>\nArchived-At: <https://www.reddit.com/c1/>\n")
             :to-equal "https://www.reddit.com/c1/"))
   (it "opens the list's archive without one"
-    (expect (mail-tests--open-in-archive "Message-ID: <seven@x>\n")
-            :to-equal "https://list.orgmode.org/orgmode/seven%40x/")))
+    (expect (mail-tests--open #'open-message-in-list-archive
+                              "Message-ID: <seven@x>\nTo: emacs-orgmode@gnu.org\n")
+            :to-equal "https://yhetil.org/orgmode/seven%40x/"))
+  (it "says it knows no archive for mail of no list it knows"
+    (expect (mail-tests--open #'open-message-in-list-archive
+                              "Message-ID: <seven@x>\nTo: someone@example.com\n")
+            :to-throw 'user-error '("No public archive known for this message"))))
 
 (defmacro mail-tests--searching (hits &rest body)
   "Run BODY with the search stubbed to open a summary of HITS articles.

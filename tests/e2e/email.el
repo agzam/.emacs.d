@@ -170,14 +170,17 @@ SUBJECT, ID, DATE and REFERENCES fill the headers."
 
 (defun email-e2e--write-news-post (file subject id date &optional references flags)
   "Write to FILE a post of gmane.test with SUBJECT, ID, DATE and REFERENCES.
-FLAGS, when given, ends the name as a maildir suffix."
+It carries the List-Id and the dead Archived-At an emacs-devel post of
+gmane has.  FLAGS, when given, ends the name as a maildir suffix."
   (with-temp-file (if flags (concat file ":2," flags) file)
     (insert "From: Eli <eli@example.com>\n"
             "Newsgroups: gmane.test\n"
+            "List-Id: \"Emacs development discussions.\" <emacs-devel.gnu.org>\n"
             "Subject: " subject "\n"
             "Date: " date "\n"
             "Message-ID: <" id "@fixture.example>\n"
             (if references (concat "References: " references "\n") "")
+            "Archived-At: <http://permalink.gmane.org/gmane.test/" id ">\n"
             "\n"
             "body of " subject "\n")))
 
@@ -1420,6 +1423,23 @@ buffers, summary and queued files the cases leave are cleared after."
                              (null (text-property-not-all (point-min) (point-max)
                                                           'mail-labels nil)))
                         :got (buffer-substring-no-properties (point-min) (point-max)))
+                ;; the post's Archived-At points into the dead permalink.gmane.org
+                (let (browsed)
+                  (when (derived-mode-p 'gnus-summary-mode)
+                    (gnus-summary-goto-subject (email-e2e--article "news post one"))
+                    (cl-letf (((symbol-function 'browse-url)
+                               (lambda (url &rest _) (push url browsed))))
+                      (execute-kbd-macro (kbd "C-c C-o"))
+                      (execute-kbd-macro (kbd ", o l"))))
+                  (record "C-c C-o on a gmane post of an Emacs list opens its yhetil thread"
+                          (equal (car (last browsed))
+                                 "https://yhetil.org/emacs-devel/news-one%40fixture.example/t/#u")
+                          :got (format "%S" (reverse browsed)))
+                  (record ", o l on a gmane post opens its yhetil page, not its dead Archived-At"
+                          (and (= 2 (length browsed))
+                               (equal (car browsed)
+                                      "https://yhetil.org/emacs-devel/news-one%40fixture.example/"))
+                          :got (format "%S" (reverse browsed))))
                 (when (derived-mode-p 'gnus-summary-mode)
                   (gnus-summary-exit-no-update))
                 ;; the start's fetch delivers once go exists, into a
@@ -1539,6 +1559,14 @@ buffers, summary and queued files the cases leave are cleared after."
                           (and (< 1 (length quoted))
                                (seq-every-p (lambda (column) (eql column (+ bars 2))) quoted))
                           :got (format "columns %S, bars %d wide" quoted bars)))
+                (let (opened)
+                  (when (derived-mode-p 'mail-thread-mode)
+                    (cl-letf (((symbol-function 'browse-url)
+                               (lambda (url &rest _) (setq opened url))))
+                      (execute-kbd-macro (kbd "C-c C-o"))))
+                  (record "C-c C-o in the thread view opens the Reddit comment at point on its page"
+                          (equal opened "https://www.reddit.com/r/test/c2.p1/")
+                          :got (format "%S in %s" opened major-mode)))
                 (when (derived-mode-p 'mail-thread-mode)
                   (execute-kbd-macro "q"))
                 (set-buffer (window-buffer (selected-window)))
@@ -1769,6 +1797,13 @@ buffers, summary and queued files the cases leave are cleared after."
                                               (point-min) (point-max)))
                              (equal (subject-at-point) "release plan"))
                         :got (format "%S open" (open-subjects)))
+                (let (opened)
+                  (cl-letf (((symbol-function 'browse-url)
+                             (lambda (url &rest _) (setq opened url))))
+                    (execute-kbd-macro (kbd "C-c C-o")))
+                  (record "C-c C-o in the thread view opens a message of the Gmail inbox in Gmail"
+                          (equal opened (gmail-message-url "<plan@fixture.example>"))
+                          :got (format "%S at %S" opened (subject-at-point))))
                 ;; the stand-in notmuch answers the query with Bob's
                 ;; message, after the key has returned
                 (with-temp-file (expand-file-name "(from:bob)" hits)
@@ -1826,6 +1861,13 @@ buffers, summary and queued files the cases leave are cleared after."
                              (null (cite-overlays)))
                         :got (format "%S, %d gnus-cite overlays"
                                      (quote-faces) (length (cite-overlays))))
+                (let (opened)
+                  (cl-letf (((symbol-function 'browse-url)
+                             (lambda (url &rest _) (setq opened url))))
+                    (execute-kbd-macro (kbd "C-c C-o")))
+                  (record "C-c C-o in the article buffer opens its message in Gmail"
+                          (equal opened (gmail-message-url "<plan-bob@fixture.example>"))
+                          :got (format "%S in %s" opened major-mode)))
                 ;; replying cites every line once more, and message-mode
                 ;; paints it with the same faces by the same depth rule
                 (switch-to-buffer "*Summary nnmaildir+gmail:inbox*")
@@ -2452,8 +2494,15 @@ buffers, summary and queued files the cases leave are cleared after."
                       (record ", o g opens the message in Gmail and , o l in its list archive"
                               (equal (reverse browsed)
                                      (list (gmail-message-url "<list-plan-dan@fixture.example>")
-                                           "https://yhetil.org/emacs-devel/list-plan-dan%40fixture.example"))
+                                           "https://yhetil.org/emacs-devel/list-plan-dan%40fixture.example/"))
                               :got (format "%S" (reverse browsed)))
+                      (setq browsed nil)
+                      (at answer)
+                      (execute-kbd-macro (kbd "C-c C-o"))
+                      (record "C-c C-o opens Emacs list mail Gmail holds in its yhetil thread"
+                              (equal browsed
+                                     '("https://yhetil.org/emacs-devel/list-plan-dan%40fixture.example/t/#u"))
+                              :got (format "%S" browsed))
                       (setq browsed nil)
                       ;; RET takes the first query the prompt offers
                       (at plan)
@@ -2581,7 +2630,7 @@ buffers, summary and queued files the cases leave are cleared after."
                           (record "the article buffer opens its message in the list archive and answers it on r"
                                   (and in-article
                                        (equal browsed
-                                              '("https://yhetil.org/emacs-devel/list-plan%40fixture.example"))
+                                              '("https://yhetil.org/emacs-devel/list-plan%40fixture.example/"))
                                        (string-match-p "carol@example\\.com" (field message :to))
                                        (string-match-p "^> body of list plan" (field message :body)))
                                   :got (format "article %S, %S, %S" in-article browsed message))))

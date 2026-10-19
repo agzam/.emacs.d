@@ -614,6 +614,14 @@ Gnus reverses only on a prefix argument."
 
 ;;; Web archives
 
+(defconst emacs-list-inboxes
+  '(("emacs-devel" . "emacs-devel")
+    ("help-gnu-emacs" . "emacs-user")
+    ("bug-gnu-emacs" . "emacs-bugs")
+    ("emacs-orgmode" . "orgmode")
+    ("emacs-tangents" . "emacs-tangents"))
+  "Emacs lists at gnu.org, each with the yhetil.org inbox that archives it.")
+
 (defun bare-message-id (message-id)
   "MESSAGE-ID without its angle brackets."
   (string-trim message-id "<" ">"))
@@ -624,21 +632,62 @@ Gnus reverses only on a prefix argument."
   (concat "https://mail.google.com/mail/u/0/#search/"
           (url-hexify-string (concat "rfc822msgid:" (bare-message-id message-id)))))
 
-(defun list-archive-message-url (message-id recipients)
-  "Public archive URL of MESSAGE-ID on the mailing list found in RECIPIENTS.
-RECIPIENTS is the To and Cc header text.  Returns nil when no known list
-address appears there."
-  (let ((id (bare-message-id message-id)))
-    (cond
-     ((string-match-p "emacs-orgmode@gnu\\.org" recipients)
-      (format "https://list.orgmode.org/orgmode/%s/" (url-hexify-string id)))
-     ((string-match "\\([[:alnum:]._-]+\\)@gnu\\.org" recipients)
-      (format "https://yhetil.org/%s/%s" (match-string 1 recipients)
-              (url-hexify-string id)))
-     ((string-match "\\([[:alnum:]._-]+\\)@googlegroups\\.com" recipients)
-      (concat "https://groups.google.com/forum/#!topicsearchin/"
-              (match-string 1 recipients) "/messageid$3A"
-              (url-hexify-string (concat "\"" id "\"")))))))
+(defun yhetil-message-url (inbox message-id &optional thread)
+  "URL of the message with MESSAGE-ID in the yhetil.org INBOX.
+With THREAD, the URL of its thread, nested by reply, scrolled to it."
+  (format "https://yhetil.org/%s/%s/%s" inbox
+          (url-hexify-string (bare-message-id message-id))
+          (if thread "t/#u" "")))
+
+(defun emacs-list-inbox ()
+  "The yhetil.org inbox of the Emacs list the head in this buffer went to.
+List-Id names the list, else To or Cc do: an own sent copy has no List-Id."
+  (let ((text (concat (mail-fetch-field "List-Id") " "
+                      (mail-fetch-field "To") " " (mail-fetch-field "Cc")))
+        (start 0)
+        inbox)
+    (while (and (not inbox)
+                (string-match "\\([[:alnum:]_-]+\\)[.@]gnu\\.org" text start))
+      (setq inbox (cdr (assoc-string (match-string 1 text) emacs-list-inboxes t))
+            start (match-end 0)))
+    inbox))
+
+(defun archived-at-url ()
+  "URL the Archived-At header in this buffer names, or nil.
+Gmane's permalink service is gone, so its URLs count as none."
+  (when-let* ((value (mail-fetch-field "Archived-At"))
+              (url (string-trim value "[ \t\n<]+" "[ \t\n>]+"))
+              ((not (string-match-p "\\`https?://permalink\\.gmane\\.org/" url))))
+    url))
+
+(defun list-archive-message-url (head)
+  "Public archive URL of the message with HEAD, or nil.
+That is where its Archived-At header points, else its page in the
+archive of its mailing list."
+  (with-temp-buffer
+    (insert head)
+    (let ((id (mail-fetch-field "Message-ID"))
+          (recipients (concat (mail-fetch-field "To") " " (mail-fetch-field "Cc"))))
+      (or (archived-at-url)
+          (when-let* ((inbox (emacs-list-inbox)))
+            (yhetil-message-url inbox id))
+          (and (string-match "\\([[:alnum:]._-]+\\)@googlegroups\\.com" recipients)
+               (concat "https://groups.google.com/forum/#!topicsearchin/"
+                       (match-string 1 recipients) "/messageid$3A"
+                       (url-hexify-string (concat "\"" (bare-message-id id) "\""))))))))
+
+(defun mail-web-url (group head)
+  "URL of the web page of the message with HEAD that GROUP holds, or nil.
+Emacs list mail opens in its yhetil.org thread, other Gmail mail in
+Gmail, and the rest where its Archived-At header points."
+  (with-temp-buffer
+    (insert head)
+    (let ((id (mail-fetch-field "Message-ID")))
+      (or (when-let* ((inbox (emacs-list-inbox)))
+            (yhetil-message-url inbox id t))
+          (and (string-prefix-p "nnmaildir+gmail:" group)
+               (gmail-message-url id))
+          (archived-at-url)))))
 
 (defun mail-header-on-screen ()
   "Header of the message the current summary, thread or article buffer shows."
@@ -652,28 +701,33 @@ address appears there."
   (interactive nil gnus-summary-mode mail-thread-mode gnus-article-mode)
   (browse-url (gmail-message-url (mail-header-id (mail-header-on-screen)))))
 
-(defun archived-at-on-screen ()
-  "URL the Archived-At header of the message on screen names, or nil."
+(defun mail-head-on-screen ()
+  "Group holding the message on screen and its head, as (GROUP . HEAD)."
   (pcase-let ((`(,summary . ,article) (mail-on-screen)))
     (with-current-buffer summary
-      (when (gnus-request-head article gnus-newsgroup-name)
-        (with-current-buffer nntp-server-buffer
-          (when-let* ((value (mail-fetch-field "Archived-At")))
-            (string-trim value "[ \t\n<]+" "[ \t\n>]+")))))))
+      (let ((group (mail-article-group article)))
+        (unless (gnus-request-head article gnus-newsgroup-name)
+          (user-error "Cannot read this message"))
+        (cons group (with-current-buffer nntp-server-buffer
+                      (buffer-string)))))))
+
+;;;###autoload
+(defun open-mail-on-web ()
+  "Open the message at point where it lives on the web.
+Emacs list mail opens in its yhetil.org thread, other Gmail mail in
+Gmail, and the rest where its Archived-At header points."
+  (interactive nil gnus-summary-mode mail-thread-mode gnus-article-mode)
+  (pcase-let ((`(,group . ,head) (mail-head-on-screen)))
+    (browse-url (or (mail-web-url group head)
+                    (user-error "No web page known for this message of %s" group)))))
 
 ;;;###autoload
 (defun open-message-in-list-archive ()
-  "Open the message at point where its Archived-At header points.
-Without one, open it in the public archive of the mailing list among its
-recipients."
+  "Open the message at point in its public archive.
+That is where its Archived-At header points, else its page in the
+archive of its mailing list."
   (interactive nil gnus-summary-mode mail-thread-mode gnus-article-mode)
-  (if-let* ((url (or (archived-at-on-screen)
-                     (let* ((header (mail-header-on-screen))
-                            (extra (mail-header-extra header)))
-                       (list-archive-message-url
-                        (mail-header-id header)
-                        (concat (cdr (assq 'To extra)) " " (cdr (assq 'Cc extra))))))))
-      (browse-url url)
-    (user-error "No Archived-At header, and no known mailing list among the recipients")))
+  (browse-url (or (list-archive-message-url (cdr (mail-head-on-screen)))
+                  (user-error "No public archive known for this message"))))
 
 ;;; mail.el ends here

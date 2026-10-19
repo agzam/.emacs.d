@@ -363,6 +363,12 @@ KEYS holds a prefix's key and the key under it apart by a space, as
                             (function open-message-in-gmail)
                             (function open-message-in-list-archive))))))
 
+  (it "opens the message on the web on C-c C-o wherever a message is read, in any state"
+    (dolist (map '(gnus-summary-mode-map gnus-article-mode-map mail-thread-mode-map))
+      (expect (cdr (assoc "C-c C-o" (mapcan #'map-form-key-pairs (map-form-groups config map))))
+              :to-equal '(function open-mail-on-web))
+      (expect (assoc "C-c C-o" (email-tests--key-states config map)) :to-be nil)))
+
   (it "takes r and R back from evil-collection in normal state"
     (dolist (map '(gnus-summary-mode-map gnus-article-mode-map))
       (let ((states (email-tests--key-states config map)))
@@ -671,7 +677,7 @@ window and deletes the summary's."
                       run-in-mail-summary mail-on-screen mail-thread-update-header-line
                       mail-render-message mail-thread-draw-labels)
                      ("mail.el" sort-mail-by-date sort-mail-by-author
-                      sort-mail-by-subject toggle-mail-thread-fold
+                      sort-mail-by-subject toggle-mail-thread-fold open-mail-on-web
                       ;; a search, an advice or a sibling file calls these
                       search-likeliest-copies-a read-mail-search-limit refresh-mail-group
                       keep-flags-set-elsewhere-a maildir-groups accept-mail-without-nul-a
