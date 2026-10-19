@@ -6,6 +6,7 @@
           (locate-dominating-file (or load-file-name buffer-file-name)
                                   "helper.el")))
 (require 'buttercup)
+(require 'cl-lib)
 (require 'dired)
 
 (load-module-file "modules/dired/autoload/listing.el")
@@ -99,55 +100,88 @@
             t))
      :to-be t))
 
-  (it "registers the subtree drop as a filter-return advice"
+  (it "registers the subtree reader as an override advice"
     (expect
      (with-temp-buffer
        (insert-file-contents (expand-file-name "modules/dired/config.el"
                                                test-config-root))
        (goto-char (point-min))
        (and (re-search-forward
-             (rx "(advice-add 'dired-subtree--readin :filter-return"
-                 (+ space) "#'dired-subtree-drop-dot-entries-a)")
+             (rx "(advice-add 'dired-subtree--readin :override"
+                 (+ space) "#'dired-subtree-readin-a)")
              nil t)
             t))
      :to-be t)))
 
-(describe "dired-subtree-drop-dot-entries-a"
-  ;; dired-subtree hands over a listing with no header, no total line and no
-  ;; trailing newline; whatever comes back is spliced in as-is.
-  (it "drops both dot entries from the middle of a subtree listing"
-    (expect (dired-subtree-drop-dot-entries-a
-             (string-trim-right
-              (concat (listing-tests--entry "sub" t)
-                      (listing-tests--entry "." t)
-                      (listing-tests--entry ".." t)
-                      (listing-tests--entry "old.txt"))
-              "\n"))
-            :to-equal (string-trim-right
-                       (concat (listing-tests--entry "sub" t)
-                               (listing-tests--entry "old.txt"))
-                       "\n")))
+(defun listing-tests--readin (total &rest entries)
+  "What `dired-subtree-readin-a' makes of `ls' printing TOTAL, then ENTRIES."
+  (cl-letf (((symbol-function 'insert-directory)
+             (lambda (&rest _)
+               (insert total)
+               (dolist (entry entries)
+                 (insert (substring entry 2))))))
+    (dired-subtree-readin-a "/tmp/demo/")))
 
-  (it "leaves a listing dired-subtree already stripped alone"
-    (let ((listing (string-trim-right
-                    (concat (listing-tests--entry "sub" t)
-                            (listing-tests--entry "old.txt"))
-                    "\n")))
-      (expect (dired-subtree-drop-dot-entries-a listing) :to-equal listing)))
+(defun listing-tests--subtree (&rest entries)
+  "ENTRIES the way dired-subtree splices them in."
+  (string-trim-right (apply #'concat entries) "\n"))
+
+(describe "dired-subtree-readin-a"
+  ;; `ls' prints a total line, then unindented entries; dired-subtree splices
+  ;; the result in as-is, so it carries the indent and no final newline.
+  (it "keeps a lone child listed between \"..\" and \".\""
+    (expect (listing-tests--readin "total 4\n"
+                                   (listing-tests--entry ".." t)
+                                   (listing-tests--entry "only" t)
+                                   (listing-tests--entry "." t))
+            :to-equal (listing-tests--subtree (listing-tests--entry "only" t))))
+
+  (it "keeps the entry that follows a leading \".\""
+    (expect (listing-tests--readin "total 4\n"
+                                   (listing-tests--entry "." t)
+                                   (listing-tests--entry "sub" t)
+                                   (listing-tests--entry ".." t)
+                                   (listing-tests--entry "old.txt"))
+            :to-equal (listing-tests--subtree (listing-tests--entry "sub" t)
+                                              (listing-tests--entry "old.txt"))))
+
+  (it "keeps a first entry whose name ends in a dot"
+    (expect (listing-tests--readin "total 4\n"
+                                   (listing-tests--entry "v1." t)
+                                   (listing-tests--entry "." t)
+                                   (listing-tests--entry ".." t))
+            :to-equal (listing-tests--subtree (listing-tests--entry "v1." t))))
+
+  (it "drops a total line printed in another language"
+    (expect (listing-tests--readin "insgesamt 4\n"
+                                   (listing-tests--entry "dir" t))
+            :to-equal (listing-tests--subtree (listing-tests--entry "dir" t))))
+
+  (it "drops both dot entries from the middle of the listing"
+    (expect (listing-tests--readin "total used in directory 12 available 100\n"
+                                   (listing-tests--entry "sub" t)
+                                   (listing-tests--entry "." t)
+                                   (listing-tests--entry ".." t)
+                                   (listing-tests--entry "old.txt"))
+            :to-equal (listing-tests--subtree (listing-tests--entry "sub" t)
+                                              (listing-tests--entry "old.txt"))))
+
+  (it "keeps a listing without dot entries whole"
+    (expect (listing-tests--readin "total 4\n"
+                                   (listing-tests--entry "sub" t)
+                                   (listing-tests--entry "old.txt"))
+            :to-equal (listing-tests--subtree (listing-tests--entry "sub" t)
+                                              (listing-tests--entry "old.txt"))))
 
   (it "leaves no trailing newline when a dot entry ends the listing"
-    (expect (dired-subtree-drop-dot-entries-a
-             (string-trim-right
-              (concat (listing-tests--entry "old.txt")
-                      (listing-tests--entry "." t)
-                      (listing-tests--entry ".." t))
-              "\n"))
-            :to-equal (string-trim-right (listing-tests--entry "old.txt") "\n")))
+    (expect (listing-tests--readin "total 4\n"
+                                   (listing-tests--entry "old.txt")
+                                   (listing-tests--entry "." t)
+                                   (listing-tests--entry ".." t))
+            :to-equal (listing-tests--subtree (listing-tests--entry "old.txt"))))
 
   (it "yields an empty listing for a directory holding only dot entries"
-    (expect (dired-subtree-drop-dot-entries-a
-             (string-trim-right
-              (concat (listing-tests--entry "." t)
-                      (listing-tests--entry ".." t))
-              "\n"))
+    (expect (listing-tests--readin "total 0\n"
+                                   (listing-tests--entry "." t)
+                                   (listing-tests--entry ".." t))
             :to-equal "")))

@@ -68,7 +68,7 @@
   :init
   (setopt dired-subtree-cycle-depth 5)
   :config
-  (advice-add 'dired-subtree--readin :filter-return #'dired-subtree-drop-dot-entries-a))
+  (advice-add 'dired-subtree--readin :override #'dired-subtree-readin-a))
 
 (after! dired
   (setopt dired-use-ls-dired t

@@ -1,7 +1,7 @@
 ;;; modules/dired/autoload/listing.el --- listing layout fixups -*- lexical-binding: t; -*-
 ;;; Commentary:
-;; Rearrangements applied to a listing once it has been read, both to
-;; dired's own buffer and to dired-subtree's inline sub-listings.
+;; Placement of the dot entries: at the head of Dired's own listing, and
+;; nowhere in dired-subtree's inline sub-listings, which this file reads in.
 ;;; Code:
 
 (defun dired-take-entry-line (name)
@@ -39,15 +39,20 @@ into the middle, where the eye stops looking for them."
     (set-marker top nil)))
 
 ;;;###autoload
-(defun dired-subtree-drop-dot-entries-a (listing)
-  "Drop \".\" and \"..\" from a subtree LISTING.
-dired-subtree drops them itself, but only when they lead the listing,
-which sorting by time stops guaranteeing.  A subtree has no use for
-either: \".\" repeats the directory line right above it."
+(defun dired-subtree-readin-a (dir-name)
+  "Return the listing of DIR-NAME for `dired-subtree-insert' to splice in.
+Overrides `dired-subtree--readin', which drops the dot entries by their
+position and so cuts a real entry when sorting by time moves them."
   (with-temp-buffer
-    (insert listing)
+    (insert-directory dir-name dired-listing-switches nil t)
+    (goto-char (point-min))
+    (when (dired-between-files)
+      (delete-region (point) (line-beginning-position 2)))
     (dired-take-entry-line ".")
     (dired-take-entry-line "..")
+    (while (not (eobp))
+      (insert "  ")
+      (forward-line 1))
     (string-trim-right (buffer-string) "\n")))
 
 ;;; listing.el ends here
