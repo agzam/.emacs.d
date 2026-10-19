@@ -1,0 +1,65 @@
+# mbsync's config; the email module passes it with -c on every run
+Sync Full
+Create Near
+Remove None
+Expunge Both
+CopyArrivalDate yes
+SyncState *
+
+IMAPAccount gmail
+Host imap.gmail.com
+# the login and the app password of the "machine imap.gmail.com" line of
+# ~/.authinfo.gpg, its pairs in any order; this file names no account
+UserCmd "gpg -q --batch -d ~/.authinfo.gpg | awk '$2 == \"imap.gmail.com\" { for (i = 3; i < NF; i++) if ($i == \"login\") { print $(i + 1); exit } }'"
+PassCmd "gpg -q --batch -d ~/.authinfo.gpg | awk '$2 == \"imap.gmail.com\" { for (i = 3; i < NF; i++) if ($i == \"password\") { print $(i + 1); exit } }'"
+TLSType IMAPS
+# macOS ships a PLAIN-CLIENTTOKEN SASL plugin that mbsync prefers and that
+# rejects app passwords; the connection is already TLS
+AuthMechs PLAIN
+
+IMAPStore gmail-remote
+Account gmail
+
+# Verbatim keeps mbsync from reading nnmaildir's .nnmaildir directory as a
+# mailbox; Flatten stores the label a/b as the folder a.b
+MaildirStore gmail-local
+Path ~/.mail/gmail/
+Inbox ~/.mail/gmail/inbox
+SubFolders Verbatim
+Flatten .
+
+Channel inbox
+Far :gmail-remote:INBOX
+Near :gmail-local:INBOX
+
+Channel sent
+Far :gmail-remote:"[Gmail]/Sent Mail"
+Near :gmail-local:sent
+
+Channel trash
+Far :gmail-remote:"[Gmail]/Trash"
+Near :gmail-local:trash
+
+Channel archive
+Far :gmail-remote:"[Gmail]/All Mail"
+Near :gmail-local:archive
+
+# No pattern names a label, so one Gmail drops fails no channel.  mbsync's
+# maildir listing skips every folder named cur, new or tmp; a label made
+# on either side becomes one on the other
+Channel labels
+Far :gmail-remote:
+Near :gmail-local:
+Patterns * !INBOX ![Gmail]* !sent !trash !archive !emacs !org-mode !cur !new !tmp
+Create Both
+
+Channel bulk-labels
+Far :gmail-remote:
+Near :gmail-local:
+Patterns emacs org-mode
+Create Both
+
+Group fast inbox sent trash labels
+
+# tens of thousands of messages each
+Group bulk archive bulk-labels

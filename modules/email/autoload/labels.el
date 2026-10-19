@@ -544,6 +544,9 @@ Return `shown' when the summary's own copy went, nil when nothing changed."
   (gnus-group-jump-to-group (make-mail-label name))
   (message "Made label %s; the next sync takes it to Gmail" name))
 
+(defvar mail-label-change-process nil
+  "Process of the label change that runs, or nil.")
+
 (defun mail-label-change-problem (group)
   "Why mail-sync cannot rename or delete GROUP, or nil when it can."
   (cond ((null group) "No group here")
@@ -553,26 +556,30 @@ Return `shown' when the summary's own copy went, nil when nothing changed."
          (format "%s is not a label" (mail-label-name group)))
         ((string-match-p "[^[:ascii:]]" group)
          (format "Change %s in Gmail: mail-sync sends ASCII names only"
-                 (gnus-group-real-name group)))))
+                 (gnus-group-real-name group)))
+        ;; mbsync would sync the label while its folder moves
+        ((mail-sync-running-p)
+         "A mail sync runs; change the label once it is done")))
 
 (defun run-mail-label-change (args done)
   "Run `mail-sync-program' with ARGS in the background, then call DONE.
 DONE runs after a clean exit, once the groups follow the folders; a
 failure says what the program printed last."
-  (make-process
-   :name "mail-label-change" :buffer (generate-new-buffer " *mail-label-change*")
-   :command (cons mail-sync-program args) :noquery t
-   :sentinel (lambda (process _event)
-               (when (memq (process-status process) '(exit signal))
-                 (let ((said (with-current-buffer (process-buffer process)
-                               (car (last (split-string (buffer-string) "\n" t))))))
-                   (kill-buffer (process-buffer process))
-                   (if (and (eq (process-status process) 'exit)
-                            (zerop (process-exit-status process)))
-                       (progn
-                         (follow-mail-folders)
-                         (funcall done))
-                     (message "Labels: %s failed: %s" (car args) said)))))))
+  (setq mail-label-change-process
+        (make-process
+         :name "mail-label-change" :buffer (generate-new-buffer " *mail-label-change*")
+         :command (cons mail-sync-program args) :noquery t
+         :sentinel (lambda (process _event)
+                     (when (memq (process-status process) '(exit signal))
+                       (let ((said (with-current-buffer (process-buffer process)
+                                     (car (last (split-string (buffer-string) "\n" t))))))
+                         (kill-buffer (process-buffer process))
+                         (if (and (eq (process-status process) 'exit)
+                                  (zerop (process-exit-status process)))
+                             (progn
+                               (follow-mail-folders)
+                               (funcall done))
+                           (message "Labels: %s failed: %s" (car args) said))))))))
 
 ;;;###autoload
 (defun delete-mail-label (group)

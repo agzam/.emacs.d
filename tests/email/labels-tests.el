@@ -25,6 +25,7 @@
 (load-module-file "modules/email/autoload/news.el")
 (load-module-file "modules/email/autoload/marks.el")
 (load-module-file "modules/email/autoload/labels.el")
+(load-module-file "modules/email/autoload/sync.el")
 
 (defconst labels-tests-today
   '("Inbox" "clojure" "emacs" "forwarded" "friends" "github" "Health" "job" "kids"
@@ -680,7 +681,12 @@
   (it "refuses a label whose name mail-sync could not send"
     (let ((gnus-message-archive-group "nnmaildir+gmail:sent"))
       (expect (mail-label-change-problem (labels-tests-group "caf\u00e9"))
-              :to-match "\\`Change caf\u00e9 in Gmail"))))
+              :to-match "\\`Change caf\u00e9 in Gmail")))
+  (it "refuses while a mail sync runs, which would sync the label mid-change"
+    (let ((gnus-message-archive-group "nnmaildir+gmail:sent"))
+      (cl-letf (((symbol-function 'mail-sync-running-p) (lambda () t)))
+        (expect (mail-label-change-problem (labels-tests-group "travel"))
+                :to-equal "A mail sync runs; change the label once it is done")))))
 
 (defun labels-tests-program (exit &rest lines)
   "A stand-in mail-sync that logs its arguments, prints LINES and exits EXIT.
@@ -713,6 +719,17 @@ Returns (PROGRAM . LOG)."
             (expect (nreverse calls) :to-equal '(follow done))
             (expect (with-temp-buffer (insert-file-contents log) (buffer-string))
                     :to-equal "remove travel\n"))
+        (delete-file program)
+        (delete-file log))))
+  (it "keeps its process where a mail sync looks before it starts"
+    (pcase-let* ((`(,program . ,log) (labels-tests-program 0 "mail-sync: label travel deleted"))
+                 (mail-sync-program program)
+                 (mail-label-change-process nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'follow-mail-folders) #'ignore))
+            (let ((process (run-mail-label-change '("remove" "travel") #'ignore)))
+              (expect mail-label-change-process :to-be process)
+              (labels-tests-wait process)))
         (delete-file program)
         (delete-file log))))
   (it "says what mail-sync printed last when it fails, and calls nothing back"

@@ -9,7 +9,6 @@
 (require 'url-util)
 
 (defvar gmail-maildir)
-(defvar mail-sync-program)
 (defvar mail-inbox-group)
 (defvar mail-trash-group)
 (defvar mail-archive-group)
@@ -17,52 +16,7 @@
 (defvar mail-bulk-groups)
 (defvar gnus-topic-alist)
 
-;;; Sync
-
-(defvar mail-sync-hook nil
-  "Hook `sync-mail' runs to fetch what lives outside Gmail.")
-
-(defun mail-sync-command (&optional full)
-  "Command line for `mail-sync-program'; FULL runs every sync tier at once."
-  (list mail-sync-program (if full "full" "sync")))
-
-(defun mail-sync-sentinel (proc event)
-  "Report PROC's EVENT; after a clean exit, follow the folders and refresh."
-  (when (memq (process-status proc) '(exit signal))
-    (if (and (eq (process-status proc) 'exit)
-             (zerop (process-exit-status proc)))
-        (progn
-          (message "Mail synced")
-          (when (gnus-alive-p)
-            (follow-mail-folders)
-            (refresh-mail-groups)))
-      (message "Mail sync failed: %s (see %s)"
-               (string-trim event) (buffer-name (process-buffer proc))))))
-
-;;;###autoload
-(defun sync-mail (&optional full)
-  "Sync mail with Gmail and run `mail-sync-hook', all in the background.
-With FULL, the mail sync runs every tier at once."
-  (interactive "P")
-  (let ((buf (get-buffer-create " *mail-sync*")))
-    (with-current-buffer buf
-      (erase-buffer))
-    (make-process :name "mail-sync"
-                  :buffer buf
-                  :command (mail-sync-command full)
-                  :sentinel #'mail-sync-sentinel))
-  (run-hooks 'mail-sync-hook))
-
-;;; Syncs launchd runs
-
-(defvar mail-sync-check-interval 15
-  "Seconds between looks for routine groups whose folder mbsync changed.")
-
-(defvar mail-sync-check-timer nil
-  "Timer of `check-mail-syncs' while Gnus runs, or nil.")
-
-(defvar mail-sync-states (make-hash-table :test #'equal)
-  "The time of each routine group's mbsync state file at the last look.")
+;;; What a sync changed
 
 (defun mail-sync-state-time (group)
   "When mbsync last wrote its state file in GROUP's folder, or nil."
@@ -72,38 +26,19 @@ With FULL, the mail sync runs every tier at once."
                                         store)))))
 
 ;;;###autoload
-(defun check-mail-syncs ()
-  "Read again, in the background, each routine group whose folder mbsync changed.
+(defun refresh-synced-mail-groups (since)
+  "Read again, in the background, each routine group a sync changed SINCE.
 mbsync rewrites a folder's state file only when it changed the folder.
-The first look at a group only notes the time.  A label made or dropped
-since the last look gains or loses its group first."
+A label made or dropped meanwhile gains or loses its group first."
   (when (gnus-alive-p)
     (follow-mail-folders)
-    (when-let* ((changed (seq-filter
-                          (lambda (group)
-                            (let ((then (gethash group mail-sync-states 'unseen))
-                                  (now (mail-sync-state-time group)))
-                              (puthash group now mail-sync-states)
-                              (not (or (eq then 'unseen)
-                                       (if (and now then) (time-equal-p now then) (eq now then))))))
-                          (scanned-mail-groups))))
-      (load-mail-groups changed))))
-
-;;;###autoload
-(defun start-mail-sync-check ()
-  "Look for folders mbsync changed every `mail-sync-check-interval' seconds."
-  (stop-mail-sync-check)
-  (check-mail-syncs)
-  (setq mail-sync-check-timer
-        (run-with-timer mail-sync-check-interval mail-sync-check-interval #'check-mail-syncs)))
-
-;;;###autoload
-(defun stop-mail-sync-check ()
-  "Stop looking for folders mbsync changed, and forget what was seen."
-  (when (timerp mail-sync-check-timer)
-    (cancel-timer mail-sync-check-timer))
-  (setq mail-sync-check-timer nil)
-  (clrhash mail-sync-states))
+    ;; a file system may keep whole seconds
+    (let ((since (time-convert since 'integer)))
+      (when-let* ((changed (seq-filter (lambda (group)
+                                         (when-let* ((time (mail-sync-state-time group)))
+                                           (not (time-less-p time since))))
+                                       (scanned-mail-groups))))
+        (load-mail-groups changed)))))
 
 ;;; Navigation
 
@@ -165,7 +100,6 @@ Nothing goes while the inbox folder is missing.  Return the groups killed."
                                 gnus-group-list)))
     (dolist (group gone)
       (forget-mail-group group)
-      (remhash group mail-sync-states)
       (gnus-group-change-level group gnus-level-killed (gnus-group-level group))
       ;; a label made again under this name is subscribed again
       (setq gnus-killed-list (delete group gnus-killed-list))

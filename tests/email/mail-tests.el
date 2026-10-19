@@ -9,7 +9,6 @@
 
 (defvar gmail-maildir "/nonexistent-mail-tests/")
 (defvar news-maildir "/nonexistent-mail-tests-news/")
-(defvar mail-sync-program "mail-sync")
 (defvar mail-inbox-group "nnmaildir+gmail:inbox")
 (defvar mail-trash-group "nnmaildir+gmail:trash")
 (defvar mail-archive-group "nnmaildir+gmail:archive")
@@ -135,24 +134,6 @@ Returns the hashtable; the caller binds `gnus-group-list' itself."
                                   "Archived-At: <http://permalink.gmane.org/gmane.emacs.gnus.general/1>\n"))
             :to-be nil)))
 
-(describe "mail-sync-command"
-  (it "runs the incremental sync by default"
-    (expect (mail-sync-command) :to-equal '("mail-sync" "sync")))
-  (it "runs the full sync on request"
-    (expect (mail-sync-command t) :to-equal '("mail-sync" "full"))))
-
-(describe "sync-mail"
-  (it "starts the mail sync in the background, then runs mail-sync-hook"
-    (let* (made
-           fetched
-           (mail-sync-hook (list (lambda () (push (length made) fetched)))))
-      (cl-letf (((symbol-function 'make-process)
-                 (lambda (&rest args) (push (plist-get args :command) made) 'process)))
-        (sync-mail))
-      (expect made :to-equal '(("mail-sync" "sync")))
-      ;; the hook ran once, after the sync had started
-      (expect fetched :to-equal '(1)))))
-
 (describe "mail-file-group"
   (it "names a file's group after the nnmaildir server whose store holds it"
     (let ((gnus-secondary-select-methods
@@ -164,45 +145,6 @@ Returns the hashtable; the caller binds `gnus-group-list' itself."
       (expect (mail-file-group "/m/reddit/r.emacs/cur/2:2,")
               :to-equal "nnmaildir+reddit:r.emacs")
       (expect (mail-file-group "/m/other/x/cur/3") :to-be nil))))
-
-(defmacro mail-tests--with-sentinel-stubs (code calls &rest body)
-  "Run BODY with the sentinel's dependencies stubbed, PROC exiting with CODE.
-Every refresh path logs into CALLS, so a spec can tell the scoped refresh
-from the server-wide scan that froze the frame."
-  (declare (indent 2))
-  `(cl-letf (((symbol-function 'process-status) (lambda (_) 'exit))
-             ((symbol-function 'process-exit-status) (lambda (_) ,code))
-             ((symbol-function 'process-buffer)
-              (lambda (_) (get-buffer-create " *mail-tests log*")))
-             ((symbol-function 'refresh-mail-groups) (lambda () (push 'refresh ,calls)))
-             ((symbol-function 'follow-mail-folders) (lambda () (push 'follow ,calls)))
-             ((symbol-function 'gnus-group-get-new-news)
-              (lambda (&rest _) (push 'scan-every-group ,calls))))
-     ,@body))
-
-(describe "mail-sync-sentinel"
-  (it "follows the folders, then refreshes the routine groups, after a clean exit"
-    ;; a label made or dropped in Gmail gains or loses its group first
-    (let (calls)
-      (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t)))
-        (mail-tests--with-sentinel-stubs 0 calls
-          (mail-sync-sentinel 'proc "finished\n")))
-      (expect (nreverse calls) :to-equal '(follow refresh))))
-  (it "asks for nothing when Gnus is not running"
-    (let (calls)
-      (cl-letf (((symbol-function 'gnus-alive-p) (lambda () nil)))
-        (mail-tests--with-sentinel-stubs 0 calls
-          (mail-sync-sentinel 'proc "finished\n")))
-      (expect calls :to-be nil)))
-  (it "leaves Gnus alone and reports a failed exit"
-    (let ((calls nil) (said nil))
-      (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
-                ((symbol-function 'message)
-                 (lambda (fmt &rest args) (setq said (apply #'format fmt args)))))
-        (mail-tests--with-sentinel-stubs 1 calls
-          (mail-sync-sentinel 'proc "exited abnormally with code 1\n")))
-      (expect calls :to-be nil)
-      (expect said :to-match "Mail sync failed"))))
 
 (describe "scanned-mail-groups"
   (it "takes the maildir groups at or below the activate level, and nothing else"
@@ -472,11 +414,9 @@ and the news group have no folder in the store."
           (gnus-topic-alist (list (list "Gnus") (list "Labels" "nnmaildir+gmail:job"
                                                       "nnmaildir+gmail:gone")
                                   (list "Gmail" "nnmaildir+gmail:inbox")))
-          (mail-sync-states (make-hash-table :test #'equal))
           (gnus-group-buffer " *mail-tests group*"))
      (dolist (folder ,folders)
        (make-directory (expand-file-name folder gmail-maildir)))
-     (puthash "nnmaildir+gmail:gone" '(1 0) mail-sync-states)
      (puthash "nnmaildir+gmail:gone" '(1 . 9) gnus-active-hashtb)
      (get-buffer-create gnus-group-buffer)
      (unwind-protect
@@ -503,14 +443,13 @@ and the news group have no folder in the store."
         (expect (assoc "nnmaildir+gmail:gone" gnus-newsrc-alist) :to-be nil)
         ;; a news group's folder lives in another store
         (expect (gnus-group-level "nnmaildir+news:gmane.emacs.devel") :to-equal 4))))
-  (it "forgets what was read of a killed group, its sync state time too"
+  (it "forgets what was read of a killed group"
     (let (calls)
       (mail-tests--with-store '("inbox" "job") calls
         (cl-letf (((symbol-function 'message) #'ignore))
           (drop-vanished-mail-groups))
         (expect (assoc 'forget calls) :to-equal '(forget "nnmaildir+gmail:gone"))
         (expect (seq-count (lambda (call) (eq (car call) 'forget)) calls) :to-be 1)
-        (expect (gethash "nnmaildir+gmail:gone" mail-sync-states 'none) :to-be 'none)
         (expect (gnus-active "nnmaildir+gmail:gone") :to-be nil))))
   (it "leaves no killed mark, so a label made again under the name is subscribed again"
     (let (calls)
@@ -1379,55 +1318,46 @@ groups are read, and the renamed-file advice is on as config.el puts it."
         (nnmaildir-request-update-info "trash" info "gmail")
         (expect (range-member-p number (gnus-info-read info)) :to-be-truthy)))))
 
-;;; Syncs launchd runs
+;;; What a sync changed
 
-(defun mail-tests--look (states times)
-  "Run one `check-mail-syncs' over STATES, the state files dated per TIMES.
-TIMES maps each routine group to its state file's time, nil for none.
-Returns the groups it read again."
-  (let ((mail-sync-states states)
-        loaded)
+(defun mail-tests--refresh (since times)
+  "Groups `refresh-synced-mail-groups' reads again after a sync begun at SINCE.
+TIMES maps each routine group to its state file's time, nil for none."
+  (let (loaded)
     (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
               ((symbol-function 'follow-mail-folders) #'ignore)
               ((symbol-function 'scanned-mail-groups) (lambda () (mapcar #'car times)))
               ((symbol-function 'mail-sync-state-time) (lambda (group) (cdr (assoc group times))))
               ((symbol-function 'load-mail-groups) (lambda (groups) (setq loaded groups))))
-      (check-mail-syncs))
+      (refresh-synced-mail-groups since))
     loaded))
 
-(describe "check-mail-syncs"
-  (it "only notes the times at its first look"
-    (expect (mail-tests--look (make-hash-table :test #'equal)
-                              '(("inbox" . (1 0)) ("trash" . nil)))
-            :to-be nil))
-  (it "reads again only the groups whose state file mbsync rewrote"
-    (let ((states (make-hash-table :test #'equal)))
-      (mail-tests--look states '(("inbox" . (1 0)) ("trash" . (1 0)) ("job" . (1 0))))
-      (expect (mail-tests--look states '(("inbox" . (2 0)) ("trash" . (1 0)) ("job" . (3 0))))
-              :to-equal '("inbox" "job"))
-      (expect (mail-tests--look states '(("inbox" . (2 0)) ("trash" . (1 0)) ("job" . (3 0))))
-              :to-be nil)))
-  (it "reads again a group whose state file appeared"
-    ;; mbsync's first sync of a new label
-    (let ((states (make-hash-table :test #'equal)))
-      (mail-tests--look states '(("job" . nil)))
-      (expect (mail-tests--look states '(("job" . (1 0)))) :to-equal '("job"))))
+(describe "refresh-synced-mail-groups"
+  (it "reads again only the routine groups whose state file mbsync wrote since the sync began"
+    (expect (mail-tests--refresh 1000.5 '(("inbox" . 1001) ("trash" . 999) ("job" . nil)
+                                          ;; written in that second, where a file
+                                          ;; system that keeps whole seconds puts it
+                                          ("kids" . 1000)))
+            :to-equal '("inbox" "kids")))
+  (it "reads nothing when the sync changed no folder"
+    (expect (mail-tests--refresh 1000 '(("inbox" . 999) ("trash" . nil))) :to-be nil))
   (it "looks at nothing while Gnus is down"
-    (let ((mail-sync-states (make-hash-table :test #'equal)))
-      (cl-letf (((symbol-function 'gnus-alive-p) #'ignore))
-        (spy-on 'scanned-mail-groups)
-        (check-mail-syncs)
-        (expect 'scanned-mail-groups :not :to-have-been-called))))
-  (it "follows the folders a launchd sync changed before it reads the state files"
+    (cl-letf (((symbol-function 'gnus-alive-p) #'ignore))
+      (spy-on 'scanned-mail-groups)
+      (spy-on 'follow-mail-folders)
+      (refresh-synced-mail-groups 1000)
+      (expect 'scanned-mail-groups :not :to-have-been-called)
+      (expect 'follow-mail-folders :not :to-have-been-called)))
+  (it "follows the folders before it reads the state files"
     ;; a label Gmail dropped has no state file to read, and a new one needs its group
-    (let ((mail-sync-states (make-hash-table :test #'equal))
-          calls)
+    (let (calls)
       (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
                 ((symbol-function 'follow-mail-folders) (lambda () (push 'follow calls)))
                 ((symbol-function 'scanned-mail-groups)
                  (lambda () (push 'scanned calls) '("nnmaildir+gmail:inbox")))
-                ((symbol-function 'mail-sync-state-time) (lambda (_) '(1 0))))
-        (check-mail-syncs))
+                ((symbol-function 'mail-sync-state-time) (lambda (_) 1001))
+                ((symbol-function 'load-mail-groups) #'ignore))
+        (refresh-synced-mail-groups 1000))
       (expect (nreverse calls) :to-equal '(follow scanned)))))
 
 (describe "mail-sync-state-time"
@@ -1443,42 +1373,3 @@ Returns the groups it read again."
     (mail-tests--in-store '("inbox/cur/1.x:2,")
       (let ((gnus-secondary-select-methods `((nnmaildir "gmail" (directory ,root)))))
         (expect (mail-sync-state-time "nnmaildir+gmail:inbox") :to-be nil)))))
-
-(describe "start-mail-sync-check"
-  (it "notes the times at once, then looks again every interval"
-    (let ((mail-sync-check-timer nil)
-          (mail-sync-check-interval 15)
-          (mail-sync-states (make-hash-table :test #'equal))
-          looks)
-      (cl-letf (((symbol-function 'check-mail-syncs) (lambda () (push 'look looks))))
-        (unwind-protect
-            (progn
-              (start-mail-sync-check)
-              (expect looks :to-equal '(look))
-              (expect (timer--repeat-delay mail-sync-check-timer) :to-equal 15)
-              (expect (timer--function mail-sync-check-timer) :to-be 'check-mail-syncs))
-          (stop-mail-sync-check)))))
-  (it "keeps one timer however often Gnus starts"
-    (let ((mail-sync-check-timer nil)
-          (mail-sync-check-interval 15)
-          (mail-sync-states (make-hash-table :test #'equal)))
-      (cl-letf (((symbol-function 'check-mail-syncs) #'ignore))
-        (unwind-protect
-            (progn
-              (start-mail-sync-check)
-              (start-mail-sync-check)
-              (expect (seq-count (lambda (timer) (eq (timer--function timer) 'check-mail-syncs))
-                                 timer-list)
-                      :to-be 1))
-          (stop-mail-sync-check))))))
-
-(describe "stop-mail-sync-check"
-  (it "cancels the timer and forgets the times seen"
-    (let ((mail-sync-check-timer (run-with-timer 3600 3600 #'ignore))
-          (mail-sync-states (make-hash-table :test #'equal)))
-      (puthash "nnmaildir+gmail:inbox" '(1 0) mail-sync-states)
-      (let ((timer mail-sync-check-timer))
-        (stop-mail-sync-check)
-        (expect (list (memq timer timer-list) mail-sync-check-timer
-                      (hash-table-count mail-sync-states))
-                :to-equal '(nil nil 0))))))

@@ -28,7 +28,7 @@
   "Address whose mailbox mbsync mirrors; never a sender.")
 
 (defvar mail-sync-program "mail-sync"
-  "Program that syncs the maildir with Gmail and refreshes the notmuch index.")
+  "Program that renames and deletes a label in Gmail and moves its folder.")
 
 (defvar mail-inbox-group "nnmaildir+gmail:inbox"
   "Gnus group `open-mail-inbox' enters.")
@@ -100,6 +100,9 @@ Any other label's chip takes the face `mail-label'.")
 ;; the news and Reddit stores fill while Emacs runs, whether Gnus runs or not
 (add-hook 'emacs-startup-hook #'start-news-fetch-timer)
 (add-hook 'emacs-startup-hook #'start-reddit-fetch-timer)
+;; Gmail's syncs only in the Emacs that owns the server, which
+;; `init-server-h' starts at depth 0
+(add-hook 'doom-after-init-hook #'start-mail-sync-timer 90)
 
 (use-package gnus
   :ensure nil
@@ -195,9 +198,6 @@ Any other label's chip takes the face `mail-label'.")
   ;; a slice at a time
   (add-hook 'gnus-started-hook #'load-all-mail-groups 90)
   (add-hook 'gnus-exit-gnus-hook #'stop-mail-load)
-  ;; what launchd's syncs change reaches the routine groups, as after , u
-  (add-hook 'gnus-started-hook #'start-mail-sync-check 90)
-  (add-hook 'gnus-exit-gnus-hook #'stop-mail-sync-check)
   ;; queued mail leaves on Gnus's demon, and what is left before Gnus quits
   (add-hook 'gnus-started-hook #'start-mail-queue 90)
   (add-hook 'gnus-exit-gnus-hook #'stop-mail-queue)

@@ -46,7 +46,12 @@
 (defvar mail-label-jobs)
 (defvar mail-label-colors)
 (defvar mail-label-refresh-timer)
-(defvar mail-sync-check-interval)
+(defvar mbsync-program)
+(defvar notmuch-program)
+(defvar mail-sync-directory)
+(defvar mail-sync-process)
+(defvar mail-sync-report)
+(defvar mail-sync-timer)
 (defvar mail-live-preview-name)
 (defvar mail-live-history)
 
@@ -675,6 +680,14 @@ buffers, summary and queued files the cases leave are cleared after."
 
 (defun email-e2e ()
   "Gnus reads the fixture maildir, replies, and shows a thread in one buffer."
+  ;; a probe that owns the server runs the module's timer, whose syncs
+  ;; would land in the middle of a case
+  (when (timerp (bound-and-true-p mail-sync-timer))
+    (cancel-timer mail-sync-timer)
+    (setq mail-sync-timer nil))
+  (with-timeout (60)
+    (while (and (fboundp 'mail-sync-running-p) (mail-sync-running-p))
+      (accept-process-output nil 0.1)))
   (let* ((root (expand-file-name "mail/" e2e-work-dir))
          (inbox (expand-file-name "inbox/" root))
          ;; the group a queued deletion is moved into has to exist when
@@ -762,13 +775,23 @@ buffers, summary and queued files the cases leave are cleared after."
          (mail-load-script (expand-file-name "mail-load.el" e2e-work-dir))
          (mail-load-directory (expand-file-name "mail-load/" e2e-work-dir))
          (mail-table-directory (expand-file-name "mail-tables/" e2e-work-dir))
-         ;; stands in for mail-sync: a sync does nothing, and remove and
-         ;; rename move a label's folder as mail-sync does once Gmail agreed
+         ;; stands in for mail-sync: remove and rename move a label's
+         ;; folder as mail-sync does once Gmail agreed
          (mail-sync-program (expand-file-name "mail-sync" e2e-work-dir))
          (mail-sync-log (expand-file-name "mail-sync-log" e2e-work-dir))
          (removed (expand-file-name "removed/" e2e-work-dir))
-         ;; the flow looks for mbsync's changes itself, never on a timer
-         (mail-sync-check-interval 3600)
+         ;; stand in for mbsync and notmuch new: each logs its call to
+         ;; sync-calls, mbsync waits while sync-hold exists, and its -ls
+         ;; prints gmail-boxes
+         (mbsync-program (expand-file-name "mbsync" e2e-work-dir))
+         (notmuch-program notmuch)
+         (sync-calls (expand-file-name "sync-calls" e2e-work-dir))
+         (sync-hold (expand-file-name "sync-hold" e2e-work-dir))
+         (gmail-boxes (expand-file-name "gmail-boxes" e2e-work-dir))
+         (mail-sync-directory (expand-file-name "sync-state/" e2e-work-dir))
+         (mail-sync-process nil)
+         (mail-sync-report nil)
+         (gnus-search-notmuch-config-file (expand-file-name "notmuch-config" e2e-work-dir))
          ;; a reply reads no notmuch and writes no saved addresses
          (mail-address-file (expand-file-name "mail-addresses.eld" e2e-work-dir))
          (mail-addresses-read-at (float-time))
@@ -825,6 +848,13 @@ buffers, summary and queued files the cases leave are cleared after."
               "  rename) mv '" root "'\"$2\" '" root "'\"$3\";;\n"
               "esac\n"))
     (set-file-modes mail-sync-program #o755)
+    (with-temp-file mbsync-program
+      (insert "#!/bin/sh\n"
+              "printf '%s\\n' \"mbsync $*\" >> '" sync-calls "'\n"
+              "while [ -f '" sync-hold "' ]; do sleep 0.05; done\n"
+              "case \" $* \" in *\" -ls \"*) cat '" gmail-boxes "';; esac\n"))
+    (set-file-modes mbsync-program #o755)
+    (write-region "===== gmail-remote:\nINBOX\n[Gmail]/All Mail\n" nil gmail-boxes)
     (email-e2e--write-feed served '(("first" "First fixture post" "10")
                                     ("second" "Second fixture post" "11")))
     (with-temp-file feed-fetch-program
@@ -919,6 +949,8 @@ buffers, summary and queued files the cases leave are cleared after."
       (with-temp-file notmuch
         (insert "#!/bin/sh\n"
                 "case \" $* \" in\n"
+                "  *\" new --quiet \"*)\n"
+                "    printf '%s\\n' \"notmuch $*\" >> '" sync-calls "';;\n"
                 "  *\" count \"*)\n"
                 "    : > '" counted-log "'\n"
                 "    n=1\n"
@@ -1066,6 +1098,32 @@ buffers, summary and queued files the cases leave are cleared after."
                                    (buffer-list))
                     (accept-process-output nil 0.05)))
                 t)
+              ;; what the stand-ins for mbsync and notmuch new were asked,
+              ;; a line a run
+              (sync-runs ()
+                (when (file-exists-p sync-calls)
+                  (with-temp-buffer
+                    (insert-file-contents sync-calls)
+                    (split-string (buffer-string) "\n" t))))
+              ;; the line a run of the mbsync stand-in on ARGS logs, and
+              ;; that of the notmuch one when it indexes
+              (mbsync-run (args)
+                (format "mbsync -c %s %s" (expand-file-name mail-sync-config) args))
+              (notmuch-new ()
+                (format "notmuch --config=%s new --quiet"
+                        (expand-file-name gnus-search-notmuch-config-file)))
+              ;; a sync, FULL or by its markers, run to its end; ACT
+              ;; changes the store as mbsync would, while mbsync is held
+              (synced (&optional act full)
+                (write-region "" nil sync-hold)
+                (start-mail-sync full)
+                (when act
+                  (funcall act))
+                (delete-file sync-hold)
+                (with-timeout (10 nil)
+                  (while (mail-sync-running-p)
+                    (accept-process-output nil 0.05)))
+                (not (mail-sync-running-p)))
               ;; the group buffer from the top: a topic line as its name,
               ;; a group line as (GROUP TOPIC TEXT)
               (group-lines ()
@@ -1471,6 +1529,87 @@ buffers, summary and queued files the cases leave are cleared after."
                 (record ", u's fetch counts the news group's new post"
                         (eql (gnus-group-unread news-group) 3)
                         :got (format "unread %S" (gnus-group-unread news-group)))
+                ;; , u syncs mail too, and returns while mbsync is held
+                (let ((unread (gnus-group-unread "nnmaildir+gmail:inbox"))
+                      (fetched (expand-file-name "fetched/" root))
+                      (synced-file (expand-file-name "new/1700000091.91.fixture" inbox))
+                      (start (float-time)))
+                  (write-region "" nil sync-hold)
+                  (execute-kbd-macro (kbd ", u"))
+                  (record ", u returns while mbsync still syncs"
+                          (and (< (- (float-time) start) 0.5) (mail-sync-running-p) t)
+                          :got (format "%.2f s, syncing %S" (- (float-time) start)
+                                       (mail-sync-running-p)))
+                  ;; meanwhile mbsync brings a message to the inbox and a
+                  ;; label made in Gmail, and writes both state files
+                  (dolist (sub '("cur" "new" "tmp"))
+                    (make-directory (expand-file-name sub fetched) t))
+                  (email-e2e--write-message (expand-file-name "cur/1700000090.90.fixture:2," fetched)
+                                            "Kim <kim@example.com>" "labelled in Gmail" "fetched")
+                  (write-region "" nil (expand-file-name ".mbsyncstate" fetched))
+                  (email-e2e--write-message synced-file "Kim <kim@example.com>" "synced" "synced")
+                  (write-region "" nil (expand-file-name ".mbsyncstate" inbox))
+                  (delete-file sync-hold)
+                  (with-timeout (10)
+                    (while (mail-sync-running-p)
+                      (accept-process-output nil 0.05)))
+                  (loads-done)
+                  (record "the sync ends on its own, and reads the inbox again and the label it brought"
+                          (and (not (mail-sync-running-p))
+                               (eql (gnus-group-unread "nnmaildir+gmail:inbox") (1+ unread))
+                               (member "fetched" (read-groups))
+                               (eql (gnus-group-unread "nnmaildir+gmail:fetched") 1))
+                          :got (format "syncing %S, inbox %S then %S, read %S, fetched %S"
+                                       (mail-sync-running-p) unread
+                                       (gnus-group-unread "nnmaildir+gmail:inbox") (read-groups)
+                                       (gnus-group-unread "nnmaildir+gmail:fetched")))
+                  ;; the feed's , u found no marker, the later ones fresh ones
+                  (record "the first sync lists Gmail's labels and syncs every box, a later one the inbox, through the module's isyncrc"
+                          (and (equal (seq-take (sync-runs) 3)
+                                      (list (mbsync-run "-ls gmail-remote") (mbsync-run "fast bulk")
+                                            (notmuch-new)))
+                               (equal (last (sync-runs) 2) (list (mbsync-run "inbox") (notmuch-new)))
+                               (file-exists-p (expand-file-name "last-fast" mail-sync-directory))
+                               (file-exists-p (expand-file-name "last-full" mail-sync-directory)))
+                          :got (format "%S" (sync-runs)))
+                  (record "the first sync writes the notmuch config, over the stores' root"
+                          (and (file-exists-p gnus-search-notmuch-config-file)
+                               (with-temp-buffer
+                                 (insert-file-contents gnus-search-notmuch-config-file)
+                                 (string-prefix-p (format "[database]\nmail_root=%s\n"
+                                                          (directory-file-name e2e-work-dir))
+                                                  (buffer-string))))
+                          :got (format "%S" (and (file-exists-p gnus-search-notmuch-config-file)
+                                                 (with-temp-buffer
+                                                   (insert-file-contents
+                                                    gnus-search-notmuch-config-file)
+                                                   (buffer-string)))))
+                  ;; Gmail lists no such label any more, and the phone
+                  ;; archived the message, which the read moved to cur/; a
+                  ;; full sync takes both out
+                  (synced (lambda ()
+                            (dolist (file (messages-in inbox))
+                              (when (string-prefix-p (file-name-nondirectory synced-file)
+                                                     (file-name-nondirectory file))
+                                (delete-file file)))
+                            (write-region "" nil (expand-file-name ".mbsyncstate" inbox)))
+                          t)
+                  (loads-done)
+                  (record "a full sync sets aside the folder of a label Gmail dropped, and its group goes"
+                          (and (not (file-exists-p fetched))
+                               (directory-files (expand-file-name "removed/" mail-sync-directory)
+                                                nil "\\`fetched-")
+                               (not (gnus-group-entry "nnmaildir+gmail:fetched"))
+                               (equal (last (sync-runs) 3)
+                                      (list (mbsync-run "-ls gmail-remote") (mbsync-run "fast bulk")
+                                            (notmuch-new))))
+                          :got (format "folder %S, entry %S, runs %S" (file-exists-p fetched)
+                                       (and (gnus-group-entry "nnmaildir+gmail:fetched") t)
+                                       (last (sync-runs) 3)))
+                  (record "the sync reads the inbox again without the message mbsync took out"
+                          (eql (gnus-group-unread "nnmaildir+gmail:inbox") unread)
+                          :got (format "inbox %S, was %S" (gnus-group-unread "nnmaildir+gmail:inbox")
+                                       unread)))
                 ;; a Reddit post and its comments read as one thread, each
                 ;; under what it answers, the post heading it from outside
                 ;; the window
@@ -3223,11 +3362,11 @@ buffers, summary and queued files the cases leave are cleared after."
                                      (not (equal (flags-of trash "twin-drop") before)))
                                 :got (format "article %S, %s, flags %S then %S" article name
                                              before (flags-of trash "twin-drop")))))
-                    ;; a launchd sync: mbsync stars synced-star and writes
-                    ;; the inbox's state file, which the start found missing
-                    (phone "synced-star" "F")
-                    (write-region "" nil (expand-file-name ".mbsyncstate" inbox))
-                    (check-mail-syncs)
+                    ;; a sync: mbsync stars synced-star and rewrites the
+                    ;; inbox's state file
+                    (synced (lambda ()
+                              (phone "synced-star" "F")
+                              (write-region "" nil (expand-file-name ".mbsyncstate" inbox))))
                     (loads-done)
                     (let* ((err (enter "nnmaildir+gmail:inbox"))
                            (article (article-of "synced-star")))
@@ -3728,19 +3867,19 @@ buffers, summary and queued files the cases leave are cleared after."
                   (record "a label that appeared after the start loads once its batch runs"
                           (member "fresh" (read-groups))
                           :got (format "%S" (read-groups))))
-                ;; a launchd sync while Gnus runs: a label made in Gmail
-                ;; arrives as a folder, and the next look gives it a group
+                ;; a sync while Gnus runs: a label made in Gmail arrives as
+                ;; a folder, and the sync gives it a group
                 (let ((arrived (expand-file-name "arrived/" root))
                       (said nil))
                   (dolist (sub '("cur" "new" "tmp"))
                     (make-directory (expand-file-name sub arrived) t))
                   (email-e2e--write-message (expand-file-name "cur/1700000080.80.fixture:2," arrived)
                                             "Ivy <ivy@example.com>" "arrived" "arrived")
-                  (let ((err (condition-case err (progn (check-mail-syncs) nil) (error err))))
+                  (let ((err (condition-case err (progn (synced) nil) (error err))))
                     (loads-done)
                     (with-current-buffer gnus-group-buffer
                       (gnus-group-list-groups))
-                    (record "a label made in Gmail gets its group under Labels at the next look, read"
+                    (record "a label made in Gmail gets its group under Labels at the next sync, read"
                             (and (null err)
                                  (equal (gnus-group-topic "nnmaildir+gmail:arrived") "Labels")
                                  (member "arrived" (read-groups))
@@ -3750,7 +3889,7 @@ buffers, summary and queued files the cases leave are cleared after."
                                          (gnus-group-topic "nnmaildir+gmail:arrived")
                                          (read-groups)
                                          (gnus-group-unread "nnmaildir+gmail:arrived"))))
-                  ;; Gmail dropped it again, and mail-sync set its folder aside
+                  ;; Gmail dropped it again, and its folder went aside
                   (rename-file (directory-file-name arrived) (expand-file-name "arrived" removed))
                   (let* ((note (lambda (format &rest args)
                                  (when format
@@ -3758,9 +3897,9 @@ buffers, summary and queued files the cases leave are cleared after."
                          (err (progn
                                 (advice-add 'message :before note)
                                 (unwind-protect
-                                    (condition-case err (progn (check-mail-syncs) nil) (error err))
+                                    (condition-case err (progn (synced) nil) (error err))
                                   (advice-remove 'message note)))))
-                    (record "a label dropped in Gmail leaves the group buffer and the chips at the next look"
+                    (record "a label dropped in Gmail leaves the group buffer and the chips at the next sync"
                             (and (null err)
                                  (not (gnus-group-entry "nnmaildir+gmail:arrived"))
                                  (not (assoc "nnmaildir+gmail:arrived"

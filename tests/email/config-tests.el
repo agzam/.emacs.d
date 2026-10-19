@@ -683,7 +683,8 @@ window and deletes the summary's."
                       keep-flags-set-elsewhere-a maildir-groups accept-mail-without-nul-a
                       subscribe-mail-group mail-file-group current-mail-file
                       follow-renamed-mail-a follow-renamed-mail-marks-a
-                      check-mail-syncs start-mail-sync-check stop-mail-sync-check
+                      ;; the end of a sync reads what it changed
+                      refresh-synced-mail-groups
                       ;; Gnus's start and the label commands follow the folders
                       drop-vanished-mail-groups follow-mail-folders
                       ;; the live search goes through these
@@ -722,6 +723,9 @@ window and deletes the summary's."
                      ("reddit.el" fetch-reddit fetch-stale-reddit start-reddit-fetch-timer
                       ensure-reddit-folders reddit-group-p reddit-group-parked-p
                       fetch-pending-reddit)
+                     ;; , u, the hook that starts the timer, and the label commands
+                     ("sync.el" sync-mail start-mail-sync start-mail-sync-timer
+                      mail-sync-running-p)
                      ("load.el" load-mail-groups maildir-group-p mail-group-loaded-p
                       mail-group-pending-p mail-group-reading-p mail-load-busy-p
                       mail-full-group-name wait-for-mail-load load-unloaded-mail-groups
@@ -1025,7 +1029,7 @@ window and deletes the summary's."
           (eval form t)))
       (expect gnus-started-hook
               :to-equal '(drop-vanished-mail-groups subscribe-mail-groups apply-mail-topics
-                          load-all-mail-groups start-mail-sync-check start-mail-queue
+                          load-all-mail-groups start-mail-queue
                           start-feed-fetches fetch-stale-news fetch-stale-reddit))))
   (it "renames and deletes a label's group in Gmail too, never its folder alone"
     ;; mbsync's sync state would point at a label Gmail lacks
@@ -1040,7 +1044,7 @@ window and deletes the summary's."
           (expect (advice-member-p #'delete-mail-label-a 'gnus-group-delete-group) :to-be-truthy))
       (advice-remove 'gnus-group-rename-group #'rename-mail-label-a)
       (advice-remove 'gnus-group-delete-group #'delete-mail-label-a)))
-  (it "drops every load and stops looking for syncs when Gnus leaves"
+  (it "sends the queue, then drops every load, when Gnus leaves"
     (require 'gnus)
     (let ((gnus-exit-gnus-hook nil))
       (dolist (form (email-tests--config-forms 'gnus))
@@ -1048,8 +1052,7 @@ window and deletes the summary's."
                    (equal (cadr form) ''gnus-exit-gnus-hook))
           (eval form t)))
       ;; queued mail leaves first, while every server is still open
-      (expect gnus-exit-gnus-hook
-              :to-equal '(stop-mail-queue stop-mail-sync-check stop-mail-load))))
+      (expect gnus-exit-gnus-hook :to-equal '(stop-mail-queue stop-mail-load))))
   (it "waits for loads before a search, a thread search or entering a group"
     (require 'gnus-sum)
     (let ((gnus-mark-article-hook nil)
@@ -1087,6 +1090,24 @@ window and deletes the summary's."
   (it "fetches news and Reddit while Emacs runs, whether Gnus runs or not"
     (expect (memq #'start-news-fetch-timer emacs-startup-hook) :to-be-truthy)
     (expect (memq #'start-reddit-fetch-timer emacs-startup-hook) :to-be-truthy))
+  (it "syncs Gmail from the end of init, after the server starts, and not at config load"
+    (expect (memq #'start-mail-sync-timer doom-after-init-hook) :to-be-truthy)
+    (expect (bound-and-true-p mail-sync-timer) :to-be nil)
+    (expect (seq-find (lambda (timer) (eq (timer--function timer) #'start-mail-sync)) timer-list)
+            :to-be nil)
+    ;; the server decides which Emacs syncs, and init-server-h runs at
+    ;; depth 0, whichever file adds it first
+    (let ((doom-after-init-hook nil)
+          (form (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "modules/email/config.el" test-config-root))
+                  (let (form)
+                    (while (and (setq form (ignore-errors (read (current-buffer))))
+                                (not (equal (cadr form) ''doom-after-init-hook))))
+                    form))))
+      (add-hook 'doom-after-init-hook #'ignore)
+      (eval form t)
+      (expect doom-after-init-hook :to-equal '(ignore start-mail-sync-timer))))
   (it "keeps each fetch and the batch read of its folders apart, and , u starts every fetch"
     ;; both would number the messages a fetch delivers
     (let ((mail-load-parked-functions nil)
