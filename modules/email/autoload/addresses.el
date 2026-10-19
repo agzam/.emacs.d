@@ -54,7 +54,7 @@ nil stands for every message.")
 
 (defun mail-address-own ()
   "The account's own addresses, never offered."
-  (list mail-from-address mail-inbox-address))
+  (delq nil (list mail-from-address mail-inbox-address)))
 
 (defun mail-address-runs ()
   "The notmuch runs a read makes, as (GROUP INCREMENT ARGS).

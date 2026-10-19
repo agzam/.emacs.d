@@ -792,6 +792,8 @@ buffers, summary and queued files the cases leave are cleared after."
          (mail-sync-process nil)
          (mail-sync-report nil)
          (gnus-search-notmuch-config-file (expand-file-name "notmuch-config" e2e-work-dir))
+         ;; the fixtures' mail goes here; custom.el holds the real one
+         (mail-inbox-address "inbox@example.com")
          ;; a reply reads no notmuch and writes no saved addresses
          (mail-address-file (expand-file-name "mail-addresses.eld" e2e-work-dir))
          (mail-addresses-read-at (float-time))

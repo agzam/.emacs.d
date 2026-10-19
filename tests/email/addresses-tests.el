@@ -127,7 +127,12 @@ DIR is bound to that dir."
       ;; a message of the last 30 days lands in all four runs
       (expect (apply #'+ (mapcar #'cadr (seq-filter (lambda (run) (eq (car run) 'wrote-you)) runs)))
               :to-be-close-to 8 6)
-      (expect (cadr (nth 2 runs)) :to-be-close-to 1.9 6))))
+      (expect (cadr (nth 2 runs)) :to-be-close-to 1.9 6)))
+  (it "asks about the from address alone while custom.el sets no inbox address"
+    (let* ((mail-inbox-address nil)
+           (runs (mail-address-runs)))
+      (expect (car (last (nth 2 (nth 0 runs)))) :to-equal "(from:agzam.ibragimov@gmail.com)")
+      (expect (car (last (nth 2 (nth 1 runs)))) :to-equal "(to:agzam.ibragimov@gmail.com)"))))
 
 (describe "ranked-mail-addresses"
   (it "puts whom the account wrote to first, then who only wrote to it"
@@ -173,6 +178,12 @@ DIR is bound to that dir."
                                   (addresses-tests-entry "Year" "brenda1961@gmail.com" 1))))
             :to-equal '("Kept <kept@example.com>" "Phone <6468818131@messaging.example>"
                         "Year <brenda1961@gmail.com>")))
+  (it "drops the from address while custom.el sets no inbox address"
+    (let ((mail-inbox-address nil))
+      (expect (addresses-tests-rank
+               `(wrote 1 ,(list (addresses-tests-entry "Ag" "agzam.ibragimov@gmail.com" 9)
+                                (addresses-tests-entry "Kept" "kept@example.com" 1))))
+              :to-equal '("Kept <kept@example.com>"))))
   (it "adds an address's messages across both groups and keeps it with whom the account wrote to"
     (expect (addresses-tests-rank
              `(wrote 1 ,(list (addresses-tests-entry "Eric" "eric@home.example" 1)

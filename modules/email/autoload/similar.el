@@ -37,6 +37,7 @@ notmuch counts a batch of queries one line each."
   (format "%s:\"%s\"" prefix
           (string-replace "\"" "\"\"" (replace-regexp-in-string "[ \t\n\r]+" " " value))))
 
+;;;###autoload
 (defun own-address-p (address)
   "Non-nil when ADDRESS is one of the account's own."
   (member (downcase address) (list mail-from-address mail-inbox-address)))

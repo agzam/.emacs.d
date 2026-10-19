@@ -4,9 +4,9 @@
 ;; nnmaildir group, notmuch is only the search index behind gnus-search,
 ;; and batch Emacs runs fetch gmane's lists and subreddits into maildirs.
 ;; Outgoing mail always leaves as agzam.ibragimov - sending it through the
-;; inbox account with that address as an alias stamps "sent on
-;; behalf" - and a Gcc copy lands in the synced sent folder so threads in
-;; the mirrored store keep their replies.
+;; inbox account with that address as an alias stamps "sent on behalf" -
+;; and a Gcc copy lands in the synced sent folder so threads in the
+;; mirrored store keep their replies.
 ;;; Code:
 
 (defvar gmail-maildir (expand-file-name "~/.mail/gmail/")
@@ -24,8 +24,9 @@
 (defvar mail-from-address "agzam.ibragimov@gmail.com"
   "Address every outgoing message is sent from.")
 
-(defvar mail-inbox-address "inbox@example.com"
-  "Address whose mailbox mbsync mirrors; never a sender.")
+(defvar mail-inbox-address nil
+  "Address whose mailbox mbsync mirrors; never a sender.
+It is private, so custom.el sets it and this public repo never holds it.")
 
 (defvar mail-sync-program "mail-sync"
   "Program that renames and deletes a label in Gmail and moves its folder.")
@@ -521,8 +522,9 @@ columns would go to the window left of Gnus."
         message-fill-column nil
         ;; not message-alternative-emails: a match there overrides the
         ;; posting style and would answer as whichever address received
-        ;; the mail
-        message-dont-reply-to-names (regexp-opt (list mail-from-address mail-inbox-address))
+        ;; the mail.  A predicate, since custom.el sets the inbox address
+        ;; after this file loads
+        message-dont-reply-to-names #'own-address-p
         message-citation-line-function #'message-insert-formatted-citation-line
         message-citation-line-format "On %a, %b %d, %Y at %R, %N wrote:\n"
         message-signature "Best regards,\nAg")

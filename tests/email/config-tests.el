@@ -49,9 +49,20 @@ in this process, which the mail suite performs."
     (expect smtpmail-smtp-user :to-equal "agzam.ibragimov@gmail.com")
     (expect smtpmail-smtp-server :to-equal "smtp.gmail.com")
     (expect smtpmail-stream-type :to-be 'starttls))
-  (it "keeps both own addresses out of reply recipients"
-    (expect "agzam.ibragimov@gmail.com" :to-match message-dont-reply-to-names)
-    (expect "inbox@example.com" :to-match message-dont-reply-to-names))
+  (it "keeps both own addresses out of reply recipients, read at each reply"
+    ;; custom.el sets the inbox address after this file loads
+    (expect message-dont-reply-to-names :to-be #'own-address-p)
+    ;; message calls it before its file has loaded
+    (with-temp-buffer
+      (insert-file-contents
+       (expand-file-name "modules/email/autoload/similar.el" test-config-root))
+      (expect (buffer-string) :to-match "^;;;###autoload\n(defun own-address-p ")))
+  (it "leaves the inbox address to custom.el, out of this public repo"
+    (with-temp-buffer
+      (insert-file-contents (expand-file-name "modules/email/config.el" test-config-root))
+      (re-search-forward "^(defvar mail-inbox-address\\_>")
+      (goto-char (match-beginning 0))
+      (expect (nth 2 (read (current-buffer))) :to-be nil)))
   (it "leaves message-alternative-emails alone (it would override the posting style)"
     (expect (bound-and-true-p message-alternative-emails) :to-be nil))
   (it "files a read copy of outgoing mail into the synced sent folder"

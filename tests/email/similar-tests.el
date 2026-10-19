@@ -98,6 +98,16 @@ With OUTPUT nil, count --batch answers 2, 3, ... for its queries."
                   2)
             :to-equal '((label . "folder:\"gmail/github\"") (label . "folder:\"gmail/job\"")))))
 
+(describe "own-address-p"
+  (it "matches either own address in any case, and nobody else"
+    (expect (own-address-p "Agzam.Ibragimov@gmail.com") :to-be-truthy)
+    (expect (own-address-p "Inbox@Example.com") :to-be-truthy)
+    (expect (own-address-p "dan@example.org") :not :to-be-truthy))
+  (it "matches the from address alone while custom.el sets no inbox address"
+    (let ((mail-inbox-address nil))
+      (expect (own-address-p "agzam.ibragimov@gmail.com") :to-be-truthy)
+      (expect (own-address-p "inbox@example.com") :not :to-be-truthy))))
+
 (describe "simplified-subject"
   (it "strips every reply and forward prefix"
     (expect (simplified-subject "Re: Fwd: RE[2]: AW: the plan") :to-equal "the plan"))

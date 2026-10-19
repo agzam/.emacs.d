@@ -187,7 +187,7 @@ Its paths are absolute, so no tracked file can be it."
                  (file-name-directory (directory-file-name (expand-file-name gmail-maildir))))
                 "\n[user]\nname=" user-full-name
                 "\nprimary_email=" mail-from-address
-                "\nother_email=" mail-inbox-address
+                (if mail-inbox-address (concat "\nother_email=" mail-inbox-address) "")
                 "\n[new]\nignore=.nnmaildir;.mbsyncstate;.mbsyncstate.new;"
                 ".mbsyncstate.journal;.mbsyncstate.lock;.uidvalidity\n"
                 "[maildir]\nsynchronize_flags=true\n"

@@ -452,6 +452,15 @@ its state in DIR/state/, and DIR/calls lists the programs' calls."
                       ".mbsyncstate.journal;.mbsyncstate.lock;.uidvalidity\n"
                       "[maildir]\nsynchronize_flags=true\n"
                       "[index]\nheader.List=List-Id\n"))))
+  (it "is written without other_email while custom.el sets no inbox address"
+    (sync-tests--with nil
+      (sync-tests--fresh-markers)
+      (let ((mail-inbox-address nil))
+        (sync-tests--sync))
+      (expect (with-temp-buffer
+                (insert-file-contents gnus-search-notmuch-config-file)
+                (buffer-string))
+              :to-match "\nprimary_email=ann@example.com\n\\[new\\]\n")))
   (it "is left alone once it exists"
     (sync-tests--with nil
       (sync-tests--fresh-markers)
