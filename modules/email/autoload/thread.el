@@ -54,6 +54,9 @@
 (defvar mail-thread-width 80
   "Text width of the thread view's column, besides the deepest guide bars.")
 
+(defvar mail-thread-body-indent 2
+  "Columns a top-level message's body sits off the edge, under its sender.")
+
 (defvar mail-thread-open-hook nil
   "Hook run in the thread view once it shows a thread opened from a summary.")
 
@@ -207,10 +210,21 @@ A terminal whose colors Emacs does not know keeps their `shadow'."
     (set-face-foreground 'mail-thread-guide guide)
     (set-face-foreground 'mail-thread-from from)))
 
-(defun mail-thread-indent (message start end)
-  "Draw MESSAGE's guide bars left of each line from START to END."
-  (put-text-property start end 'line-prefix
-                     (mail-thread-guides (mail-thread-message-depth message))))
+(defun mail-thread-body-prefix (depth)
+  "What sits left of each body line of a message DEPTH replies deep.
+A reply's guide bars set it off the edge; a top-level message gets
+`mail-thread-body-indent' columns of space instead."
+  (if (< 0 depth)
+      (mail-thread-guides depth)
+    (make-string mail-thread-body-indent ?\s)))
+
+(defun mail-thread-indent (message start end &optional body)
+  "Draw MESSAGE's guide bars left of each line from START to END.
+With BODY non-nil the lines are its body, set off as
+`mail-thread-body-prefix' says."
+  (let ((depth (mail-thread-message-depth message)))
+    (put-text-property start end 'line-prefix
+                       (if body (mail-thread-body-prefix depth) (mail-thread-guides depth)))))
 
 (defun mail-thread-wrap-prefix (guides prefix)
   "GUIDES followed by PREFIX, the `wrap-prefix' visual-wrap gave a line.
@@ -288,7 +302,7 @@ on the next message stays there while a body lands above it."
                              (mail-thread-message-article message))
          "[the store no longer holds this message]")
      "\n\n")
-    (mail-thread-indent message start (point))))
+    (mail-thread-indent message start (point) t)))
 
 (defun mail-thread-expand (message)
   "Show MESSAGE's body and mark its article read."

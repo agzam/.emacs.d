@@ -466,6 +466,12 @@ The guide and sender faces get their colors back after."
       (expect (face-attribute 'mail-thread-guide :foreground) :to-be 'unspecified)
       (expect (face-attribute 'mail-thread-guide :inherit) :to-be 'shadow))))
 
+(describe "mail-thread-body-prefix"
+  (it "pads a top-level message's body, and leaves a reply's body its guide bars alone"
+    (let ((mail-thread-body-indent 2))
+      (expect (mail-thread-body-prefix 0) :to-equal "  ")
+      (expect (mail-thread-body-prefix 2) :to-equal "│ │ "))))
+
 (describe "mail-thread-wrap-prefix"
   (it "puts the bars alone where visual-wrap left no prefix"
     (expect (mail-thread-wrap-prefix "│ " nil) :to-equal "│ ")
@@ -496,6 +502,16 @@ The guide and sender faces get their colors back after."
           (expect (thread-tests-guides-from (mail-thread-body-start message)
                                             (mail-thread-body-end message))
                   :to-equal '("│ "))))))
+  (it "give way to padding on a top-level message's body, and to nothing on its line"
+    (thread-tests-with-buffer 10 nil
+      (let ((message (thread-tests-message 10))
+            (mail-thread-body-indent 2))
+        (expect (thread-tests-guides-from (mail-thread-message-marker message)
+                                          (mail-thread-body-start message))
+                :to-equal '(nil))
+        (expect (thread-tests-guides-from (mail-thread-body-start message)
+                                          (mail-thread-body-end message))
+                :to-equal '("  ")))))
   (it "start the lines of a body the fill renders later"
     (let ((thread-tests-entries thread-tests-branches))
       (thread-tests-with-buffer 21 '(24)

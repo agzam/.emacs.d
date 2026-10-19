@@ -2057,6 +2057,12 @@ buffers, summary and queued files the cases leave are cleared after."
                                               (point-min) (point-max)))
                              (equal (subject-at-point) "release plan"))
                         :got (format "%S open" (open-subjects)))
+                (let ((line (car (posn-x-y (posn-at-point (mail-thread-message-marker
+                                                           (car mail-thread-messages))))))
+                      (body (wrap-columns "body of release plan" 0)))
+                  (record "a top-level message's text sits two columns in, its sender's line at the edge"
+                          (and (eql line 0) (equal body '(2)))
+                          :got (format "line at %S, text at %S" line body)))
                 (let (opened)
                   (cl-letf (((symbol-function 'browse-url)
                              (lambda (url &rest _) (setq opened url))))
