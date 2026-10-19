@@ -159,6 +159,11 @@
         (cmd! () (cond
                   ((bound-and-true-p org-src-mode) (org-edit-src-exit))
                   ((eq major-mode 'separedit-double-quote-string-mode) (separedit-commit))
+                  ;; this evil binding hides an edit buffer's own C-c ': the
+                  ;; commit, or separedit's nested edit in separedit's buffers
+                  ((bound-and-true-p edit-indirect--overlay)
+                   (call-interactively
+                    (let (emulation-mode-map-alists) (key-binding (kbd "C-c '")))))
                   (t (separedit-dwim)))))
   (map! :map (separedit-double-quote-string-mode-map
               separedit-single-quote-string-mode-map)
@@ -242,6 +247,7 @@
 (after! markdown-mode
   (setopt markdown-enable-math nil)
   (map! :map (markdown-mode-map)
+        [remap markdown-edit-code-block] #'markdown-edit-special
         (:localleader
          (:prefix ("s" . "wrap")
                   "<" #'markdown-wrap-collapsible
@@ -255,6 +261,12 @@
                   "l" #'markdown-store-link))
         :i "[[" #'markdown-insert-stored-link
         :i "[ SPC" #'insert-bracket-pair))
+
+;; No close key: edit-indirect's own C-c ' commits what C-c ' opened.
+(after! edit-indirect
+  (add-hook 'edit-indirect-after-commit-functions
+            #'markdown-blockquote-commit-h 90)
+  (advice-add 'edit-indirect-commit :around #'markdown-blockquote-commit-a))
 
 (use-package wiktionary-bro
   :ensure (wiktionary-bro :host github :repo "agzam/wiktionary-bro.el")
