@@ -7,6 +7,7 @@
 
 (require 'gnus)
 (require 'gnus-group)
+(require 'gnus-sum)
 (require 'subr-x)
 
 (defvar doom-cache-dir)
@@ -14,6 +15,10 @@
 (defvar reddit-maildir)
 (defvar mail-groups)
 (defvar mail-load-running)
+;; the thread view's, which runs the hook that fetches its thread
+(defvar mail-thread-buffer-name)
+(defvar mail-thread-group)
+(defvar mail-thread-summary-buffer)
 
 (defvar reddit-fetch-script (expand-file-name "scripts/reddit-fetch.el" doom-emacs-dir)
   "Batch script that fills `reddit-maildir' from Reddit.")
@@ -39,6 +44,15 @@
 (defvar reddit-fetch-pending nil
   "Non-nil when a fetch waits for the mail load reading a Reddit group.")
 
+(defvar reddit-thread-fetch-interval 60
+  "Seconds after a thread's fetch in which opening it fetches nothing.")
+
+(defvar reddit-thread-fetched-at nil
+  "(POST . TIME) of each thread an opened view fetched lately.")
+
+(defvar reddit-thread-pending nil
+  "(GROUP . POST) of the thread to fetch once the running fetch or read ends.")
+
 (defconst reddit-group-prefix "nnmaildir+reddit:"
   "Prefix of the groups in `reddit-maildir'.")
 
@@ -59,16 +73,35 @@ only the folders it finds."
                                         reddit-maildir)
                       t))))
 
-(defun reddit-fetch-command ()
-  "Command line of the batch Emacs that fetches every subreddit folder."
+(defun reddit-fetch-command (&optional thread)
+  "Command line of the batch Emacs that fetches every subreddit folder.
+With THREAD, (GROUP . POST), it fetches that thread alone."
   (list (expand-file-name invocation-name invocation-directory)
         "-Q" "--batch" "--init-directory" reddit-fetch-directory
         "-l" reddit-fetch-script
-        "--eval" (format "(reddit-fetch-main %S %S)" (expand-file-name reddit-maildir) reddit-url)))
+        "--eval" (if thread
+                     (format "(reddit-fetch-main %S %S '%S)"
+                             (expand-file-name reddit-maildir) reddit-url
+                             `((,(gnus-group-real-name (car thread)) ,(cdr thread))))
+                   (format "(reddit-fetch-main %S %S)"
+                           (expand-file-name reddit-maildir) reddit-url))))
+
+(defun start-reddit-fetch (command sentinel)
+  "Run the batch fetch COMMAND in the background, SENTINEL watching it."
+  (make-directory reddit-fetch-directory t)
+  (let ((buffer (get-buffer-create " *reddit-fetch*")))
+    (with-current-buffer buffer
+      (erase-buffer))
+    (setq reddit-fetch-process
+          (make-process :name "reddit-fetch" :buffer buffer :command command
+                        :connection-type 'pipe :noquery t :sentinel sentinel))
+    ;; a question the batch Emacs asked would wait for an answer forever
+    (process-send-eof reddit-fetch-process)))
 
 (defun reddit-fetch-sentinel (process event)
   "Read the Reddit groups again in the background once PROCESS ended with EVENT.
-A failed fetch reads them too, for what it delivered first."
+A failed fetch reads them too, for what it delivered first.  A thread an
+opened view asked for meanwhile is fetched next."
   (when (memq (process-status process) '(exit signal))
     (when (gnus-alive-p)
       (load-mail-groups (seq-filter #'reddit-group-p gnus-group-list)))
@@ -76,7 +109,8 @@ A failed fetch reads them too, for what it delivered first."
              (zerop (process-exit-status process)))
         (setq reddit-fetched-at (float-time))
       (message "Reddit fetch failed: %s (see %s)"
-               (string-trim event) (buffer-name (process-buffer process))))))
+               (string-trim event) (buffer-name (process-buffer process))))
+    (fetch-pending-reddit-thread)))
 
 ;;;###autoload
 (defun fetch-reddit ()
@@ -88,16 +122,7 @@ starts it when done: both would number the messages it delivers."
         (and (seq-some #'reddit-group-p (bound-and-true-p mail-load-running)) t))
   (unless (or reddit-fetch-pending (process-live-p reddit-fetch-process))
     (ensure-reddit-folders)
-    (make-directory reddit-fetch-directory t)
-    (let ((buffer (get-buffer-create " *reddit-fetch*")))
-      (with-current-buffer buffer
-        (erase-buffer))
-      (setq reddit-fetch-process
-            (make-process :name "reddit-fetch" :buffer buffer :command (reddit-fetch-command)
-                          :connection-type 'pipe :noquery t
-                          :sentinel #'reddit-fetch-sentinel))
-      ;; a question the batch Emacs asked would wait for an answer forever
-      (process-send-eof reddit-fetch-process))))
+    (start-reddit-fetch (reddit-fetch-command) #'reddit-fetch-sentinel)))
 
 ;;;###autoload
 (defun fetch-stale-reddit ()
@@ -123,5 +148,90 @@ starts it when done: both would number the messages it delivers."
   "Start the Reddit fetch a batch read of a Reddit group held back."
   (when reddit-fetch-pending
     (fetch-reddit)))
+
+;;; The thread a view opened
+
+(defun reddit-post-id (message-id)
+  "Reddit post of MESSAGE-ID, a post's or a comment's, or nil."
+  (when (and message-id
+             (string-match "\\`<\\(?:[^.@<>]+\\.\\)?\\([^.@<>]+\\)@reddit\\.com>\\'" message-id))
+    (match-string 1 message-id)))
+
+;;;###autoload
+(defun fetch-reddit-thread (group post)
+  "Fetch the newest replies of thread POST of Reddit GROUP in the background.
+It waits for a running fetch or a read of a Reddit group, and fetches
+nothing within `reddit-thread-fetch-interval' of its last fetch."
+  (let ((now (float-time)))
+    (setq reddit-thread-fetched-at
+          (seq-filter (lambda (fetched) (< (- now (cdr fetched)) reddit-thread-fetch-interval))
+                      reddit-thread-fetched-at))
+    (cond ((assoc post reddit-thread-fetched-at))
+          ((or (process-live-p reddit-fetch-process)
+               (seq-some #'reddit-group-p (bound-and-true-p mail-load-running)))
+           (setq reddit-thread-pending (cons group post)))
+          (t
+           (setq reddit-thread-pending nil)
+           (push (cons post now) reddit-thread-fetched-at)
+           (start-reddit-fetch (reddit-fetch-command (cons group post))
+                               (lambda (process event)
+                                 (reddit-thread-sentinel process event group post)))))))
+
+(defun reddit-fetch-comments (process)
+  "Comments the Reddit fetch PROCESS reported delivering."
+  (let ((count 0))
+    (when (buffer-live-p (process-buffer process))
+      (with-current-buffer (process-buffer process)
+        (goto-char (point-min))
+        (while (re-search-forward "^[^:\n]+: [0-9]+ posts, \\([0-9]+\\) comments" nil t)
+          (setq count (+ count (string-to-number (match-string 1)))))))
+    count))
+
+(defun reddit-thread-sentinel (process event group post)
+  "Bring the replies the fetch PROCESS of thread POST delivered on screen.
+EVENT says how it ended.  GROUP is read again first, ahead of others."
+  (when (memq (process-status process) '(exit signal))
+    (unless (and (eq (process-status process) 'exit)
+                 (zerop (process-exit-status process)))
+      (message "Reddit thread fetch failed: %s (see %s)"
+               (string-trim event) (buffer-name (process-buffer process))))
+    (let ((count (reddit-fetch-comments process)))
+      (when (and (< 0 count) (gnus-alive-p))
+        (load-mail-groups (list group) t)
+        (wait-for-mail-load 'reddit-thread "for the new replies"
+                            (lambda () (not (mail-group-pending-p group)))
+                            (lambda () (show-reddit-replies group post count)))))
+    (fetch-pending-reddit-thread)))
+
+(defun show-reddit-replies (group post count)
+  "Bring COUNT replies fetched into thread POST of GROUP on screen.
+GROUP's summary takes them in, and a thread view showing POST in a
+window lays the thread out again."
+  (when-let* ((summary (get-buffer (gnus-summary-buffer-name group))))
+    (if-let* ((window (get-buffer-window summary t)))
+        (with-selected-window window
+          (gnus-summary-insert-new-articles))
+      (with-current-buffer summary
+        (gnus-summary-insert-new-articles)))
+    (when-let* ((view (get-buffer mail-thread-buffer-name))
+                ((get-buffer-window view t))
+                ((eq (buffer-local-value 'mail-thread-summary-buffer view) summary)))
+      (with-current-buffer view
+        (when (member post (mapcar #'reddit-post-id (mail-thread-message-ids)))
+          (mail-thread-reload)
+          (message "%d new %s" count (if (= count 1) "reply" "replies")))))))
+
+;;;###autoload
+(defun fetch-pending-reddit-thread ()
+  "Fetch the thread an opened view asked for while the store was busy."
+  (when-let* ((thread reddit-thread-pending))
+    (fetch-reddit-thread (car thread) (cdr thread))))
+
+;;;###autoload
+(defun fetch-reddit-thread-h ()
+  "Fetch the newest replies of the Reddit thread the view just opened."
+  (when (reddit-group-p mail-thread-group)
+    (when-let* ((post (seq-some #'reddit-post-id (mail-thread-message-ids))))
+      (fetch-reddit-thread mail-thread-group post))))
 
 ;;; reddit.el ends here

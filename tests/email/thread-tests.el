@@ -853,6 +853,23 @@ The guide and sender faces get their colors back after."
         (when-let* ((thread (get-buffer mail-thread-buffer-name)))
           (kill-buffer thread))
         (kill-buffer summary))))
+  (it "runs the open hook in the view it filled"
+    (let ((summary (generate-new-buffer " *thread-tests summary*"))
+          (gnus-newsgroup-unreads nil)
+          (gnus-newsgroup-name "nnmaildir+gmail:inbox")
+          seen)
+      (unwind-protect
+          (save-window-excursion
+            (let ((mail-thread-open-hook
+                   (list (lambda ()
+                           (push (list (buffer-name) mail-thread-group (mail-thread-message-ids))
+                                 seen)))))
+              (thread-tests-open-thread summary))
+            (expect seen :to-equal `((,mail-thread-buffer-name "nnmaildir+gmail:inbox"
+                                      ("<1@x>" "<2@x>" "<3@x>")))))
+        (when-let* ((thread (get-buffer mail-thread-buffer-name)))
+          (kill-buffer thread))
+        (kill-buffer summary))))
   (it "leaves no message folded in a group that unfolds read ones"
     (let ((summary (generate-new-buffer " *thread-tests summary*"))
           (gnus-newsgroup-unreads '(12))
@@ -867,6 +884,43 @@ The guide and sender faces get their colors back after."
         (when-let* ((thread (get-buffer mail-thread-buffer-name)))
           (kill-buffer thread))
         (kill-buffer summary)))))
+
+(describe "mail-thread-reload"
+  (it "lays the thread out again with its summary's new messages, point kept in its message"
+    (let ((full thread-tests-entries)
+          (gnus-newsgroup-name "nnmaildir+gmail:inbox")
+          (gnus-newsgroup-unreads '(12))
+          (gnus-newsrc-hashtb (gnus-make-hashtable)))
+      (let ((thread-tests-entries (seq-take full 2)))
+        (thread-tests-with-buffer 11 nil
+          (goto-char (+ (mail-thread-body-start (thread-tests-message 11)) 3))
+          (cl-letf (((symbol-function 'mail-thread-entries) (lambda () full)))
+            (mail-thread-reload))
+          (expect (mapcar #'mail-thread-message-article mail-thread-messages)
+                  :to-equal '(10 11 12))
+          (expect (mail-thread-message-article (mail-thread-message-at-point)) :to-equal 11)
+          (expect (- (point) (mail-thread-body-start (thread-tests-message 11))) :to-equal 3)
+          (expect (thread-tests-open-articles) :to-equal '(11))
+          (expect (thread-tests-waiting) :to-equal '(12))
+          (expect header-line-format :to-equal "Plan   3 messages")))))
+  (it "asks the filter's query again"
+    (let ((gnus-newsgroup-name "nnmaildir+gmail:inbox")
+          (gnus-newsgroup-unreads nil)
+          (gnus-newsrc-hashtb (gnus-make-hashtable))
+          asked)
+      (thread-tests-with-buffer 11 nil
+        (setq mail-thread-filter-query "from:ann")
+        (cl-letf (((symbol-function 'mail-thread-entries) (lambda () thread-tests-entries))
+                  ((symbol-function 'mail-thread-start-filter)
+                   (lambda (query) (push query asked))))
+          (mail-thread-reload))
+        (expect asked :to-equal '("from:ann")))))
+  (it "leaves the view alone when its summary no longer shows the message"
+    (thread-tests-with-buffer 11 nil
+      (let ((before (buffer-string)))
+        (cl-letf (((symbol-function 'gnus-summary-goto-subject) #'ignore))
+          (mail-thread-reload))
+        (expect (buffer-string) :to-equal before)))))
 
 (defvar thread-tests-calls nil
   "Where `thread-tests-probe' ran: its buffer, the article at point, the window.")

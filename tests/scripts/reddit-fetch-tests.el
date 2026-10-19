@@ -547,6 +547,28 @@ nobody; c4 is older than a week.  p3 holds c5."
                                      reddit-fetch-tests--base)))
                           ("r.test" 3 5 0 nil)))))
 
+  (it "fetches only the threads it is given, asking for no listing"
+    (reddit-fetch-tests--with-store
+      (reddit-fetch-tests--serve-subreddit fixtures)
+      (expect (reddit-fetch-run store reddit-fetch-tests--base '(("r.test" "p2")))
+              :to-equal '(("r.test" 0 4 0 nil)))
+      (expect (reddit-fetch-tests--requests log)
+              :to-equal (list (reddit-fetch-tests--url 'thread "p2")))
+      ;; the post comes as context, read
+      (expect (reddit-fetch-tests--messages store)
+              :to-equal (seq-filter (lambda (message) (string-match-p "p2@" (car message)))
+                                    reddit-fetch-tests--delivered))
+      (expect (reddit-fetch-run store reddit-fetch-tests--base '(("r.test" "p2")))
+              :to-equal '(("r.test" 0 0 0 nil)))))
+
+  (it "keeps the count of every thread it knows, the given one's brought up to date"
+    (reddit-fetch-tests--with-store
+      (reddit-fetch-tests--serve-subreddit fixtures)
+      (reddit-fetch-save-state store "r.test" reddit-fetch-threads-file '(("p9" . 7)))
+      (reddit-fetch-run store reddit-fetch-tests--base '(("r.test" "p2")))
+      (expect (reddit-fetch-read-state store "r.test" reddit-fetch-threads-file)
+              :to-equal '(("p2" . 4) ("p9" . 7)))))
+
   (it "deletes the browser profile of the run, which holds the user's login"
     (reddit-fetch-tests--with-store
       (reddit-fetch-tests--serve-subreddit fixtures)
@@ -557,7 +579,7 @@ nobody; c4 is older than a week.  p3 holds c5."
         (expect reddit-fetch-profile :to-be nil)))))
 
 (describe "reddit-fetch-main"
-  (cl-flet ((main (store)
+  (cl-flet ((main (store &optional threads)
               (let ((sandbox (make-temp-file "reddit-fetch-init" t))
                     (output (generate-new-buffer " *reddit-fetch-main*")))
                 (unwind-protect
@@ -567,8 +589,8 @@ nobody; c4 is older than a week.  p3 holds c5."
                            "-l" reddit-fetch-tests--script
                            "--eval" (format "(setq reddit-fetch-browser %S reddit-fetch-cookies %S)"
                                             reddit-fetch-browser reddit-fetch-cookies)
-                           "--eval" (format "(reddit-fetch-main %S %S)"
-                                            store reddit-fetch-tests--base))
+                           "--eval" (format "(reddit-fetch-main %S %S '%S)"
+                                            store reddit-fetch-tests--base threads))
                           (with-current-buffer output (buffer-string)))
                   (kill-buffer output)
                   (delete-directory sandbox t)))))
@@ -582,6 +604,14 @@ nobody; c4 is older than a week.  p3 holds c5."
         (expect (seq-filter #'file-exists-p
                             (reddit-fetch-tests--requests (concat log ".profiles")))
                 :to-equal nil)))
+    (it "fetches only the threads it is given and reports what they brought"
+      (reddit-fetch-tests--with-store
+        (reddit-fetch-tests--serve-subreddit fixtures)
+        (pcase-let ((`(,status ,output) (main store '(("r.test" "p3")))))
+          (expect status :to-equal 0)
+          (expect output :to-match "^r.test: 0 posts, 1 comments, 0 threads waiting$"))
+        (expect (reddit-fetch-tests--requests log)
+                :to-equal (list (reddit-fetch-tests--url 'thread "p3")))))
     (it "exits 1 when a listing fails"
       (reddit-fetch-tests--with-store
         (pcase-let ((`(,status ,output) (main store)))

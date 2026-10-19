@@ -26,6 +26,8 @@
 (defvar mail-load-parked-functions)
 (defvar mail-load-finished-hook)
 (defvar mail-sync-hook)
+;; thread.el defines it, and the Reddit spec binds it
+(defvar mail-thread-open-hook)
 
 (defun email-tests--load ()
   "Load the module config with `use-package' reduced to its :init forms.
@@ -750,7 +752,7 @@ window and deletes the summary's."
                       news-group-parked-p fetch-pending-news)
                      ("reddit.el" fetch-reddit fetch-stale-reddit start-reddit-fetch-timer
                       ensure-reddit-folders reddit-group-p reddit-group-parked-p
-                      fetch-pending-reddit)
+                      fetch-pending-reddit fetch-pending-reddit-thread fetch-reddit-thread-h)
                      ;; , u, the hook that starts the timer, and the label commands
                      ("sync.el" sync-mail start-mail-sync start-mail-sync-timer
                       mail-sync-running-p start-gmail-label-change)
@@ -1149,8 +1151,16 @@ window and deletes the summary's."
       (expect mail-load-parked-functions
               :to-have-same-items-as '(news-group-parked-p reddit-group-parked-p))
       (expect mail-load-finished-hook
-              :to-have-same-items-as '(fetch-pending-news fetch-pending-reddit))
+              :to-have-same-items-as '(fetch-pending-news fetch-pending-reddit
+                                       fetch-pending-reddit-thread))
       (expect mail-sync-hook :to-have-same-items-as '(fetch-news fetch-feeds fetch-reddit))))
+  (it "fetches the newest replies of a Reddit thread as the thread view opens it"
+    (let ((mail-thread-open-hook nil))
+      (dolist (form (email-tests--config-forms 'gnus))
+        (when (and (eq (car-safe form) 'add-hook)
+                   (equal (cadr form) ''mail-thread-open-hook))
+          (eval form t)))
+      (expect mail-thread-open-hook :to-equal '(fetch-reddit-thread-h))))
   (it "loads the advice and the hook functions before any command of their file ran"
     (pcase-dolist (`(,file . ,fns)
                    '(("mail.el" defer-mail-server-scan-a scan-mail-group-on-miss-a)

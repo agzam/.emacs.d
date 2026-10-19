@@ -54,6 +54,9 @@
 (defvar mail-thread-width 80
   "Text width of the thread view's column, besides the deepest guide bars.")
 
+(defvar mail-thread-open-hook nil
+  "Hook run in the thread view once it shows a thread opened from a summary.")
+
 (defface mail-thread-guide '((t :inherit shadow))
   "Guide bars left of a reply in the thread view."
   :group 'gnus-summary)
@@ -655,6 +658,14 @@ ENTRY is the article the summary was on.  The articles of UNFOLD wait in
     (mail-thread-update-header-line)
     (set-buffer-modified-p nil)))
 
+(defun mail-thread-unfolded (entries)
+  "Articles of ENTRIES the view renders, asked in the summary they come from.
+Every one under the group parameter `mail-thread-unfold-read', else the
+unread ones."
+  (if (gnus-group-find-parameter gnus-newsgroup-name 'mail-thread-unfold-read)
+      (mapcar #'car entries)
+    gnus-newsgroup-unreads))
+
 ;;;###autoload
 (defun open-mail-thread ()
   "Read every message of the thread at point in one buffer.
@@ -667,9 +678,7 @@ The read ones stay folded unless the group parameter
          (summary (current-buffer))
          (entries (or (mail-thread-entries)
                       (user-error "No article Gnus can fetch in this thread")))
-         (unfold (if (gnus-group-find-parameter group 'mail-thread-unfold-read)
-                     (mapcar #'car entries)
-                   gnus-newsgroup-unreads))
+         (unfold (mail-thread-unfolded entries))
          (buffer (get-buffer-create mail-thread-buffer-name)))
     (with-current-buffer buffer
       (let ((inhibit-read-only t))
@@ -688,7 +697,56 @@ The read ones stay folded unless the group parameter
       (when-let* ((message (seq-find (lambda (message)
                                        (eql (mail-thread-message-article message) entry))
                                      mail-thread-messages)))
-        (mail-thread-goto-message message)))))
+        (mail-thread-goto-message message))
+      (run-hooks 'mail-thread-open-hook))))
+
+;;;###autoload
+(defun mail-thread-message-ids ()
+  "Message-IDs of the thread in this view, in reply order."
+  (mapcar (lambda (message) (mail-header-id (mail-thread-message-header message)))
+          mail-thread-messages))
+
+(defun mail-thread-summary-thread (article)
+  "Thread of ARTICLE in the view's summary as (ENTRIES . UNFOLD), or nil."
+  (when (buffer-live-p mail-thread-summary-buffer)
+    (with-current-buffer mail-thread-summary-buffer
+      (save-excursion
+        (when (gnus-summary-goto-subject article nil t)
+          (when-let* ((entries (mail-thread-entries)))
+            (cons entries (mail-thread-unfolded entries))))))))
+
+;;;###autoload
+(defun mail-thread-reload ()
+  "Lay the thread out again from its summary, which has new messages of it.
+Point stays in its message, on the same row of the window showing the
+view, and a filter is asked again; folds the reader made are gone."
+  (let ((window (get-buffer-window (current-buffer) t)))
+    (if (and window (not (eq window (selected-window))))
+        (with-selected-window window
+          (mail-thread-reload))
+      (when-let* ((here (mail-thread-message-at-point))
+                  (article (mail-thread-message-article here))
+                  (thread (mail-thread-summary-thread article)))
+        (let ((offset (- (point) (mail-thread-message-marker here)))
+              (row (when-let* ((window) (posn (posn-at-point)))
+                     (cdr (posn-col-row posn))))
+              (query mail-thread-filter-query))
+          (mail-thread-stop-fill)
+          (let ((inhibit-read-only t))
+            (erase-buffer)
+            (remove-overlays))
+          (setq mail-thread-filter-query nil)
+          (mail-thread-build (car thread) article (cdr thread))
+          (mail-thread-start-fill)
+          (when-let* ((message (seq-find (lambda (message)
+                                           (eql (mail-thread-message-article message) article))
+                                         mail-thread-messages)))
+            (goto-char (min (+ (mail-thread-message-marker message) offset)
+                            (mail-thread-body-end message)))
+            (when row
+              (recenter row)))
+          (when query
+            (mail-thread-start-filter query)))))))
 
 ;;; Acting on the message on screen
 ;;

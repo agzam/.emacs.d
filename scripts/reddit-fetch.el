@@ -298,10 +298,11 @@ A comment comes after its parent."
   (time-less-p (plist-get entry :time)
                (time-subtract nil (* reddit-fetch-unread-days 86400))))
 
-(defun reddit-fetch-group (store group base)
+(defun reddit-fetch-group (store group base &optional threads)
   "Fetch subreddit folder GROUP under STORE from BASE.
 New posts arrive first, then every thread with new comments, oldest
-first, until a fetch fails.  Return (GROUP POSTS COMMENTS WAITING PROBLEM)."
+first, until a fetch fails; with THREADS, post ids, those threads alone.
+Return (GROUP POSTS COMMENTS WAITING PROBLEM)."
   (let* ((name (reddit-fetch-subreddit group))
          (mlist (reddit-fetch-scan store group))
          (known (make-hash-table :test #'equal))
@@ -309,7 +310,7 @@ first, until a fetch fails.  Return (GROUP POSTS COMMENTS WAITING PROBLEM)."
          (posts 0)
          (comments 0)
          (fetched 0)
-         threads problem)
+         problem)
     (dolist (id (reddit-fetch-read-state store group reddit-fetch-known-file))
       (puthash id t known))
     (cl-labels ((seen-p (entry)
@@ -328,8 +329,8 @@ first, until a fetch fails.  Return (GROUP POSTS COMMENTS WAITING PROBLEM)."
                                            (hash-table-keys known))
                   (reddit-fetch-save-state store group reddit-fetch-threads-file counts)))
       (unwind-protect
-          (let* ((listed (listing "new"))
-                 (recent (listing "comments"))
+          (let* ((listed (unless threads (listing "new")))
+                 (recent (unless threads (listing "comments")))
                  (ids (mapcar (lambda (post) (plist-get post :post)) listed))
                  (times (mapcar (lambda (post) (cons (plist-get post :post) (plist-get post :time)))
                                 listed)))
@@ -339,20 +340,21 @@ first, until a fetch fails.  Return (GROUP POSTS COMMENTS WAITING PROBLEM)."
             ;; a thread past the listing is found by its new comments alone,
             ;; and the oldest thread goes first: article numbers follow time,
             ;; and a group shows its newest numbers
-            (setq counts (seq-filter (lambda (count) (member (car count) ids)) counts)
-                  threads (sort (delete-dups
-                                 (append
-                                  (mapcar (lambda (post) (plist-get post :post))
-                                          (seq-remove (lambda (post)
-                                                        (eql (plist-get post :comments)
-                                                             (alist-get (plist-get post :post) counts
-                                                                        0 nil #'equal)))
-                                                      listed))
-                                  (mapcar (lambda (comment) (plist-get comment :post))
-                                          (seq-remove #'seen-p recent))))
-                                (lambda (a b)
-                                  (< (alist-get a times 0 nil #'equal)
-                                     (alist-get b times 0 nil #'equal)))))
+            (unless threads
+              (setq counts (seq-filter (lambda (count) (member (car count) ids)) counts)
+                    threads (sort (delete-dups
+                                   (append
+                                    (mapcar (lambda (post) (plist-get post :post))
+                                            (seq-remove (lambda (post)
+                                                          (eql (plist-get post :comments)
+                                                               (alist-get (plist-get post :post)
+                                                                          counts 0 nil #'equal)))
+                                                        listed))
+                                    (mapcar (lambda (comment) (plist-get comment :post))
+                                            (seq-remove #'seen-p recent))))
+                                  (lambda (a b)
+                                    (< (alist-get a times 0 nil #'equal)
+                                       (alist-get b times 0 nil #'equal))))))
             (while (and threads (not problem) (< fetched reddit-fetch-max-threads))
               (condition-case err
                   (let* ((thread (reddit-fetch-thread
@@ -378,8 +380,9 @@ first, until a fetch fails.  Return (GROUP POSTS COMMENTS WAITING PROBLEM)."
 
 ;;; Entry point
 
-(defun reddit-fetch-run (store base)
+(defun reddit-fetch-run (store base &optional threads)
   "Fetch every subreddit folder under STORE from BASE.
+THREADS, as ((GROUP POST...)...), limits the run to those threads.
 Returns one (GROUP POSTS COMMENTS WAITING PROBLEM) or (GROUP error
 MESSAGE) row per folder."
   (let ((gnus-newsrc-hashtb (gnus-make-hashtable))
@@ -395,11 +398,11 @@ MESSAGE) row per folder."
     (unwind-protect
         ;; nnmaildir syncs every disk after each delivery
         (cl-letf (((symbol-function 'unix-sync) #'ignore))
-          (mapcar (lambda (group)
+          (mapcar (pcase-lambda (`(,group . ,posts))
                     (condition-case err
-                        (reddit-fetch-group store group base)
+                        (reddit-fetch-group store group base posts)
                       (error (list group 'error (error-message-string err)))))
-                  (reddit-fetch-groups store)))
+                  (or threads (mapcar #'list (reddit-fetch-groups store)))))
       ;; a later run in this process must not inherit this store
       (setf (alist-get reddit-fetch-server nnmaildir--servers nil 'remove #'equal) nil)
       (setq nnmaildir--cur-server nil)
@@ -408,15 +411,16 @@ MESSAGE) row per folder."
         (delete-directory reddit-fetch-profile t)
         (setq reddit-fetch-profile nil)))))
 
-(defun reddit-fetch-main (store base)
-  "Fetch the subreddit folders under STORE from BASE, report, exit."
+(defun reddit-fetch-main (store base &optional threads)
+  "Fetch the subreddit folders under STORE from BASE, report, exit.
+THREADS limits the fetch as in `reddit-fetch-run'."
   (run-at-time reddit-fetch-watchdog nil
                (lambda ()
                  (message "reddit-fetch: no end after %d s" reddit-fetch-watchdog)
                  (kill-emacs 2)))
   (let (failed)
     (condition-case err
-        (dolist (row (reddit-fetch-run store base))
+        (dolist (row (reddit-fetch-run store base threads))
           (pcase row
             (`(,group error ,text)
              (setq failed t)

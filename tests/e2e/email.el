@@ -36,6 +36,7 @@
 (defvar reddit-fetch-process)
 (defvar reddit-fetch-pending)
 (defvar reddit-fetched-at)
+(defvar reddit-thread-fetch-interval)
 (defvar mail-load-script)
 (defvar mail-load-directory)
 (defvar mail-table-directory)
@@ -933,13 +934,15 @@ buffers, summary and queued files the cases leave are cleared after."
                                      "c3.p1" "Mon, 28 Sep 2026 13:00:00 +0000"
                                      "<p1@reddit.com> <c1.p1@reddit.com> <c2.p1@reddit.com>")
     (with-temp-file reddit-fetch-script
-      (prin1 `(defun reddit-fetch-main (store _base)
+      (prin1 `(defun reddit-fetch-main (store _base &optional _threads)
                 (while (not (file-exists-p ,reddit-go))
                   (sleep-for 0.05))
-                (dolist (file (directory-files ,reddit-outbox t "\\`[^.]"))
-                  (rename-file file (expand-file-name
-                                     (concat "r.test/new/" (file-name-nondirectory file))
-                                     store)))
+                (let ((files (directory-files ,reddit-outbox t "\\`[^.]")))
+                  (dolist (file files)
+                    (rename-file file (expand-file-name
+                                       (concat "r.test/new/" (file-name-nondirectory file))
+                                       store)))
+                  (message "r.test: 0 posts, %d comments, 0 threads waiting" (length files)))
                 (kill-emacs 0))
              (current-buffer)))
     ;; the real batch reader, which waits while load-hold exists
@@ -1786,6 +1789,44 @@ buffers, summary and queued files the cases leave are cleared after."
                                (eql (cdr (posn-x-y (posn-at-point))) (1+ row)))
                           :got (format "row %S, then %S at %S" row
                                        (cdr (posn-x-y (posn-at-point))) (point))))
+                ;; Reddit has a reply to c4 the store lacks, which the
+                ;; thread's opening fetches; its first opening a moment ago
+                ;; still counts, so the interval is lifted
+                (email-e2e--write-reddit-message (expand-file-name "1700000055.55.fixture"
+                                                                   reddit-outbox)
+                                                 "c5.p1" "Mon, 28 Sep 2026 15:00:00 +0000"
+                                                 "<p1@reddit.com> <c4.p1@reddit.com>")
+                (when (derived-mode-p 'mail-thread-mode)
+                  (execute-kbd-macro "q"))
+                (set-buffer (window-buffer (selected-window)))
+                (when (derived-mode-p 'gnus-summary-mode)
+                  (let ((reddit-thread-fetch-interval 0))
+                    (execute-kbd-macro (kbd "RET"))))
+                (cl-flet ((layout ()
+                            (with-current-buffer mail-thread-buffer-name
+                              (mapcar (lambda (message)
+                                        (cons (mail-header-id (mail-thread-message-header message))
+                                              (mail-thread-message-depth message)))
+                                      mail-thread-messages))))
+                  ;; the fetch, the read of its folder and the summary
+                  ;; run on processes and plain timers, which a timed
+                  ;; wait serves without leaving Emacs idle
+                  (with-timeout (20)
+                    (while (not (assoc "<c5.p1@reddit.com>" (layout)))
+                      (accept-process-output nil 0.05)))
+                  (record "RET on a Reddit thread fetches its newest reply and lays it out under its parent"
+                          (and (equal (layout)
+                                      '(("<p1@reddit.com>" . 0) ("<c1.p1@reddit.com>" . 1)
+                                        ("<c2.p1@reddit.com>" . 2) ("<c3.p1@reddit.com>" . 3)
+                                        ("<c4.p1@reddit.com>" . 1) ("<c5.p1@reddit.com>" . 2)))
+                               (with-current-buffer mail-thread-buffer-name
+                                 (equal (mail-header-id (mail-thread-message-header
+                                                         (mail-thread-message-at-point)))
+                                        "<c2.p1@reddit.com>")))
+                          :got (format "%S, at %S" (layout)
+                                       (with-current-buffer mail-thread-buffer-name
+                                         (mail-header-id (mail-thread-message-header
+                                                          (mail-thread-message-at-point)))))))
                 (when (derived-mode-p 'mail-thread-mode)
                   (execute-kbd-macro "q"))
                 (set-buffer (window-buffer (selected-window)))
