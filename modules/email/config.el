@@ -109,6 +109,15 @@ Any other label's chip takes the face `mail-label'.")
 (after! epg-config
   (setq epg-gpg-program "gpg"))
 
+;; the thread view wraps at a column of its own
+(use-package visual-fill-column
+  :defer t)
+
+;; the thread view's guide bars and senders are shades of the theme's colors
+(after! mail-thread
+  (mail-thread-shade-faces)
+  (add-hook 'enable-theme-functions #'mail-thread-shade-faces))
+
 (use-package gnus
   :ensure nil
   :defer t
@@ -170,8 +179,10 @@ Any other label's chip takes the face `mail-label'.")
            (post-method nntp ,news-server))
           ;; a thread's post can sit below the 500 its comments are in, and
           ;; heads the thread once its header is fetched too; `some' would
-          ;; have nnmaildir hand over every header of the group each time
-          ("\\`nnmaildir\\+reddit:" (display . 500) (gnus-fetch-old-headers 2000)))
+          ;; have nnmaildir hand over every header of the group each time.
+          ;; The fetch delivers old comments read, and a thread reads whole
+          ("\\`nnmaildir\\+reddit:" (display . 500) (gnus-fetch-old-headers 2000)
+           (mail-thread-unfold-read . t)))
         ;; the function already puts the newest thread first; (not ...)
         ;; would sort oldest first
         gnus-thread-sort-functions '(gnus-thread-sort-by-most-recent-date)
@@ -339,6 +350,13 @@ are applied again from `evil-collection-setup-hook'."
         :n "C-k" #'mail-thread-previous-message
         :n "]]" #'mail-thread-next-message
         :n "[[" #'mail-thread-previous-message
+        ;; vim's folds, over messages
+        :n "zR" #'mail-thread-unfold-all
+        :n "zM" #'mail-thread-fold-all
+        ;; a paragraph is one line wrapped over several, walked a screen
+        ;; line at a time
+        :n "j" #'evil-next-visual-line
+        :n "k" #'evil-previous-visual-line
         :n "q" #'mail-thread-quit
         ;; the summary's , n narrows as well
         (:localleader :desc "narrow to a query" "n" #'mail-thread-filter)

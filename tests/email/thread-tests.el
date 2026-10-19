@@ -164,6 +164,29 @@ summary buffer as `summary'."
   "Non-nil while TIMER is still scheduled."
   (and (memq timer timer-idle-list) t))
 
+(defun thread-tests-open-thread (summary)
+  "Run `open-mail-thread' in SUMMARY on article 11 of `thread-tests-entries'.
+Gnus's side is stubbed.  Return the layouts `gnus-configure-windows' was
+asked for, as (SETTING SUMMARY)."
+  (let ((gnus-newsrc-hashtb (gnus-make-hashtable))
+        layouts)
+    (setq thread-tests-rendered nil
+          thread-tests-marked nil)
+    (cl-letf (((symbol-function 'gnus-summary-article-number) (lambda (&rest _) 11))
+              ((symbol-function 'mail-thread-entries) (lambda () thread-tests-entries))
+              ((symbol-function 'mail-thread-render)
+               (lambda (_group article)
+                 (push article thread-tests-rendered)
+                 (format "body of %d" article)))
+              ;; the layout itself is the config's, specced there
+              ((symbol-function 'gnus-configure-windows)
+               (lambda (setting &rest _)
+                 (push (list setting gnus-summary-buffer) layouts)
+                 (switch-to-buffer mail-thread-buffer-name))))
+      (with-current-buffer summary
+        (open-mail-thread)))
+    layouts))
+
 (defun thread-tests-message (article)
   "The message of ARTICLE in the thread buffer."
   (seq-find (lambda (message) (eql (mail-thread-message-article message) article))
@@ -254,9 +277,11 @@ is the only treatment."
   (let ((message (mail-thread-message-create
                   :article 11 :header (cdr (nth 1 thread-tests-entries))
                   :marker (point-min-marker))))
-    (it "names the sender"
-      (expect (substring-no-properties (mail-thread-message-line message "Plan" t))
-              :to-match "Bob"))
+    (it "names the sender, in the dim sender face"
+      (let ((line (mail-thread-message-line message "Plan" t)))
+        (expect (substring-no-properties line) :to-match "Bob")
+        (expect (get-text-property (string-search "Bob" line) 'face line)
+                :to-be 'mail-thread-from)))
     (it "leaves the subject out while it is the thread's"
       (expect (substring-no-properties (mail-thread-message-line message "Plan" t))
               :not :to-match "Plan"))
@@ -392,16 +417,54 @@ is the only treatment."
               :to-equal 3))))
 
 (describe "mail-thread-guides"
-  (it "draws a bar per level in the window divider's dim face, and nothing for a root"
+  (it "draws a bar per level in the guide face, and nothing for a root"
     (expect (mail-thread-guides 0) :to-be nil)
     (expect (mail-thread-guides 1) :to-equal "│ ")
     (expect (mail-thread-guides 3) :to-equal "│ │ │ ")
-    (expect (get-text-property 0 'face (mail-thread-guides 3)) :to-be 'vertical-border))
+    (expect (get-text-property 0 'face (mail-thread-guides 3)) :to-be 'mail-thread-guide))
   (it "stops at the cap, a deeper message indented as far and no further"
     (let ((mail-thread-max-indent 6))
       (expect (mail-thread-guides 6) :to-equal "│ │ │ │ │ │ ")
       (expect (mail-thread-guides 9) :to-equal "│ │ │ │ │ │ ")
       (expect (mail-thread-guides 58) :to-equal "│ │ │ │ │ │ "))))
+
+(defmacro thread-tests-with-theme (background text &rest body)
+  "Run BODY under a theme of BACKGROUND and TEXT colors.
+The guide and sender faces get their colors back after."
+  (declare (indent 2))
+  `(let ((guide (face-attribute 'mail-thread-guide :foreground))
+         (from (face-attribute 'mail-thread-from :foreground)))
+     (unwind-protect
+         (cl-letf (((symbol-function 'face-background) (lambda (&rest _) ,background))
+                   ((symbol-function 'face-foreground) (lambda (&rest _) ,text)))
+           ,@body)
+       (set-face-attribute 'mail-thread-guide nil :foreground guide)
+       (set-face-attribute 'mail-thread-from nil :foreground from))))
+
+(describe "mail-thread-shade"
+  (it "mixes the share of the text color into the background"
+    (thread-tests-with-theme "#000000" "#ffffff"
+      (expect (mail-thread-shade 0.2) :to-equal "#333333"))
+    (thread-tests-with-theme "#ffffff" "#000000"
+      (expect (mail-thread-shade 0.2) :to-equal "#cccccc")))
+  (it "gives nothing where the theme's colors are unknown"
+    (thread-tests-with-theme "unspecified-bg" "unspecified-fg"
+      (expect (mail-thread-shade 0.2) :to-be nil))))
+
+(describe "mail-thread-shade-faces"
+  (it "colors the bars and the senders each its share of the way to the text"
+    (let ((mail-thread-guide-shade 0.2)
+          (mail-thread-from-shade 0.4))
+      (thread-tests-with-theme "#000000" "#ffffff"
+        (mail-thread-shade-faces)
+        (expect (face-attribute 'mail-thread-guide :foreground) :to-equal "#333333")
+        (expect (face-attribute 'mail-thread-from :foreground) :to-equal "#666666"))))
+  (it "leaves both faces alone where the theme's colors are unknown"
+    (thread-tests-with-theme "unspecified-bg" "unspecified-fg"
+      (set-face-attribute 'mail-thread-guide nil :foreground 'unspecified)
+      (mail-thread-shade-faces)
+      (expect (face-attribute 'mail-thread-guide :foreground) :to-be 'unspecified)
+      (expect (face-attribute 'mail-thread-guide :inherit) :to-be 'shadow))))
 
 (describe "mail-thread-wrap-prefix"
   (it "puts the bars alone where visual-wrap left no prefix"
@@ -492,6 +555,43 @@ is the only treatment."
       (mail-thread-toggle-message)
       (expect (mail-thread-message-article (mail-thread-message-at-point))
               :to-equal 10))))
+
+(describe "mail-thread-unfold-all"
+  (it "unfolds the rendered messages at once and leaves the rest to the fill"
+    (thread-tests-with-buffer 11 nil
+      (mail-thread-collapse (thread-tests-message 11))
+      (mail-thread-unfold-all)
+      (expect (thread-tests-open-articles) :to-equal '(11))
+      (expect (thread-tests-waiting) :to-equal '(12 10))
+      (mail-thread-fill (current-buffer) mail-thread-fill-timer)
+      (expect (thread-tests-open-articles) :to-equal '(10 11 12))
+      (expect (reverse thread-tests-rendered) :to-equal '(11 12 10))))
+  (it "leaves alone the messages the filter hides"
+    (thread-tests-with-buffer 11 nil
+      (mail-thread-hide-unmatched "from:ann" '("1@x" "2@x"))
+      (mail-thread-unfold-all)
+      (expect (thread-tests-waiting) :to-equal '(10))
+      (mail-thread-fill (current-buffer) mail-thread-fill-timer)
+      (expect thread-tests-rendered :to-equal '(10 11))
+      (expect thread-tests-marked :to-equal '(10 11)))))
+
+(describe "mail-thread-fold-all"
+  (it "folds every message and stops the fill"
+    (thread-tests-with-buffer 11 '(10 12)
+      (mail-thread-start-fill)
+      (let ((timer mail-thread-fill-timer))
+        (mail-thread-fold-all)
+        (expect (thread-tests-open-articles) :to-equal nil)
+        (expect (thread-tests-timer-active-p timer) :to-be nil)
+        (mail-thread-fill (current-buffer) timer)
+        (expect thread-tests-rendered :to-equal '(11)))))
+  (it "puts point on the line of the message it was in"
+    (thread-tests-with-buffer 11 nil
+      (goto-char (mail-thread-body-start (thread-tests-message 11)))
+      (forward-char 3)
+      (mail-thread-fold-all)
+      (expect (point) :to-equal (marker-position
+                                 (mail-thread-message-marker (thread-tests-message 11)))))))
 
 (describe "mail-thread-fill"
   (it "takes the messages after the entry before the ones above it"
@@ -718,12 +818,20 @@ is the only treatment."
               :to-be 'message-cited-text-2))))
 
 (describe "mail-thread-mode"
-  (it "wraps long lines at the window edge, keeping their indentation"
+  (it "wraps long lines at the column, keeping their indentation"
     (with-temp-buffer
       (mail-thread-mode)
       (expect visual-line-mode :to-be-truthy)
       (expect visual-wrap-prefix-mode :to-be-truthy)
-      (expect truncate-lines :to-be nil))))
+      (expect visual-fill-column-mode :to-be-truthy)
+      (expect truncate-lines :to-be nil)))
+  (it "makes the column as wide as the text and the deepest guide bars, at the left edge"
+    (let ((mail-thread-width 72)
+          (mail-thread-max-indent 4))
+      (with-temp-buffer
+        (mail-thread-mode)
+        (expect visual-fill-column-width :to-equal 80)
+        (expect visual-fill-column-center-text :to-be nil)))))
 
 (describe "open-mail-thread"
   (it "says so when point is on no article"
@@ -732,32 +840,30 @@ is the only treatment."
   (it "shows the thread with the entry rendered and starts filling the rest"
     (let ((summary (generate-new-buffer " *thread-tests summary*"))
           (gnus-newsgroup-unreads '(12))
-          (gnus-newsgroup-name "nnmaildir+gmail:inbox")
-          layouts)
-      (setq thread-tests-rendered nil
-            thread-tests-marked nil)
+          (gnus-newsgroup-name "nnmaildir+gmail:inbox"))
       (unwind-protect
           (save-window-excursion
-            (cl-letf (((symbol-function 'gnus-summary-article-number) (lambda (&rest _) 11))
-                      ((symbol-function 'mail-thread-entries) (lambda () thread-tests-entries))
-                      ((symbol-function 'mail-thread-render)
-                       (lambda (_group article)
-                         (push article thread-tests-rendered)
-                         (format "body of %d" article)))
-                      ;; the layout itself is the config's, specced there
-                      ((symbol-function 'gnus-configure-windows)
-                       (lambda (setting &rest _)
-                         (push (list setting gnus-summary-buffer) layouts)
-                         (switch-to-buffer mail-thread-buffer-name))))
-              (with-current-buffer summary
-                (open-mail-thread))
-              (expect layouts :to-equal `((mail-thread ,summary)))
-              (expect (memq (get-buffer mail-thread-buffer-name) (gnus-buffers)) :to-be-truthy)
-              (expect (buffer-name (window-buffer)) :to-equal mail-thread-buffer-name)
-              (with-current-buffer mail-thread-buffer-name
-                (expect (thread-tests-open-articles) :to-equal '(11))
-                (expect (thread-tests-waiting) :to-equal '(12))
-                (expect (thread-tests-timer-active-p mail-thread-fill-timer) :to-be t))))
+            (expect (thread-tests-open-thread summary) :to-equal `((mail-thread ,summary)))
+            (expect (memq (get-buffer mail-thread-buffer-name) (gnus-buffers)) :to-be-truthy)
+            (expect (buffer-name (window-buffer)) :to-equal mail-thread-buffer-name)
+            (with-current-buffer mail-thread-buffer-name
+              (expect (thread-tests-open-articles) :to-equal '(11))
+              (expect (thread-tests-waiting) :to-equal '(12))
+              (expect (thread-tests-timer-active-p mail-thread-fill-timer) :to-be t)))
+        (when-let* ((thread (get-buffer mail-thread-buffer-name)))
+          (kill-buffer thread))
+        (kill-buffer summary))))
+  (it "leaves no message folded in a group that unfolds read ones"
+    (let ((summary (generate-new-buffer " *thread-tests summary*"))
+          (gnus-newsgroup-unreads '(12))
+          (gnus-newsgroup-name "nnmaildir+reddit:r.emacs")
+          (gnus-parameters '(("\\`nnmaildir\\+reddit:" (mail-thread-unfold-read . t)))))
+      (unwind-protect
+          (save-window-excursion
+            (thread-tests-open-thread summary)
+            (with-current-buffer mail-thread-buffer-name
+              (expect (thread-tests-open-articles) :to-equal '(11))
+              (expect (thread-tests-waiting) :to-equal '(12 10))))
         (when-let* ((thread (get-buffer mail-thread-buffer-name)))
           (kill-buffer thread))
         (kill-buffer summary)))))

@@ -154,8 +154,9 @@ not block on a credential prompt)."
   ;; and local batch runs to the same version - the one runtime gets.
   ;; mpv and subed are test deps because the player-sharing specs drive
   ;; their real IPC clients against a fake mpv socket.  org-mime is one
-  ;; because the compose specs run its conversion.
-  deps {:doc "Install test deps (buttercup, parseedn, transient, mpv, subed, org-mime) into .local/.cache/test-elpa"
+  ;; because the compose specs run its conversion, visual-fill-column
+  ;; because the thread view turns it on.
+  deps {:doc "Install test deps (buttercup, parseedn, transient, mpv, subed, org-mime, visual-fill-column) into .local/.cache/test-elpa"
         :task (apply p/shell
                      (concat emacs-batch
                              ["--eval" (format "(setq package-user-dir %s)" (pr-str test-elpa))
@@ -166,7 +167,7 @@ not block on a credential prompt)."
                               ;; treats the built-in transient as already satisfied.  A
                               ;; missing dep refreshes the archive list first: a cached one
                               ;; names versions the archive no longer serves
-                              "--eval" "(let (fresh) (dolist (p '(buttercup parseedn transient mpv subed org-mime)) (unless (assq p package-alist) (unless fresh (package-refresh-contents) (setq fresh t)) (package-install (cadr (assq p package-archive-contents))))))"]))}
+                              "--eval" "(let (fresh) (dolist (p '(buttercup parseedn transient mpv subed org-mime visual-fill-column)) (unless (assq p package-alist) (unless fresh (package-refresh-contents) (setq fresh t)) (package-install (cadr (assq p package-archive-contents))))))"]))}
 
   lint {:doc "check-parens over every tracked .el file"
         :task (let [files (->> (p/shell {:out :string :dir root}

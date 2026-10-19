@@ -1,18 +1,13 @@
 ;;; modules/email/autoload/thread.el -*- lexical-binding: t; -*-
 ;;; Commentary:
-;; A whole thread in one buffer, the way notmuch-show reads it.  Gnus has
-;; no such view: its tree pane still shows one article at a time.  Each
-;; message gets a line of its own and its body is rendered through the
-;; normal article pipeline, so shr, the MIME dissection and the charset
-;; decoding are the ones the article buffer uses.  Only the message the
-;; summary was on renders before the buffer shows.  The unread ones fill
-;; in while Emacs is idle, because every gmane article is an NNTP round
-;; trip.  A read one renders when it is unfolded - one sent message in
-;; this store is a 33 MB article, and a thread must not pay for it to
-;; show a line.
+;; A whole thread in one buffer, the way notmuch-show reads it, each body
+;; rendered through Gnus's own article pipeline.  The fill renders unread
+;; bodies while Emacs is idle, and read ones only under the group parameter
+;; mail-thread-unfold-read: one sent message of the store is 33 MB.
 ;;; Code:
 
 (require 'cl-lib)
+(require 'color)
 (require 'gnus)
 (require 'gnus-art)
 (require 'gnus-search)
@@ -20,6 +15,7 @@
 (require 'gnus-util)
 (require 'mm-decode)
 (require 'seq)
+(require 'visual-fill-column)
 
 (defvar mail-thread-buffer-name "*mail thread*"
   "Buffer every thread is rendered into.")
@@ -54,6 +50,23 @@
 
 (defvar mail-thread-max-indent 6
   "Levels the thread view indents at most.")
+
+(defvar mail-thread-width 80
+  "Text width of the thread view's column, besides the deepest guide bars.")
+
+(defface mail-thread-guide '((t :inherit shadow))
+  "Guide bars left of a reply in the thread view."
+  :group 'gnus-summary)
+
+(defface mail-thread-from '((t :inherit shadow))
+  "Sender on a message's line in the thread view."
+  :group 'gnus-summary)
+
+(defvar mail-thread-guide-shade 0.15
+  "Share of the text color in `mail-thread-guide', the rest the background's.")
+
+(defvar mail-thread-from-shade 0.6
+  "Share of the text color in `mail-thread-from', the rest the background's.")
 
 ;;; Reading the thread out of the summary
 
@@ -156,7 +169,7 @@ SUBJECT is the thread's, shown again only where a message changed it."
          (own (mail-thread-subject header)))
     (concat (propertize (if open "▼" "▶") 'face 'shadow)
             " "
-            (propertize (mail-thread-sender header) 'face 'gnus-header-from)
+            (propertize (mail-thread-sender header) 'face 'mail-thread-from)
             "  "
             (propertize (gnus-user-date (mail-header-date header)) 'face 'shadow)
             ;; `mail-thread-draw-labels' shows the message's labels here
@@ -171,9 +184,25 @@ SUBJECT is the thread's, shown again only where a message changed it."
   "Guide bars left of each line of a message DEPTH replies deep, or nil.
 They stop at `mail-thread-max-indent' levels."
   (when (< 0 depth)
-    ;; dimmer than `shadow': the bars only hint at the indent
     (propertize (apply #'concat (make-list (min depth mail-thread-max-indent) "│ "))
-                'face 'vertical-border)))
+                'face 'mail-thread-guide)))
+
+(defun mail-thread-shade (share)
+  "Color SHARE of the way from the theme's background to its text, or nil."
+  (when-let* ((background (color-name-to-rgb (or (face-background 'default nil t) "")))
+              (text (color-name-to-rgb (or (face-foreground 'default nil t) ""))))
+    (apply #'color-rgb-to-hex
+           (append (cl-mapcar (lambda (from to) (+ from (* share (- to from))))
+                              background text)
+                   '(2)))))
+
+(defun mail-thread-shade-faces (&rest _)
+  "Color the guide bars and the senders as shades of the current theme.
+A terminal whose colors Emacs does not know keeps their `shadow'."
+  (when-let* ((guide (mail-thread-shade mail-thread-guide-shade))
+              (from (mail-thread-shade mail-thread-from-shade)))
+    (set-face-foreground 'mail-thread-guide guide)
+    (set-face-foreground 'mail-thread-from from)))
 
 (defun mail-thread-indent (message start end)
   "Draw MESSAGE's guide bars left of each line from START to END."
@@ -516,6 +545,32 @@ The cursor of a point in hidden text shows at the end of that message."
       (mail-thread-expand message))
     (goto-char (mail-thread-message-marker message))))
 
+(defun mail-thread-unfold-all ()
+  "Unfold every message on show; the fill renders the ones never rendered."
+  (interactive nil mail-thread-mode)
+  (let* ((here (mail-thread-message-at-point))
+         (shown (mail-thread-shown-messages)))
+    (dolist (message shown)
+      (when (mail-thread-fold-overlay message)
+        (mail-thread-expand message)))
+    (setq mail-thread-waiting
+          (seq-filter (lambda (message)
+                        (and (memq message shown) (not (mail-thread-rendered-p message))))
+                      (cons here (mail-thread-fill-order here))))
+    (unless mail-thread-fill-timer
+      (mail-thread-start-fill))))
+
+(defun mail-thread-fold-all ()
+  "Fold every message and stop the fill.
+Point moves to the line of the message it was in."
+  (interactive nil mail-thread-mode)
+  (let ((here (mail-thread-message-at-point)))
+    (mail-thread-stop-fill)
+    (dolist (message mail-thread-messages)
+      (when (mail-thread-message-open-p message)
+        (mail-thread-collapse message)))
+    (goto-char (mail-thread-message-marker here))))
+
 (defun mail-thread-filter (query)
   "Show only the messages of this thread that notmuch QUERY matches.
 An empty QUERY shows every message again.  notmuch answers in the
@@ -554,9 +609,14 @@ attachments are opened here."
 (define-derived-mode mail-thread-mode special-mode "Mail thread"
   "Major mode for reading every message of a thread in one buffer."
   (buffer-disable-undo)
-  ;; HTML paragraphs come unfilled, and the window decides where they wrap
+  ;; HTML paragraphs come unfilled and wrap at the column, whose right
+  ;; margin takes the rest of the window
   (visual-line-mode)
   (visual-wrap-prefix-mode)
+  (setq-local visual-fill-column-width
+              (+ mail-thread-width
+                 (string-width (or (mail-thread-guides mail-thread-max-indent) ""))))
+  (visual-fill-column-mode)
   ;; after visual-wrap's own function, at depth 90
   (add-hook 'jit-lock-functions #'mail-thread-wrap-guides 95 t)
   (jit-lock-register #'mail-thread-wrap-guides)
@@ -564,11 +624,10 @@ attachments are opened here."
   (add-hook 'kill-buffer-hook #'mail-thread-stop-fill nil t)
   (add-hook 'change-major-mode-hook #'mail-thread-stop-fill nil t))
 
-(defun mail-thread-build (entries entry unreads)
+(defun mail-thread-build (entries entry unfold)
   "Insert every message of ENTRIES in reply order, rendering ENTRY's.
-ENTRY is the article the summary was on and UNREADS the articles it
-holds unread; those wait in `mail-thread-waiting' for the fill, the rest
-stay a line."
+ENTRY is the article the summary was on.  The articles of UNFOLD wait in
+`mail-thread-waiting' for the fill, and the rest stay a line."
   (let* ((arranged (mail-thread-arrange entries))
          (subject (mail-thread-subject (cddar arranged)))
          (inhibit-read-only t)
@@ -590,7 +649,7 @@ stay a line."
     (setq mail-thread-messages (nreverse messages)
           mail-thread-waiting (seq-filter
                                (lambda (message)
-                                 (memq (mail-thread-message-article message) unreads))
+                                 (memq (mail-thread-message-article message) unfold))
                                (mail-thread-fill-order shown)))
     (mail-thread-draw-labels)
     (mail-thread-update-header-line)
@@ -598,15 +657,19 @@ stay a line."
 
 ;;;###autoload
 (defun open-mail-thread ()
-  "Read every message of the thread at point in one buffer."
+  "Read every message of the thread at point in one buffer.
+The read ones stay folded unless the group parameter
+`mail-thread-unfold-read' is set."
   (interactive nil gnus-summary-mode)
   (let* ((entry (or (gnus-summary-article-number)
                     (user-error "No article on this line")))
-         (unreads gnus-newsgroup-unreads)
          (group gnus-newsgroup-name)
          (summary (current-buffer))
          (entries (or (mail-thread-entries)
                       (user-error "No article Gnus can fetch in this thread")))
+         (unfold (if (gnus-group-find-parameter group 'mail-thread-unfold-read)
+                     (mapcar #'car entries)
+                   gnus-newsgroup-unreads))
          (buffer (get-buffer-create mail-thread-buffer-name)))
     (with-current-buffer buffer
       (let ((inhibit-read-only t))
@@ -617,7 +680,7 @@ stay a line."
       (gnus-add-buffer)
       (setq mail-thread-summary-buffer summary
             mail-thread-group group)
-      (mail-thread-build entries entry unreads)
+      (mail-thread-build entries entry unfold)
       (mail-thread-start-fill))
     (let ((gnus-summary-buffer summary))
       (gnus-configure-windows 'mail-thread))

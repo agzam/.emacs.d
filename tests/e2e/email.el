@@ -1697,6 +1697,18 @@ buffers, summary and queued files the cases leave are cleared after."
                                           ("<c3.p1@reddit.com>" "│ │ │ ")
                                           ("<c4.p1@reddit.com>" "│ ")))
                           :got (format "%s: %S" major-mode layout)))
+                ;; the post is read, the way the fetch delivers an old one.
+                ;; Waiting for the fill would leave Emacs idle, and the
+                ;; inbox fill's cases below need it busy
+                (let ((queued (and (derived-mode-p 'mail-thread-mode)
+                                   (mapcar (lambda (message)
+                                             (mail-header-id (mail-thread-message-header message)))
+                                           mail-thread-waiting))))
+                  (record "RET on a Reddit comment leaves every other message to the fill, its read post too"
+                          (equal (sort (copy-sequence queued) #'string<)
+                                 '("<c1.p1@reddit.com>" "<c3.p1@reddit.com>"
+                                   "<c4.p1@reddit.com>" "<p1@reddit.com>"))
+                          :got (format "%S" queued)))
                 (let ((bars (string-width (mail-thread-guides 2)))
                       (plain (wrap-columns "long comment" 0))
                       (quoted (wrap-columns "long quote" 2)))
@@ -1720,6 +1732,60 @@ buffers, summary and queued files the cases leave are cleared after."
                   (record "C-c C-o in the thread view opens the Reddit comment at point on its page"
                           (equal opened "https://www.reddit.com/r/test/c2.p1/")
                           :got (format "%S in %s" opened major-mode)))
+                ;; the real column is wider than this window, so the
+                ;; thread opens again on a narrow one
+                (when (derived-mode-p 'mail-thread-mode)
+                  (execute-kbd-macro "q"))
+                (set-buffer (window-buffer (selected-window)))
+                (when (derived-mode-p 'gnus-summary-mode)
+                  (let ((mail-thread-width 20))
+                    (execute-kbd-macro (kbd "RET"))))
+                ;; the harness inhibits redisplay, whose window change
+                ;; hooks make this call
+                (when (derived-mode-p 'mail-thread-mode)
+                  (visual-fill-column-adjust))
+                (let* ((window (get-buffer-window mail-thread-buffer-name))
+                       (margins (and window (window-margins window))))
+                  (record "the thread view wraps at its column, a right margin taking the rest of the window"
+                          (and window (memq (car margins) '(nil 0)) (cdr margins)
+                               (eql (window-body-width window) 32))
+                          :got (format "margins %S, %S of %S columns" margins
+                                       (and window (window-body-width window))
+                                       (and window (window-total-width window)))))
+                (let* ((start (and (derived-mode-p 'mail-thread-mode)
+                                   (save-excursion
+                                     (goto-char (point-min))
+                                     (and (search-forward "long comment" nil t)
+                                          (match-beginning 0)))))
+                       (words (when start
+                                (save-excursion
+                                  (goto-char start)
+                                  (let (found)
+                                    (while (re-search-forward "\\w+" (pos-eol) t)
+                                      (push (match-beginning 0) found))
+                                    (nreverse found)))))
+                       visited row)
+                  (when start
+                    (goto-char start)
+                    (dotimes (_ (1- (length words)))
+                      (execute-kbd-macro "w")
+                      (push (point) visited))
+                    (setq visited (nreverse visited)))
+                  (record "w walks a wrapped paragraph word by word, from each screen line on to the next"
+                          (and words
+                               (< 2 (count-screen-lines start (car (last words))))
+                               (equal visited (cdr words)))
+                          :got (format "words at %S, w stopped at %S" words visited))
+                  (when start
+                    (goto-char start)
+                    (setq row (cdr (posn-x-y (posn-at-point))))
+                    (execute-kbd-macro "j"))
+                  (record "j moves down one screen line of a wrapped paragraph"
+                          (and row
+                               (< start (point) (car (last words)))
+                               (eql (cdr (posn-x-y (posn-at-point))) (1+ row)))
+                          :got (format "row %S, then %S at %S" row
+                                       (cdr (posn-x-y (posn-at-point))) (point))))
                 (when (derived-mode-p 'mail-thread-mode)
                   (execute-kbd-macro "q"))
                 (set-buffer (window-buffer (selected-window)))
@@ -1998,6 +2064,22 @@ buffers, summary and queued files the cases leave are cleared after."
                 (switch-to-buffer "*Summary nnmaildir+gmail:inbox*")
                 (gnus-summary-goto-subject (email-e2e--article "Re: release plan (Bob)"))
                 (execute-kbd-macro (kbd "RET"))
+                ;; the other two are read by now, so the view folds them
+                (execute-kbd-macro (kbd "zR"))
+                (email-e2e--idle 5 (lambda () (= 3 (length (open-subjects)))))
+                (record "zR unfolds every message, rendering the read ones the view left folded"
+                        (and (equal (open-subjects)
+                                    '("release plan" "Re: release plan (Bob)"
+                                      "Re: release plan (Ann)"))
+                             (string-match-p "body of release plan" (thread-text)))
+                        :got (format "%S open" (open-subjects)))
+                (execute-kbd-macro (kbd "zM"))
+                (record "zM folds every message, point on the line of the one it was in"
+                        (and (null (open-subjects))
+                             (equal (subject-at-point) "Re: release plan (Bob)")
+                             (eql (point) (marker-position (mail-thread-message-marker
+                                                            (mail-thread-message-at-point)))))
+                        :got (format "%S open, at %S" (open-subjects) (subject-at-point)))
                 (execute-kbd-macro (kbd "RET"))
                 (record "RET in the thread reads the message in the article buffer"
                         (and (derived-mode-p 'gnus-article-mode)

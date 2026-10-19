@@ -72,6 +72,11 @@ in this process, which the mail suite performs."
     (expect gnus-message-archive-group :to-equal "nnmaildir+gmail:sent")
     (expect gnus-gcc-mark-as-read :to-be t)))
 
+(describe "email module thread view"
+  (it "shades its guide bars and senders again whenever a theme is enabled"
+    (load-module-file "modules/email/autoload/thread.el")
+    (expect (memq #'mail-thread-shade-faces enable-theme-functions) :to-be-truthy)))
+
 (describe "email module servers"
   (it "reads the mbsync maildir through nnmaildir without fetching mail itself"
     (let ((server (assq 'nnmaildir gnus-secondary-select-methods)))
@@ -176,6 +181,15 @@ in this process, which the mail suite performs."
       (with-temp-buffer
         (gnus-summary-set-local-parameters "nnmaildir+news:gmane.emacs.devel")
         (expect gnus-fetch-old-headers :to-be nil))))
+  (it "opens a Reddit thread whole, and a mail or news thread on its unread messages"
+    (email-tests--with-empty-newsrc
+      (expect (gnus-group-find-parameter "nnmaildir+reddit:r.emacs" 'mail-thread-unfold-read)
+              :to-be t)
+      (expect (gnus-group-find-parameter "nnmaildir+gmail:inbox" 'mail-thread-unfold-read)
+              :to-be nil)
+      (expect (gnus-group-find-parameter "nnmaildir+news:gmane.emacs.devel"
+                                         'mail-thread-unfold-read)
+              :to-be nil)))
   (it "posts a followup from a news group to the server it came from"
     (require 'gnus-msg)
     (email-tests--with-empty-newsrc

@@ -1,8 +1,8 @@
 ;;; modules/email/autoload/html.el -*- lexical-binding: t; -*-
 ;;; Commentary:
 ;; HTML mail through shr, set up for reading under any theme of the
-;; rotation.  Paragraphs stay unfilled so the buffer wraps them at the
-;; window edge, the way eww leaves them; the sender's colors give way to
+;; rotation.  Paragraphs stay unfilled so the buffer showing them decides
+;; where they wrap, the way eww leaves them; the sender's colors give way to
 ;; the theme's; and each blockquote level is drawn as a `>' marker, so
 ;; quoted history reads and is faced like the quotes of plain mail.  The
 ;; shr settings are bound around each render, which leaves eww its own.
