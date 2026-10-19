@@ -764,7 +764,7 @@ buffers, summary and queued files the cases leave are cleared after."
          (reddit-fetched-at nil)
          ;; Gnus shows one message more than display, so the subreddit shows
          ;; its two newest and leaves its post out, the way older posts
-         ;; fall out of 500
+         ;; fall out of the real group's display
          (gnus-parameters
           (mapcar (lambda (entry)
                     (if (equal (car entry) "\\`nnmaildir\\+reddit:")

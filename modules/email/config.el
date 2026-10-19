@@ -177,11 +177,11 @@ Any other label's chip takes the face `mail-label'.")
           ;; a year of a list; a followup posts to the server it came from
           ("\\`nnmaildir\\+news:" (display . 500) (gnus-use-scoring t)
            (post-method nntp ,news-server))
-          ;; a thread's post can sit below the 500 its comments are in, and
-          ;; heads the thread once its header is fetched too; `some' would
-          ;; have nnmaildir hand over every header of the group each time.
+          ;; most messages are comments, so it takes 5000 to show weeks of
+          ;; threads.  An older post heads its thread once its header is
+          ;; fetched too; `some' would have nnmaildir hand over every header.
           ;; The fetch delivers old comments read, and a thread reads whole
-          ("\\`nnmaildir\\+reddit:" (display . 500) (gnus-fetch-old-headers 2000)
+          ("\\`nnmaildir\\+reddit:" (display . 5000) (gnus-fetch-old-headers 2000)
            (mail-thread-unfold-read . t)))
         ;; the function already puts the newest thread first; (not ...)
         ;; would sort oldest first

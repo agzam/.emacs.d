@@ -169,13 +169,15 @@ in this process, which the mail suite performs."
   (it "shows the archive as a newest slice, overriding the general entry"
     (email-tests--with-empty-newsrc
       (expect (gnus-group-find-parameter "nnmaildir+gmail:archive" 'display) :to-equal 200)))
-  (it "shows a news or Reddit group's newest 500 messages, read and unread"
+  (it "shows a news group's newest 500 messages and a Reddit group's newest 5000, read and unread"
+    ;; a number, not `all': past `gnus-large-newsgroup' articles, `all'
+    ;; asks for a count on every entry
     (email-tests--with-empty-newsrc
       (expect (gnus-group-find-parameter "nnmaildir+news:gmane.emacs.devel" 'display)
               :to-equal 500)
-      (expect (gnus-group-find-parameter "nnmaildir+reddit:r.emacs" 'display) :to-equal 500)
+      (expect (gnus-group-find-parameter "nnmaildir+reddit:r.emacs" 'display) :to-equal 5000)
       (expect (gnus-group-find-parameter "nnmaildir+gmail:inbox" 'display) :to-be 'all)))
-  (it "heads a Reddit thread with its post, though the post sits below the newest 500"
+  (it "heads a Reddit thread with its post, though the post sits below the newest 5000"
     (email-tests--with-empty-newsrc
       (with-temp-buffer
         (gnus-summary-set-local-parameters "nnmaildir+reddit:r.emacs")
