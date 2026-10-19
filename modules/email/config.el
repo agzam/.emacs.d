@@ -28,8 +28,6 @@
   "Address whose mailbox mbsync mirrors; never a sender.
 It is private, so custom.el sets it and this public repo never holds it.")
 
-(defvar mail-sync-program "mail-sync"
-  "Program that renames and deletes a label in Gmail and moves its folder.")
 
 (defvar mail-inbox-group "nnmaildir+gmail:inbox"
   "Gnus group `open-mail-inbox' enters.")

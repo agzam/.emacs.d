@@ -411,7 +411,7 @@ loader made are the spec's own."
         (delete-directory tables t))))
 
   (it "drops a table whose folder went while the batch read it"
-    ;; mail-sync set the folder aside, and its group is gone
+    ;; a sync set the folder aside, and its group is gone
     (load-tests--with-state ((store (load-tests--store 2))
                              (tables (make-temp-file "load-tests-tables" t))
                              (calls nil))

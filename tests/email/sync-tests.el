@@ -9,12 +9,11 @@
 ;; the end of a sync asks Gnus whether it runs
 (require 'gnus)
 
-;; config.el, labels.el and server.el define these; the specs bind them
+;; config.el and server.el define these; the specs bind them
 (defvar gmail-maildir)
 (defvar mail-from-address)
 (defvar mail-inbox-address)
 (defvar gnus-search-notmuch-config-file)
-(defvar mail-label-change-process)
 (defvar server-process)
 
 (load-module-file "modules/email/autoload/sync.el")
@@ -37,16 +36,47 @@ a line; any other call exits 0.  While DIR/hold exists the program waits."
                       (shell-quote-argument (expand-file-name "hold" dir)))
               "[ \"$1\" = -c ] && shift 2\n"
               "case \"$1\" in --config=*) shift;; esac\n"
-              "case \"$*\" in\n")
-      (pcase-dolist (`(,args ,exit ,output) answers)
-        (insert (format "  %s) %s;;\n" (shell-quote-argument args)
-                        (pcase exit
-                          ('hang "exec sleep 10")
-                          ;; 3 once the input ended, as a prompt would see it
-                          ('read "read answer; exit 3")
-                          (_ (format "printf '%%s' %s; exit %d"
-                                     (shell-quote-argument output) exit))))))
-      (insert "esac\n"))
+              "case \"$*\" in\n"
+              (sync-tests--answers answers)
+              "esac\n"))
+    (set-file-modes file #o755)
+    file))
+
+(defun sync-tests--answers (answers)
+  "The branches of a stand-in's `case' that give ANSWERS."
+  (mapconcat (pcase-lambda (`(,args ,exit ,output))
+               (format "  %s) %s;;\n" (shell-quote-argument args)
+                       (pcase exit
+                         ('hang "exec sleep 10")
+                         ;; 3 once the input ended, as a prompt would see it
+                         ('read "read answer; exit 3")
+                         (_ (format "printf '%%s' %s; exit %d"
+                                    (shell-quote-argument output) exit)))))
+             answers ""))
+
+(defun sync-tests--curl (dir answers)
+  "Write a stand-in curl into DIR/bin/ that logs `curl URL REQUEST' to DIR/calls.
+Its arguments go to DIR/curl-args and its input to DIR/curl-input, a
+line a run.  ANSWERS maps a request as `sync-tests--program' maps
+arguments.  While DIR/hold exists the program waits."
+  (let ((file (expand-file-name "bin/curl" dir)))
+    (make-directory (file-name-directory file) t)
+    (with-temp-file file
+      (insert "#!/bin/sh\n"
+              (format "printf '%%s\\n' \"$*\" >> %s\n"
+                      (shell-quote-argument (expand-file-name "curl-args" dir)))
+              (format "cat >> %s\n" (shell-quote-argument (expand-file-name "curl-input" dir)))
+              "while [ $# -gt 0 ]; do\n"
+              "  case \"$1\" in --url) url=$2; shift;; --request) request=$2; shift;; esac\n"
+              "  shift\n"
+              "done\n"
+              (format "printf '%%s\\n' \"curl $url $request\" >> %s\n"
+                      (shell-quote-argument (expand-file-name "calls" dir)))
+              (format "while [ -f %s ]; do sleep 0.02; done\n"
+                      (shell-quote-argument (expand-file-name "hold" dir)))
+              "case \"$request\" in\n"
+              (sync-tests--answers answers)
+              "esac\n"))
     (set-file-modes file #o755)
     file))
 
@@ -57,9 +87,10 @@ a line; any other call exits 0.  While DIR/hold exists the program waits."
       (accept-process-output nil 0.02))))
 
 (defmacro sync-tests--with (answers &rest body)
-  "Run BODY over an empty store, stand-in mbsync and notmuch answering ANSWERS.
+  "Run BODY over an empty store, stand-in mbsync, notmuch and curl answering ANSWERS.
 `dir' names the temp dir: the store is DIR/mail/gmail/, the sync keeps
-its state in DIR/state/, and DIR/calls lists the programs' calls."
+its state in DIR/state/, and DIR/calls lists the programs' calls.  The
+isyncrc's account prints the login ann and the password app-password."
   (declare (indent 1))
   `(let* ((dir (file-name-as-directory (make-temp-file "sync-tests" t)))
           (gmail-maildir (expand-file-name "mail/gmail/" dir))
@@ -70,12 +101,19 @@ its state in DIR/state/, and DIR/calls lists the programs' calls."
           (mail-inbox-address "inbox@example.com")
           (mbsync-program (sync-tests--program dir "mbsync" ,answers))
           (notmuch-program (sync-tests--program dir "notmuch" ,answers))
+          (mail-imap-program (sync-tests--curl dir ,answers))
           (mail-sync-process nil)
           (mail-sync-report nil)
           (mail-sync-hook nil)
-          (mail-label-change-process nil))
+          (running-label-change nil)
+          (waiting-label-changes nil))
      (make-directory gmail-maildir t)
      (make-directory mail-sync-directory t)
+     ;; quoted as mbsync reads them
+     (write-region (concat "IMAPAccount gmail\nHost imap.example.com\n"
+                           "UserCmd \"echo \\\"ann\\\"\"\n"
+                           "PassCmd \"printf '%s' \\\"app-password\\\"\"\n")
+                   nil mail-sync-config nil 'silent)
      (unwind-protect (progn ,@body)
        (ignore-errors (delete-file (expand-file-name "hold" dir)))
        (sync-tests--wait)
@@ -142,6 +180,25 @@ its state in DIR/state/, and DIR/calls lists the programs' calls."
   (let ((removed (expand-file-name "removed/" mail-sync-directory)))
     (and (file-directory-p removed)
          (sort (directory-files removed nil "\\`[^.]") #'string<))))
+
+(defun sync-tests--curl-call (request)
+  "The call of the stand-in curl with REQUEST, as it logs it."
+  (format "curl imaps://imap.example.com/ %s" request))
+
+(defun sync-tests--file (dir name)
+  "What the file NAME of DIR holds, or nil without it."
+  (let ((file (expand-file-name name dir)))
+    (when (file-exists-p file)
+      (with-temp-buffer
+        (insert-file-contents file)
+        (buffer-string)))))
+
+(defun sync-tests--change (change)
+  "Run the label CHANGE to its end; return what it called back, or `none'."
+  (let ((got 'none))
+    (start-gmail-label-change change (lambda (problem) (setq got problem)))
+    (sync-tests--wait)
+    got))
 
 (defun sync-tests--sync (&optional full)
   "Run one sync, FULL or by the markers, to its end."
@@ -267,15 +324,18 @@ its state in DIR/state/, and DIR/calls lists the programs' calls."
       (expect (sync-tests--calls dir)
               :to-equal (list (sync-tests--mbsync "inbox") (sync-tests--notmuch)))))
   (it "starts nothing while a label change runs"
-    (sync-tests--with nil
-      (let ((mail-label-change-process
-             (make-process :name "sync-tests-label" :command '("sleep" "10") :noquery t)))
-        (unwind-protect
-            (progn
-              (expect (start-mail-sync) :to-be nil)
-              (expect (mail-sync-running-p) :to-be nil)
-              (expect (sync-tests--calls dir) :to-be nil))
-          (delete-process mail-label-change-process)))))
+    (sync-tests--with '(("-ls gmail-remote" 0 "INBOX\ntravel\n"))
+      (sync-tests--folder "travel" t)
+      (write-region "" nil (expand-file-name "hold" dir))
+      (expect (start-gmail-label-change '(delete "travel") #'ignore) :to-be-truthy)
+      (expect (mail-sync-running-p) :to-be-truthy)
+      (expect (start-mail-sync) :to-be nil)
+      (delete-file (expand-file-name "hold" dir))
+      (sync-tests--wait)
+      (expect (sync-tests--calls dir)
+              :to-equal (list (sync-tests--mbsync "-ls gmail-remote")
+                              (sync-tests--curl-call "DELETE \"travel\"")
+                              (sync-tests--notmuch)))))
   (it "goes on when a program cannot start, and logs why"
     (sync-tests--with nil
       (sync-tests--fresh-markers)
@@ -512,17 +572,17 @@ its state in DIR/state/, and DIR/calls lists the programs' calls."
               :to-equal '("A mail sync runs already; it says when it is done" "Mail synced"))
       (expect (length (sync-tests--calls dir)) :to-equal 2)))
   (it "says a label change holds the mail sync back, and fetches the rest"
-    (sync-tests--with nil
-      (let* ((mail-label-change-process
-              (make-process :name "sync-tests-label" :command '("sleep" "10") :noquery t))
-             (ran nil)
+    (sync-tests--with '(("-ls gmail-remote" 0 "INBOX\n"))
+      (write-region "" nil (expand-file-name "hold" dir))
+      (start-gmail-label-change '(delete "travel") #'ignore)
+      (let* ((ran nil)
              (mail-sync-hook (list (lambda () (setq ran t)))))
-        (unwind-protect
-            (expect (sync-tests--said #'sync-mail)
-                    :to-equal '("A label change runs; sync once it is done"))
-          (delete-process mail-label-change-process))
-        (expect ran :to-be t)
-        (expect (sync-tests--calls dir) :to-be nil))))
+        (expect (sync-tests--said #'sync-mail)
+                :to-equal '("A label change runs; sync once it is done"))
+        (expect ran :to-be t))
+      (delete-file (expand-file-name "hold" dir))
+      (sync-tests--wait)
+      (expect (sync-tests--calls dir) :to-equal (list (sync-tests--mbsync "-ls gmail-remote")))))
   (it "runs the full tier with a prefix argument"
     (sync-tests--with nil
       (sync-tests--fresh-markers)
@@ -555,6 +615,170 @@ its state in DIR/state/, and DIR/calls lists the programs' calls."
                    (lambda (since) (push since refreshed))))
           (sync-tests--sync))
         (expect refreshed :to-be nil)))))
+
+(describe "start-gmail-label-change"
+  (it "deletes a synced label in Gmail with one IMAP command, sets its folder aside, then indexes"
+    (sync-tests--with '(("-ls gmail-remote" 0 "===== gmail-remote:\nINBOX\ntravel\n"))
+      (sync-tests--folder "travel" t)
+      (expect (sync-tests--change '(delete "travel")) :to-be nil)
+      (expect (sync-tests--calls dir)
+              :to-equal (list (sync-tests--mbsync "-ls gmail-remote")
+                              (sync-tests--curl-call "DELETE \"travel\"")
+                              (sync-tests--notmuch)))
+      (expect (sync-tests--store) :to-be nil)
+      (expect (length (sync-tests--removed)) :to-equal 1)
+      (expect (car (sync-tests--removed)) :to-match "\\`travel-[0-9]\\{8\\}-[0-9]\\{6\\}\\'")))
+  (it "deletes a nested label by the name of its box in Gmail"
+    (sync-tests--with '(("-ls gmail-remote" 0 "INBOX\nwork/qlik\n"))
+      (sync-tests--folder "work.qlik" t)
+      (expect (sync-tests--change '(delete "work.qlik")) :to-be nil)
+      (expect (sync-tests--calls dir) :to-contain (sync-tests--curl-call "DELETE \"work/qlik\""))
+      (expect (sync-tests--store) :to-be nil)))
+  (it "keeps the folder when Gmail keeps the label, and indexes nothing"
+    (sync-tests--with '(("-ls gmail-remote" 0 "INBOX\ntravel\n")
+                        ("DELETE \"travel\"" 78 "curl: (78) Remote file not found"))
+      (sync-tests--folder "travel" t)
+      (expect (sync-tests--change '(delete "travel")) :to-equal "Gmail kept label travel")
+      (expect (sync-tests--calls dir)
+              :to-equal (list (sync-tests--mbsync "-ls gmail-remote")
+                              (sync-tests--curl-call "DELETE \"travel\"")))
+      (expect (sync-tests--store) :to-equal '("travel"))
+      (expect (sync-tests--removed) :to-be nil)
+      (expect (sync-tests--log) :to-match "^--- failed in [0-9]+s: Gmail kept label travel ---$")))
+  (it "sets aside the folder of a label no sync took to Gmail yet, sending Gmail nothing"
+    (sync-tests--with '(("-ls gmail-remote" 0 "INBOX\n"))
+      (sync-tests--folder "travel")
+      (expect (sync-tests--change '(delete "travel")) :to-be nil)
+      (expect (sync-tests--calls dir)
+              :to-equal (list (sync-tests--mbsync "-ls gmail-remote") (sync-tests--notmuch)))
+      (expect (sync-tests--store) :to-be nil)
+      (expect (length (sync-tests--removed)) :to-equal 1)))
+  (it "fails on a label that neither Gmail nor the store has"
+    (sync-tests--with '(("-ls gmail-remote" 0 "INBOX\n"))
+      (expect (sync-tests--change '(delete "travel")) :to-equal "no label travel")
+      (expect (sync-tests--calls dir) :to-equal (list (sync-tests--mbsync "-ls gmail-remote")))))
+  (it "changes nothing when Gmail's labels cannot be listed"
+    (sync-tests--with '(("-ls gmail-remote" 1 "IMAP error: authentication failed"))
+      (sync-tests--folder "travel" t)
+      (dolist (change '((delete "travel") (rename "travel" "trips")))
+        (expect (sync-tests--change change) :to-equal "could not list Gmail's labels"))
+      (expect (sync-tests--store) :to-equal '("travel"))
+      (expect (seq-uniq (sync-tests--calls dir))
+              :to-equal (list (sync-tests--mbsync "-ls gmail-remote")))))
+  (it "renames a synced label in Gmail and keeps its folder while Gmail keeps the label's UIDVALIDITY"
+    (sync-tests--with '(("-ls gmail-remote" 0 "INBOX\ntravel\n")
+                        ("STATUS \"trips\" (UIDVALIDITY)" 0
+                         "* STATUS \"trips\" (UIDVALIDITY 42)\r\n"))
+      (sync-tests--folder "travel" t)
+      (write-region "FarUidValidity 42\nNearUidValidity 7\n" nil
+                    (expand-file-name "travel/.mbsyncstate" gmail-maildir) nil 'silent)
+      (expect (sync-tests--change '(rename "travel" "trips")) :to-be nil)
+      (expect (sync-tests--calls dir)
+              :to-equal (list (sync-tests--mbsync "-ls gmail-remote")
+                              (sync-tests--curl-call "RENAME \"travel\" \"trips\"")
+                              (sync-tests--curl-call "STATUS \"trips\" (UIDVALIDITY)")
+                              (sync-tests--notmuch)))
+      (expect (sync-tests--store) :to-equal '("trips"))
+      (expect (sync-tests--file gmail-maildir "trips/.mbsyncstate")
+              :to-equal "FarUidValidity 42\nNearUidValidity 7\n")
+      (expect (sync-tests--removed) :to-be nil)
+      (expect (sync-tests--log) :to-match "^--- [-0-9]+ [:0-9]+ rename label travel to trips ---$")))
+  (it "renames a nested label from its box in Gmail"
+    (sync-tests--with '(("-ls gmail-remote" 0 "INBOX\nwork/qlik\n")
+                        ("STATUS \"qlik\" (UIDVALIDITY)" 0
+                         "* STATUS \"qlik\" (UIDVALIDITY 42)\r\n"))
+      (sync-tests--folder "work.qlik" t)
+      (write-region "FarUidValidity 42\n" nil
+                    (expand-file-name "work.qlik/.mbsyncstate" gmail-maildir) nil 'silent)
+      (expect (sync-tests--change '(rename "work.qlik" "qlik")) :to-be nil)
+      (expect (sync-tests--calls dir)
+              :to-contain (sync-tests--curl-call "RENAME \"work/qlik\" \"qlik\""))
+      (expect (sync-tests--store) :to-equal '("qlik"))))
+  (it "sets the folder aside when Gmail gave the renamed label new UIDs, or named none"
+    (dolist (status '((0 "* STATUS \"trips\" (UIDVALIDITY 43)\r\n") (7 "")))
+      (sync-tests--with `(("-ls gmail-remote" 0 "INBOX\ntravel\n")
+                          ("STATUS \"trips\" (UIDVALIDITY)" ,@status))
+        (sync-tests--folder "travel" t)
+        (write-region "FarUidValidity 42\n" nil
+                      (expand-file-name "travel/.mbsyncstate" gmail-maildir) nil 'silent)
+        (expect (sync-tests--change '(rename "travel" "trips")) :to-be nil)
+        (expect (sync-tests--store) :to-be nil)
+        (expect (car (sync-tests--removed)) :to-match "\\`travel-[0-9]\\{8\\}-[0-9]\\{6\\}\\'")
+        (expect (car (last (sync-tests--calls dir))) :to-equal (sync-tests--notmuch)))))
+  (it "renames the folder of a label no sync took to Gmail yet, sending Gmail nothing"
+    (sync-tests--with '(("-ls gmail-remote" 0 "INBOX\n"))
+      (sync-tests--folder "travel")
+      (expect (sync-tests--change '(rename "travel" "trips")) :to-be nil)
+      (expect (sync-tests--calls dir)
+              :to-equal (list (sync-tests--mbsync "-ls gmail-remote") (sync-tests--notmuch)))
+      (expect (sync-tests--store) :to-equal '("trips"))))
+  (it "refuses a new name that Gmail or the store has already"
+    (sync-tests--with '(("-ls gmail-remote" 0 "INBOX\ntravel\ntrips\n"))
+      (sync-tests--folder "travel" t)
+      (expect (sync-tests--change '(rename "travel" "trips")) :to-equal "label trips exists"))
+    (sync-tests--with '(("-ls gmail-remote" 0 "INBOX\ntravel\n"))
+      (sync-tests--folder "travel" t)
+      (sync-tests--folder "trips")
+      (expect (sync-tests--change '(rename "travel" "trips")) :to-equal "label trips exists")
+      (expect (sync-tests--calls dir) :to-equal (list (sync-tests--mbsync "-ls gmail-remote")))
+      (expect (sync-tests--store) :to-equal '("travel" "trips"))))
+  (it "fails on a synced label that Gmail lacks"
+    (sync-tests--with '(("-ls gmail-remote" 0 "INBOX\n"))
+      (sync-tests--folder "travel" t)
+      (expect (sync-tests--change '(rename "travel" "trips")) :to-equal "no label travel in Gmail")
+      (expect (sync-tests--store) :to-equal '("travel"))))
+  (it "keeps the folder when Gmail keeps the label's name"
+    (sync-tests--with '(("-ls gmail-remote" 0 "INBOX\ntravel\n")
+                        ("RENAME \"travel\" \"trips\"" 78 ""))
+      (sync-tests--folder "travel" t)
+      (expect (sync-tests--change '(rename "travel" "trips")) :to-equal "Gmail kept label travel")
+      (expect (sync-tests--calls dir)
+              :to-equal (list (sync-tests--mbsync "-ls gmail-remote")
+                              (sync-tests--curl-call "RENAME \"travel\" \"trips\"")))
+      (expect (sync-tests--store) :to-equal '("travel"))))
+  (it "hands curl the login and the password on its input, as the isyncrc's commands print them"
+    (sync-tests--with '(("-ls gmail-remote" 0 "INBOX\ntravel\n"))
+      (sync-tests--folder "travel" t)
+      (sync-tests--change '(delete "travel"))
+      (expect (sync-tests--file dir "curl-input") :to-equal "user = \"ann:app-password\"\n")
+      (expect (sync-tests--file dir "curl-args") :to-match "--config - ")
+      ;; neither an argument nor the log, which others can read
+      (expect (sync-tests--file dir "curl-args") :not :to-match "app-password")
+      (expect (sync-tests--log) :not :to-match "app-password")))
+  (it "logs an IMAP step by its request, not by the commands that print the password"
+    (sync-tests--with '(("-ls gmail-remote" 0 "INBOX\ntravel\n"))
+      (sync-tests--folder "travel" t)
+      (sync-tests--change '(delete "travel"))
+      (expect (sync-tests--log) :to-match "^--- [-0-9]+ [:0-9]+ delete label travel ---$")
+      (expect (sync-tests--log) :to-match "^imap DELETE \"travel\": exit 0 in [.0-9]+s$")
+      (expect (sync-tests--log) :to-match "^--- done in [0-9]+s ---$")
+      (expect (sync-tests--log) :not :to-match "printf")))
+  (it "waits for a running sync, then runs, oldest first"
+    (sync-tests--with '(("-ls gmail-remote" 0 "INBOX\ntravel\nwork\n"))
+      (sync-tests--fresh-markers)
+      (sync-tests--folder "travel" t)
+      (sync-tests--folder "work" t)
+      (write-region "" nil (expand-file-name "hold" dir))
+      (start-mail-sync)
+      (let (done)
+        (dolist (name '("travel" "work"))
+          (expect (start-gmail-label-change (list 'delete name)
+                                            (lambda (problem) (push (list name problem) done)))
+                  :to-be nil))
+        ;; the held mbsync logs its call as it starts
+        (with-timeout (5)
+          (while (null (sync-tests--calls dir))
+            (accept-process-output nil 0.02)))
+        (expect (sync-tests--calls dir) :to-equal (list (sync-tests--mbsync "inbox")))
+        (delete-file (expand-file-name "hold" dir))
+        (sync-tests--wait)
+        (expect (nreverse done) :to-equal '(("travel" nil) ("work" nil))))
+      (expect (sync-tests--calls dir)
+              :to-equal (list (sync-tests--mbsync "inbox") (sync-tests--notmuch)
+                              (sync-tests--mbsync "-ls gmail-remote")
+                              (sync-tests--curl-call "DELETE \"travel\"") (sync-tests--notmuch)
+                              (sync-tests--mbsync "-ls gmail-remote")
+                              (sync-tests--curl-call "DELETE \"work\"") (sync-tests--notmuch))))))
 
 (describe "start-mail-sync-timer"
   (it "syncs every five minutes, the first half a minute on, in the Emacs that owns the server"
@@ -605,7 +829,7 @@ its state in DIR/state/, and DIR/calls lists the programs' calls."
         (goto-char (point-min))
         (expect (and (re-search-forward (format "\\_<%s\\_>" (regexp-quote fn)) nil t) fn)
                 :to-be nil))))
-  (it "never asks Emacs for the password; mbsync gets it from gpg"
+  (it "never asks Emacs for the password; mbsync and curl get it from gpg"
     (with-temp-buffer
       (insert-file-contents (expand-file-name "modules/email/autoload/sync.el" test-config-root))
       (expect (buffer-string) :not :to-match "auth-source"))))

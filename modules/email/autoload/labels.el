@@ -18,7 +18,6 @@
 
 (defvar doom-state-dir)
 (defvar gmail-maildir)
-(defvar mail-sync-program)
 (defvar mail-inbox-group)
 (defvar mail-trash-group)
 (defvar mail-archive-group)
@@ -360,8 +359,8 @@ Embark's select picks several; a name no label has picks none."
 
 (defun mail-label-name-problem (name)
   "Why NAME cannot name a new label, or nil when it can.
-mail-sync sends a name to Gmail as it is, and mbsync's maildir listing
-skips the folders cur, new and tmp."
+A label change sends a name to Gmail as it is, and mbsync's maildir
+listing skips the folders cur, new and tmp."
   (cond ((not (string-match-p "\\`[a-zA-Z0-9_-]+\\'" name))
          "A label name takes ASCII letters, digits, - and _")
         ((member name '("cur" "new" "tmp"))
@@ -534,7 +533,7 @@ Return `shown' when the summary's own copy went, nil when nothing changed."
 
 ;;; Labels in the group buffer
 ;;
-;; mail-sync renames or deletes a label in Gmail and moves its folder, and
+;; sync.el renames or deletes a label in Gmail and moves its folder, and
 ;; the groups then follow the folders.
 
 ;;;###autoload
@@ -544,42 +543,29 @@ Return `shown' when the summary's own copy went, nil when nothing changed."
   (gnus-group-jump-to-group (make-mail-label name))
   (message "Made label %s; the next sync takes it to Gmail" name))
 
-(defvar mail-label-change-process nil
-  "Process of the label change that runs, or nil.")
-
 (defun mail-label-change-problem (group)
-  "Why mail-sync cannot rename or delete GROUP, or nil when it can."
+  "Why GROUP cannot be renamed or deleted in Gmail, or nil when it can."
   (cond ((null group) "No group here")
         ((not (string-prefix-p "nnmaildir+gmail:" group))
          (format "%s is not a Gmail label" group))
         ((or (equal group mail-inbox-group) (not (mail-label-group-p group)))
          (format "%s is not a label" (mail-label-name group)))
         ((string-match-p "[^[:ascii:]]" group)
-         (format "Change %s in Gmail: mail-sync sends ASCII names only"
-                 (gnus-group-real-name group)))
-        ;; mbsync would sync the label while its folder moves
-        ((mail-sync-running-p)
-         "A mail sync runs; change the label once it is done")))
+         (format "Change %s in Gmail: a label change sends ASCII names only"
+                 (gnus-group-real-name group)))))
 
-(defun run-mail-label-change (args done)
-  "Run `mail-sync-program' with ARGS in the background, then call DONE.
-DONE runs after a clean exit, once the groups follow the folders; a
-failure says what the program printed last."
-  (setq mail-label-change-process
-        (make-process
-         :name "mail-label-change" :buffer (generate-new-buffer " *mail-label-change*")
-         :command (cons mail-sync-program args) :noquery t
-         :sentinel (lambda (process _event)
-                     (when (memq (process-status process) '(exit signal))
-                       (let ((said (with-current-buffer (process-buffer process)
-                                     (car (last (split-string (buffer-string) "\n" t))))))
-                         (kill-buffer (process-buffer process))
-                         (if (and (eq (process-status process) 'exit)
-                                  (zerop (process-exit-status process)))
-                             (progn
-                               (follow-mail-folders)
-                               (funcall done))
-                           (message "Labels: %s failed: %s" (car args) said))))))))
+(defun run-mail-label-change (change doing done)
+  "Make CHANGE, as `start-gmail-label-change' takes it, saying DOING.
+DONE runs once the change is made and the groups follow the folders; a
+failure says why."
+  (if (start-gmail-label-change change
+                                (lambda (problem)
+                                  (if problem
+                                      (message "Labels: %s failed: %s" (car change) problem)
+                                    (follow-mail-folders)
+                                    (funcall done))))
+      (message "%s..." doing)
+    (message "%s once the mail sync is done..." doing)))
 
 ;;;###autoload
 (defun delete-mail-label (group)
@@ -590,8 +576,7 @@ failure says what the program printed last."
   (let ((name (gnus-group-real-name group)))
     (when (yes-or-no-p (format "Delete label %s in Gmail (its messages keep their other labels)? "
                                name))
-      (message "Deleting label %s..." name)
-      (run-mail-label-change (list "remove" name)
+      (run-mail-label-change (list 'delete name) (format "Deleting label %s" name)
                              (lambda () (message "Deleted label %s" name))))))
 
 ;;;###autoload
@@ -609,12 +594,11 @@ failure says what the program printed last."
         (renamed (concat "nnmaildir+gmail:" new))
         (topic (gnus-group-topic group))
         (level (gnus-group-level group)))
-    (message "Renaming label %s to %s..." name new)
     (run-mail-label-change
-     (list "rename" name new)
+     (list 'rename name new) (format "Renaming label %s to %s" name new)
      (lambda ()
        (if (not (gnus-group-entry renamed))
-           ;; mail-sync set the folder aside: Gmail renumbered the label
+           ;; the folder went aside: Gmail renumbered the label
            (message "Renamed label %s to %s; the next sync fetches it" name new)
          (unless (eql level (gnus-group-level renamed))
            (gnus-group-change-level renamed level (gnus-group-level renamed)))

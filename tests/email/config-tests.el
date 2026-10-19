@@ -736,7 +736,7 @@ window and deletes the summary's."
                       fetch-pending-reddit)
                      ;; , u, the hook that starts the timer, and the label commands
                      ("sync.el" sync-mail start-mail-sync start-mail-sync-timer
-                      mail-sync-running-p)
+                      mail-sync-running-p start-gmail-label-change)
                      ("load.el" load-mail-groups maildir-group-p mail-group-loaded-p
                       mail-group-pending-p mail-group-reading-p mail-load-busy-p
                       mail-full-group-name wait-for-mail-load load-unloaded-mail-groups

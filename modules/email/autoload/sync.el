@@ -1,8 +1,9 @@
 ;;; modules/email/autoload/sync.el -*- lexical-binding: t; -*-
 ;;; Commentary:
 ;; mbsync mirrors Gmail into the store by `mail-sync-config', and notmuch
-;; indexes the store after it.  Each step is a process whose sentinel
-;; starts the next, so the main thread waits on none of them.
+;; indexes the store after it.  Between syncs, curl renames or deletes a
+;; label in Gmail.  Each step is a process whose sentinel starts the
+;; next, so the main thread waits on none of them.
 ;;; Code:
 
 (defvar doom-emacs-dir)
@@ -11,7 +12,6 @@
 (defvar mail-from-address)
 (defvar mail-inbox-address)
 (defvar gnus-search-notmuch-config-file)
-(defvar mail-label-change-process)
 (defvar server-process)
 
 (defvar mail-sync-hook nil
@@ -22,6 +22,9 @@
 
 (defvar notmuch-program "notmuch"
   "Program that indexes the stores after a sync.")
+
+(defvar mail-imap-program "curl"
+  "Program that sends Gmail the IMAP command of a label change.")
 
 (defvar mail-sync-config (expand-file-name "modules/email/isyncrc" doom-emacs-dir)
   "Config file every mbsync run reads: the account, the stores and the channels.")
@@ -49,6 +52,12 @@
 
 (defvar mail-sync-report nil
   "Non-nil when the running sync says in the echo area how it ended.")
+
+(defvar running-label-change nil
+  "The label change that runs, or nil.")
+
+(defvar waiting-label-changes nil
+  "Label changes that wait for the running sync, as (CHANGE . DONE), oldest first.")
 
 (defconst mail-sync-tiers
   '((inbox (("inbox")) ())
@@ -79,17 +88,18 @@ labels; bulk holds All Mail and the mailing-list labels.")
   "Command line of mbsync with ARGS, reading `mail-sync-config'."
   (append (list mbsync-program "-c" (expand-file-name mail-sync-config)) args))
 
-(defun run-mail-sync-step (command then &optional quiet)
+(defun run-mail-sync-step (command then &optional quiet name)
   "Run COMMAND in the background, log how it ended, then call THEN.
 THEN gets the exit status, 128 plus the signal, or 127 when COMMAND
-cannot start, and the output.  QUIET logs the output only on a failure."
+cannot start, and the output.  QUIET logs the output only on a failure.
+NAME stands for COMMAND in the log."
   (let* ((start (current-time))
          (buffer (get-buffer-create " *mail-sync*"))
          (finish (lambda (status output)
                    (unless (or (string-empty-p output) (and quiet (zerop status)))
                      (mail-sync-log "%s" (string-trim-right output)))
-                   (mail-sync-log "%s: exit %d in %.1fs" (string-join command " ") status
-                                  (float-time (time-since start)))
+                   (mail-sync-log "%s: exit %d in %.1fs" (or name (string-join command " "))
+                                  status (float-time (time-since start)))
                    (funcall then status output))))
     (with-current-buffer buffer
       (erase-buffer))
@@ -125,19 +135,23 @@ cannot start, and the output.  QUIET logs the output only on a failure."
   (let ((boxes (split-string listing "\n" t)))
     (and (member "INBOX" boxes) boxes)))
 
-(defun dropped-label-folders (boxes)
-  "Folders of synced labels that Gmail's BOXES lack.
+(defun gmail-label-box (folder boxes)
+  "The box of BOXES that mbsync keeps in FOLDER, or nil.
 mbsync keeps the box a/b in the folder a.b."
-  (let ((folders (mapcar (lambda (box) (string-replace "/" "." box)) boxes)))
-    (seq-filter (lambda (name)
-                  (and (not (member name '("inbox" "sent" "trash" "archive")))
-                       (not (member name folders))
-                       (file-exists-p (expand-file-name (concat name "/.mbsyncstate")
-                                                        gmail-maildir))))
-                (directory-files gmail-maildir nil "\\`[^.]"))))
+  (seq-find (lambda (box) (equal (string-replace "/" "." box) folder)) boxes))
+
+(defun dropped-label-folders (boxes)
+  "Folders of synced labels that Gmail's BOXES lack."
+  (seq-filter (lambda (name)
+                (and (not (member name '("inbox" "sent" "trash" "archive")))
+                     (not (gmail-label-box name boxes))
+                     (file-exists-p (expand-file-name (concat name "/.mbsyncstate")
+                                                      gmail-maildir))))
+              (directory-files gmail-maildir nil "\\`[^.]")))
 
 (defun set-aside-label-folder (name why)
-  "Move the folder of label NAME out of the store, logging WHY it went."
+  "Move the folder of label NAME out of the store, logging WHY it went.
+Return nil, or why it could not move."
   (let ((dest (expand-file-name (format "removed/%s-%s" name
                                         (format-time-string "%Y%m%d-%H%M%S"))
                                 mail-sync-directory)))
@@ -147,10 +161,13 @@ mbsync keeps the box a/b in the folder a.b."
           (rename-file (expand-file-name name gmail-maildir) dest)
           ;; its age counts from the move
           (set-file-times dest)
-          (mail-sync-log "label %s %s, its folder moved to %s" name why dest))
+          (mail-sync-log "label %s %s, its folder moved to %s" name why dest)
+          nil)
       (file-error
-       (mail-sync-log "could not move the folder of label %s: %s"
-                      name (error-message-string err))))))
+       (let ((problem (format "could not move the folder of label %s: %s"
+                              name (error-message-string err))))
+         (mail-sync-log "%s" problem)
+         problem)))))
 
 (defun set-aside-dropped-labels (status listing)
   "Set aside the folder of each label Gmail dropped, by LISTING of mbsync -ls.
@@ -203,13 +220,17 @@ Its paths are absolute, so no tracked file can be it."
       (message "Mail sync failed, status %d (see %s)" status
                (abbreviate-file-name (expand-file-name "mail-sync.log" mail-sync-directory)))))
   (when (and (featurep 'gnus) (gnus-alive-p))
-    (refresh-synced-mail-groups start)))
+    (refresh-synced-mail-groups start))
+  (run-waiting-label-change))
+
+(defun notmuch-new-command ()
+  "Command line of notmuch indexing the stores."
+  (list notmuch-program (concat "--config=" (expand-file-name gnus-search-notmuch-config-file))
+        "new" "--quiet"))
 
 (defun index-synced-mail (status start)
   "Index the stores, then end the sync begun at START, whose mbsync gave STATUS."
-  (run-mail-sync-step (list notmuch-program
-                            (concat "--config=" (expand-file-name gnus-search-notmuch-config-file))
-                            "new" "--quiet")
+  (run-mail-sync-step (notmuch-new-command)
                       (lambda (indexed _)
                         (finish-mail-sync (if (zerop status) indexed status) start))))
 
@@ -228,7 +249,7 @@ A clean pass moves MARKERS.  START is when the sync began."
 
 ;;;###autoload
 (defun mail-sync-running-p ()
-  "Non-nil while a mail sync runs.
+  "Non-nil while a mail sync or a label change runs.
 A step's process reads as exited before its sentinel starts the next."
   (and (processp mail-sync-process)
        (not (process-get mail-sync-process 'ended))))
@@ -238,8 +259,7 @@ A step's process reads as exited before its sentinel starts the next."
   "Start a mail sync in the background; FULL runs every tier.
 Nothing starts while a sync or a label change runs.  REPORT has the
 sync say in the echo area how it ended.  Non-nil when one started."
-  (unless (or (mail-sync-running-p)
-              (process-live-p (bound-and-true-p mail-label-change-process)))
+  (unless (mail-sync-running-p)
     (pcase-let* ((tier (mail-sync-tier full))
                  (`(,runs ,markers) (alist-get tier mail-sync-tiers))
                  (start (current-time)))
@@ -263,11 +283,164 @@ With FULL, the mail sync runs every tier at once.  The echo area says
 how it ended."
   (interactive "P")
   (cond ((start-mail-sync full t))
-        ((mail-sync-running-p)
-         (setq mail-sync-report t)
-         (message "A mail sync runs already; it says when it is done"))
-        (t (message "A label change runs; sync once it is done")))
+        (running-label-change
+         (message "A label change runs; sync once it is done"))
+        (t (setq mail-sync-report t)
+           (message "A mail sync runs already; it says when it is done")))
   (run-hooks 'mail-sync-hook))
+
+;;; Label changes
+;;
+;; One IMAP command through curl renames or deletes a label in Gmail, and
+;; its folder follows.  The isyncrc's UserCmd and PassCmd print the
+;; account to curl's input, so Emacs never holds the password.
+
+(defun mail-sync-config-value (keyword)
+  "The value of KEYWORD in `mail-sync-config', unquoted as mbsync reads it."
+  (with-temp-buffer
+    (insert-file-contents mail-sync-config)
+    (when (re-search-forward (format "^%s[ \t]+\\(.+\\)$" (regexp-quote keyword)) nil t)
+      (let ((value (string-trim-right (match-string 1))))
+        (if (string-match "\\`\"\\(.*\\)\"\\'" value)
+            (replace-regexp-in-string "\\\\\\(.\\)" "\\1" (match-string 1 value))
+          value)))))
+
+(defun imap-command (request)
+  "Command line that sends REQUEST to the IMAP server of `mail-sync-config'."
+  (list "sh" "-c"
+        (concat "printf 'user = \"%s:%s\"\\n' \"$(sh -c \"$1\")\" \"$(sh -c \"$2\")\""
+                " | \"$3\" --silent --show-error --config - --url \"imaps://$4/\""
+                " --request \"$5\"")
+        "imap" (mail-sync-config-value "UserCmd") (mail-sync-config-value "PassCmd")
+        mail-imap-program (mail-sync-config-value "Host") request))
+
+(defun run-imap-step (request then)
+  "Send REQUEST to Gmail in the background, then call THEN.
+THEN gets what `run-mail-sync-step' gives it."
+  (run-mail-sync-step (imap-command request) then nil (concat "imap " request)))
+
+(defun mbsync-state-holds-p (folder uidvalidity)
+  "Non-nil when mbsync's state of FOLDER is for Gmail's UIDVALIDITY."
+  (let ((state (expand-file-name ".mbsyncstate" folder)))
+    (and (file-exists-p state)
+         (with-temp-buffer
+           ;; the first line; a state holds a line per message
+           (insert-file-contents state nil 0 256)
+           (looking-at-p (format "FarUidValidity %s$" (regexp-quote uidvalidity)))))))
+
+(defun move-label-folder (name new)
+  "Move the folder of label NAME to NEW; return nil, or why it could not."
+  (condition-case err
+      (progn
+        (rename-file (expand-file-name name gmail-maildir) (expand-file-name new gmail-maildir))
+        (mail-sync-log "label %s renamed to %s, its folder with it" name new)
+        nil)
+    (file-error (format "could not move the folder of label %s: %s"
+                        name (error-message-string err)))))
+
+(defun delete-gmail-label (name boxes finish)
+  "Delete the label NAME, one of Gmail's BOXES, and set its folder aside.
+FINISH gets nil, or why it failed.  A label no sync took to Gmail yet
+has only its folder."
+  (let ((box (gmail-label-box name boxes))
+        (folder (expand-file-name name gmail-maildir)))
+    (cond (box
+           (run-imap-step (format "DELETE \"%s\"" box)
+                          (lambda (status _)
+                            (funcall finish
+                                     (cond ((not (zerop status))
+                                            (format "Gmail kept label %s" box))
+                                           ((file-directory-p folder)
+                                            (set-aside-label-folder name "deleted")))))))
+          ((file-directory-p folder)
+           (funcall finish (set-aside-label-folder name "deleted")))
+          (t (funcall finish (format "no label %s" name))))))
+
+(defun rename-gmail-label (name new boxes finish)
+  "Rename the label NAME, one of Gmail's BOXES, to NEW, and its folder with it.
+FINISH gets nil, or why it failed.  The folder keeps mbsync's state only
+while Gmail keeps the label's UIDVALIDITY; else it goes aside, and the
+next sync fetches the label anew."
+  (let ((box (gmail-label-box name boxes))
+        (folder (expand-file-name name gmail-maildir)))
+    (cond ((or (file-exists-p (expand-file-name new gmail-maildir))
+               (gmail-label-box new boxes))
+           (funcall finish (format "label %s exists" new)))
+          (box
+           (run-imap-step
+            (format "RENAME \"%s\" \"%s\"" box new)
+            (lambda (status _)
+              (if (not (zerop status))
+                  (funcall finish (format "Gmail kept label %s" box))
+                (run-imap-step
+                 (format "STATUS \"%s\" (UIDVALIDITY)" new)
+                 (lambda (_ output)
+                   (funcall finish
+                            (cond ((and (string-match "UIDVALIDITY \\([0-9]+\\)" output)
+                                        (mbsync-state-holds-p folder (match-string 1 output)))
+                                   (move-label-folder name new))
+                                  ((file-directory-p folder)
+                                   (set-aside-label-folder
+                                    name (format "renamed to %s" new)))))))))))
+          ((and (file-directory-p folder)
+                (not (file-exists-p (expand-file-name ".mbsyncstate" folder))))
+           ;; a label made here that no sync took to Gmail yet
+           (funcall finish (move-label-folder name new)))
+          (t (funcall finish (format "no label %s in Gmail" name))))))
+
+(defun finish-gmail-label-change (problem done start)
+  "End the label change begun at START, which PROBLEM stopped unless nil.
+A change made indexes the stores first.  DONE gets PROBLEM, and then
+the oldest change that waits starts."
+  (let ((end (lambda ()
+               (let ((seconds (round (float-time (time-since start)))))
+                 (if problem
+                     (mail-sync-log "--- failed in %ds: %s ---" seconds problem)
+                   (mail-sync-log "--- done in %ds ---" seconds)))
+               (setq running-label-change nil)
+               (unwind-protect (funcall done problem)
+                 (run-waiting-label-change)))))
+    (if problem
+        (funcall end)
+      (run-mail-sync-step (notmuch-new-command) (lambda (_status _output) (funcall end))))))
+
+(defun run-gmail-label-change (change done)
+  "Make CHANGE now, then call DONE, as `start-gmail-label-change' says."
+  (let ((start (current-time)))
+    (setq running-label-change change)
+    (make-directory mail-sync-directory t)
+    (mail-sync-log "--- %s %s ---" (format-time-string "%F %T" start)
+                   (pcase change
+                     (`(delete ,name) (format "delete label %s" name))
+                     (`(rename ,name ,new) (format "rename label %s to %s" name new))))
+    (run-mail-sync-step
+     (mbsync-command "-ls" "gmail-remote")
+     (lambda (status listing)
+       (let ((finish (lambda (problem) (finish-gmail-label-change problem done start))))
+         (if-let* (((zerop status))
+                   (boxes (gmail-boxes listing)))
+             (pcase change
+               (`(delete ,name) (delete-gmail-label name boxes finish))
+               (`(rename ,name ,new) (rename-gmail-label name new boxes finish)))
+           (funcall finish "could not list Gmail's labels"))))
+     t)))
+
+(defun run-waiting-label-change ()
+  "Start the oldest label change that waits for the sync, if any."
+  (when-let* ((next (pop waiting-label-changes)))
+    (run-gmail-label-change (car next) (cdr next))))
+
+;;;###autoload
+(defun start-gmail-label-change (change done)
+  "Make CHANGE in Gmail and the store in the background, then call DONE.
+CHANGE is (delete NAME) or (rename NAME NEW), and DONE gets nil, or why
+it failed.  A change waits for a running sync.  Non-nil when it starts."
+  (if (mail-sync-running-p)
+      (progn
+        (setq waiting-label-changes (append waiting-label-changes (list (cons change done))))
+        nil)
+    (run-gmail-label-change change done)
+    t))
 
 ;;;###autoload
 (defun start-mail-sync-timer ()

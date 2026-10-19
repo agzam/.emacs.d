@@ -48,6 +48,8 @@
 (defvar mail-label-refresh-timer)
 (defvar mbsync-program)
 (defvar notmuch-program)
+(defvar mail-imap-program)
+(defvar mail-sync-config)
 (defvar mail-sync-directory)
 (defvar mail-sync-process)
 (defvar mail-sync-report)
@@ -775,10 +777,13 @@ buffers, summary and queued files the cases leave are cleared after."
          (mail-load-script (expand-file-name "mail-load.el" e2e-work-dir))
          (mail-load-directory (expand-file-name "mail-load/" e2e-work-dir))
          (mail-table-directory (expand-file-name "mail-tables/" e2e-work-dir))
-         ;; stands in for mail-sync: remove and rename move a label's
-         ;; folder as mail-sync does once Gmail agreed
-         (mail-sync-program (expand-file-name "mail-sync" e2e-work-dir))
-         (mail-sync-log (expand-file-name "mail-sync-log" e2e-work-dir))
+         ;; stands in for curl as Gmail's IMAP server: it logs each
+         ;; request to imap-calls, and a rename or a delete changes the
+         ;; boxes gmail-boxes lists.  The label cases read an isyncrc
+         ;; whose account commands print no secret
+         (mail-imap-program (expand-file-name "imap-curl" e2e-work-dir))
+         (imap-calls (expand-file-name "imap-calls" e2e-work-dir))
+         (label-config (expand-file-name "isyncrc-labels" e2e-work-dir))
          (removed (expand-file-name "removed/" e2e-work-dir))
          ;; stand in for mbsync and notmuch new: each logs its call to
          ;; sync-calls, mbsync waits while sync-hold exists, and its -ls
@@ -842,14 +847,23 @@ buffers, summary and queued files the cases leave are cleared after."
       (dolist (sub '("cur" "new" "tmp"))
         (make-directory (expand-file-name sub dir) t)))
     (make-directory removed t)
-    (with-temp-file mail-sync-program
+    (with-temp-file mail-imap-program
       (insert "#!/bin/sh\n"
-              "echo \"$*\" >> '" mail-sync-log "'\n"
-              "case \"$1\" in\n"
-              "  remove) mv '" root "'\"$2\" '" removed "'\"$2\";;\n"
-              "  rename) mv '" root "'\"$2\" '" root "'\"$3\";;\n"
+              "cat > /dev/null\n"
+              "while [ $# -gt 0 ]; do [ \"$1\" = --request ] && request=$2; shift; done\n"
+              "printf '%s\\n' \"$request\" >> '" imap-calls "'\n"
+              "first=$(printf '%s' \"$request\" | cut -d'\"' -f2)\n"
+              "second=$(printf '%s' \"$request\" | cut -d'\"' -f4)\n"
+              "case \"$request\" in\n"
+              "  RENAME*) { grep -vxF \"$first\" '" gmail-boxes "'; echo \"$second\"; }"
+              " > '" gmail-boxes ".new'; mv '" gmail-boxes ".new' '" gmail-boxes "';;\n"
+              "  DELETE*) grep -vxF \"$first\" '" gmail-boxes "' > '" gmail-boxes ".new';"
+              " mv '" gmail-boxes ".new' '" gmail-boxes "';;\n"
+              "  STATUS*) printf '* STATUS \"%s\" (UIDVALIDITY 7)\\r\\n' \"$first\";;\n"
               "esac\n"))
-    (set-file-modes mail-sync-program #o755)
+    (set-file-modes mail-imap-program #o755)
+    (write-region "IMAPAccount gmail\nHost imap.example.com\nUserCmd \"echo e2e\"\nPassCmd \"echo e2e\"\n"
+                  nil label-config)
     (with-temp-file mbsync-program
       (insert "#!/bin/sh\n"
               "printf '%s\\n' \"mbsync $*\" >> '" sync-calls "'\n"
@@ -1086,18 +1100,16 @@ buffers, summary and queued files the cases leave are cleared after."
               (read-groups ()
                 (when-let* ((server (alist-get "gmail" nnmaildir--servers nil nil #'equal)))
                   (sort (hash-table-keys (nnmaildir--srv-groups server)) #'string<)))
-              ;; what the mail-sync stand-in was asked, a line a run
-              (mail-sync-calls ()
-                (when (file-exists-p mail-sync-log)
+              ;; what the curl stand-in was asked, a request a line
+              (imap-requests ()
+                (when (file-exists-p imap-calls)
                   (with-temp-buffer
-                    (insert-file-contents mail-sync-log)
+                    (insert-file-contents imap-calls)
                     (split-string (buffer-string) "\n" t))))
-              ;; a label change mail-sync runs, until its sentinel is done
+              ;; a label change, until the sentinel of its last step ran
               (label-change-done ()
                 (with-timeout (10 nil)
-                  (while (seq-some (lambda (buffer)
-                                     (string-prefix-p " *mail-label-change*" (buffer-name buffer)))
-                                   (buffer-list))
+                  (while (mail-sync-running-p)
                     (accept-process-output nil 0.05)))
                 t)
               ;; what the stand-ins for mbsync and notmuch new were asked,
@@ -3914,59 +3926,68 @@ buffers, summary and queued files the cases leave are cleared after."
                             :got (format "err %S, entry %S, read %S, said %S" err
                                          (and (gnus-group-entry "nnmaildir+gmail:arrived") t)
                                          (read-groups) said))))
-                ;; labels made, renamed and deleted from the group buffer; the
-                ;; stand-in moves the folder as mail-sync does
-                (delete-other-windows)
-                (switch-to-buffer gnus-group-buffer)
-                (gnus-group-jump-to-group "nnmaildir+gmail:lists")
-                (let ((minibuffer-history nil))
-                  (execute-kbd-macro (kbd ", l n made RET")))
-                (loads-done)
-                (record ", l n makes a label's folder, and its group under Labels with point on it"
-                        (and (file-directory-p (expand-file-name "made/cur" root))
-                             (equal (gnus-group-topic "nnmaildir+gmail:made") "Labels")
-                             (equal (gnus-group-group-name) "nnmaildir+gmail:made")
-                             ;; Gmail gets it at the next sync, not from Emacs
-                             (not (seq-some (lambda (call) (string-match-p "made" call))
-                                            (mail-sync-calls))))
-                        :got (format "folder %S, topic %S, point on %S, mail-sync %S"
-                                     (file-directory-p (expand-file-name "made" root))
-                                     (gnus-group-topic "nnmaildir+gmail:made")
-                                     (gnus-group-group-name) (mail-sync-calls)))
-                ;; in a topic of its own, which the rename keeps
-                (execute-kbd-macro (kbd ", m Lists RET"))
-                (gnus-group-jump-to-group "nnmaildir+gmail:made")
-                ;; Gnus's prompt starts from the old name, point before it
-                (let ((minibuffer-history nil)
-                      (gnus-group-history nil))
-                  (execute-kbd-macro (kbd "r 2 RET")))
-                (label-change-done)
-                (loads-done)
-                (record "r renames a label through mail-sync, and its group keeps its topic"
-                        (and (member "rename made 2made" (mail-sync-calls))
-                             (file-directory-p (expand-file-name "2made/cur" root))
-                             (not (file-exists-p (expand-file-name "made" root)))
-                             (not (gnus-group-entry "nnmaildir+gmail:made"))
-                             (equal (gnus-group-topic "nnmaildir+gmail:2made") "Lists"))
-                        :got (format "mail-sync %S, folders %S, made %S, 2made in %S"
-                                     (mail-sync-calls) (directory-files root nil "made")
-                                     (and (gnus-group-entry "nnmaildir+gmail:made") t)
-                                     (gnus-group-topic "nnmaildir+gmail:2made")))
-                (gnus-group-jump-to-group "nnmaildir+gmail:2made")
-                (let ((use-short-answers t))
-                  (execute-kbd-macro (kbd ", l d y")))
-                (label-change-done)
-                (loads-done)
-                (record ", l d deletes a label through mail-sync once asked, and its group goes"
-                        (and (member "remove 2made" (mail-sync-calls))
-                             (file-directory-p (expand-file-name "2made" removed))
-                             (not (file-exists-p (expand-file-name "2made" root)))
-                             (not (gnus-group-entry "nnmaildir+gmail:2made"))
-                             (not (gnus-group-topic "nnmaildir+gmail:2made")))
-                        :got (format "mail-sync %S, removed %S, entry %S, topic %S"
-                                     (mail-sync-calls) (directory-files removed)
-                                     (and (gnus-group-entry "nnmaildir+gmail:2made") t)
-                                     (gnus-group-topic "nnmaildir+gmail:2made")))
+                ;; labels made, renamed and deleted from the group buffer,
+                ;; each change in Gmail through the curl stand-in
+                (let ((mail-sync-config label-config))
+                  (delete-other-windows)
+                  (switch-to-buffer gnus-group-buffer)
+                  (gnus-group-jump-to-group "nnmaildir+gmail:lists")
+                  (let ((minibuffer-history nil))
+                    (execute-kbd-macro (kbd ", l n made RET")))
+                  (loads-done)
+                  (record ", l n makes a label's folder, and its group under Labels with point on it"
+                          (and (file-directory-p (expand-file-name "made/cur" root))
+                               (equal (gnus-group-topic "nnmaildir+gmail:made") "Labels")
+                               (equal (gnus-group-group-name) "nnmaildir+gmail:made")
+                               ;; Gmail gets it at the next sync, not from Emacs
+                               (null (imap-requests)))
+                          :got (format "folder %S, topic %S, point on %S, imap %S"
+                                       (file-directory-p (expand-file-name "made" root))
+                                       (gnus-group-topic "nnmaildir+gmail:made")
+                                       (gnus-group-group-name) (imap-requests)))
+                  ;; a sync took it to Gmail, which numbers its messages
+                  ;; under UIDVALIDITY 7
+                  (write-region "made\n" nil gmail-boxes t)
+                  (write-region "FarUidValidity 7\n" nil (expand-file-name "made/.mbsyncstate" root))
+                  ;; in a topic of its own, which the rename keeps
+                  (execute-kbd-macro (kbd ", m Lists RET"))
+                  (gnus-group-jump-to-group "nnmaildir+gmail:made")
+                  ;; Gnus's prompt starts from the old name, point before it
+                  (let ((minibuffer-history nil)
+                        (gnus-group-history nil))
+                    (execute-kbd-macro (kbd "r 2 RET")))
+                  (label-change-done)
+                  (loads-done)
+                  (record "r renames a label in Gmail, keeps its synced folder, and its group its topic"
+                          (and (equal (imap-requests)
+                                      '("RENAME \"made\" \"2made\"" "STATUS \"2made\" (UIDVALIDITY)"))
+                               (file-exists-p (expand-file-name "2made/.mbsyncstate" root))
+                               (file-directory-p (expand-file-name "2made/cur" root))
+                               (not (file-exists-p (expand-file-name "made" root)))
+                               (not (gnus-group-entry "nnmaildir+gmail:made"))
+                               (equal (gnus-group-topic "nnmaildir+gmail:2made") "Lists"))
+                          :got (format "imap %S, folders %S, made %S, 2made in %S"
+                                       (imap-requests) (directory-files root nil "made")
+                                       (and (gnus-group-entry "nnmaildir+gmail:made") t)
+                                       (gnus-group-topic "nnmaildir+gmail:2made")))
+                  (gnus-group-jump-to-group "nnmaildir+gmail:2made")
+                  (let ((use-short-answers t))
+                    (execute-kbd-macro (kbd ", l d y")))
+                  (label-change-done)
+                  (loads-done)
+                  (let ((aside (expand-file-name "removed/" mail-sync-directory)))
+                    (record ", l d deletes a label in Gmail once asked, and its group goes"
+                            (and (member "DELETE \"2made\"" (imap-requests))
+                                 (file-directory-p aside)
+                                 (directory-files aside nil "\\`2made-")
+                                 (not (file-exists-p (expand-file-name "2made" root)))
+                                 (not (gnus-group-entry "nnmaildir+gmail:2made"))
+                                 (not (gnus-group-topic "nnmaildir+gmail:2made")))
+                            :got (format "imap %S, aside %S, entry %S, topic %S"
+                                         (imap-requests)
+                                         (and (file-directory-p aside) (directory-files aside))
+                                         (and (gnus-group-entry "nnmaildir+gmail:2made") t)
+                                         (gnus-group-topic "nnmaildir+gmail:2made")))))
                 ;; Org in the body, sent through real keys
                 (email-e2e--org-compose #'record)
                 ;; C-c C-c queues, the queue sends, e takes a message back
