@@ -112,9 +112,12 @@ script(1) disagree on syntax, hence the split."
                     macos? (str/includes? (str/lower-case (System/getProperty "os.name")) "mac")
                     emacs-args ["emacs" "-nw" "--init-directory" root
                                 "-l" (str (fs/path root "scripts" script))]
+                    ;; the pty takes the size of the terminal that runs bb,
+                    ;; and the e2e measures wrapping against the window width
+                    sized (str "stty cols 80 rows 24; exec " (str/join " " emacs-args))
                     cmd (if macos?
-                          (into ["script" "-q" "/dev/null"] emacs-args)
-                          ["script" "-qec" (str/join " " emacs-args) "/dev/null"])]
+                          ["script" "-q" "/dev/null" "sh" "-c" sized]
+                          ["script" "-qec" sized "/dev/null"])]
                 (println intro)
                 (apply p/shell {:continue true
                                 :extra-env {result-env result

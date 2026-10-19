@@ -68,3 +68,15 @@ reads as the one form Emacs will receive."
   (it "hands Emacs well-formed forms" ; a truncated payload evals to nothing good
     (dolist (payload (bb-edn-tests--payloads bb-edn-tests-file))
       (expect (read payload) :not :to-throw))))
+
+(describe "the bb.edn pty probes"
+  (it "boot Emacs in an 80x24 pty, CI's size, whatever terminal runs bb"
+    ;; the e2e measures wrapping against the window width
+    (with-temp-buffer
+      (insert-file-contents bb-edn-tests-file)
+      (goto-char (point-min))
+      (search-forward "(defn run-pty-probe")
+      (let ((probe (buffer-substring (point) (save-excursion (up-list) (point)))))
+        (expect probe :to-match "\"stty cols 80 rows 24; exec \"")
+        (expect probe :to-match "\\[\"script\" \"-q\" \"/dev/null\" \"sh\" \"-c\" sized\\]")
+        (expect probe :to-match "\\[\"script\" \"-qec\" sized \"/dev/null\"\\]")))))
