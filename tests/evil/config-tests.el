@@ -47,11 +47,16 @@ neither evil nor general (behind `map!') is available."
                               "(setq evil-ex-search-vim-style-regexp"))
   "The pre-load `setq' pairs, as a plist.")
 
+(defvar evil-tests--unlog-advice
+  (evil-tests--read-form "modules/evil/config.el"
+                         "(defadvice! unlog-noisy-errors-a"))
+
 (eval (evil-tests--read-form "modules/evil/config.el"
                              "(defun remember-visual-selection")
       t)
 (eval evil-tests--paste-advice t)
 (eval evil-tests--yank-advice t)
+(eval evil-tests--unlog-advice t)
 
 (describe "search highlight delay"
   (it "refreshes faster than macOS's quickest key repeat (15ms)"
@@ -136,5 +141,24 @@ neither evil nor general (behind `map!') is available."
         (insert-for-yank "")
         (expect (marker-position evil-visual-mark) :to-equal 1)
         (expect evil-visual-selection :to-be 'line)))))
+
+(describe "unlog-noisy-errors-a"
+  ;; The stub stands in for the real handler, which kills a batch Emacs.
+  (it "wraps the default command-error-function"
+    (expect (cadr (memq :around evil-tests--unlog-advice))
+            :to-equal '(function help-command-error-confusable-suggestions)))
+
+  (it "turns off *Messages* logging for buffer and line edges and quits"
+    (dolist (err '(beginning-of-buffer end-of-buffer beginning-of-line end-of-line
+                   quit minibuffer-quit))
+      (expect (unlog-noisy-errors-a (lambda (&rest _) message-log-max)
+                                    (list err) "" 'evil-line-move)
+              :to-be nil)))
+
+  (it "logs every other error and passes the arguments through"
+    (let ((message-log-max 1000))
+      (expect (unlog-noisy-errors-a (lambda (&rest args) (cons message-log-max args))
+                                    '(error "boom") "ctx" 'some-fn)
+              :to-equal '(1000 (error "boom") "ctx" some-fn)))))
 
 ;;; config-tests.el ends here

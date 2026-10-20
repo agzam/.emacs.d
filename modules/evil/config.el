@@ -62,6 +62,18 @@ Leaves `evil-insert-vcount' alone, so visual-block I/A still works."
   :before #'evil-cleanup-insert-state
   (setq evil-insert-count nil))
 
+;; The default `command-error-function': prints every uncaught command error.
+(defadvice! unlog-noisy-errors-a (fn data &rest args)
+  "Keep buffer and line edge errors and quits out of *Messages*.
+FN still shows DATA in the echo area; ARGS pass through."
+  :around #'help-command-error-confusable-suggestions
+  (let ((message-log-max
+         (unless (memq (car data) '(beginning-of-buffer end-of-buffer
+                                    beginning-of-line end-of-line
+                                    quit minibuffer-quit))
+           message-log-max)))
+    (apply fn data args)))
+
 (defun remember-visual-selection (beg end)
   "Store BEG..END as the region `evil-visual-restore' brings back.
 It reads these three variables and nothing else, so writing them is what
