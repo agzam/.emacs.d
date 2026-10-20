@@ -751,6 +751,13 @@
                   nil . "maximize")
                 which-key-replacement-alist)))
 
+;; The command loop runs `undefined' for any key sequence with no binding.
+(defadvice! cancel-prefix-quietly-a (fn)
+  "Cancel a key sequence ended by ESC or the quit key; otherwise call FN."
+  :around #'undefined
+  (unless (memq last-command-event '(?\e ?\C-g))
+    (funcall fn)))
+
 ;;
 ;;; Global text-manipulation keys (Doom config/default rows the vendoring
 ;;; missed - found by the global-key sweep; the (retired) key audit only
