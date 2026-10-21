@@ -21,6 +21,8 @@
 ;; valued, unlike the others: the rewrite specs `let'-bind it, and a
 ;; value-less defvar marks a variable special only inside its own file
 (defvar gptel--rewrite-overlays nil)
+;; valued for the same reason: the model refresh specs `let'-bind it
+(defvar gptel--known-backends nil)
 (provide 'mcp-hub)
 
 (describe "mcp-servers-from-eca-config"
@@ -1642,3 +1644,32 @@
         (gptel-persist-history 0 0))
       (expect (file-directory-p (expand-file-name "gptel" chat-root))
               :to-be nil))))
+
+(describe "gptel-refresh-models"
+  :var (claude copilot)
+  (before-each
+    ;; dispatch reads only the struct type, so a bare record stands in
+    (setq claude (record 'gptel-anthropic-oauth)
+          copilot (record 'gptel--gh))
+    (spy-on 'gptel-anthropic-oauth-update-models :and-return-value '(a b))
+    (spy-on 'gptel-copilot-update-models :and-return-value '(c d e)))
+
+  (it "reloads every backend that fetches its own list, in one call"
+    (let ((inhibit-message t)
+          (gptel--known-backends `(("Claude-OAuth" . ,claude)
+                                   ("Copilot" . ,copilot)
+                                   ("Ollama" . ,(record 'gptel-ollama)))))
+      (with-fake-feature 'gptel
+        (expect (gptel-refresh-models)
+                :to-equal "Models: Claude-OAuth 2, Copilot 3"))
+      (expect 'gptel-anthropic-oauth-update-models :to-have-been-called-with claude)
+      (expect 'gptel-copilot-update-models :to-have-been-called-with copilot)))
+
+  (it "reports a backend whose fetch failed and still reloads the rest"
+    (spy-on 'gptel-copilot-update-models :and-return-value nil)
+    (let ((inhibit-message t)
+          (gptel--known-backends `(("Copilot" . ,copilot)
+                                   ("Claude-OAuth" . ,claude))))
+      (with-fake-feature 'gptel
+        (expect (gptel-refresh-models)
+                :to-equal "Models: Copilot failed, Claude-OAuth 2")))))

@@ -1270,3 +1270,25 @@ gptel conversations."
           (concat consult-ripgrep-args " --sortr=modified"))
          (consult-async-min-input 0))  ; Show results immediately
     (consult-ripgrep dir initial)))
+
+;;; Model lists
+
+(defvar gptel--known-backends)
+(declare-function gptel-copilot-update-models "gptel-copilot")
+(declare-function gptel-anthropic-oauth-update-models "gptel-anthropic-oauth")
+
+;;;###autoload
+(defun gptel-refresh-models ()
+  "Reload the model list of every gptel backend that can fetch its own."
+  (interactive)
+  (require 'gptel)
+  (let (report)
+    (pcase-dolist (`(,name . ,backend) gptel--known-backends)
+      (when-let* ((update (pcase (type-of backend)
+                            ('gptel--gh #'gptel-copilot-update-models)
+                            ('gptel-anthropic-oauth #'gptel-anthropic-oauth-update-models))))
+        (push (if-let* ((models (funcall update backend)))
+                  (format "%s %d" name (length models))
+                (format "%s failed" name))
+              report)))
+    (message "Models: %s" (string-join (nreverse report) ", "))))

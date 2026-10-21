@@ -28,7 +28,7 @@
 ;; To use:
 ;; (setq gptel-model 'claude-sonnet-4-5-20250929
 ;;       gptel-backend (gptel-make-anthropic-oauth "Claude-OAuth" :stream t))
-;;    Use `gptel-anthropic-oauth-refresh-models' to refresh an existing backend.
+;;    Use `gptel-anthropic-oauth-update-models' to refresh an existing backend.
 
 ;;; Code:
 
@@ -67,8 +67,9 @@
 (defconst gptel-anthropic-oauth--redirect-uri "https://console.anthropic.com/oauth/code/callback"
   "OAuth redirect URI.")
 
-(defconst gptel-anthropic-oauth--models-url "https://api.anthropic.com/v1/models"
-  "Anthropic model discovery endpoint.")
+(defconst gptel-anthropic-oauth--models-url
+  "https://api.anthropic.com/v1/models?limit=1000"
+  "Anthropic model discovery endpoint, at its largest page size.")
 
 (defconst gptel-anthropic-oauth--required-system-prompt
   "You are Claude Code, Anthropic's official CLI for Claude."
@@ -404,22 +405,12 @@ annotated entry carries the existing properties along."
         :warning)
        nil))))
 
-(defun gptel-anthropic-oauth--refresh-backends (models)
-  "Set OAuth backend model lists to MODELS."
-  (let ((models (gptel-anthropic-oauth--annotate-thinking models)))
-    (dolist (entry gptel--known-backends)
-      (when (gptel-anthropic-oauth-p (cdr entry))
-        (setf (gptel-backend-models (cdr entry))
-              (gptel--process-models models))))))
-
-(defun gptel-anthropic-oauth-refresh-models ()
-  "Refresh Claude OAuth models from Anthropic."
-  (interactive)
-  (if-let* ((models (gptel-anthropic-oauth--fetch-models)))
-      (progn
-        (gptel-anthropic-oauth--refresh-backends models)
-        (message "Claude OAuth: loaded %d models" (length models)))
-    (user-error "Claude OAuth model discovery failed")))
+(defun gptel-anthropic-oauth-update-models (backend)
+  "Replace BACKEND's models with the ones Anthropic serves; return them, or nil."
+  (when-let* ((models (gptel-anthropic-oauth--fetch-models)))
+    (setf (gptel-backend-models backend)
+          (gptel--process-models
+           (gptel-anthropic-oauth--annotate-thinking models)))))
 
 ;;; Backend Creation
 

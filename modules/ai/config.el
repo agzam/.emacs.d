@@ -108,7 +108,7 @@
     :backend "Ollama"
     :model 'qwen3.8:27b)
 
-  (gptel-make-gh-copilot "Copilot")
+  (gptel-copilot-update-models (gptel-make-gh-copilot "Copilot"))
 
   (map! "C-c C-g" #'gptel-abort)
 

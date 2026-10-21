@@ -73,6 +73,14 @@
       (expect (memq 'tool-use (plist-get (cdr model) :capabilities))
               :to-be-truthy))))
 
+(describe "Copilot backend in ai/config.el"
+  (it "loads Copilot's model catalog as it is created"
+    ;; gptel's bundled Copilot list trails what the account can use
+    (expect (seq-some (lambda (call)
+                        (eq (car-safe (cadr call)) 'gptel-make-gh-copilot))
+                      (ai-tests--calls 'gptel-copilot-update-models))
+            :to-be-truthy)))
+
 (describe "local gptel presets"
   (it "exist"
     (expect (ai-tests--local-presets) :not :to-be nil))

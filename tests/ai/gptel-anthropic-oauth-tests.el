@@ -56,15 +56,41 @@
       (expect (plist-get (cdr (car models)) :description)
               :to-equal "Most capable model")))
 
-  (it "updates every registered OAuth backend"
+  (it "asks for every model in one page"
+    ;; the endpoint pages at 20 models by default and reports has_more
+    (spy-on 'gptel-anthropic-oauth--cached-token :and-return-value "token")
+    (spy-on 'url-retrieve-synchronously)
+    (spy-on 'display-warning)
+    (gptel-anthropic-oauth--fetch-models)
+    (expect (car (spy-calls-args-for 'url-retrieve-synchronously 0))
+            :to-match "[?&]limit=1000\\'"))
+
+  (it "replaces a backend's models with the discovered ones"
     (let ((backend (gptel-make-anthropic-oauth
                     "OAuth-test" :models '(claude-old))))
       (unwind-protect
           (progn
-            (gptel-anthropic-oauth--refresh-backends
-             '((claude-new :description "new")))
+            (spy-on 'gptel-anthropic-oauth--fetch-models
+                    :and-return-value '((claude-new :description "new")))
+            (expect (gptel-anthropic-oauth-update-models backend)
+                    :to-equal '(claude-new))
             (expect (gptel-backend-models backend)
                     :to-equal '(claude-new)))
+        (setf (symbol-plist 'claude-new) nil)
+        (setq gptel--known-backends
+              (cl-remove-if
+               (lambda (entry) (equal (car entry) "OAuth-test"))
+               gptel--known-backends)))))
+
+  (it "keeps a backend's models when discovery fails"
+    (let ((backend (gptel-make-anthropic-oauth
+                    "OAuth-test" :models '(claude-old))))
+      (unwind-protect
+          (progn
+            (spy-on 'gptel-anthropic-oauth--fetch-models :and-return-value nil)
+            (expect (gptel-anthropic-oauth-update-models backend) :to-be nil)
+            (expect (gptel-backend-models backend)
+                    :to-equal '(claude-old)))
         (setq gptel--known-backends
               (cl-remove-if
                (lambda (entry) (equal (car entry) "OAuth-test"))
