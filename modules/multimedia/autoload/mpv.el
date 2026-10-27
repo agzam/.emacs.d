@@ -104,6 +104,63 @@ connection is new."
   (message "Starting mpv to play %s" (car args))
   (apply orig-fn args))
 
+(defadvice! mpv-quit-before-kill-a (&rest _)
+  "Ask mpv to quit, so its scripts see shutdown, before mpv.el kills it.
+mpv.el kills with SIGKILL, which no script survives; a player that
+ignores the request for a second is killed as before."
+  :before #'mpv-kill
+  (when-let* (((mpv-live-p))
+              (ipc (and mpv--queue (tq-process mpv--queue))))
+    ;; read what is pending first: writing into a connection the player
+    ;; already dropped raises SIGPIPE, fatal to a batch Emacs
+    (accept-process-output ipc 0)
+    (when (process-live-p ipc)
+      (ignore-errors (mpv--enqueue '("quit") #'ignore))
+      (with-timeout (1 nil)
+        (while (mpv-live-p)
+          (sleep-for 0.05))))))
+
+(defun mpv-report-load-failure (url)
+  "Say in the echo area when mpv fails to load URL.
+mpv.el drops a player that dies before playing without a word."
+  (let (on-event on-exit)
+    (let ((done (lambda ()
+                  (remove-hook 'mpv-on-event-hook on-event)
+                  (remove-hook 'mpv-on-exit-hook on-exit))))
+      (setq on-event
+            (lambda (event)
+              (pcase (alist-get 'event event)
+                ("file-loaded" (funcall done))
+                ("end-file"
+                 (when (equal (alist-get 'reason event) "error")
+                   (funcall done)
+                   (message "mpv could not play %s: %s" url
+                            (or (alist-get 'file_error event) "error")))))))
+      (setq on-exit
+            (lambda ()
+              (funcall done)
+              (message "mpv quit before it played %s" url))))
+    (add-hook 'mpv-on-event-hook on-event)
+    (add-hook 'mpv-on-exit-hook on-exit)))
+
+;;;###autoload
+(defun mpv-play-url-at (url start &optional speed)
+  "Play URL in mpv from START seconds at SPEED.
+A running mpv plays URL right away and keeps its playlist."
+  (require 'mpv)
+  (let ((start (format "%.3f" start))
+        (speed (or speed 1)))
+    (if (mpv-live-p)
+        (progn
+          (mpv-report-load-failure url)
+          ;; insert-next-play would start only an idle player
+          (mpv-run-command "loadfile" url "insert-next" "-1"
+                           (concat "start=" start))
+          (mpv-run-command "playlist-next")
+          (mpv-set-property "speed" speed))
+      (mpv-start (concat "--start=" start) (format "--speed=%s" speed) url)
+      (mpv-report-load-failure url))))
+
 ;; The playback transient lives in media.el (media-transient): one
 ;; prefix, one keybind, backend-conditional groups (mpv / browser).
 

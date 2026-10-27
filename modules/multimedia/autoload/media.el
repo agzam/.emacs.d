@@ -87,6 +87,44 @@ URLs go to the browser lane (JXA or MPRIS) or mpv per
       (navegosa-media-open-url url)))))
 
 ;;;###autoload
+(defun media-detach-to-mpv ()
+  "Continue the browser's video in mpv at the same position and speed.
+The browser tab stays open, paused."
+  (interactive)
+  (let ((state nil))
+    (navegosa-media-pause (lambda (s) (setq state s)))
+    (with-timeout (7 (user-error "The browser did not report the paused tab"))
+      (while (not state)
+        (accept-process-output nil 0.05)))
+    (unless (plist-get state :url)
+      (user-error "This browser lane exposes no URL to hand to mpv"))
+    (let ((time (or (plist-get state :time) 0))
+          (rate (or (plist-get state :rate) 1)))
+      (mpv-play-url-at (plist-get state :url) time rate)
+      ;; YouTube in mpv takes seconds before it plays; say what is coming
+      (message "Paused the tab; mpv loads it at %s, %sx"
+               (format-seconds "%m:%02s" time) rate))))
+
+;;;###autoload
+(defun media-detach-to-browser ()
+  "Continue mpv's video in the browser at the same position and speed.
+mpv quits; a browser tab already showing the video plays it."
+  (interactive)
+  (unless (mpv-live-p)
+    (user-error "No mpv player is running"))
+  (let ((url (mpv-get-property "path"))
+        (time (mpv-get-property "time-pos"))
+        (rate (mpv-get-property "speed")))
+    (unless (string-match-p "\\`https?://" url)
+      (user-error "The browser takes URLs, and mpv plays a local file"))
+    ;; paused, not quit: if the browser fails, mpv is still there
+    (mpv-set-property "pause" t)
+    (navegosa-media-play-url-at url time rate)
+    (mpv-kill)
+    (message "Quit mpv; the browser plays it at %s, %sx"
+             (format-seconds "%m:%02s" time) rate)))
+
+;;;###autoload
 (transient-define-prefix media-transient ()
   "Playback control; backend resolved via `media-backend'."
   ;; re-create suffix objects after every press: group :if predicates
@@ -121,6 +159,7 @@ URLs go to the browser lane (JXA or MPRIS) or mpv per
    [("f" "fullscreen" mpv-fullscreen-toggle :transient t)
     ("SPC" "pause" mpv-pause :transient t)]
    [("o" "play" mpv-open :transient t)
+    ("D" "to browser" media-detach-to-browser :transient t)
     ("Q" "quit" mpv-kill)
     ("b" media-backend-switch :description media-backend-description
      :transient t)]]
@@ -143,6 +182,7 @@ URLs go to the browser lane (JXA or MPRIS) or mpv per
     ("SPC" "pause" navegosa-media-play-pause :transient t)]
    [("s" "pick tab" navegosa-media-select-tab :transient t)
     ("o" "open" media-open :transient t)
+    ("D" "to mpv" media-detach-to-mpv :transient t)
     ("g" "status" navegosa-media-status :transient t)
     ("b" media-backend-switch :description media-backend-description
      :transient t)]]
@@ -167,6 +207,13 @@ URLs go to the browser lane (JXA or MPRIS) or mpv per
     ("SPC" "pause" navegosa-media-play-pause :transient t)]
    [("s" "pick player" navegosa-media-select-tab :transient t)
     ("o" "open" media-open :transient t)
+    ("D" "to mpv" media-detach-to-mpv :transient t)
     ("g" "status" navegosa-media-status :transient t)
     ("b" media-backend-switch :description media-backend-description
-     :transient t)]])
+     :transient t)]]
+  ;; a pick made with s lasts one session: an old pick must not steal
+  ;; play/pause from the tab that plays later
+  (interactive)
+  (when (fboundp 'navegosa-media-clear-pick)
+    (navegosa-media-clear-pick))
+  (transient-setup 'media-transient))

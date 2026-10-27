@@ -96,6 +96,17 @@
           (expect (mpv-connect player) :to-be nil)
           (expect mpv--queue :to-be queue)))))
 
+  (it "asks the player to quit before killing it"
+    ;; mpv.el kills with SIGKILL; only a quit request lets mpv's own
+    ;; scripts run their shutdown handlers (the window-frame save)
+    (mpv-tests--with-ipc-server socket received
+      (let ((player (mpv-tests--fake-player socket)))
+        (mpv-connect player)
+        (mpv-kill)
+        (expect received :to-match "\"quit\"")
+        (expect (process-live-p player) :to-be nil)
+        (expect (mpv-live-p) :to-be nil))))
+
   (it "detaches when the player exits, running the exit hook"
     (mpv-tests--with-ipc-server socket received
       (let ((player (mpv-tests--fake-player socket))
@@ -163,3 +174,74 @@
           (mpv-open))))
     (expect calls :to-contain
             '(play-url "https://www.youtube.com/watch?v=q"))))
+
+(describe "mpv-report-load-failure"
+  :var (saved-event saved-exit)
+  (before-all (require 'mpv))
+  (before-each
+    (setq saved-event mpv-on-event-hook
+          saved-exit mpv-on-exit-hook)
+    (spy-on 'message))
+  (after-each
+    (setq mpv-on-event-hook saved-event
+          mpv-on-exit-hook saved-exit))
+
+  (it "says why mpv could not load the url, once"
+    (mpv-report-load-failure "https://youtu.be/x")
+    (run-hook-with-args 'mpv-on-event-hook
+                        '((event . "end-file") (reason . "error")
+                          (file_error . "loading failed")))
+    (run-hooks 'mpv-on-exit-hook)
+    (expect 'message :to-have-been-called-with
+            "mpv could not play %s: %s" "https://youtu.be/x" "loading failed")
+    (expect (spy-calls-count 'message) :to-equal 1)
+    (expect mpv-on-event-hook :to-equal saved-event)
+    (expect mpv-on-exit-hook :to-equal saved-exit))
+
+  (it "says so when mpv quits before playing"
+    (mpv-report-load-failure "https://youtu.be/x")
+    (run-hooks 'mpv-on-exit-hook)
+    (expect 'message :to-have-been-called-with
+            "mpv quit before it played %s" "https://youtu.be/x"))
+
+  (it "stays quiet once the file loads, and through the files after it"
+    (mpv-report-load-failure "https://youtu.be/x")
+    (run-hook-with-args 'mpv-on-event-hook '((event . "end-file") (reason . "stop")))
+    (run-hook-with-args 'mpv-on-event-hook '((event . "file-loaded")))
+    (run-hook-with-args 'mpv-on-event-hook '((event . "end-file") (reason . "error")))
+    (run-hooks 'mpv-on-exit-hook)
+    (expect 'message :not :to-have-been-called)
+    (expect mpv-on-event-hook :to-equal saved-event)))
+
+(describe "mpv-play-url-at"
+  (before-all (require 'mpv))
+  (before-each (spy-on 'mpv-report-load-failure))
+
+  (it "starts mpv at the position and speed"
+    (spy-on 'mpv-live-p :and-return-value nil)
+    (spy-on 'mpv-start)
+    (mpv-play-url-at "https://youtu.be/x" 754.3 1.5)
+    (expect 'mpv-start :to-have-been-called-with
+            "--start=754.300" "--speed=1.5" "https://youtu.be/x")
+    (expect 'mpv-report-load-failure :to-have-been-called-with "https://youtu.be/x"))
+
+  (it "plays at normal speed when none is given"
+    (spy-on 'mpv-live-p :and-return-value nil)
+    (spy-on 'mpv-start)
+    (mpv-play-url-at "https://youtu.be/x" 0)
+    (expect 'mpv-start :to-have-been-called-with
+            "--start=0.000" "--speed=1" "https://youtu.be/x"))
+
+  (it "plays next in a running mpv and keeps its playlist"
+    (spy-on 'mpv-live-p :and-return-value t)
+    (spy-on 'mpv-start)
+    (spy-on 'mpv-run-command)
+    (spy-on 'mpv-set-property)
+    (mpv-play-url-at "https://youtu.be/x" 12 1.25)
+    ;; insert-next-play would start only an idle player
+    (expect (spy-calls-all-args 'mpv-run-command)
+            :to-equal '(("loadfile" "https://youtu.be/x" "insert-next" "-1" "start=12.000")
+                        ("playlist-next")))
+    (expect 'mpv-set-property :to-have-been-called-with "speed" 1.25)
+    (expect 'mpv-report-load-failure :to-have-been-called-with "https://youtu.be/x")
+    (expect 'mpv-start :not :to-have-been-called)))

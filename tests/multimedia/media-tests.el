@@ -154,6 +154,7 @@ Same dual-dialect traversal as `transient-layout-commands'."
               mpv-toggle-osc mpv-get-path mpv-toggle-subtitles
               mpv-speed-decrease mpv-speed-increase mpv-speed-reset
               mpv-fullscreen-toggle mpv-pause mpv-open mpv-kill
+              media-detach-to-browser
               ;; browser group
               navegosa-media-volume-up navegosa-media-volume-down
               navegosa-media-mute-toggle
@@ -165,7 +166,7 @@ Same dual-dialect traversal as `transient-layout-commands'."
               navegosa-media-speed-reset
               navegosa-media-fullscreen-toggle navegosa-media-play-pause
               navegosa-media-select-tab media-open
-              navegosa-media-status
+              navegosa-media-status media-detach-to-mpv
               ;; the mpris group re-binds the same navegosa-media-*
               ;; commands - same set, no additions
               ;; the backend switch is shared by all three groups
@@ -188,7 +189,8 @@ Same dual-dialect traversal as `transient-layout-commands'."
                     (mpv-playlist-next . navegosa-media-next)
                     (mpv-get-path . navegosa-media-copy-url)
                     (mpv-fullscreen-toggle . navegosa-media-fullscreen-toggle)
-                    (mpv-open . media-open))))
+                    (mpv-open . media-open)
+                    (media-detach-to-browser . media-detach-to-mpv))))
       (dolist (pair mirror)
         (let ((mpv-key (cdr (assq (car pair) pairs)))
               (browser-key (cdr (assq (cdr pair) pairs))))
@@ -215,6 +217,29 @@ Same dual-dialect traversal as `transient-layout-commands'."
                                   (eq (car pair) 'media-backend-switch))
                                 pairs))))
       (expect keys :to-equal '("b" "b" "b"))))
+
+  (it "puts the detach to mpv on D in the browser and mpris groups"
+    (let ((keys (mapcar #'cdr (seq-filter
+                               (lambda (pair) (eq (car pair) 'media-detach-to-mpv))
+                               (media-tests--layout-keys
+                                (get 'media-transient 'transient--layout))))))
+      (expect keys :to-equal '("D" "D"))))
+
+  (it "puts the detach to the browser on D in the mpv group"
+    (let ((keys (mapcar #'cdr (seq-filter
+                               (lambda (pair) (eq (car pair) 'media-detach-to-browser))
+                               (media-tests--layout-keys
+                                (get 'media-transient 'transient--layout))))))
+      (expect keys :to-equal '("D"))))
+
+  (it "starts each session without a tab pick"
+    ;; a pick from an earlier session must not steal play/pause from
+    ;; the tab that plays now
+    (spy-on 'navegosa-media-clear-pick)
+    (spy-on 'transient-setup)
+    (media-transient)
+    (expect 'navegosa-media-clear-pick :to-have-been-called)
+    (expect 'transient-setup :to-have-been-called-with 'media-transient))
 
   (it "re-inits suffixes after every press so a backend hop redraws"
     ;; group :if predicates evaluate at (re)init time: without
@@ -362,3 +387,82 @@ Same dual-dialect traversal as `transient-layout-commands'."
       (with-temp-buffer
         (let ((kill-ring '("not a url")))
           (expect (media-open) :to-throw 'user-error))))))
+
+(describe "media-detach-to-mpv"
+  (it "hands the paused tab's url, position and speed to mpv"
+    (spy-on 'navegosa-media-pause
+            :and-call-fake
+            (lambda (handler)
+              (funcall handler '(:url "https://youtu.be/x" :time 754.3 :rate 1.5
+                                 :paused t))))
+    (spy-on 'mpv-play-url-at)
+    (spy-on 'message)
+    (media-detach-to-mpv)
+    (expect 'mpv-play-url-at :to-have-been-called-with "https://youtu.be/x" 754.3 1.5)
+    ;; mpv needs seconds for YouTube: the echo says what is coming
+    (expect 'message :to-have-been-called-with
+            "Paused the tab; mpv loads it at %s, %sx" "12:34" 1.5))
+
+  (it "waits for a browser that answers later"
+    (let (pending)
+      (spy-on 'navegosa-media-pause
+              :and-call-fake (lambda (handler) (setq pending handler)))
+      (spy-on 'mpv-play-url-at)
+      (run-at-time 0.1 nil (lambda ()
+                             (funcall pending '(:url "https://youtu.be/x" :time 3 :rate 1))))
+      (media-detach-to-mpv)
+      (expect 'mpv-play-url-at :to-have-been-called-with "https://youtu.be/x" 3 1)))
+
+  (it "refuses a lane that exposes no URL"
+    ;; Chromium's MPRIS metadata carries no xesam:url
+    (spy-on 'navegosa-media-pause
+            :and-call-fake (lambda (handler) (funcall handler '(:time 3 :paused t))))
+    (spy-on 'mpv-play-url-at)
+    (expect (media-detach-to-mpv) :to-throw 'user-error)
+    (expect 'mpv-play-url-at :not :to-have-been-called)))
+
+(describe "media-detach-to-browser"
+  :var (order mpv-path)
+  ;; a spy on the autoloaded mpv-kill loads mpv.el, which would redefine
+  ;; the mpv functions spied before it
+  (before-all (require 'mpv))
+  (before-each
+    (setq order nil
+          mpv-path "https://youtu.be/x")
+    (spy-on 'mpv-live-p :and-return-value t)
+    (spy-on 'mpv-get-property
+            :and-call-fake
+            (lambda (prop)
+              (pcase prop
+                ("path" mpv-path) ("time-pos" 754.3) ("speed" 1.5))))
+    (spy-on 'mpv-set-property
+            :and-call-fake (lambda (prop value) (push (list prop value) order)))
+    (spy-on 'navegosa-media-play-url-at
+            :and-call-fake (lambda (&rest _) (push 'browser order)))
+    (spy-on 'mpv-kill :and-call-fake (lambda () (push 'kill order)))
+    (spy-on 'message))
+
+  (it "pauses mpv, hands its url, position and speed to the browser, then quits mpv"
+    (media-detach-to-browser)
+    (expect 'navegosa-media-play-url-at
+            :to-have-been-called-with "https://youtu.be/x" 754.3 1.5)
+    (expect (reverse order) :to-equal '(("pause" t) browser kill))
+    (expect 'message :to-have-been-called-with
+            "Quit mpv; the browser plays it at %s, %sx" "12:34" 1.5))
+
+  (it "leaves mpv paused when the browser fails"
+    (spy-on 'navegosa-media-play-url-at
+            :and-call-fake (lambda (&rest _) (user-error "No browser windows")))
+    (expect (media-detach-to-browser) :to-throw 'user-error)
+    (expect 'mpv-kill :not :to-have-been-called))
+
+  (it "refuses a local file"
+    (setq mpv-path "/tmp/clip.mp4")
+    (expect (media-detach-to-browser) :to-throw 'user-error)
+    (expect 'mpv-set-property :not :to-have-been-called)
+    (expect 'mpv-kill :not :to-have-been-called))
+
+  (it "refuses when mpv is not running"
+    (spy-on 'mpv-live-p :and-return-value nil)
+    (expect (media-detach-to-browser) :to-throw 'user-error)
+    (expect 'navegosa-media-play-url-at :not :to-have-been-called)))
