@@ -32,6 +32,7 @@ the syntax alone.")
   (dolist (fn '(process-external-url
                 browse-url-externally
                 eww-open-in-other-window
+                hn-discussion
                 markdown-link-url-at-point
                 open-org-link-in-emacs))
     (when (autoloadp (symbol-function fn))
@@ -44,7 +45,8 @@ the syntax alone.")
                   (insert " -> " (format "%s" url)))))
     (cl-letf (((symbol-function 'eww-open-in-other-window) record)
               ((symbol-function 'browse-url-externally) record)
-              ((symbol-function 'forge-visit-topic-via-url) record))
+              ((symbol-function 'forge-visit-topic-via-url) record)
+              ((symbol-function 'consult-hn) record))
       (append
        (mapcan
         (pcase-lambda (`(,what ,ext ,text ,search ,type))
@@ -60,6 +62,19 @@ the syntax alone.")
                     :want (concat text " -> https://example.com/x"))))
            browse-actions-destinations))
         browse-actions-cases)
+       ;; "b h" lives on `embark-url-map', which org url links compose
+       ;; with and markdown links do not
+       (mapcar
+        (pcase-lambda (`(,what ,ext ,text ,search ,type))
+          (e2e-act-case
+           (list :label (format "%s -> HN discussion (b h)" what)
+                 :ext ext
+                 :text text
+                 :search search
+                 :type type
+                 :keys "b h"
+                 :want (concat text " -> https://example.com/x"))))
+        (cl-remove 'markdown-link browse-actions-cases :key #'cl-fifth))
        ;; "b b" is the handler `embark-url-config' prescribes, not eww flat
        (let ((text "see [[https://github.com/agzam/foo/pull/12][the PR]] now"))
          (list

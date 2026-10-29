@@ -66,6 +66,18 @@
       (eww--rename-buffer)
       (expect (buffer-name) :to-match "\\*https://y\\.example/ # eww\\*"))))
 
+(describe "hn-discussion"
+  (it "searches HN for URL, on the url attribute alone"
+    (let (call)
+      (cl-letf (((symbol-function 'consult-hn)
+                 (lambda (&rest args) (setq call args))))
+        (hn-discussion "https://example.com/post"))
+      (expect call :to-equal '("https://example.com/post" :url-match t))))
+
+  (it "reads the url as a command, so embark can inject its target"
+    (expect (commandp 'hn-discussion) :to-be-truthy)
+    (expect (interactive-form 'hn-discussion) :to-equal '(interactive "sURL: "))))
+
 (describe "eww-hn-discussion"
   (it "searches HN for the page's url, on the url attribute alone"
     (with-temp-buffer

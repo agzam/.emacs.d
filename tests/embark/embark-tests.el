@@ -526,10 +526,14 @@
                            (memq 'embark-url-map (flatten-tree f))))
                     (cons 'progn embark-tests--config-forms))))
 
-  (it "keeps b b, b o and b e on the url map every url type inherits"
+  (it "keeps b b, b o, b e and b h on the url map every url type inherits"
     (let ((layout (map-form-prefix-keys map-form 'embark-url-map "b")))
       (expect (car layout) :to-be nil)
-      (expect (cdr layout) :to-have-same-items-as '("b" "o" "e"))))
+      (expect (cdr layout) :to-have-same-items-as '("b" "o" "e" "h"))))
+
+  (it "searches HN for the url's threads on b h"
+    (expect (cdr (assoc "h" (map-form-prefix-pairs map-form 'embark-url-map "b")))
+            :to-equal '(function hn-discussion)))
 
   (dolist (map '(embark-markdown-link-map
                  embark-bug-reference-link-map

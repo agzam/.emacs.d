@@ -236,7 +236,8 @@
       ("b" . "browse")
       :desc "default" "b" #'process-external-url
       :desc "browser" "o" #'browse-url-externally
-      :desc "eww" "e" #'eww-open-in-other-window)
+      :desc "eww" "e" #'eww-open-in-other-window
+      :desc "HN discussion" "h" #'hn-discussion)
     ( :prefix
       ("c" . "convert")
       :desc "markdown link" "m" #'link-plain->link-markdown
