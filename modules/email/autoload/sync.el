@@ -32,6 +32,24 @@
 (defvar mail-sync-directory (expand-file-name "mail-sync/" doom-state-dir)
   "Directory of the sync's log, its tier markers and the label folders set aside.")
 
+(defvar mail-sync-log-buffer-name "*mail sync log*"
+  "Name of the buffer that shows the sync's log.")
+
+(defvar mail-sync-log-bury-delay 5
+  "Seconds the log stays on screen after the sync `sync-mail' showed it for ends.")
+
+(defvar mail-sync-log-window nil
+  "Window `sync-mail' showed the log in, until the log leaves it.")
+
+(defvar mail-sync-log-timer nil
+  "Timer that takes the log off the screen, or nil.")
+
+(defvar mail-sync-log-font-lock-keywords
+  '(("^.*: exit [1-9][0-9]* in .*$" . 'error)
+    ("^--- \\(?:done in .*, status [1-9][0-9]*\\|failed in .*\\) ---$" . 'error)
+    ("^.*\\<\\(?:error\\|could not\\)\\>.*$" . 'error))
+  "Lines of the sync's log that say something failed.")
+
 (defvar mail-sync-interval 300
   "Seconds between the syncs `mail-sync-timer' starts.")
 
@@ -67,10 +85,47 @@
 The isyncrc's group fast holds the inbox, sent, trash and the small
 labels; bulk holds All Mail and the mailing-list labels.")
 
+(define-derived-mode mail-sync-log-mode special-mode "Mail sync log"
+  "Mode of the buffer that shows the sync's log, what failed in the face `error'."
+  (setq-local font-lock-defaults '(mail-sync-log-font-lock-keywords t t)))
+
+(defun mail-sync-log-buffer ()
+  "The buffer named `mail-sync-log-buffer-name', made read-only if missing."
+  (or (get-buffer mail-sync-log-buffer-name)
+      (with-current-buffer (get-buffer-create mail-sync-log-buffer-name)
+        (mail-sync-log-mode)
+        (buffer-disable-undo)
+        (current-buffer))))
+
 (defun mail-sync-log (format-string &rest args)
-  "Append a line of FORMAT-STRING and ARGS to the sync's log."
-  (write-region (concat (apply #'format format-string args) "\n") nil
-                (expand-file-name "mail-sync.log" mail-sync-directory) t 'silent))
+  "Append a line of FORMAT-STRING and ARGS to the sync's log and its buffer."
+  (let ((line (concat (apply #'format format-string args) "\n")))
+    (write-region line nil (expand-file-name "mail-sync.log" mail-sync-directory) t 'silent)
+    (with-current-buffer (mail-sync-log-buffer)
+      (let ((inhibit-read-only t))
+        (save-excursion
+          (goto-char (point-max))
+          ;; a window at the end follows the line, one elsewhere stays
+          (insert-before-markers line))))))
+
+(defun show-mail-sync-log ()
+  "Show the sync's log in another window, unless a window shows it already."
+  (when (timerp mail-sync-log-timer)
+    (cancel-timer mail-sync-log-timer)
+    (setq mail-sync-log-timer nil))
+  (let ((buffer (mail-sync-log-buffer)))
+    (unless (get-buffer-window buffer 'visible)
+      (setq mail-sync-log-window (display-buffer buffer '(nil (inhibit-same-window . t)))))))
+
+(defun bury-mail-sync-log ()
+  "Take the log off the window `show-mail-sync-log' gave it, unless it is selected."
+  (when-let* ((window mail-sync-log-window)
+              ((window-live-p window))
+              ((eq (window-buffer window) (get-buffer mail-sync-log-buffer-name)))
+              ((not (eq window (selected-window)))))
+    (quit-restore-window window 'bury))
+  (setq mail-sync-log-window nil
+        mail-sync-log-timer nil))
 
 (defun mail-sync-due-p (marker interval)
   "Non-nil when MARKER of `mail-sync-directory' is missing or INTERVAL seconds old."
@@ -217,8 +272,14 @@ Its paths are absolute, so no tracked file can be it."
   (when mail-sync-report
     (if (zerop status)
         (message "Mail synced")
-      (message "Mail sync failed, status %d (see %s)" status
-               (abbreviate-file-name (expand-file-name "mail-sync.log" mail-sync-directory)))))
+      (message "%s" (propertize
+                     (format "Mail sync failed, status %d (see %s)" status
+                             (abbreviate-file-name
+                              (expand-file-name "mail-sync.log" mail-sync-directory)))
+                     'face 'error)))
+    (when mail-sync-log-window
+      (setq mail-sync-log-timer
+            (run-with-timer mail-sync-log-bury-delay nil #'bury-mail-sync-log))))
   (when (and (featurep 'gnus) (gnus-alive-p))
     (refresh-synced-mail-groups start))
   (run-waiting-label-change))
@@ -279,14 +340,17 @@ sync say in the echo area how it ended.  Non-nil when one started."
 ;;;###autoload
 (defun sync-mail (&optional full)
   "Sync mail with Gmail and run `mail-sync-hook', all in the background.
-With FULL, the mail sync runs every tier at once.  The echo area says
-how it ended."
+With FULL, the mail sync runs every tier at once.  The log shows in
+another window until `mail-sync-log-bury-delay' seconds after the sync
+ends, and the echo area says how it ended."
   (interactive "P")
-  (cond ((start-mail-sync full t))
-        (running-label-change
-         (message "A label change runs; sync once it is done"))
-        (t (setq mail-sync-report t)
-           (message "A mail sync runs already; it says when it is done")))
+  (if (and running-label-change (mail-sync-running-p))
+      (message "A label change runs; sync once it is done")
+    ;; before the start, which may end the sync at once
+    (show-mail-sync-log)
+    (unless (start-mail-sync full t)
+      (setq mail-sync-report t)
+      (message "A mail sync runs already; it says when it is done")))
   (run-hooks 'mail-sync-hook))
 
 ;;; Label changes

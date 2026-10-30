@@ -102,6 +102,10 @@ isyncrc's account prints the login ann and the password app-password."
           (mbsync-program (sync-tests--program dir "mbsync" ,answers))
           (notmuch-program (sync-tests--program dir "notmuch" ,answers))
           (mail-imap-program (sync-tests--curl dir ,answers))
+          (mail-sync-log-buffer-name (generate-new-buffer-name "*sync-tests log*"))
+          (mail-sync-log-bury-delay 0.3)
+          (mail-sync-log-window nil)
+          (mail-sync-log-timer nil)
           (mail-sync-process nil)
           (mail-sync-report nil)
           (mail-sync-hook nil)
@@ -114,12 +118,18 @@ isyncrc's account prints the login ann and the password app-password."
                            "UserCmd \"echo \\\"ann\\\"\"\n"
                            "PassCmd \"printf '%s' \\\"app-password\\\"\"\n")
                    nil mail-sync-config nil 'silent)
-     (unwind-protect (progn ,@body)
-       (ignore-errors (delete-file (expand-file-name "hold" dir)))
-       (sync-tests--wait)
-       (when (process-live-p mail-sync-process)
-         (delete-process mail-sync-process))
-       (delete-directory dir t))))
+     ;; , u shows the log in a window of its own
+     (save-window-excursion
+       (unwind-protect (progn ,@body)
+         (ignore-errors (delete-file (expand-file-name "hold" dir)))
+         (sync-tests--wait)
+         (when (process-live-p mail-sync-process)
+           (delete-process mail-sync-process))
+         (when (timerp mail-sync-log-timer)
+           (cancel-timer mail-sync-log-timer))
+         (when-let* ((buffer (get-buffer mail-sync-log-buffer-name)))
+           (kill-buffer buffer))
+         (delete-directory dir t)))))
 
 (defun sync-tests--calls (dir)
   "Each call the stand-ins under DIR logged, in order."
@@ -204,6 +214,28 @@ isyncrc's account prints the login ann and the password app-password."
   "Run one sync, FULL or by the markers, to its end."
   (prog1 (start-mail-sync full)
     (sync-tests--wait)))
+
+(defun sync-tests--after (seconds)
+  "Run timers and process output for SECONDS."
+  (let ((end (+ (float-time) seconds)))
+    (while (< (float-time) end)
+      (accept-process-output nil 0.02))))
+
+(defun sync-tests--log-window ()
+  "The window that shows the log, or nil."
+  (get-buffer-window mail-sync-log-buffer-name))
+
+(defun sync-tests--faces ()
+  "The face at the start of each line of the log, once fontified."
+  (with-current-buffer mail-sync-log-buffer-name
+    (font-lock-ensure)
+    (save-excursion
+      (goto-char (point-min))
+      (let (faces)
+        (while (not (eobp))
+          (push (get-text-property (point) 'face) faces)
+          (forward-line 1))
+        (nreverse faces)))))
 
 (defun sync-tests--said (fn)
   "Call FN; return what it said in the echo area, oldest first."
@@ -410,6 +442,141 @@ isyncrc's account prints the login ann and the password app-password."
       (sync-tests--sync)
       (expect (sync-tests--log) :to-match "IMAP command LIST returned an error"))))
 
+(describe "the log buffer"
+  (it "holds what the log file holds, syncs and label changes alike, and no window shows it"
+    (sync-tests--with '(("inbox" 0 "Channels: 1    Boxes: 1\n")
+                        ("-ls gmail-remote" 0 "===== gmail-remote:\nINBOX\ntravel\n"))
+      (sync-tests--fresh-markers)
+      (sync-tests--folder "travel" t)
+      (expect (get-buffer mail-sync-log-buffer-name) :to-be nil)
+      (sync-tests--sync)
+      (sync-tests--change '(delete "travel"))
+      (let ((buffer (get-buffer mail-sync-log-buffer-name)))
+        (expect (buffer-live-p buffer) :to-be t)
+        (expect (get-buffer-window buffer t) :to-be nil)
+        (with-current-buffer buffer
+          (expect (buffer-string) :to-equal (sync-tests--log))
+          (expect (buffer-string) :to-match "Channels: 1    Boxes: 1\n")
+          (expect (buffer-string) :to-match "imap DELETE \"travel\": exit 0 in ")
+          (expect major-mode :to-be 'mail-sync-log-mode)
+          (expect (derived-mode-p 'special-mode) :to-be-truthy)
+          (expect buffer-read-only :to-be t)
+          (expect buffer-undo-list :to-be t)))))
+  (it "shows what failed in the face error, and the rest as it is"
+    (sync-tests--with '(("inbox" 1 "Socket error on imap.example.com: timeout.\n")
+                        ("-ls gmail-remote" 1 "IMAP command LIST returned an error\n"))
+      (sync-tests--fresh-markers)
+      (sync-tests--sync)
+      (sync-tests--change '(delete "travel"))
+      ;; the sync: its start, mbsync's report and exit, the index, its end;
+      ;; the change: its start, the listing's report and exit, its end
+      (expect (sync-tests--faces)
+              :to-equal '(nil error error nil error nil error error error))))
+  (it "keeps a window at its end following new lines, and one elsewhere in place"
+    (sync-tests--with nil
+      (sync-tests--fresh-markers)
+      (sync-tests--sync)
+      (save-window-excursion
+        (let ((other (split-window)))
+          (switch-to-buffer mail-sync-log-buffer-name)
+          (set-window-buffer other (current-buffer))
+          ;; the selected window at the end, the other at the start
+          (goto-char (point-max))
+          (set-window-point other (point-min))
+          (let ((before (point-max)))
+            (sync-tests--sync)
+            (expect (< before (point-max)) :to-be t))
+          (expect (window-point) :to-equal (point-max))
+          (expect (window-point other) :to-equal (point-min))
+          ;; and the other way round
+          (goto-char (point-min))
+          (set-window-point other (point-max))
+          (sync-tests--sync)
+          (expect (window-point) :to-equal (point-min))
+          (expect (window-point other) :to-equal (point-max)))))))
+
+(describe "the log on screen"
+  (it "shows in another window on , u, keeps the focus, and goes a while after the sync ends"
+    (sync-tests--with nil
+      (sync-tests--fresh-markers)
+      (delete-other-windows)
+      (let ((selected (selected-window))
+            (shown (window-buffer)))
+        (write-region "" nil (expand-file-name "hold" dir))
+        (sync-tests--said #'sync-mail)
+        (expect (window-live-p (sync-tests--log-window)) :to-be t)
+        (expect (selected-window) :to-be selected)
+        (expect (window-buffer selected) :to-be shown)
+        (delete-file (expand-file-name "hold" dir))
+        (sync-tests--said #'sync-tests--wait)
+        ;; the sync ended, and the log stays for the delay
+        (expect (window-live-p (sync-tests--log-window)) :to-be t)
+        (sync-tests--after 0.5)
+        (expect (sync-tests--log-window) :to-be nil)
+        (expect (count-windows) :to-equal 1)
+        (expect (car (last (buffer-list))) :to-be (get-buffer mail-sync-log-buffer-name)))))
+  (it "goes a while after a sync that ended before , u returned"
+    (sync-tests--with nil
+      (sync-tests--fresh-markers)
+      (delete-other-windows)
+      (let ((mbsync-program (expand-file-name "missing" dir))
+            (notmuch-program (expand-file-name "missing" dir)))
+        (sync-tests--said #'sync-mail))
+      (expect (mail-sync-running-p) :to-be nil)
+      (expect (window-live-p (sync-tests--log-window)) :to-be t)
+      (sync-tests--after 0.5)
+      (expect (sync-tests--log-window) :to-be nil)))
+  (it "gives a window it borrowed its buffer back"
+    (sync-tests--with nil
+      (sync-tests--fresh-markers)
+      (delete-other-windows)
+      (let ((other (split-window))
+            (buffer (get-buffer-create "*sync-tests other*")))
+        (unwind-protect
+            (progn
+              (set-window-buffer other buffer)
+              (sync-tests--said (lambda () (sync-mail) (sync-tests--wait)))
+              (expect (sync-tests--log-window) :to-be other)
+              (sync-tests--after 0.5)
+              (expect (window-live-p other) :to-be t)
+              (expect (window-buffer other) :to-be buffer))
+          (kill-buffer buffer)))))
+  (it "stays while its window is selected"
+    (sync-tests--with nil
+      (sync-tests--fresh-markers)
+      (delete-other-windows)
+      (write-region "" nil (expand-file-name "hold" dir))
+      (sync-tests--said #'sync-mail)
+      (let ((window (sync-tests--log-window)))
+        (select-window window)
+        (delete-file (expand-file-name "hold" dir))
+        (sync-tests--said #'sync-tests--wait)
+        (sync-tests--after 0.5)
+        (expect (window-live-p window) :to-be t)
+        (expect (window-buffer window) :to-be (get-buffer mail-sync-log-buffer-name)))))
+  (it "stays through a sync , u asks for before it goes, and through one already running"
+    (sync-tests--with nil
+      (sync-tests--fresh-markers)
+      (delete-other-windows)
+      (let ((hold (expand-file-name "hold" dir)))
+        ;; a sync the timer started, which , u then shows
+        (write-region "" nil hold)
+        (start-mail-sync)
+        (expect (sync-tests--log-window) :to-be nil)
+        (sync-tests--said #'sync-mail)
+        (expect (window-live-p (sync-tests--log-window)) :to-be t)
+        (delete-file hold)
+        (sync-tests--said #'sync-tests--wait)
+        ;; , u again before the log goes
+        (write-region "" nil hold)
+        (sync-tests--said #'sync-mail)
+        (sync-tests--after 0.5)
+        (expect (window-live-p (sync-tests--log-window)) :to-be t)
+        (delete-file hold)
+        (sync-tests--said #'sync-tests--wait)
+        (sync-tests--after 0.5)
+        (expect (sync-tests--log-window) :to-be nil)))))
+
 (describe "labels Gmail dropped"
   (it "moves the folder of a synced label Gmail no longer lists out of the store"
     (sync-tests--with '(("-ls gmail-remote" 0
@@ -544,17 +711,20 @@ isyncrc's account prints the login ann and the password app-password."
                             (delete-file (expand-file-name "hold" dir))
                             (sync-tests--wait)))
         (expect ran :to-equal '(t)))))
-  (it "says in the echo area how the mail sync ended"
+  (it "says in the echo area how the mail sync ended, a failure in the face error"
     (sync-tests--with nil
       (sync-tests--fresh-markers)
-      (expect (sync-tests--said (lambda () (sync-mail) (sync-tests--wait)))
-              :to-equal '("Mail synced")))
+      (let ((said (sync-tests--said (lambda () (sync-mail) (sync-tests--wait)))))
+        (expect said :to-equal '("Mail synced"))
+        (expect (get-text-property 0 'face (car said)) :to-be nil)))
     (sync-tests--with '(("inbox" 1 ""))
       (sync-tests--fresh-markers)
-      (expect (sync-tests--said (lambda () (sync-mail) (sync-tests--wait)))
-              :to-equal (list (format "Mail sync failed, status 1 (see %s)"
-                                      (abbreviate-file-name
-                                       (expand-file-name "mail-sync.log" mail-sync-directory)))))))
+      (let ((said (sync-tests--said (lambda () (sync-mail) (sync-tests--wait)))))
+        (expect said
+                :to-equal (list (format "Mail sync failed, status 1 (see %s)"
+                                        (abbreviate-file-name
+                                         (expand-file-name "mail-sync.log" mail-sync-directory)))))
+        (expect (get-text-property 0 'face (car said)) :to-be 'error))))
   (it "says nothing of a sync the timer started"
     (sync-tests--with '(("inbox" 1 ""))
       (sync-tests--fresh-markers)
@@ -579,10 +749,18 @@ isyncrc's account prints the login ann and the password app-password."
              (mail-sync-hook (list (lambda () (setq ran t)))))
         (expect (sync-tests--said #'sync-mail)
                 :to-equal '("A label change runs; sync once it is done"))
-        (expect ran :to-be t))
+        (expect ran :to-be t)
+        (expect (sync-tests--log-window) :to-be nil))
       (delete-file (expand-file-name "hold" dir))
       (sync-tests--wait)
       (expect (sync-tests--calls dir) :to-equal (list (sync-tests--mbsync "-ls gmail-remote")))))
+  (it "syncs when a label change died and left its mark"
+    (sync-tests--with nil
+      (sync-tests--fresh-markers)
+      (let ((running-label-change '(delete "travel")))
+        (sync-tests--said (lambda () (sync-mail) (sync-tests--wait))))
+      (expect (sync-tests--calls dir)
+              :to-equal (list (sync-tests--mbsync "inbox") (sync-tests--notmuch)))))
   (it "runs the full tier with a prefix argument"
     (sync-tests--with nil
       (sync-tests--fresh-markers)

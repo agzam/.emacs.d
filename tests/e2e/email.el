@@ -55,6 +55,8 @@
 (defvar mail-sync-process)
 (defvar mail-sync-report)
 (defvar mail-sync-timer)
+(defvar mail-sync-log-buffer-name)
+(defvar mail-sync-log-bury-delay)
 (defvar mail-live-preview-name)
 (defvar mail-live-history)
 
@@ -787,14 +789,19 @@ buffers, summary and queued files the cases leave are cleared after."
          (label-config (expand-file-name "isyncrc-labels" e2e-work-dir))
          (removed (expand-file-name "removed/" e2e-work-dir))
          ;; stand in for mbsync and notmuch new: each logs its call to
-         ;; sync-calls, mbsync waits while sync-hold exists, and its -ls
-         ;; prints gmail-boxes
+         ;; sync-calls, mbsync waits while sync-hold exists, fails while
+         ;; sync-fail exists, and its -ls prints gmail-boxes
          (mbsync-program (expand-file-name "mbsync" e2e-work-dir))
          (notmuch-program notmuch)
          (sync-calls (expand-file-name "sync-calls" e2e-work-dir))
          (sync-hold (expand-file-name "sync-hold" e2e-work-dir))
+         (sync-fail (expand-file-name "sync-fail" e2e-work-dir))
          (gmail-boxes (expand-file-name "gmail-boxes" e2e-work-dir))
          (mail-sync-directory (expand-file-name "sync-state/" e2e-work-dir))
+         ;; a timer sync before the cancel above logs to the real buffer
+         (mail-sync-log-buffer-name "*e2e mail sync log*")
+         ;; the log , u shows leaves before the next case looks at windows
+         (mail-sync-log-bury-delay 0.5)
          (mail-sync-process nil)
          (mail-sync-report nil)
          (gnus-search-notmuch-config-file (expand-file-name "notmuch-config" e2e-work-dir))
@@ -869,6 +876,7 @@ buffers, summary and queued files the cases leave are cleared after."
       (insert "#!/bin/sh\n"
               "printf '%s\\n' \"mbsync $*\" >> '" sync-calls "'\n"
               "while [ -f '" sync-hold "' ]; do sleep 0.05; done\n"
+              "[ -f '" sync-fail "' ] && { echo 'Socket error on imap.example.com: timeout.'; exit 1; }\n"
               "case \" $* \" in *\" -ls \"*) cat '" gmail-boxes "';; esac\n"))
     (set-file-modes mbsync-program #o755)
     (write-region "===== gmail-remote:\nINBOX\n[Gmail]/All Mail\n" nil gmail-boxes)
@@ -1546,10 +1554,16 @@ buffers, summary and queued files the cases leave are cleared after."
                 (record ", u's fetch counts the news group's new post"
                         (eql (gnus-group-unread news-group) 3)
                         :got (format "unread %S" (gnus-group-unread news-group)))
+                ;; the log the earlier , u showed has left the screen
+                (with-timeout (5)
+                  (while (get-buffer-window mail-sync-log-buffer-name t)
+                    (accept-process-output nil 0.05)))
                 ;; , u syncs mail too, and returns while mbsync is held
                 (let ((unread (gnus-group-unread "nnmaildir+gmail:inbox"))
                       (fetched (expand-file-name "fetched/" root))
                       (synced-file (expand-file-name "new/1700000091.91.fixture" inbox))
+                      (selected (selected-window))
+                      (shown (window-buffer (selected-window)))
                       (start (float-time)))
                   (write-region "" nil sync-hold)
                   (execute-kbd-macro (kbd ", u"))
@@ -1557,6 +1571,15 @@ buffers, summary and queued files the cases leave are cleared after."
                           (and (< (- (float-time) start) 0.5) (mail-sync-running-p) t)
                           :got (format "%.2f s, syncing %S" (- (float-time) start)
                                        (mail-sync-running-p)))
+                  (let ((window (get-buffer-window mail-sync-log-buffer-name t)))
+                    (record ", u shows the sync's log in another window and keeps the focus"
+                            (and (window-live-p window)
+                                 (not (eq window selected))
+                                 (eq (selected-window) selected)
+                                 (eq (window-buffer selected) shown))
+                            :got (format "log in %S, selected %S on %S, was %S on %S" window
+                                         (selected-window) (window-buffer (selected-window))
+                                         selected shown)))
                   ;; meanwhile mbsync brings a message to the inbox and a
                   ;; label made in Gmail, and writes both state files
                   (dolist (sub '("cur" "new" "tmp"))
@@ -1580,6 +1603,27 @@ buffers, summary and queued files the cases leave are cleared after."
                                        (mail-sync-running-p) unread
                                        (gnus-group-unread "nnmaildir+gmail:inbox") (read-groups)
                                        (gnus-group-unread "nnmaildir+gmail:fetched")))
+                  (with-timeout (5)
+                    (while (get-buffer-window mail-sync-log-buffer-name t)
+                      (accept-process-output nil 0.05)))
+                  (let ((log (get-buffer mail-sync-log-buffer-name))
+                        (file (expand-file-name "mail-sync.log" mail-sync-directory)))
+                    (record "the log leaves the screen once the sync ended, holding what its file holds"
+                            (and log
+                                 (not (get-buffer-window log t))
+                                 (eq (selected-window) selected)
+                                 (eq (buffer-local-value 'major-mode log) 'mail-sync-log-mode)
+                                 (equal (with-current-buffer log (buffer-string))
+                                        (with-temp-buffer
+                                          (insert-file-contents file)
+                                          (buffer-string))))
+                            :got (format "buffer %S, window %S, mode %S, text %S" log
+                                         (and log (get-buffer-window log t))
+                                         (and log (buffer-local-value 'major-mode log))
+                                         (and log (with-current-buffer log
+                                                    (buffer-substring-no-properties
+                                                     (max (point-min) (- (point-max) 300))
+                                                     (point-max)))))))
                   ;; the feed's , u found no marker, the later ones fresh ones
                   (record "the first sync lists Gmail's labels and syncs every box, a later one the inbox, through the module's isyncrc"
                           (and (equal (seq-take (sync-runs) 3)
@@ -1626,7 +1670,28 @@ buffers, summary and queued files the cases leave are cleared after."
                   (record "the sync reads the inbox again without the message mbsync took out"
                           (eql (gnus-group-unread "nnmaildir+gmail:inbox") unread)
                           :got (format "inbox %S, was %S" (gnus-group-unread "nnmaildir+gmail:inbox")
-                                       unread)))
+                                       unread))
+                  ;; mbsync fails once, as it does when Gmail stops answering
+                  (write-region "" nil sync-fail)
+                  (synced)
+                  (delete-file sync-fail)
+                  (let ((lines (with-current-buffer mail-sync-log-buffer-name
+                                 (font-lock-ensure)
+                                 (save-excursion
+                                   (goto-char (point-max))
+                                   (forward-line -5)
+                                   (let (lines)
+                                     (while (not (eobp))
+                                       (push (cons (get-text-property (point) 'face)
+                                                   (buffer-substring-no-properties
+                                                    (point) (line-end-position)))
+                                             lines)
+                                       (forward-line 1))
+                                     (nreverse lines))))))
+                    ;; its start, mbsync's report and exit, the index, its end
+                    (record "the log shows what a failed sync said in the face error, the rest as it is"
+                            (equal (mapcar #'car lines) '(nil error error nil error))
+                            :got (format "%S" lines))))
                 ;; a Reddit post and its comments read as one thread, each
                 ;; under what it answers, the post heading it from outside
                 ;; the window
