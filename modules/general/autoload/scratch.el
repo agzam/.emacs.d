@@ -99,13 +99,14 @@ buffer's `default-directory'; PROJECT-NAME namespaces buffer and file."
   "Save the current scratch buffer to `scratch-dir'."
   (let ((content (buffer-substring-no-properties (point-min) (point-max)))
         (point (point))
-        (mode major-mode))
-    (make-directory scratch-dir t)
-    (with-temp-file
-        (expand-file-name (concat (or scratch-current-project
-                                      scratch-default-file)
-                                  ".el")
-                          scratch-dir)
+        (mode major-mode)
+        (file (expand-file-name (concat (or scratch-current-project
+                                            scratch-default-file)
+                                        ".el")
+                                scratch-dir)))
+    ;; A project name can hold a slash, as remoto's OWNER/REPO@REF does.
+    (make-directory (file-name-directory file) t)
+    (with-temp-file file
       (prin1 (list content point mode) (current-buffer)))))
 
 (defun persist-scratch-buffers-h ()
