@@ -434,20 +434,6 @@ GraphQL `errors' alist, which otherwise dies with `listp, http'."
 (use-package remoto
   :ensure (remoto :host github :repo "agzam/remoto.el" :files ("*.el"))
   :defer t
-  :init
-  ;; remoto installs a /github: virtual-filesystem handler at load time, which
-  ;; is the only reason it needs to load eagerly. Bootstrap a tiny handler that
-  ;; pulls remoto in on first /github: (or /gh:) access, then steps aside for
-  ;; remoto's own handler - keeping path-opening while deferring the load cost.
-  (defun remoto-bootstrap-file-handler (operation &rest args)
-    (setq file-name-handler-alist
-          (rassq-delete-all #'remoto-bootstrap-file-handler file-name-handler-alist))
-    (require 'remoto)
-    (apply operation args))
-  (unless (rassq #'remoto-bootstrap-file-handler file-name-handler-alist)
-    (push (cons (rx bos "/" (or "github" "gh") ":")
-                #'remoto-bootstrap-file-handler)
-          file-name-handler-alist))
   :config
   ;; the package browses on a bare "b"; the browse keys are uniform here.
   ;; Every target is a /github: path, so opening one in Emacs is `find-file'
