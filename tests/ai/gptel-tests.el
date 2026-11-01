@@ -23,6 +23,10 @@
 (defvar gptel--rewrite-overlays nil)
 ;; valued for the same reason: the model refresh specs `let'-bind it
 (defvar gptel--known-backends nil)
+;; valued for the same reason: the menu model specs `let'-bind it.  Not
+;; gptel-backend: bound at all, it makes the merge label call a backend
+;; accessor on it, so those specs bind it with `cl-progv' instead.
+(defvar gptel-model nil)
 (provide 'mcp-hub)
 
 (describe "mcp-servers-from-eca-config"
@@ -741,7 +745,41 @@
     (expect (plist-get (cdr (transient-get-suffix
                              'gptel-improve-text-transient "e"))
                        :command)
-            :to-be 'gptel-summarize)))
+            :to-be 'gptel-summarize))
+
+  ;; transient clones the picker with these args, so a pick in this menu
+  ;; writes its own variables and never gptel-model
+  (it "points the model picker at the menu's own variables"
+    (let ((spec (cdr (transient-get-suffix 'gptel-improve-text-transient
+                                           'gptel--infix-provider))))
+      (expect (plist-get spec :variable) :to-be 'gptel-improve-text-model)
+      (expect (plist-get spec :backend) :to-be 'gptel-improve-text-backend)
+      (expect (plist-get spec :set-value) :to-be 'gptel-improve-text-set-model)
+      (expect (plist-get spec :init-value) :to-be 'gptel-improve-text-init-model))))
+
+(describe "gptel-improve-text-set-model"
+  (it "sets the global value even when gptel-menu asks for buffer scope"
+    (let ((gptel-improve-text-model 'before))
+      (with-temp-buffer
+        (gptel-improve-text-set-model 'gptel-improve-text-model 'picked t)
+        (expect (local-variable-p 'gptel-improve-text-model) :to-be nil)
+        (expect (default-value 'gptel-improve-text-model) :to-be 'picked)))))
+
+(describe "gptel-improve-text-init-model"
+  (it "starts the menu's model as a copy of gptel's and keeps it after"
+    (cl-progv '(gptel-backend) '(chat-backend)
+      (let ((gptel-model 'chat-model)
+            (gptel-improve-text-backend nil)
+            (gptel-improve-text-model nil)
+            (obj (transient-lisp-variable)))
+        (gptel-improve-text-init-model obj)
+        (expect (list gptel-improve-text-backend gptel-improve-text-model)
+                :to-equal '(chat-backend chat-model))
+        (expect (oref obj value) :to-be 'chat-model)
+        ;; a later change of gptel's model leaves the menu's copy alone
+        (setq gptel-model 'other-model)
+        (gptel-improve-text-init-model obj)
+        (expect gptel-improve-text-model :to-be 'chat-model)))))
 
 (describe "gptel-improve-text variant picker"
   :var (origin picker region opened)
@@ -1266,9 +1304,14 @@
   (before-each
     (defvar gptel-model nil)
     (defvar gptel--rewrite-directive nil)
+    ;; a menu model of its own keeps the fallback off the unbound gptel-backend
+    (setq gptel-improve-text-backend 'menu-backend
+          gptel-improve-text-model 'menu-model)
     (setq buf (generate-new-buffer "improve-src")))
   (after-each
-    (setq gptel-improve-text-prompt nil)
+    (setq gptel-improve-text-prompt nil
+          gptel-improve-text-backend nil
+          gptel-improve-text-model nil)
     (when (buffer-live-p buf) (kill-buffer buf)))
 
   (it "routes in-place prompts through gptel-rewrite with the prompt as directive"
@@ -1369,7 +1412,57 @@
       (insert "no region here")
       (let ((transient-mark-mode t))
         (deactivate-mark)
-        (expect (gptel-improve-text) :to-throw 'user-error)))))
+        (expect (gptel-improve-text) :to-throw 'user-error))))
+
+  (it "sends aside prompts with the menu's model and leaves gptel's alone"
+    (with-current-buffer buf
+      (insert "(defun riddle ())")
+      (let ((gptel-model 'chat-model)
+            (gptel-improve-text-model 'menu-model)
+            (gptel-improve-text-backend 'menu-backend)
+            seen)
+        (cl-letf (((symbol-function 'gptel-request)
+                   (lambda (&rest _) (setq seen (list gptel-backend gptel-model)))))
+          (setq gptel-improve-text-prompt
+                (nth 3 gptel-improve-text-prompts-history)) ;explain code
+          (let ((transient-mark-mode t))
+            (push-mark (point-min) t t)
+            (goto-char (point-max))
+            (gptel-improve-text)))
+        (expect seen :to-equal '(menu-backend menu-model))
+        (expect gptel-model :to-be 'chat-model))))
+
+  (it "rewrites in place with the menu's model"
+    (with-current-buffer buf
+      (insert "sum txt to fix")
+      (let ((gptel-model 'chat-model)
+            (gptel-improve-text-model 'menu-model)
+            (gptel-improve-text-backend 'menu-backend)
+            seen)
+        (cl-letf (((symbol-function 'gptel--suffix-rewrite)
+                   (lambda (&rest _) (setq seen (list gptel-backend gptel-model)))))
+          (let ((transient-mark-mode t))
+            (push-mark (point-min) t t)
+            (goto-char (point-max))
+            (gptel-improve-text)))
+        (expect seen :to-equal '(menu-backend menu-model))
+        (expect gptel-model :to-be 'chat-model))))
+
+  (it "uses gptel's model while the menu has none of its own"
+    (with-current-buffer buf
+      (insert "sum txt to fix")
+      (cl-progv '(gptel-backend) '(chat-backend)
+        (let ((gptel-model 'chat-model)
+              (gptel-improve-text-model nil)
+              (gptel-improve-text-backend nil)
+              seen)
+          (cl-letf (((symbol-function 'gptel--suffix-rewrite)
+                     (lambda (&rest _) (setq seen (list gptel-backend gptel-model)))))
+            (let ((transient-mark-mode t))
+              (push-mark (point-min) t t)
+              (goto-char (point-max))
+              (gptel-improve-text)))
+          (expect seen :to-equal '(chat-backend chat-model)))))))
 
 (describe "gptel-summary-bounds"
   :var (buf)
@@ -1421,10 +1514,14 @@
   (before-each
     (defvar gptel-model nil)
     (setq shown nil request nil
-          src (generate-new-buffer "summary-src"))
+          src (generate-new-buffer "summary-src")
+          gptel-improve-text-backend 'menu-backend
+          gptel-improve-text-model 'menu-model)
     (spy-on 'pop-to-buffer :and-call-fake (lambda (b &rest _) (setq shown b)))
     (spy-on 'pulse-momentary-highlight-region))
   (after-each
+    (setq gptel-improve-text-backend nil
+          gptel-improve-text-model nil)
     (kill-buffer src)
     (when (buffer-live-p shown)
       (cl-letf (((symbol-function 'gptel-abort) #'ignore))
@@ -1439,8 +1536,11 @@
       (cl-letf (((symbol-function 'gptel-request)
                  (lambda (prompt &rest args)
                    (setq request (list prompt (current-buffer) args)))))
-        (let ((gptel-model 'test-model))
-          (gptel-summarize))))
+        (let ((gptel-model 'chat-model)
+              (gptel-improve-text-model 'menu-model)
+              (gptel-improve-text-backend 'menu-backend))
+          (gptel-summarize)
+          (expect gptel-model :to-be 'chat-model))))
     (pcase-let ((`(,prompt ,from ,args) request))
       (expect prompt :to-equal "* Head\nbody words\n")
       (expect from :to-be shown)
@@ -1450,12 +1550,28 @@
     (with-current-buffer shown
       (expect major-mode :to-be 'gptel-summary-mode)
       (expect (buffer-string) :to-equal "#+title: Head")
-      (expect header-line-format :to-equal " Waiting for test-model...")
+      ;; the request reads the model from this buffer: the menu's
+      (expect gptel-model :to-be 'menu-model)
+      (expect gptel-backend :to-be 'menu-backend)
+      (expect header-line-format :to-equal " Waiting for menu-model...")
       ;; gptel's own org conversion would leak a hook entry per request
       (expect gptel-org-convert-response :to-be nil)
       (expect gptel-use-tools :to-be nil)
       (expect gptel-use-context :to-be nil)
       (expect gptel-include-reasoning :to-be nil)))
+
+  (it "gives the summary buffer gptel's model while the menu has none"
+    (with-current-buffer src
+      (text-mode)
+      (insert "words")
+      (cl-letf (((symbol-function 'gptel-request) #'ignore))
+        (cl-progv '(gptel-backend) '(chat-backend)
+          (let ((gptel-model 'chat-model)
+                (gptel-improve-text-model nil)
+                (gptel-improve-text-backend nil))
+            (gptel-summarize)))))
+    (expect (buffer-local-value 'gptel-model shown) :to-be 'chat-model)
+    (expect (buffer-local-value 'gptel-backend shown) :to-be 'chat-backend))
 
   (it "sends the selection and drops it"
     (with-current-buffer src

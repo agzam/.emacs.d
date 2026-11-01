@@ -494,6 +494,29 @@ follows its own precedent, so one such answer wedges the buffer."
 ;; at runtime the package is always there.
 (require 'gptel-transient nil t)
 
+;; Special here even without gptel, so the lets swapping in the menu's
+;; model below stay dynamic.
+(defvar gptel-backend)
+(defvar gptel-model)
+
+(defvar gptel-improve-text-backend nil
+  "Backend for `gptel-improve-text-transient'; nil means gptel's own.")
+
+(defvar gptel-improve-text-model nil
+  "Model for `gptel-improve-text-transient'; nil means gptel's own.")
+
+(defun gptel-improve-text-set-model (sym value &rest _)
+  "Set SYM to VALUE globally, whatever scope `gptel-menu' is in."
+  (set-default sym value))
+
+(defun gptel-improve-text-init-model (obj)
+  "Show the menu's model in OBJ, starting from a copy of gptel's.
+gptel's picker draws its backend variable and fails on nil."
+  (unless gptel-improve-text-backend
+    (setq-default gptel-improve-text-backend gptel-backend
+                  gptel-improve-text-model gptel-model))
+  (oset obj value gptel-improve-text-model))
+
 ;; The in-place flow rides on gptel-rewrite, loaded on demand.  The
 ;; defvar keeps the let below dynamic even before that load.
 (defvar gptel--rewrite-directive)
@@ -978,9 +1001,14 @@ open for another choice."
      (concat
       (or gptel-improve-text-prompt
           (car gptel-improve-text-prompts-history)) "\n"))
-   ;; Keyed here, not inherited: gptel defines the selector on "-m", and
-   ;; `modules/ai/config.el' moves it to "m" in `gptel-menu' only.
-   [(gptel--infix-provider :key "m")
+   ;; gptel's picker, set up here rather than inherited: gptel keys it "-m"
+   ;; (`modules/ai/config.el' moves it in `gptel-menu' only), and here it
+   ;; writes the menu's own variables, so a pick never moves gptel's model.
+   [(gptel--infix-provider :key "m"
+                           :variable gptel-improve-text-model
+                           :backend gptel-improve-text-backend
+                           :set-value gptel-improve-text-set-model
+                           :init-value gptel-improve-text-init-model)
     (gptel-improve-text--infix-prompt)
     (gptel-improve-text--write-own-prompt)]
    [""
@@ -1051,7 +1079,9 @@ in INFO."
                                       (car gptel-improve-text-prompts-history)))
   (let ((in-place? (string-match-p
                     "fix mistakes\\|correct mistakes\\|simplify"
-                    gptel-improve-text-prompt)))
+                    gptel-improve-text-prompt))
+        (gptel-backend (or gptel-improve-text-backend gptel-backend))
+        (gptel-model (or gptel-improve-text-model gptel-model)))
     (message "beep-bop... checking your crap with %s" gptel-model)
     (if in-place?
         (let ((instruction
@@ -1140,6 +1170,8 @@ The answer lands in a new `gptel-summary-mode' buffer."
     (with-current-buffer buf
       (gptel-summary-mode)
       (insert "#+title: " label)
+      (setq-local gptel-backend (or gptel-improve-text-backend gptel-backend)
+                  gptel-model (or gptel-improve-text-model gptel-model))
       (setq header-line-format (format " Waiting for %s..." gptel-model))
       ;; gptel's own converter for org buffers leaks a hook entry per
       ;; `gptel-request'; the callback converts the whole answer instead

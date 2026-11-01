@@ -143,7 +143,49 @@
                                 (with-current-buffer (messages-buffer)
                                   (buffer-substring-no-properties
                                    (min msgs (point-max)) (point-max))))
-                        (format "%S" want)))))
+                        (format "%S" want))))
+
+            ;; m keeps its pick to this menu: gptel's model stays put, and
+            ;; the menu's next request goes out with the pick
+            (reset)
+            (let* ((chat (list (default-value 'gptel-backend)
+                               (default-value 'gptel-model)))
+                   (menu (list gptel-improve-text-backend gptel-improve-text-model))
+                   ;; any model gptel knows besides the chat's, so a pick shows
+                   (pick (cl-loop for (name . backend) in gptel--known-backends
+                                  thereis (cl-loop for model in (gptel-backend-models backend)
+                                                   unless (eq model gptel-model)
+                                                   return (list (concat name ":" (gptel--model-name model))
+                                                                backend model))))
+                   seen redrawn)
+              (unwind-protect
+                  (cl-letf (((symbol-function 'completing-read)
+                             (lambda (&rest _) (car pick)))
+                            ((symbol-function 'gptel-request)
+                             (lambda (prompt &rest args)
+                               (setq seen (list gptel-backend gptel-model))
+                               (apply #'summarize-stub prompt args))))
+                    (when (eq (open-menu) 'gptel-improve-text-transient)
+                      (execute-kbd-macro (kbd "m"))
+                      (setq redrawn (when-let* ((b (get-buffer transient--buffer-name)))
+                                      (with-current-buffer b
+                                        (substring-no-properties (buffer-string)))))
+                      (execute-kbd-macro (kbd "e")))
+                    ;; read gptel's own values: the summary buffer, current
+                    ;; now, holds the pick locally on purpose
+                    (let ((got (list (list gptel-improve-text-backend gptel-improve-text-model)
+                                     (equal (list (default-value 'gptel-backend)
+                                                  (default-value 'gptel-model))
+                                            chat)
+                                     (local-variable-p 'gptel-model buf)
+                                     seen
+                                     (and redrawn (string-search (car pick) redrawn) t)))
+                          (want (list (cdr pick) t nil (cdr pick) t)))
+                      (record "m picks for this menu only, and its next request uses the pick"
+                              (equal got want)
+                              (format "%S" got) (format "%S" want))))
+                (set-default 'gptel-improve-text-backend (car menu))
+                (set-default 'gptel-improve-text-model (cadr menu)))))
         (discard-input)
         ;; a failed step may strand the transient; never leak it into the
         ;; scenarios that run after this one
