@@ -972,7 +972,7 @@ open for another choice."
 
 ;;;###autoload
 (transient-define-prefix gptel-improve-text-transient ()
-  "Improve region with gptel."
+  "Improve or explain text with gptel."
   [:description
    (lambda ()
      (concat
@@ -984,7 +984,12 @@ open for another choice."
     (gptel-improve-text--infix-prompt)
     (gptel-improve-text--write-own-prompt)]
    [""
-    ("C-<return>" "Let's go" gptel-improve-text)]]
+    ("RET" "Let's go" gptel-improve-text)
+    ("e" "ELI5 summary" gptel-summarize)]]
+  ;; Return arrives as <return>, and Emacs turns it into RET only while no
+  ;; active map binds <return> - evil's org maps do.
+  [:hide always
+   ("<return>" "Let's go" gptel-improve-text)]
   [:hide always
    :class transient-subgroups
    :setup-children
@@ -1070,6 +1075,82 @@ in INFO."
                          (cons (copy-marker (region-beginning))
                                (copy-marker (region-end) t))))
         :callback #'gptel-improve-text-handle-response))))
+
+;;; Summary
+
+(defvar gptel-summary-prompt
+  (concat "Summarize the given text briefly, then explain it in plain words "
+          "a curious ten-year-old would follow. "
+          "Open with a one-sentence gist, then a few short points. "
+          "Use everyday words and explain any term you cannot avoid. "
+          "Do not add facts the text does not contain. "
+          "Use hyphens, never em-dashes.")
+  "System prompt for `gptel-summarize'.")
+
+(defun gptel-summary-bounds ()
+  "Return (BEG END LABEL) of the text `gptel-summarize' explains.
+That is the region, else the org subtree at point, else the buffer."
+  (cond
+   ((use-region-p)
+    (list (region-beginning) (region-end) (buffer-name)))
+   ((and (derived-mode-p 'org-mode) (not (org-before-first-heading-p)))
+    (save-excursion
+      (org-back-to-heading t)
+      (let ((label (substring-no-properties
+                    (org-link-display-format (org-get-heading t t t t)))))
+        (list (point) (progn (org-end-of-subtree t t) (point)) label))))
+   (t (list (point-min) (point-max) (buffer-name)))))
+
+(define-derived-mode gptel-summary-mode org-mode "Summary"
+  "Org mode for reading the answers of `gptel-summarize'."
+  (add-hook 'kill-buffer-hook #'gptel-summary-abort-h nil t))
+
+(defun gptel-summary-abort-h ()
+  "Stop the request still answering into this buffer."
+  (gptel-abort (current-buffer)))
+
+(defun gptel-summary-handle-response (resp info)
+  "Append RESP, converted to Org, to the summary buffer named in INFO.
+Reasoning and tool chunks are skipped; a failure shows in the header."
+  (when-let* ((buf (plist-get info :buffer))
+              ((buffer-live-p buf))
+              ((not (consp resp))))
+    (with-current-buffer buf
+      (setq header-line-format
+            (pcase resp
+              ((pred stringp) nil)
+              ('abort " Summary aborted")
+              (_ (format " Summary failed: %s" (plist-get info :status)))))
+      (when (stringp resp)
+        (save-excursion
+          (goto-char (point-max))
+          ;; the converter keeps a ** that opens its input
+          (insert (gptel--convert-markdown->org (concat "\n\n" resp))))))))
+
+;;;###autoload
+(defun gptel-summarize ()
+  "Explain the region, org subtree or buffer in plain words.
+The answer lands in a new `gptel-summary-mode' buffer."
+  (interactive)
+  (pcase-let* ((`(,beg ,end ,label) (gptel-summary-bounds))
+               (text (buffer-substring-no-properties beg end))
+               (buf (generate-new-buffer (format "*summary: %s*" label))))
+    (pulse-momentary-highlight-region beg end)
+    (deactivate-mark)
+    (with-current-buffer buf
+      (gptel-summary-mode)
+      (insert "#+title: " label)
+      (setq header-line-format (format " Waiting for %s..." gptel-model))
+      ;; gptel's own converter for org buffers leaks a hook entry per
+      ;; `gptel-request'; the callback converts the whole answer instead
+      (setq-local gptel-org-convert-response nil
+                  gptel-use-tools nil
+                  gptel-use-context nil
+                  gptel-include-reasoning nil)
+      (gptel-request text
+        :system (concat gptel-summary-prompt gptel-toolless-directive)
+        :callback #'gptel-summary-handle-response))
+    (pop-to-buffer buf)))
 
 ;;; Chat buffer helpers
 

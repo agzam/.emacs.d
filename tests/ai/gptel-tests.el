@@ -722,7 +722,26 @@
     (expect (plist-get (cdr (transient-get-suffix 'gptel-improve-text-transient
                                                   'gptel--infix-provider))
                        :key)
-            :to-equal "m")))
+            :to-equal "m"))
+
+  ;; Return arrives as <return>, which only falls back to RET while no
+  ;; active map binds <return>; evil's org maps do, so both are keyed.
+  (it "runs gptel-improve-text from RET and from <return>"
+    (dolist (key '("RET" "<return>"))
+      (expect (plist-get (cdr (transient-get-suffix
+                               'gptel-improve-text-transient key))
+                         :command)
+              :to-be 'gptel-improve-text)))
+
+  (it "drops the old C-<return> key"
+    (expect (transient-get-suffix 'gptel-improve-text-transient "C-<return>")
+            :to-throw 'error))
+
+  (it "runs the summary from e"
+    (expect (plist-get (cdr (transient-get-suffix
+                             'gptel-improve-text-transient "e"))
+                       :command)
+            :to-be 'gptel-summarize)))
 
 (describe "gptel-improve-text variant picker"
   :var (origin picker region opened)
@@ -1351,6 +1370,159 @@
       (let ((transient-mark-mode t))
         (deactivate-mark)
         (expect (gptel-improve-text) :to-throw 'user-error)))))
+
+(describe "gptel-summary-bounds"
+  :var (buf)
+  (before-each (setq buf (generate-new-buffer "summary-src")))
+  (after-each (kill-buffer buf))
+
+  (it "takes the active region first"
+    (with-current-buffer buf
+      (org-mode)
+      (insert "* Head\nbody words\n")
+      (let ((transient-mark-mode t))
+        (push-mark 8 t t)
+        (goto-char 12)
+        (expect (gptel-summary-bounds) :to-equal '(8 12 "summary-src")))))
+
+  (it "takes the org subtree at point, named by its bare heading"
+    (with-current-buffer buf
+      (org-mode)
+      (insert "* Parent\nparent text\n"
+              "** TODO Child [[https://x.y][link]] :tag:\nchild text\n"
+              "* Sibling\nsibling text\n")
+      (goto-char (point-min))
+      (search-forward "child text")
+      (pcase-let ((`(,beg ,end ,label) (gptel-summary-bounds)))
+        (expect (buffer-substring-no-properties beg end)
+                :to-equal "** TODO Child [[https://x.y][link]] :tag:\nchild text\n")
+        ;; the label comes from the subtree's own heading, not the next one
+        (expect label :to-equal "Child link")
+        (expect (text-properties-at 0 label) :to-be nil))))
+
+  (it "takes the whole buffer before the first org heading"
+    (with-current-buffer buf
+      (org-mode)
+      (insert "preamble\n* Head\nbody\n")
+      (goto-char (point-min))
+      (expect (gptel-summary-bounds)
+              :to-equal (list (point-min) (point-max) "summary-src"))))
+
+  (it "takes the whole buffer outside org"
+    (with-current-buffer buf
+      (text-mode)
+      (insert "plain words\n")
+      (goto-char 3)
+      (expect (gptel-summary-bounds)
+              :to-equal (list (point-min) (point-max) "summary-src")))))
+
+(describe "gptel-summarize"
+  :var (src shown request)
+  (before-each
+    (defvar gptel-model nil)
+    (setq shown nil request nil
+          src (generate-new-buffer "summary-src"))
+    (spy-on 'pop-to-buffer :and-call-fake (lambda (b &rest _) (setq shown b)))
+    (spy-on 'pulse-momentary-highlight-region))
+  (after-each
+    (kill-buffer src)
+    (when (buffer-live-p shown)
+      (cl-letf (((symbol-function 'gptel-abort) #'ignore))
+        (kill-buffer shown))))
+
+  (it "asks for the subtree from a fresh summary buffer"
+    (with-current-buffer src
+      (org-mode)
+      (insert "* Head\nbody words\n* Next\n")
+      (goto-char (point-min))
+      (search-forward "body")
+      (cl-letf (((symbol-function 'gptel-request)
+                 (lambda (prompt &rest args)
+                   (setq request (list prompt (current-buffer) args)))))
+        (let ((gptel-model 'test-model))
+          (gptel-summarize))))
+    (pcase-let ((`(,prompt ,from ,args) request))
+      (expect prompt :to-equal "* Head\nbody words\n")
+      (expect from :to-be shown)
+      (expect (plist-get args :system)
+              :to-equal (concat gptel-summary-prompt gptel-toolless-directive))
+      (expect (plist-get args :callback) :to-be #'gptel-summary-handle-response))
+    (with-current-buffer shown
+      (expect major-mode :to-be 'gptel-summary-mode)
+      (expect (buffer-string) :to-equal "#+title: Head")
+      (expect header-line-format :to-equal " Waiting for test-model...")
+      ;; gptel's own org conversion would leak a hook entry per request
+      (expect gptel-org-convert-response :to-be nil)
+      (expect gptel-use-tools :to-be nil)
+      (expect gptel-use-context :to-be nil)
+      (expect gptel-include-reasoning :to-be nil)))
+
+  (it "sends the selection and drops it"
+    (with-current-buffer src
+      (text-mode)
+      (insert "pick these words")
+      (cl-letf (((symbol-function 'gptel-request)
+                 (lambda (prompt &rest _) (setq request prompt))))
+        (let ((transient-mark-mode t))
+          (push-mark 6 t t)
+          (goto-char 11)
+          (gptel-summarize)
+          (expect (region-active-p) :to-be nil))))
+    (expect request :to-equal "these")))
+
+(describe "gptel-summary-handle-response"
+  :var (buf)
+  (before-each
+    (setq buf (generate-new-buffer "summary"))
+    (with-current-buffer buf
+      (insert "#+title: Head")
+      (setq header-line-format " Waiting for m...")))
+  (after-each
+    (when (buffer-live-p buf) (kill-buffer buf)))
+
+  (it "appends the converted answer after a blank line and clears the header"
+    ;; the leading newlines also let the converter see an opening **
+    (cl-letf (((symbol-function 'gptel--convert-markdown->org)
+               (lambda (s) (concat "<" s ">"))))
+      (gptel-summary-handle-response "**Gist:** hi" (list :buffer buf)))
+    (with-current-buffer buf
+      (expect (buffer-string) :to-equal "#+title: Head<\n\n**Gist:** hi>")
+      (expect header-line-format :to-be nil)))
+
+  (it "shows a failure in the header and leaves the text alone"
+    (gptel-summary-handle-response nil (list :buffer buf :status "429 Too Many"))
+    (with-current-buffer buf
+      (expect (buffer-string) :to-equal "#+title: Head")
+      (expect header-line-format :to-equal " Summary failed: 429 Too Many")))
+
+  (it "marks an aborted request"
+    (gptel-summary-handle-response 'abort (list :buffer buf))
+    (expect (buffer-local-value 'header-line-format buf)
+            :to-equal " Summary aborted"))
+
+  (it "skips reasoning and tool chunks"
+    (gptel-summary-handle-response '(reasoning . "hmm") (list :buffer buf))
+    (with-current-buffer buf
+      (expect (buffer-string) :to-equal "#+title: Head")
+      (expect header-line-format :to-equal " Waiting for m...")))
+
+  (it "drops an answer whose buffer is gone"
+    (kill-buffer buf)
+    (expect (gptel-summary-handle-response "late" (list :buffer buf))
+            :to-be nil)))
+
+(describe "gptel-summary-mode"
+  (it "derives from org-mode"
+    (expect (provided-mode-derived-p 'gptel-summary-mode 'org-mode)
+            :to-be-truthy))
+
+  (it "stops its request when the buffer is killed"
+    (let ((buf (generate-new-buffer "summary"))
+          aborted)
+      (cl-letf (((symbol-function 'gptel-abort) (lambda (b) (setq aborted b))))
+        (with-current-buffer buf (gptel-summary-mode))
+        (kill-buffer buf))
+      (expect aborted :to-be buf))))
 
 (describe "open-gptel"
   :var (buf-old buf-new buf-quick buf-plain switched agent-called)
