@@ -27,10 +27,15 @@
 (defvar news-fetch-tests--broken nil
   "Command the stand-in answers with a fault.")
 
+(defvar news-fetch-tests--now nil
+  "Clock reading the stand-in's dates count back from; nil means now.
+Read once per spec, so a served article and the copy a spec expects carry
+the same Date header even when a second ticks over between them.")
+
 (defun news-fetch-tests--date (days-ago)
-  "Date header value DAYS-AGO days before now."
+  "Date header value DAYS-AGO days before `news-fetch-tests--now'."
   (format-time-string "%a, %d %b %Y %H:%M:%S +0000"
-                      (time-subtract nil (* days-ago 86400)) t))
+                      (time-subtract news-fetch-tests--now (* days-ago 86400)) t))
 
 (defun news-fetch-tests--text (post)
   "The article of POST, lines ending in CRLF as NNTP sends them."
@@ -134,7 +139,8 @@ BODY sees `store', `active' and `port'."
           (store (file-name-as-directory (make-temp-file "news-store" t)))
           (active (expand-file-name "active" (make-temp-file "news-cache" t)))
           (news-fetch-tests--log nil)
-          (news-fetch-tests--broken nil))
+          (news-fetch-tests--broken nil)
+          (news-fetch-tests--now (current-time)))
      (ignore port active)
      (make-directory (expand-file-name "gmane.test" store))
      (unwind-protect (progn ,@body)
@@ -191,6 +197,17 @@ BODY sees `store', `active' and `port'."
   "gmane.test over a year and a half: one post too old, one of this week.")
 
 ;;; Specs
+
+(describe "the stand-in's clock"
+  ;; a served article and the copy a spec expects are built moments apart
+  (it "dates articles from one clock reading"
+    (let ((news-fetch-tests--now (encode-time '(0 0 0 1 1 2020 nil nil t))))
+      (expect (news-fetch-tests--date 0) :to-equal "Wed, 01 Jan 2020 00:00:00 +0000")
+      (expect (news-fetch-tests--date 1) :to-equal "Tue, 31 Dec 2019 00:00:00 +0000")))
+
+  (it "takes that reading when the stand-in starts"
+    (news-fetch-tests--with-server
+      (expect news-fetch-tests--now :not :to-be nil))))
 
 (describe "news-fetch-run"
   (it "fetches a year back, leaves the last week unread and builds every overview"
