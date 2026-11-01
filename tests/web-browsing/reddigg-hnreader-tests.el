@@ -93,8 +93,8 @@
                 (expect unfolded :to-be nil))
             (kill-buffer buf)))))))
 
-(defun reddigg-hnreader-tests--hooks (package)
-  "Hook pairs `use-package' PACKAGE declares in web-browsing/config.el."
+(defun reddigg-hnreader-tests--use-package (package)
+  "Arguments of the `use-package' PACKAGE form in web-browsing/config.el."
   (with-temp-buffer
     (insert-file-contents
      (expand-file-name "modules/web-browsing/config.el" test-config-root))
@@ -103,8 +103,13 @@
                   (not (and (eq (car-safe form) 'use-package)
                             (eq (cadr form) package)))))
       (expect form :to-be-truthy)
-      (let ((spec (car (use-package-body-forms (cddr form) :hook))))
-        (if (consp (car spec)) spec (list spec))))))
+      (cddr form))))
+
+(defun reddigg-hnreader-tests--hooks (package)
+  "Hook pairs `use-package' PACKAGE declares in web-browsing/config.el."
+  (let ((spec (car (use-package-body-forms
+                    (reddigg-hnreader-tests--use-package package) :hook))))
+    (if (consp (car spec)) spec (list spec))))
 
 (describe "the hnreader and reddigg reading buffers"
   (it "render prose in a variable-pitch face"
@@ -118,6 +123,15 @@
             :to-contain '(hnreader-mode . reddigg-hnreader-show-all-h))
     (expect (reddigg-hnreader-tests--hooks 'reddigg)
             :to-contain '(reddigg-mode . reddigg-hnreader-show-all-h))))
+
+(describe "hnreader fetching"
+  ;; a fetch inside a browser tab raises the browser over Emacs
+  (it "goes direct, logged in with the session from the browser's cookies"
+    (let ((config (flatten-tree
+                   (use-package-body-forms
+                    (reddigg-hnreader-tests--use-package 'hnreader) :config))))
+      (expect (memq 'hnreader--browser-session config) :to-be-truthy)
+      (expect (memq 'hnreader--fetch-via-browser config) :to-be nil))))
 
 (describe "hnreader-frontpage-item-no-rank-a"
   (it "strips ranking numbers and non-breaking spaces"

@@ -110,11 +110,11 @@
   :hook ((hnreader-mode . reddigg-hnreader-show-all-h)
          (hnreader-mode . variable-pitch-mode))
   :config
-  ;; HN hands an anonymous client a small request budget and answers 429
-  ;; once it is spent, which is a handful of items; fetching through the
-  ;; logged-in browser carries the session, same trick as reddigg below
+  ;; HN throttles anonymous requests and exempts logged-in ones.  The
+  ;; session comes out of Brave's cookie store: fetching inside a browser
+  ;; tab instead raises the browser over Emacs on every page.
   (when (eq system-type 'darwin)
-    (setopt hnreader-fetch-function #'hnreader--fetch-via-browser))
+    (setopt hnreader-session-function #'hnreader--browser-session))
 
   (map! :map hnreader-mode-map
         "C-c C-o" #'hnreader-browse-nh-story-url
