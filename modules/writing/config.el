@@ -35,7 +35,7 @@
   :commands mw-thesaurus-lookup-dwim
   :config
   (map! :after mw-thesaurus
-        :map mw-thesaurus-mode-map
+        :map mw-thesaurus-read-only-map
         [remap evil-record-macro] #'mw-thesaurus--quit
         [remap org-dwim-at-point] #'mw-thesaurus-lookup-at-point)
 
