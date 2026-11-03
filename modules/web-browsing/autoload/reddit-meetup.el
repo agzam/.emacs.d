@@ -23,11 +23,13 @@ The titles have drifted from one month to the next, the body has not.")
 (defvar reddit-meetup-buffer-name "*reddit-meetup*"
   "Name of the draft buffer.")
 
-(defconst reddit-meetup--me-url "https://www.reddit.com/api/me.json"
+(defconst reddit-meetup--me-url "https://api.reddit.com/api/me.json"
   "Carries the logged-in name and the modhash every write has to quote.")
 
+;; api.reddit.com, where reddigg reads too: www.reddit.com refuses several
+;; listings even to a login
 (defconst reddit-meetup--user-posts-url
-  "https://www.reddit.com/user/%s/submitted.json?limit=100&sort=new")
+  "https://api.reddit.com/user/%s/submitted?limit=100&sort=new")
 
 (defconst reddit-meetup--submit-url "https://www.reddit.com/api/submit")
 

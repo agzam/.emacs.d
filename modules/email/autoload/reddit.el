@@ -27,7 +27,7 @@
   "Init directory of the Emacs that runs `reddit-fetch-script'.")
 
 (defvar reddit-url "https://www.reddit.com"
-  "Where the subreddits come from.")
+  "Where the links of the Reddit messages lead.")
 
 (defvar reddit-fetch-interval 600
   "Seconds between Reddit fetches while Emacs runs.")

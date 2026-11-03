@@ -354,6 +354,7 @@ live in the test sandbox, and what matters here is that the guard runs
 before the post does."
   (let ((posted nil)
         (refused nil)
+        (read nil)
         (account (reddit-meetup-tests--ht "name" "someone" "modhash" "mh"))
         (response (reddit-meetup-tests--ht
                    "json" (reddit-meetup-tests--ht
@@ -366,6 +367,7 @@ before the post does."
                 ((symbol-function 'promise-catch) (lambda (value _) value))
                 ((symbol-function 'reddigg-fetch-json)
                  (lambda (url)
+                   (push url read)
                    (if (string-match-p "me\\.json" url)
                        (reddit-meetup-tests--ht "data" account)
                      listing)))
@@ -378,7 +380,7 @@ before the post does."
           (condition-case err
               (reddit-meetup-submit)
             (user-error (setq refused (error-message-string err)))))))
-    (list :posted posted :refused refused :copied (car kill-ring))))
+    (list :posted posted :refused refused :copied (car kill-ring) :read (nreverse read))))
 
 (describe "reddit-meetup-submit"
   (it "refuses a meeting that already has an announcement"
@@ -404,6 +406,15 @@ before the post does."
       (expect (cdr (assoc "title" posted)) :to-equal "A title")
       (expect (cdr (assoc "text" posted)) :to-match "This time is on August 6th\\.")
       (expect (plist-get result :copied) :to-equal "https://reddit/new")))
+
+  ;; www.reddit.com refuses several listings even to a login
+  (it "reads the account and its posts from api.reddit.com"
+    (expect (plist-get (reddit-meetup-tests--submit
+                        "A title\n\nThis time is on August 6th.\n"
+                        (reddit-meetup-tests--listing))
+                       :read)
+            :to-equal '("https://api.reddit.com/api/me.json"
+                        "https://api.reddit.com/user/someone/submitted?limit=100&sort=new")))
 
   (it "reads the date off the draft, not off the meeting it was opened for"
     ;; the draft was hand-edited to September, which nothing announces yet

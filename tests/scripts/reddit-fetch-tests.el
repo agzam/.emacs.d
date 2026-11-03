@@ -14,7 +14,10 @@
   "The script a child Emacs runs.")
 
 (defconst reddit-fetch-tests--base "http://reddit.test"
-  "Base URL the stand-in for the browser answers.")
+  "Where the links of the messages lead.")
+
+(defconst reddit-fetch-tests--api "http://api.reddit.test"
+  "Host the stand-in for the browser answers the JSON of.")
 
 ;;; Reddit's JSON
 
@@ -60,10 +63,10 @@
 (defun reddit-fetch-tests--url (kind &optional post)
   "URL of the posts listing, the comments listing or POST's thread, by KIND."
   (pcase kind
-    ('posts (format "%s/r/test/new.json?limit=100&raw_json=1" reddit-fetch-tests--base))
-    ('comments (format "%s/r/test/comments.json?limit=100&raw_json=1" reddit-fetch-tests--base))
-    ('thread (format "%s/r/test/comments/%s.json?limit=500&raw_json=1"
-                     reddit-fetch-tests--base post))))
+    ('posts (format "%s/r/test/new?limit=100&raw_json=1" reddit-fetch-tests--api))
+    ('comments (format "%s/r/test/comments?limit=100&raw_json=1" reddit-fetch-tests--api))
+    ('thread (format "%s/r/test/comments/%s?limit=500&raw_json=1"
+                     reddit-fetch-tests--api post))))
 
 ;;; A stand-in for the browser, answering from files named after the URL
 
@@ -129,6 +132,7 @@ BODY sees `store', `fixtures' and `log'."
           (log (expand-file-name "log" root))
           (reddit-fetch-browser (expand-file-name "browser" root))
           (reddit-fetch-cookies (expand-file-name "Cookies" root))
+          (reddit-fetch-api reddit-fetch-tests--api)
           (reddit-fetch-profile nil))
      (make-directory (expand-file-name "r.test" store) t)
      (make-directory fixtures t)
@@ -156,6 +160,17 @@ BODY sees `store', `fixtures' and `log'."
                             (and (string-match-p "S" (or (cadr (split-string file ":2,")) "")) t))))
                   (directory-files cur nil "\\`[^.]"))
           (lambda (a b) (string< (car a) (car b))))))
+
+(defun reddit-fetch-tests--links (store)
+  "Archived-At of each message of r.test under STORE, sorted."
+  (let ((cur (expand-file-name "r.test/cur" store)))
+    (sort (mapcar (lambda (file)
+                    (with-temp-buffer
+                      (insert-file-contents (expand-file-name file cur))
+                      (narrow-to-region (point-min) (or (search-forward "\n\n" nil t) (point-max)))
+                      (mail-fetch-field "Archived-At")))
+                  (directory-files cur nil "\\`[^.]"))
+          #'string<)))
 
 (defun reddit-fetch-tests--requests (log)
   "URLs the stand-in was asked for, in order, from LOG."
@@ -402,6 +417,21 @@ nobody; c4 is older than a week.  p3 holds c5."
                               (reddit-fetch-tests--url 'thread "p2")
                               (reddit-fetch-tests--url 'thread "p3")))))
 
+  ;; www.reddit.com refuses the listings even to a login
+  (it "asks the API host for the JSON, and links each message to the web"
+    (expect (default-value 'reddit-fetch-api) :to-equal "https://api.reddit.com")
+    (reddit-fetch-tests--with-store
+      (reddit-fetch-tests--serve-subreddit fixtures)
+      (reddit-fetch-tests--run store)
+      (expect (seq-remove (lambda (url) (string-prefix-p (concat reddit-fetch-tests--api "/") url))
+                          (reddit-fetch-tests--requests log))
+              :to-equal nil)
+      (expect (reddit-fetch-tests--links store)
+              :to-equal (mapcar (lambda (path)
+                                  (format "<%s/r/test/comments/%s/>" reddit-fetch-tests--base path))
+                                '("p1/slug" "p2/slug" "p2/slug/c1" "p2/slug/c2" "p2/slug/c3"
+                                  "p2/slug/c4" "p3/slug" "p3/slug/c5")))))
+
   (it "fetches a thread past the listing before every listed one"
     (reddit-fetch-tests--with-store
       (reddit-fetch-tests--serve-subreddit fixtures)
@@ -543,8 +573,8 @@ nobody; c4 is older than a week.  p3 holds c5."
       (expect (reddit-fetch-tests--run store)
               :to-equal `(("r.gone" error
                            ,(reddit-fetch-tests--no-json
-                             (format "%s/r/gone/new.json?limit=100&raw_json=1"
-                                     reddit-fetch-tests--base)))
+                             (format "%s/r/gone/new?limit=100&raw_json=1"
+                                     reddit-fetch-tests--api)))
                           ("r.test" 3 5 0 nil)))))
 
   (it "fetches only the threads it is given, asking for no listing"
@@ -587,8 +617,8 @@ nobody; c4 is older than a week.  p3 holds c5."
                            (expand-file-name invocation-name invocation-directory) nil output nil
                            "-Q" "--batch" "--init-directory" sandbox
                            "-l" reddit-fetch-tests--script
-                           "--eval" (format "(setq reddit-fetch-browser %S reddit-fetch-cookies %S)"
-                                            reddit-fetch-browser reddit-fetch-cookies)
+                           "--eval" (format "(setq reddit-fetch-browser %S reddit-fetch-cookies %S reddit-fetch-api %S)"
+                                            reddit-fetch-browser reddit-fetch-cookies reddit-fetch-api)
                            "--eval" (format "(reddit-fetch-main %S %S '%S)"
                                             store reddit-fetch-tests--base threads))
                           (with-current-buffer output (buffer-string)))
@@ -616,6 +646,6 @@ nobody; c4 is older than a week.  p3 holds c5."
       (reddit-fetch-tests--with-store
         (pcase-let ((`(,status ,output) (main store)))
           (expect status :to-equal 1)
-          (expect output :to-match "^r.test: .*new.json.*: no JSON in the page"))))))
+          (expect output :to-match "^r.test: .*/r/test/new\\?.*: no JSON in the page"))))))
 
 ;;; reddit-fetch-tests.el ends here

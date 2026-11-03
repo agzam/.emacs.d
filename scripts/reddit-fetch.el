@@ -65,6 +65,10 @@ Reddit answers a login 100 requests in 10 minutes, the user's own among them.")
 (defvar reddit-fetch-timeout 30
   "Seconds a request may take; a blocked one can hang the browser.")
 
+(defvar reddit-fetch-api "https://api.reddit.com"
+  "Host that answers a login with Reddit's JSON.
+Paths carry no .json suffix: Reddit refuses .json listings on every host.")
+
 (defvar reddit-fetch-profile nil
   "Browser profile of the current run, made at its first request.")
 
@@ -299,7 +303,7 @@ A comment comes after its parent."
                (time-subtract nil (* reddit-fetch-unread-days 86400))))
 
 (defun reddit-fetch-group (store group base &optional threads)
-  "Fetch subreddit folder GROUP under STORE from BASE.
+  "Fetch subreddit folder GROUP under STORE, its links leading to BASE.
 New posts arrive first, then every thread with new comments, oldest
 first, until a fetch fails; with THREADS, post ids, those threads alone.
 Return (GROUP POSTS COMMENTS WAITING PROBLEM)."
@@ -322,8 +326,9 @@ Return (GROUP POSTS COMMENTS WAITING PROBLEM)."
                 (listing (path)
                   (mapcar (lambda (thing) (reddit-fetch-entry thing base))
                           (reddit-fetch-children
-                           (reddit-fetch-json (format "%s/r/%s/%s.json?limit=%d&raw_json=1"
-                                                      base name path reddit-fetch-limit)))))
+                           (reddit-fetch-json (format "%s/r/%s/%s?limit=%d&raw_json=1"
+                                                      reddit-fetch-api name path
+                                                      reddit-fetch-limit)))))
                 (save ()
                   (reddit-fetch-save-state store group reddit-fetch-known-file
                                            (hash-table-keys known))
@@ -359,8 +364,9 @@ Return (GROUP POSTS COMMENTS WAITING PROBLEM)."
               (condition-case err
                   (let* ((thread (reddit-fetch-thread
                                   (reddit-fetch-json
-                                   (format "%s/r/%s/comments/%s.json?limit=%d&raw_json=1"
-                                           base name (car threads) reddit-fetch-thread-limit))
+                                   (format "%s/r/%s/comments/%s?limit=%d&raw_json=1"
+                                           reddit-fetch-api name (car threads)
+                                           reddit-fetch-thread-limit))
                                   base))
                          (post (car thread)))
                     ;; a post the listing no longer holds comes as context
@@ -381,7 +387,7 @@ Return (GROUP POSTS COMMENTS WAITING PROBLEM)."
 ;;; Entry point
 
 (defun reddit-fetch-run (store base &optional threads)
-  "Fetch every subreddit folder under STORE from BASE.
+  "Fetch every subreddit folder under STORE, its links leading to BASE.
 THREADS, as ((GROUP POST...)...), limits the run to those threads.
 Returns one (GROUP POSTS COMMENTS WAITING PROBLEM) or (GROUP error
 MESSAGE) row per folder."
@@ -412,7 +418,7 @@ MESSAGE) row per folder."
         (setq reddit-fetch-profile nil)))))
 
 (defun reddit-fetch-main (store base &optional threads)
-  "Fetch the subreddit folders under STORE from BASE, report, exit.
+  "Fetch the subreddit folders under STORE, links leading to BASE; report, exit.
 THREADS limits the fetch as in `reddit-fetch-run'."
   (run-at-time reddit-fetch-watchdog nil
                (lambda ()

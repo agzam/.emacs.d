@@ -140,13 +140,13 @@
   :hook ((reddigg-mode . reddigg-hnreader-show-all-h)
          (reddigg-mode . variable-pitch-mode))
   :config
-  ;; reddit 403-blocks Emacs's TLS fingerprint; fetch through the live
-  ;; browser on macOS, headless chromium elsewhere (needs one-time
-  ;; M-x reddigg-chromium-warmup)
-  (setopt reddigg-fetch-function (if (eq system-type 'darwin)
-                                     #'reddigg--fetch-via-browser
-                                   #'reddigg--fetch-via-chromium)
-          reddigg-subs '(emacs clojure programming))
+  ;; reddit answers JSON only to a login.  The session comes out of Brave's
+  ;; cookie store on macOS; elsewhere a headless chromium carries the
+  ;; browser's reddit cookies.
+  (if (eq system-type 'darwin)
+      (setopt reddigg-session-function #'reddigg--browser-session)
+    (setopt reddigg-fetch-function #'reddigg--fetch-via-chromium))
+  (setopt reddigg-subs '(emacs clojure programming))
   (map! :map reddigg-mode-map
         "C-c C-o" #'reddigg-browse-current-sub-url
         :n "yy" #'reddigg-copy-current-sub-url

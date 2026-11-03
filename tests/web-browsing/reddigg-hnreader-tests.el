@@ -133,6 +133,15 @@
       (expect (memq 'hnreader--browser-session config) :to-be-truthy)
       (expect (memq 'hnreader--fetch-via-browser config) :to-be nil))))
 
+(describe "reddigg fetching"
+  ;; reddit refuses most JSON reads in a www.reddit.com tab
+  (it "goes direct, logged in with the session from the browser's cookies"
+    (let ((config (flatten-tree
+                   (use-package-body-forms
+                    (reddigg-hnreader-tests--use-package 'reddigg) :config))))
+      (expect (memq 'reddigg--browser-session config) :to-be-truthy)
+      (expect (memq 'reddigg--fetch-via-browser config) :to-be nil))))
+
 (describe "hnreader-frontpage-item-no-rank-a"
   (it "strips ranking numbers and non-breaking spaces"
     (with-temp-buffer
