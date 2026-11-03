@@ -112,6 +112,8 @@
 
   (map! "C-c C-g" #'gptel-abort)
 
+  (advice-add #'gptel-send :around #'gptel-send-show-model-a)
+
   (add-hook! 'gptel-mode-hook
     #'gptel-highlight-mode
     (defun gptel-mode-set-local-keys-h ()

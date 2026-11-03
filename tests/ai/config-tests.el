@@ -81,6 +81,12 @@
                       (ai-tests--calls 'gptel-copilot-update-models))
             :to-be-truthy)))
 
+(describe "gptel-send in ai/config.el"
+  (it "names the model in its Querying message"
+    (expect (member '(advice-add #'gptel-send :around #'gptel-send-show-model-a)
+                    (ai-tests--calls 'advice-add))
+            :to-be-truthy)))
+
 (describe "local gptel presets"
   (it "exist"
     (expect (ai-tests--local-presets) :not :to-be nil))

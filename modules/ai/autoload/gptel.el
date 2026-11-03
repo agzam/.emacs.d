@@ -410,6 +410,20 @@ follows its own precedent, so one such answer wedges the buffer."
   (concat (eca-agents-md-content)
           (unless (bound-and-true-p gptel-tools) gptel-toolless-directive)))
 
+;;;###autoload
+(defun gptel-send-show-model-a (send &rest args)
+  "Call SEND with ARGS, adding the model to its \"Querying\" message."
+  (letf! (defun message (format-string &rest message-args)
+           (if (equal format-string "Querying %s...")
+               (funcall message "Querying %s:%s..." (car message-args)
+                        ;; a prompt preset changes the request's model, not gptel-model;
+                        ;; an unfired request leaves gptel--fsm-last on the finished one
+                        (or (and (gptel--fsm-live-p)
+                                 (plist-get (gptel-fsm-info gptel--fsm-last) :model))
+                            gptel-model))
+             (apply message format-string message-args)))
+    (apply send args)))
+
 ;;; Improve-text transient
 
 (defvar gptel-improve-text-prompt nil)

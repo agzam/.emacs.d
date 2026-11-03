@@ -642,6 +642,42 @@
     (let ((gptel-tools '(some-tool)))
       (expect (gptel-chat-directive) :to-equal "# AGENTS\nbe nice\n"))))
 
+(describe "gptel-send-show-model-a"
+  :var (shown)
+  (before-each
+    (setq shown nil)
+    (spy-on 'message :and-call-fake
+            (lambda (format-string &rest args)
+              (push (apply #'format format-string args) shown))))
+
+  ;; the stand-in request is its own info plist
+  (it "names the model of the request the send fired, not the buffer's"
+    (with-temp-buffer
+      (setq-local gptel--fsm-last '(:model qwen3.5:4b))
+      (let ((gptel-model 'claude-opus-5-5))
+        (cl-letf (((symbol-function 'gptel--fsm-live-p) (lambda (&rest _) t))
+                  ((symbol-function 'gptel-fsm-info) #'identity))
+          (gptel-send-show-model-a
+           (lambda () (message "Querying %s..." "Ollama"))))))
+    (expect shown :to-equal '("Querying Ollama:qwen3.5:4b...")))
+
+  (it "falls back to the buffer's model before the request fires"
+    (with-temp-buffer
+      (setq-local gptel--fsm-last '(:model previous-model))
+      (let ((gptel-model 'claude-opus-5-5))
+        (cl-letf (((symbol-function 'gptel--fsm-live-p) #'ignore)
+                  ((symbol-function 'gptel-fsm-info) #'identity))
+          (gptel-send-show-model-a
+           (lambda () (message "Querying %s..." "Claude-OAuth"))))))
+    (expect shown :to-equal '("Querying Claude-OAuth:claude-opus-5-5...")))
+
+  (it "passes other messages through and returns what the send returns"
+    (expect (gptel-send-show-model-a
+             (lambda (what) (message "Steering message %s" what) 'sent)
+             "canceled")
+            :to-be 'sent)
+    (expect shown :to-equal '("Steering message canceled"))))
+
 (describe "gptel-improve-text-handle-response"
   (it "ignores reasoning and tool chunks"
     ;; current gptel forwards (reasoning . TEXT) & friends to custom callbacks
