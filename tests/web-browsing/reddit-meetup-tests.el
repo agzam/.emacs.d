@@ -13,6 +13,10 @@
   "Noon of YEAR-MONTH-DAY, the hour the date math normalises to."
   (encode-time (list 0 0 12 day month year nil -1 nil)))
 
+(defun reddit-meetup-tests--posted (year month day)
+  "The created_utc of a post that went up at noon of YEAR-MONTH-DAY."
+  (float-time (reddit-meetup-tests--time year month day)))
+
 (defun reddit-meetup-tests--ht (&rest pairs)
   "Hash table of PAIRS, the shape reddit JSON parses into."
   (let ((table (make-hash-table :test 'equal)))
@@ -116,19 +120,48 @@ https://www.reddit.com/r/emacs/comments/1sa0jmd/emacs_atx_meetup_tomorrow_thursd
   (let ((meeting (reddit-meetup-tests--time 2026 8 6)))
     (it "says today on the day"
       (expect (reddit-meetup--title meeting (reddit-meetup-tests--time 2026 8 6))
-              :to-equal "Emacs ATX meetup today, in a few hours"))
+              :to-equal "Emacs Central meetup today, in a few hours"))
 
     (it "says tomorrow on the eve"
       (expect (reddit-meetup--title meeting (reddit-meetup-tests--time 2026 8 5))
-              :to-equal "Emacs ATX meetup tomorrow, August 6th"))
+              :to-equal "Emacs Central meetup tomorrow, August 6th"))
 
     (it "says this Thursday within the week"
       (expect (reddit-meetup--title meeting (reddit-meetup-tests--time 2026 8 4))
-              :to-equal "Emacs ATX meetup this Thursday, August 6th"))
+              :to-equal "Emacs Central meetup this Thursday, August 6th"))
 
     (it "names the date when it is further out"
       (expect (reddit-meetup--title meeting (reddit-meetup-tests--time 2026 7 25))
-              :to-equal "Emacs ATX meetup on August 6th"))))
+              :to-equal "Emacs Central meetup on August 6th"))))
+
+(describe "reddit-meetup--meeting-day"
+  (it "takes the day the post states, in the year it went up"
+    (expect (format-time-string
+             "%Y-%m-%d"
+             (reddit-meetup--meeting-day
+              (reddit-meetup-tests--post-data
+               "created_utc" (reddit-meetup-tests--posted 2026 7 1)
+               "selftext" "This time is on July 2nd.")))
+            :to-equal "2026-07-02"))
+
+  (it "puts a January meeting announced in December into the next year"
+    (expect (format-time-string
+             "%Y-%m-%d"
+             (reddit-meetup--meeting-day
+              (reddit-meetup-tests--post-data
+               "created_utc" (reddit-meetup-tests--posted 2026 12 30)
+               "selftext" "This time is on January 7th.")))
+            :to-equal "2027-01-07"))
+
+  ;; the earliest announcement is a link post, with no body at all
+  (it "takes the meeting due when the post went up, if it states no date"
+    (expect (format-time-string
+             "%Y-%m-%d"
+             (reddit-meetup--meeting-day
+              (reddit-meetup-tests--post-data
+               "created_utc" (reddit-meetup-tests--posted 2026 2 5)
+               "selftext" "")))
+            :to-equal "2026-02-05")))
 
 (describe "reddit-meetup--set-date"
   (it "rewrites the ordinal phrasing"
@@ -180,23 +213,73 @@ https://www.reddit.com/r/emacs/comments/1sa0jmd/emacs_atx_meetup_tomorrow_thursd
             :to-equal
             "Body.\n\n----\nPrevious meetings and notes:\n\nhttps://new/two\n")))
 
+(describe "reddit-meetup--post-id"
+  (it "reads the id off a post url"
+    (expect (reddit-meetup--post-id
+             "https://www.reddit.com/r/emacs/comments/1ukwx8l/emacs_atx_meetup_tomorrow_july_2nd/")
+            :to-equal "1ukwx8l"))
+
+  (it "returns nil for a url that is not a post"
+    (expect (reddit-meetup--post-id "https://www.meetup.com/emacsatx/events/")
+            :to-be nil)))
+
+(describe "reddit-meetup--date-previous"
+  (let ((listing (reddit-meetup-tests--listing
+                  `("id" "aaa111" "created_utc" ,(reddit-meetup-tests--posted 2026 10 1)
+                    "selftext" "This time is on October 1st.")
+                  `("id" "bbb222" "created_utc" ,(reddit-meetup-tests--posted 2026 2 5)
+                    "selftext" ""))))
+    (it "names each listed link by the meeting its post announced"
+      (expect (reddit-meetup--date-previous
+               (concat "https://www.meetup.com/emacsatx/events/\n\n"
+                       "----\nPrevious meetings and notes:\n\n"
+                       "https://www.reddit.com/r/emacs/comments/aaa111/x/\n\n"
+                       "https://www.reddit.com/r/emacs/comments/bbb222/y/\n")
+               listing)
+              :to-equal
+              (concat "https://www.meetup.com/emacsatx/events/\n\n"
+                      "----\nPrevious meetings and notes:\n\n"
+                      "[October 1, 2026](https://www.reddit.com/r/emacs/comments/aaa111/x/)\n\n"
+                      "[February 5, 2026](https://www.reddit.com/r/emacs/comments/bbb222/y/)\n")))
+
+    (it "leaves a link alone when the listing lacks its post"
+      (let ((body "Previous meetings:\n\nhttps://www.reddit.com/r/emacs/comments/zzz999/z/\n"))
+        (expect (reddit-meetup--date-previous body listing) :to-equal body)))
+
+    (it "leaves an already named link alone"
+      (let ((body "Previous meetings:\n\n[Oct 1](https://www.reddit.com/r/emacs/comments/aaa111/x/)\n"))
+        (expect (reddit-meetup--date-previous body listing) :to-equal body)))
+
+    (it "leaves a body without the list alone"
+      (let ((body "Body.\n\nhttps://www.reddit.com/r/emacs/comments/aaa111/x/\n"))
+        (expect (reddit-meetup--date-previous body listing) :to-equal body)))))
+
 (describe "reddit-meetup--compose-body"
   (let ((body (reddit-meetup--compose-body
                reddit-meetup-tests--july-body
                "August 6th"
-               "https://www.reddit.com/r/emacs/comments/1ukwx8l/emacs_atx_meetup_tomorrow_july_2nd/")))
+               "https://www.reddit.com/r/emacs/comments/1ukwx8l/emacs_atx_meetup_tomorrow_july_2nd/"
+               (reddit-meetup-tests--listing
+                `("id" "1ukwx8l" "created_utc" ,(reddit-meetup-tests--posted 2026 7 1)
+                  "selftext" ,reddit-meetup-tests--july-body)
+                `("id" "1tvcwd8" "created_utc" ,(reddit-meetup-tests--posted 2026 6 2)
+                  "selftext" "This time is on June 4.")
+                `("id" "1t4mpn3" "created_utc" ,(reddit-meetup-tests--posted 2026 5 5)
+                  "selftext" ,reddit-meetup-tests--may-body)))))
     (it "announces the new date"
       (expect body :to-match "This time is on August 6th\\."))
 
     (it "carries the boilerplate over untouched"
-      (expect body :to-match "https://www\\.meetup\\.com/emacsatx/events/")
+      (expect body :to-match "^https://www\\.meetup\\.com/emacsatx/events/$")
       (expect body :to-match "DM me if you'd like to join"))
 
-    (it "promotes the previous announcement to the top of the list"
-      (expect body :to-match
+    (it "names every previous meeting by its day, the last one first"
+      (expect (substring body (string-match "^Previous" body))
+              :to-equal
               (concat "Previous meetings and notes:\n\n"
-                      "https://www\\.reddit\\.com/r/emacs/comments/1ukwx8l/[^\n]*\n\n"
-                      "https://www\\.reddit\\.com/r/emacs/comments/1tvcwd8/")))
+                      "[July 2, 2026](https://www.reddit.com/r/emacs/comments/1ukwx8l/emacs_atx_meetup_tomorrow_july_2nd/)\n\n"
+                      "[June 4, 2026](https://www.reddit.com/r/emacs/comments/1tvcwd8/emacs_monthly_thursday_meetup/)\n\n"
+                      "[May 7, 2026](https://www.reddit.com/r/emacs/comments/1t4mpn3/emacs_atx_meetup_this_thursday/)")))
 
     (it "drops the notes link of the meeting that already happened"
       (expect body :not :to-match "Notes \\+ video"))))
@@ -329,6 +412,27 @@ https://www.reddit.com/r/emacs/comments/1sa0jmd/emacs_atx_meetup_tomorrow_thursd
   (it "reports an empty title when the draft starts blank"
     (expect (car (reddit-meetup--split-draft "\nbody\n")) :to-equal "")))
 
+(describe "reddit-meetup--draft"
+  (it "names the announcement it was worked out of by its meeting day"
+    (let ((reddit-meetup-buffer-name " *reddit-meetup-tests*")
+          (listing (reddit-meetup-tests--listing
+                    `("id" "1ukwx8l" "subreddit" "emacs"
+                      "url" "https://www.reddit.com/r/emacs/comments/1ukwx8l/emacs_atx_meetup_tomorrow_july_2nd/"
+                      "created_utc" ,(reddit-meetup-tests--posted 2026 7 1)
+                      "selftext" ,reddit-meetup-tests--july-body))))
+      (unwind-protect
+          (cl-letf (((symbol-function 'pop-to-buffer) #'ignore))
+            (reddit-meetup--draft listing)
+            (with-current-buffer reddit-meetup-buffer-name
+              (expect (buffer-string) :to-match "\\`Emacs Central meetup ")
+              (expect (buffer-string) :to-match
+                      (concat "^Previous meetings and notes:\n\n"
+                              "\\[July 2, 2026\\](https://www\\.reddit\\.com/r/emacs/comments/1ukwx8l/"
+                              "[^)\n]*)\n\n"
+                              "https://www\\.reddit\\.com/r/emacs/comments/1tvcwd8/"))))
+        (when-let* ((buffer (get-buffer reddit-meetup-buffer-name)))
+          (kill-buffer buffer))))))
+
 (describe "reddit-meetup--submit-params"
   (it "builds a self post carrying the modhash"
     (let ((params (reddit-meetup--submit-params
@@ -414,7 +518,7 @@ before the post does."
                         (reddit-meetup-tests--listing))
                        :read)
             :to-equal '("https://api.reddit.com/api/me.json"
-                        "https://api.reddit.com/user/someone/submitted?limit=100&sort=new")))
+                        "https://api.reddit.com/user/someone/submitted?limit=100&sort=new&raw_json=1")))
 
   (it "reads the date off the draft, not off the meeting it was opened for"
     ;; the draft was hand-edited to September, which nothing announces yet

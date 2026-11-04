@@ -27,9 +27,10 @@ The titles have drifted from one month to the next, the body has not.")
   "Carries the logged-in name and the modhash every write has to quote.")
 
 ;; api.reddit.com, where reddigg reads too: www.reddit.com refuses several
-;; listings even to a login
+;; listings even to a login.  raw_json keeps & < > in the bodies unescaped,
+;; the way their markdown has them.
 (defconst reddit-meetup--user-posts-url
-  "https://api.reddit.com/user/%s/submitted?limit=100&sort=new")
+  "https://api.reddit.com/user/%s/submitted?limit=100&sort=new&raw_json=1")
 
 (defconst reddit-meetup--submit-url "https://www.reddit.com/api/submit")
 
@@ -82,19 +83,35 @@ and month alone are already unique among the announcements at hand."
     (when-let* ((month (cdr (assoc (downcase (match-string 1 body)) parse-time-months))))
       (cons month (string-to-number (match-string 2 body))))))
 
+(defun reddit-meetup--meeting-day (post)
+  "Noon of the day of the meeting POST announced.
+A POST stating no date announced the meeting due when it went up."
+  (let* ((posted (seconds-to-time (gethash "created_utc" post)))
+         (parts (decode-time posted)))
+    (if-let* ((date (reddit-meetup--stated-date (gethash "selftext" post))))
+        (encode-time (list 0 0 12 (cdr date) (car date)
+                           ;; a January meeting announced in December
+                           (if (< (car date) (nth 4 parts)) (1+ (nth 5 parts)) (nth 5 parts))
+                           nil -1 nil))
+      (reddit-meetup--next-meeting posted))))
+
 (defun reddit-meetup--title (meeting &optional now)
   "Title for the MEETING announcement, worded by its distance from NOW."
   (let ((days (- (time-to-days meeting) (time-to-days (or now (current-time)))))
         (date (reddit-meetup--date-string meeting)))
-    (cond ((< days 1) "Emacs ATX meetup today, in a few hours")
-          ((= days 1) (format "Emacs ATX meetup tomorrow, %s" date))
-          ((< days 7) (format "Emacs ATX meetup this Thursday, %s" date))
-          (t (format "Emacs ATX meetup on %s" date)))))
+    (concat "Emacs Central meetup "
+            (cond ((< days 1) "today, in a few hours")
+                  ((= days 1) (format "tomorrow, %s" date))
+                  ((< days 7) (format "this Thursday, %s" date))
+                  (t (format "on %s" date))))))
 
 ;;; Reworking the previous announcement
 
 (defconst reddit-meetup--notes-link-regexp "^\\[Notes[^]]*\\](http[^)]*)\\.?[ \t]*\n"
   "Notes and video link, edited into an announcement after its meeting.")
+
+(defconst reddit-meetup--previous-regexp "^Previous[^\n]*:[ \t]*\n"
+  "Heading of the list linking the previous meetings.")
 
 (defun reddit-meetup--set-date (body date)
   "Point the reminder sentence in BODY at DATE, when BODY has one."
@@ -115,19 +132,55 @@ and month alone are already unique among the announcements at hand."
   "Put URL at the head of the previous-meetings list in BODY."
   (cond
    ((string-match-p (regexp-quote url) body) body)
-   ((string-match "^Previous[^\n]*:[ \t]*\n" body)
+   ((string-match reddit-meetup--previous-regexp body)
     (concat (substring body 0 (match-end 0))
             "\n" url "\n"
             (substring body (match-end 0))))
    (t (concat (string-trim-right body)
               "\n\n----\nPrevious meetings and notes:\n\n" url "\n"))))
 
-(defun reddit-meetup--compose-body (previous date url)
-  "Rework the PREVIOUS announcement body for DATE, listing URL as the last one."
-  (reddit-meetup--add-previous
-   (reddit-meetup--strip-notes-link
-    (reddit-meetup--set-date previous date))
-   url))
+(defun reddit-meetup--post-id (url)
+  "Id of the reddit post URL links to, or nil."
+  (when (string-match "/comments/\\([[:alnum:]]+\\)" url)
+    (match-string 1 url)))
+
+(defun reddit-meetup--dated-link (post url)
+  "URL as a markdown link named by the day of the meeting POST announced."
+  (format "[%s](%s)"
+          (format-time-string "%B %-d, %Y" (reddit-meetup--meeting-day post))
+          url))
+
+(defun reddit-meetup--date-previous (body listing)
+  "Name each bare link in the previous-meetings list of BODY by its meeting.
+The day comes from the post in LISTING the link points at; a link to a
+post LISTING does not hold stays bare."
+  (if (string-match reddit-meetup--previous-regexp body)
+      (let ((start (match-end 0))
+            (posts (reddit-meetup--posts listing)))
+        (concat
+         (substring body 0 start)
+         (replace-regexp-in-string
+          "^https?://[^ \t\n]+"
+          (lambda (url)
+            ;; the replacement goes in by the match data URL came with
+            (save-match-data
+              (if-let* ((id (reddit-meetup--post-id url))
+                        (post (seq-find (lambda (post) (equal id (gethash "id" post)))
+                                        posts)))
+                  (reddit-meetup--dated-link post url)
+                url)))
+          (substring body start) t t)))
+    body))
+
+(defun reddit-meetup--compose-body (previous date url listing)
+  "Rework the PREVIOUS announcement body for DATE, listing URL as the last one.
+The links to past meetings are named by the posts of LISTING."
+  (reddit-meetup--date-previous
+   (reddit-meetup--add-previous
+    (reddit-meetup--strip-notes-link
+     (reddit-meetup--set-date previous date))
+    url)
+   listing))
 
 ;;; Talking to reddit
 
@@ -140,11 +193,14 @@ and month alone are already unique among the announcements at hand."
              (reddit-meetup--stated-date body))
          t)))
 
+(defun reddit-meetup--posts (listing)
+  "Posts in LISTING, newest first."
+  (seq-map (lambda (child) (gethash "data" child))
+           (gethash "children" (gethash "data" listing))))
+
 (defun reddit-meetup--announcements (listing)
   "Announcement posts in LISTING, newest first."
-  (seq-filter #'reddit-meetup--announcement-p
-              (seq-map (lambda (child) (gethash "data" child))
-                       (gethash "children" (gethash "data" listing)))))
+  (seq-filter #'reddit-meetup--announcement-p (reddit-meetup--posts listing)))
 
 (defun reddit-meetup--find-announcement (listing)
   "Newest announcement in LISTING, the one a draft is worked out of."
@@ -258,7 +314,7 @@ Reddit reports refusals inside an HTTP 200, so they surface from here."
       (insert (reddit-meetup--title meeting) "\n\n"
               (reddit-meetup--compose-body (gethash "selftext" post)
                                            (reddit-meetup--date-string meeting)
-                                           url)
+                                           url listing)
               "\n")
       (setq reddit-meetup--source
             (list :subreddit (gethash "subreddit" post)
