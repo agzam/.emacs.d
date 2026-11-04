@@ -74,7 +74,7 @@
   :ensure t
   :defer t
   :init
-  (setq shell-pop-shell-type '("eshell" "*eshell*" (lambda () (eshell))))
+  (setq shell-pop-shell-type '("ghostel" "*ghostel*" (lambda () (ghostel))))
   :config
   (setopt shell-pop-window-position "bottom"))
 
@@ -93,6 +93,13 @@
   ;; rebuilds don't wipe it and force a re-download.
   (setq ghostel-module-directory (expand-file-name "ghostel/" doom-data-dir))
   :config
+  ;; A missing or stale native module never prompts: it downloads once Emacs
+  ;; idles after startup, or on the spot when a terminal starts first.  CI
+  ;; skips the fetch so no download lands mid-e2e.
+  (setopt ghostel-module-auto-install 'download)
+  (unless (getenv "CI")
+    (run-with-idle-timer 2 nil #'fetch-ghostel-module))
+
   ;; Let terminal programs drive the system clipboard via OSC52.
   ;; URL/file detection and shell integration are already on by default.
   (setopt ghostel-enable-osc52 t)
