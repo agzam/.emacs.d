@@ -30,6 +30,7 @@
    gptel-expert-commands t
    gptel-track-media t
    gptel-highlight-methods '(face)
+   gptel-confirm-tool-calls nil
    ;; rewrite overlays advertise their keys instead of a bare "Ready"
    gptel-rewrite-default-action #'gptel-rewrite-ready-banner)
 
@@ -116,6 +117,7 @@
 
   (add-hook! 'gptel-mode-hook
     #'gptel-highlight-mode
+    #'gptel-mode-select-all-tools-h
     (defun gptel-mode-set-local-keys-h ()
       (map! :map gptel-mode-map
             :i "RET" nil

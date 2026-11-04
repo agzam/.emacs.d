@@ -23,6 +23,8 @@
 (defvar gptel--rewrite-overlays nil)
 ;; valued for the same reason: the model refresh specs `let'-bind it
 (defvar gptel--known-backends nil)
+;; valued for the same reason: the tool selection specs `let'-bind it
+(defvar gptel--known-tools nil)
 ;; valued for the same reason: the menu model specs `let'-bind it.  Not
 ;; gptel-backend: bound at all, it makes the merge label call a backend
 ;; accessor on it, so those specs bind it with `cl-progv' instead.
@@ -641,6 +643,79 @@
   (it "leaves the note off once tools are active"
     (let ((gptel-tools '(some-tool)))
       (expect (gptel-chat-directive) :to-equal "# AGENTS\nbe nice\n"))))
+
+(describe "gptel-all-tools"
+  :var (dir)
+  (before-each
+    ;; stands in for gptel-agent, which registers its tools as it loads
+    (setq dir (make-temp-file "gptel-agent-stub" t))
+    (with-temp-file (expand-file-name "gptel-agent.el" dir)
+      (insert ";;; gptel-agent.el -*- lexical-binding: t; -*-\n"
+              "(push '(\"gptel-agent\" (\"Bash\" . bash-tool)) gptel--known-tools)\n"
+              "(provide 'gptel-agent)\n")))
+  (after-each
+    (delete-directory dir t))
+
+  (it "returns the tools of every category"
+    (let ((gptel--known-tools '(("slack" ("search" . search-tool)
+                                         ("fetch" . fetch-tool))
+                                ("k8s" ("pods" . pods-tool))))
+          (features (cons 'gptel-agent features)))
+      (expect (gptel-all-tools) :to-equal '(search-tool fetch-tool pods-tool))))
+
+  ;; gptel-agent is deferred, so a chat opened before any agent session
+  ;; would otherwise start without its tools
+  (it "loads gptel-agent so its tools are among them"
+    (let ((gptel--known-tools '(("slack" ("search" . search-tool))))
+          (load-path (cons dir load-path))
+          (features (remq 'gptel-agent features)))
+      (expect (gptel-all-tools) :to-equal '(bash-tool search-tool)))))
+
+(describe "gptel-mode-select-all-tools-h"
+  (before-each
+    (spy-on 'gptel-all-tools :and-return-value '(tool-a tool-b)))
+
+  (it "selects every tool in a chat that starts with none"
+    (let ((gptel-tools nil))
+      (with-temp-buffer
+        (setq-local gptel-mode t)
+        (gptel-mode-select-all-tools-h)
+        (expect (local-variable-p 'gptel-tools) :to-be t)
+        (expect gptel-tools :to-equal '(tool-a tool-b)))))
+
+  ;; restored from the chat file, applied by a preset, or set from the menu
+  (it "keeps the buffer's own selection"
+    (let ((gptel-tools nil))
+      (with-temp-buffer
+        (setq-local gptel-mode t
+                    gptel-tools '(tool-a))
+        (gptel-mode-select-all-tools-h)
+        (expect gptel-tools :to-equal '(tool-a)))))
+
+  (it "keeps the buffer's own choice of no tools"
+    (let ((gptel-tools nil))
+      (with-temp-buffer
+        (setq-local gptel-mode t
+                    gptel-tools nil)
+        (gptel-mode-select-all-tools-h)
+        (expect gptel-tools :to-be nil)
+        (expect 'gptel-all-tools :not :to-have-been-called))))
+
+  ;; the global scope of `gptel-menu' picks the tools every chat starts with
+  (it "leaves a global selection in charge"
+    (let ((gptel-tools '(tool-b)))
+      (with-temp-buffer
+        (setq-local gptel-mode t)
+        (gptel-mode-select-all-tools-h)
+        (expect (local-variable-p 'gptel-tools) :to-be nil)
+        (expect 'gptel-all-tools :not :to-have-been-called))))
+
+  (it "does nothing as gptel-mode turns off"
+    (let ((gptel-tools nil))
+      (with-temp-buffer
+        (setq-local gptel-mode nil)
+        (gptel-mode-select-all-tools-h)
+        (expect (local-variable-p 'gptel-tools) :to-be nil)))))
 
 (describe "gptel-send-show-model-a"
   :var (shown)

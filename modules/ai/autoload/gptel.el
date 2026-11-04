@@ -410,6 +410,31 @@ follows its own precedent, so one such answer wedges the buffer."
   (concat (eca-agents-md-content)
           (unless (bound-and-true-p gptel-tools) gptel-toolless-directive)))
 
+;; gptel's own, special here even before gptel loads
+(defvar gptel--known-tools)
+(defvar gptel-tools)
+(defvar gptel-mode)
+
+;;;###autoload
+(defun gptel-all-tools ()
+  "Return every tool gptel knows, gptel-agent's own included."
+  ;; gptel-agent is deferred and registers its tools as it loads; the whole
+  ;; package rather than gptel-agent-tools, since its Agent and Skill tools
+  ;; read variables only gptel-agent.el defines
+  (require 'gptel-agent nil t)
+  (cl-loop for (_ . tools) in gptel--known-tools
+           append (mapcar #'cdr tools)))
+
+;;;###autoload
+(defun gptel-mode-select-all-tools-h ()
+  "Select every known tool in a chat that starts with none.
+A selection of the buffer's own - restored from its file, or set by a
+preset or `gptel-menu' - stays, and so does a global one."
+  (when (and gptel-mode
+             (not gptel-tools)
+             (not (local-variable-p 'gptel-tools)))
+    (setq-local gptel-tools (gptel-all-tools))))
+
 ;;;###autoload
 (defun gptel-send-show-model-a (send &rest args)
   "Call SEND with ARGS, adding the model to its \"Querying\" message."

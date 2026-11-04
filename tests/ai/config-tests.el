@@ -81,6 +81,21 @@
                       (ai-tests--calls 'gptel-copilot-update-models))
             :to-be-truthy)))
 
+(describe "gptel tools in ai/config.el"
+  (it "run without confirmation"
+    (let ((setting (seq-some (lambda (call)
+                               (plist-member (cdr call) 'gptel-confirm-tool-calls))
+                             (ai-tests--calls 'setopt))))
+      (expect setting :to-be-truthy)
+      (expect (cadr setting) :to-be nil)))
+
+  (it "are all selected when a chat starts"
+    (expect (seq-some (lambda (call)
+                        (and (equal (cadr call) ''gptel-mode-hook)
+                             (member '#'gptel-mode-select-all-tools-h (cddr call))))
+                      (ai-tests--calls 'add-hook!))
+            :to-be-truthy)))
+
 (describe "gptel-send in ai/config.el"
   (it "names the model in its Querying message"
     (expect (member '(advice-add #'gptel-send :around #'gptel-send-show-model-a)
