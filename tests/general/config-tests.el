@@ -58,4 +58,20 @@
       (eval pair-delay t)
       (expect sp-show-pair-delay :to-equal show-paren-delay))))
 
+(describe "winum config"
+  :var* ((wiring (cl-find-if (lambda (f) (eq (car-safe f) 'after!))
+                             (general-config-tests--config-forms 'winum))))
+
+  (it "numbers the windows whenever which-key pops up a menu"
+    (require 'which-key)
+    (expect wiring :to-be-truthy)
+    (unwind-protect
+        (progn
+          (eval wiring t)
+          (expect (advice-member-p #'which-key-window-numbers-a
+                                   #'which-key--create-buffer-and-show)
+                  :to-be-truthy))
+      (advice-remove #'which-key--create-buffer-and-show
+                     #'which-key-window-numbers-a))))
+
 ;;; config-tests.el ends here

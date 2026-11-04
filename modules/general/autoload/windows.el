@@ -271,3 +271,53 @@ has nothing to offer, and then nothing changes."
   (interactive)
   (window-layout--jump tab-bar-history-forward tab-bar-history-back
                        "No further window layout"))
+
+;;; Window number labels -------------------------------------------------
+
+(defvar window-number-labels nil
+  "Posframe buffers of the window number labels on display.")
+
+(defun keymap-selects-windows-p (keymap)
+  "Non-nil when KEYMAP binds a `winum' window selector directly."
+  (and (keymapp keymap)
+       (catch 'found
+         (map-keymap
+          (lambda (_ def)
+            (let ((cmd (if (stringp (car-safe def)) (cdr def) def)))
+              (when (and (symbolp cmd)
+                         (string-prefix-p "winum-select-window-" (symbol-name cmd)))
+                (throw 'found t))))
+          keymap))))
+
+(defun show-window-numbers ()
+  "Show each window's `winum' number in a big posframe at its top left."
+  (when-let* (((null window-number-labels))
+              ((posframe-workable-p))
+              (windows (seq-filter #'winum-get-number (window-list nil 'nomini)))
+              ((length> windows 1)))
+    ;; defines `aw-leading-char-face', the one the theme makes big
+    (require 'ace-window)
+    (let ((font (face-font 'aw-leading-char-face))
+          (color (face-foreground 'aw-leading-char-face nil t)))
+      (dolist (w windows)
+        (let* ((n (winum-get-number w))
+               (buf (format " *window-number-%d*" n)))
+          (with-selected-window w
+            (posframe-show buf :string (number-to-string n)
+                           :font font :foreground-color color
+                           :poshandler #'posframe-poshandler-window-top-left-corner))
+          (push buf window-number-labels))))
+    (add-hook 'pre-command-hook #'hide-window-numbers)))
+
+(defun hide-window-numbers ()
+  "Hide the labels `show-window-numbers' put up."
+  (remove-hook 'pre-command-hook #'hide-window-numbers)
+  (mapc #'posframe-hide window-number-labels)
+  (setq window-number-labels nil))
+
+;;;###autoload
+(defun which-key-window-numbers-a (&optional prefix-keys &rest _)
+  "Number the windows while which-key lists the selectors under PREFIX-KEYS."
+  (if (and prefix-keys (keymap-selects-windows-p (key-binding prefix-keys)))
+      (show-window-numbers)
+    (hide-window-numbers)))

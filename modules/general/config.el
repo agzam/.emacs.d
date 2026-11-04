@@ -29,7 +29,10 @@
       (map! :n k f)
       (map! :leader :n wn f
             :n (concat "w" wn) f)
-      (global-set-key (kbd k) f))))
+      (global-set-key (kbd k) f)))
+  ;; numbers ride which-key's idle popup, so a fast SPC sequence never draws them
+  (after! which-key
+    (advice-add #'which-key--create-buffer-and-show :after #'which-key-window-numbers-a)))
 
 (use-package info+
   ;; EmacsWiki package: purged from MELPA in 2018; straight resolved it via
