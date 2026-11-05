@@ -1,6 +1,6 @@
 ;;; modules/ai/autoload/model-picker.el -*- lexical-binding: t; -*-
 
-;;; Provider headers and narrowing in the model pickers
+;;; Newest models only, provider headers and narrowing in the model pickers
 
 ;; gptel and eca list every backend's models as one flat PROVIDER:MODEL or
 ;; PROVIDER/MODEL list.  Typed input filters on the model name, so "opu"
@@ -72,13 +72,42 @@ by that letter does; under a transient which-key is off."
   (lambda (candidate)
     (equal (model-picker-provider candidate) (alist-get consult--narrow keys))))
 
+(defun model-picker-version (candidate)
+  "Split CANDIDATE into (FAMILY . VERSION), nil when its model has no version.
+VERSION is the first number in the model name that no letter follows, so
+\"gpt-6.1-sol\" gives (\"gpt-#-sol\" 6 1) and the 8 in \"8b\" never counts.
+A trailing date stamp is dropped, or it would outrank every minor version."
+  (let ((name (replace-regexp-in-string
+               "-[0-9]\\{8\\}\\'" "" (if (consp candidate) (car candidate) candidate))))
+    (when (string-match "\\([0-9]+\\(?:[.-][0-9]+\\)*\\)\\(?:[^[:alnum:]]\\|\\'\\)" name)
+      (let ((version (match-string 1 name)))
+        (cons (replace-match "#" t t name 1)
+              (mapcar #'string-to-number (split-string version "[.-]")))))))
+
+(defun model-picker-latest (table)
+  "TABLE without the entries a newer version of their model supersedes.
+Versions compare within one provider.  TABLE holds candidates, or alist
+entries keyed by them."
+  (let ((newest (make-hash-table :test #'equal)))
+    (pcase-dolist (`(,family . ,version) (delq nil (mapcar #'model-picker-version table)))
+      (when (version-list-< (gethash family newest) version)
+        (puthash family version newest)))
+    (seq-remove (lambda (entry)
+                  (when-let* ((parsed (model-picker-version entry)))
+                    (version-list-< (cdr parsed) (gethash (car parsed) newest))))
+                table)))
+
 ;;;###autoload
 (defun model-picker-setup-h ()
-  "Group a model picker's list by provider, narrowable to one with `consult-narrow-key'.
-For `minibuffer-setup-hook', at a depth past vertico's own setup, which
-installs the local map the narrowing keys compose onto."
+  "Group a model picker's newest models by provider, narrowable to one.
+The narrowing key is `consult-narrow-key'.  For `minibuffer-setup-hook', at
+a depth past vertico's own setup, which installs the local map the
+narrowing keys compose onto."
   (when (memq this-command model-picker-commands)
     (require 'consult)
+    ;; A predicate would not last: narrowing overwrites
+    ;; `minibuffer-completion-predicate'.
+    (setq minibuffer-completion-table (model-picker-latest minibuffer-completion-table))
     (let ((keys (model-picker-narrowing-keys
                  (seq-uniq (delq nil (mapcar #'model-picker-provider
                                              (all-completions "" minibuffer-completion-table

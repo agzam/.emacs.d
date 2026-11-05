@@ -201,9 +201,9 @@
 ;; upstream's M-RET in dired and friends; an evil-level g-sequence wins).
 (map! :n "gi" #'gptel-inline-dwim)
 
-;; Provider headers and narrowing in the gptel and eca model pickers
-;; (model-picker.el).  Depth past vertico's setup, whose local map the
-;; narrowing keys compose onto.
+;; Newest models only, provider headers and narrowing in the gptel and eca
+;; model pickers (model-picker.el).  Depth past vertico's setup, whose local
+;; map the narrowing keys compose onto.
 (add-hook 'minibuffer-setup-hook #'model-picker-setup-h 90)
 
 ;; mcp-tool-defs-from-source parses the MCP harness sources with parseedn;

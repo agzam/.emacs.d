@@ -1,4 +1,4 @@
-;;; tests/e2e/model-picker-groups.el --- provider headers and narrowing in the model pickers -*- lexical-binding: t; -*-
+;;; tests/e2e/model-picker-groups.el --- newest-only lists, provider headers and narrowing in the model pickers -*- lexical-binding: t; -*-
 ;; Loaded by scripts/e2e-check.el inside a fully booted Emacs, not by
 ;; buttercup (the name stays clear of *-tests.el so discovery skips it).
 ;;
@@ -24,15 +24,19 @@
                          #'string<)
         :selected (if (< vertico--index 0) 'prompt 'candidate)))
 
-(defun model-picker-e2e--observe (done-p thunk)
-  "The snapshot of THUNK's read once DONE-P holds inside its minibuffer.
-Checked from `post-command-hook'; the read is aborted right after the
-capture.  A read that never gets there is aborted by a timer rather than
-left to eat the keys of the scenarios after this one."
+(defun model-picker-e2e--candidates ()
+  "The candidates the live minibuffer shows, sorted."
+  (sort (mapcar #'substring-no-properties vertico--candidates) #'string<))
+
+(defun model-picker-e2e--observe (done-p thunk &optional snapshot)
+  "What SNAPSHOT returns in THUNK's read once DONE-P holds in its minibuffer.
+SNAPSHOT defaults to `model-picker-e2e--snapshot'; it runs from
+`post-command-hook', and the read is aborted right after.  A read that never
+gets there is aborted by a timer, not left to eat the next scenarios' keys."
   (let* ((seen 'never-captured)
          (capture (lambda ()
                     (when (and (minibufferp) (funcall done-p))
-                      (setq seen (model-picker-e2e--snapshot))
+                      (setq seen (funcall (or snapshot #'model-picker-e2e--snapshot)))
                       (abort-minibuffers))))
          (guard (run-with-timer 10 nil
                                 (lambda ()
@@ -55,8 +59,9 @@ left to eat the keys of the scenarios after this one."
   "A DONE-P for `model-picker-e2e--observe': the read is narrowed by KEY."
   (lambda () (eq consult--narrow key)))
 
-(defun model-picker-e2e--plain-read (command keys done-p)
-  "Snapshot of a picker-shaped read COMMAND opens, KEYS in, once DONE-P holds."
+(defun model-picker-e2e--plain-read (command keys done-p &optional snapshot)
+  "SNAPSHOT of a picker-shaped read COMMAND opens, KEYS in, once DONE-P holds.
+SNAPSHOT as in `model-picker-e2e--observe'."
   (model-picker-e2e--observe
    done-p
    (lambda ()
@@ -66,7 +71,8 @@ left to eat the keys of the scenarios after this one."
                         '("anthropic/claude-opus-5" "anthropic/claude-opus-4-6"
                           "github-copilot/claude-opus-5" "github-copilot/gpt-5.4"
                           "ollama/solar")
-                        nil t nil nil "anthropic/claude-opus-5")))))
+                        nil t nil nil "anthropic/claude-opus-5")))
+   snapshot))
 
 (defmacro model-picker-e2e--in-gptel-menu (&rest body)
   "Run BODY with gptel loaded and a buffer to open its menu in.
@@ -88,14 +94,21 @@ scenarios after this one, and the model it may have set is put back."
          (setq gptel-backend old-backend
                gptel-model old-model)))))
 
-(defun model-picker-e2e--gptel-menu (keys done-p)
-  "Snapshot of the picker behind gptel-menu's m, KEYS typed, once DONE-P holds."
+(defun model-picker-e2e--gptel-menu (keys done-p &optional snapshot)
+  "SNAPSHOT of the picker behind gptel-menu's m, KEYS typed, once DONE-P holds.
+SNAPSHOT as in `model-picker-e2e--observe'."
   (model-picker-e2e--in-gptel-menu
     (model-picker-e2e--observe
      done-p
      (lambda ()
        (gptel-menu)
-       (execute-kbd-macro (kbd keys))))))
+       (execute-kbd-macro (kbd keys)))
+     snapshot)))
+
+(defun model-picker-e2e--gptel-candidates (name)
+  "Every model of gptel backend NAME, written as its picker writes it."
+  (mapcar (lambda (model) (concat name ":" (gptel--model-name model)))
+          (gptel-backend-models (gptel-get-backend name))))
 
 (defun model-picker-e2e--gptel-pick (keys)
   "The backend and model gptel holds after KEYS go into its menu, or the signal."
@@ -115,7 +128,7 @@ scenarios after this one, and the model it may have set is put back."
         (cancel-timer guard)))))
 
 (defun model-picker-e2e ()
-  "Check the provider headers and narrowing in the model pickers."
+  "Check the newest-only lists, provider headers and narrowing in the model pickers."
   (require 'eca-chat)
   (require 'eca-chat-inline)
   ;; the hook is autoloaded and nothing here has opened a minibuffer yet
@@ -134,9 +147,20 @@ scenarios after this one, and the model it may have set is put back."
     '(:groups ("anthropic  (< a)" "github-copilot  (< g)")
       :providers ("anthropic" "github-copilot") :selected candidate))
    (model-picker-e2e--result
+    "eca's picker: opu leaves out anthropic/claude-opus-4-6, which claude-opus-5 supersedes"
+    (model-picker-e2e--plain-read 'eca-chat-select-model "opu" (model-picker-e2e--typed "opu")
+                                  #'model-picker-e2e--candidates)
+    '("anthropic/claude-opus-5" "github-copilot/claude-opus-5"))
+   (model-picker-e2e--result
     "eca's picker: < g leaves github-copilot alone, first candidate selected"
     (model-picker-e2e--plain-read 'eca-chat-select-model "< g" (model-picker-e2e--narrowed ?g))
     '(:groups ("github-copilot  (< g)") :providers ("github-copilot") :selected candidate))
+   ;; narrowing swaps the completion predicate, which must not bring 4-6 back
+   (model-picker-e2e--result
+    "eca's picker: < a still leaves out anthropic/claude-opus-4-6"
+    (model-picker-e2e--plain-read 'eca-chat-select-model "< a" (model-picker-e2e--narrowed ?a)
+                                  #'model-picker-e2e--candidates)
+    '("anthropic/claude-opus-5"))
    (model-picker-e2e--result
     "the inline picker narrows the same way"
     (model-picker-e2e--plain-read 'eca-chat-inline-select-model "< o"
@@ -155,12 +179,24 @@ scenarios after this one, and the model it may have set is put back."
     "gptel-menu: m < g RET sets a Copilot model"
     (model-picker-e2e--gptel-pick "m < g RET")
     '("Copilot" t))
+   (let* ((in-view (model-picker-e2e--gptel-menu "m < a" (model-picker-e2e--narrowed ?a)
+                                                 #'model-picker-e2e--candidates))
+          (all (model-picker-e2e--gptel-candidates "Claude-OAuth")))
+     (model-picker-e2e--result
+      "gptel-menu: m < a lists the newest Claude-OAuth models only, fewer than gptel holds"
+      (list :in-view in-view :fewer (and (listp in-view) (< (length in-view) (length all))))
+      (list :in-view (sort (model-picker-latest all) #'string<) :fewer t)))
    ;; runs after the pickers on purpose: the minibuffer is reused, and the
    ;; local group function and narrowing must not outlive the read that set them
    (model-picker-e2e--result
     "a read another command opens has neither headers nor narrowing"
     (model-picker-e2e--plain-read 'execute-extended-command "opu" (model-picker-e2e--typed "opu"))
     '(:groups nil :providers ("anthropic" "github-copilot") :selected candidate))
+   (model-picker-e2e--result
+    "a read another command opens lists every model, the superseded ones too"
+    (model-picker-e2e--plain-read 'execute-extended-command "opu" (model-picker-e2e--typed "opu")
+                                  #'model-picker-e2e--candidates)
+    '("anthropic/claude-opus-4-6" "anthropic/claude-opus-5" "github-copilot/claude-opus-5"))
    (model-picker-e2e--result
     "there < just types"
     (model-picker-e2e--plain-read 'execute-extended-command "< g" (model-picker-e2e--typed "<g"))

@@ -108,6 +108,106 @@
     (let ((consult--narrow ?a))
       (expect (funcall pred "solar") :to-be nil))))
 
+(describe "model-picker-version"
+  (it "splits a dotted version out of the family"
+    (expect (model-picker-version "github-copilot/gpt-6.1-sol")
+            :to-equal '("github-copilot/gpt-#-sol" 6 1)))
+
+  ;; Anthropic separates the minor version with a dash
+  (it "reads a dashed version"
+    (expect (model-picker-version "Claude-OAuth:claude-opus-5-5")
+            :to-equal '("Claude-OAuth:claude-opus-#" 5 5)))
+
+  (it "reads a major version alone"
+    (expect (model-picker-version "anthropic/claude-opus-5")
+            :to-equal '("anthropic/claude-opus-#" 5)))
+
+  ;; as a version part, 20250514 would put opus 4 above opus 4.1
+  (it "drops a trailing date stamp"
+    (expect (model-picker-version "anthropic/claude-opus-4-20250514")
+            :to-equal '("anthropic/claude-opus-#" 4))
+    (expect (model-picker-version "anthropic/claude-opus-4-1-20250805")
+            :to-equal '("anthropic/claude-opus-#" 4 1)))
+
+  (it "leaves an ollama size tag in the family"
+    (expect (model-picker-version "Ollama:qwen3.5:4b") :to-equal '("Ollama:qwen#:4b" 3 5))
+    (expect (model-picker-version "ollama/qwen3-embedding:0.6b")
+            :to-equal '("ollama/qwen#-embedding:0.6b" 3)))
+
+  ;; the dash would join the 8 of the 8b size to version 3.1
+  (it "takes no number a letter follows"
+    (expect (model-picker-version "Groq:llama-3.1-8b-instant")
+            :to-equal '("Groq:llama-#-8b-instant" 3 1))
+    (expect (model-picker-version "Copilot:gpt-4o") :to-be nil))
+
+  (it "reads an alist entry by its key"
+    (expect (model-picker-version '("Copilot:grok-4.7" backend model))
+            :to-equal '("Copilot:grok-#" 4 7)))
+
+  (it "is nil for a model without a version"
+    (expect (model-picker-version "ollama/nomic-embed-text:latest") :to-be nil)))
+
+(defun model-picker-tests--listed (provider &rest models)
+  "MODELS as eca lists them under PROVIDER."
+  (mapcar (lambda (model) (concat provider "/" model)) models))
+
+(describe "model-picker-latest"
+  (it "keeps the newest version of each model"
+    (expect (model-picker-latest
+             (model-picker-tests--listed "github-copilot"
+                                         "gpt-6-sol" "gpt-6-luna" "gpt-6.1-sol" "gpt-5.6-luna"))
+            :to-equal (model-picker-tests--listed "github-copilot" "gpt-6-luna" "gpt-6.1-sol")))
+
+  (it "compares versions within one provider"
+    (expect (model-picker-latest '("anthropic/claude-opus-5" "github-copilot/claude-opus-5.5"))
+            :to-equal '("anthropic/claude-opus-5" "github-copilot/claude-opus-5.5")))
+
+  (it "tells sizes apart"
+    (expect (model-picker-latest
+             (model-picker-tests--listed "ollama" "qwen3.5:4b" "qwen3.6:27b" "qwen3.8:27b"))
+            :to-equal (model-picker-tests--listed "ollama" "qwen3.5:4b" "qwen3.8:27b")))
+
+  (it "keeps the models without a version"
+    (expect (model-picker-latest
+             (model-picker-tests--listed "ollama" "nomic-embed-text:latest" "embeddinggemma:latest"))
+            :to-equal
+            (model-picker-tests--listed "ollama" "nomic-embed-text:latest" "embeddinggemma:latest")))
+
+  (it "keeps gptel's alist entries whole"
+    (expect (model-picker-latest '(("Copilot:grok-4.6" b m) ("Copilot:grok-4.7" b m)))
+            :to-equal '(("Copilot:grok-4.7" b m))))
+
+  (it "keeps one model per family of the Copilot catalog"
+    (expect (model-picker-latest
+             (model-picker-tests--listed
+              "github-copilot"
+              "claude-fable-5.1" "claude-haiku-4.5" "claude-haiku-5.5" "claude-opus-4.8"
+              "claude-opus-5" "claude-opus-5.5" "claude-sonnet-5" "claude-sonnet-5.5"
+              "gemini-3.8-flash" "gemini-4-argon" "gpt-5.3-codex" "gpt-5.6-luna" "gpt-5.6-sol"
+              "gpt-5.6-terra" "gpt-6-astra" "gpt-6-luna" "gpt-6-sol" "gpt-6.1-sol"
+              "gpt-6.1-terra" "grok-4.6" "grok-4.7" "mai-code-1.1-flash"))
+            :to-equal
+            (model-picker-tests--listed
+             "github-copilot"
+             "claude-fable-5.1" "claude-haiku-5.5" "claude-opus-5.5" "claude-sonnet-5.5"
+             "gemini-3.8-flash" "gemini-4-argon" "gpt-5.3-codex" "gpt-6-astra" "gpt-6-luna"
+             "gpt-6.1-sol" "gpt-6.1-terra" "grok-4.7" "mai-code-1.1-flash")))
+
+  (it "keeps one model per family of the Anthropic catalog, dated ids among them"
+    (expect (model-picker-latest
+             (model-picker-tests--listed
+              "anthropic"
+              "claude-fable-5" "claude-fable-5-1" "claude-haiku-4-5-20251001" "claude-haiku-5-5"
+              "claude-mythos-5" "claude-mythos-5-1" "claude-opus-4-5-20251101" "claude-opus-4-6"
+              "claude-opus-4-7" "claude-opus-4-8" "claude-opus-5" "claude-opus-5-5"
+              "claude-sonnet-4-5-20250929" "claude-sonnet-4-6" "claude-sonnet-5"
+              "claude-sonnet-5-5"))
+            :to-equal
+            (model-picker-tests--listed
+             "anthropic"
+             "claude-fable-5-1" "claude-haiku-5-5" "claude-mythos-5-1" "claude-opus-5-5"
+             "claude-sonnet-5-5"))))
+
 ;; consult is not installed here: its setup is stubbed to record what it was
 ;; handed, and the require is faked away.
 (defmacro model-picker-tests--with-consult-stub (&rest body)
@@ -164,6 +264,26 @@ lexical in the spec that expands this."
         (expect (plist-get completion-extra-properties :annotation-function) :to-be #'ignore)
         (expect (functionp (plist-get completion-extra-properties :group-function)) :to-be t))))
 
+  ;; the narrowing replaces the predicate, so the hiding has to sit in the table
+  (it "hides from the table the models a newer version supersedes"
+    (with-temp-buffer
+      (let ((this-command 'eca-chat-select-model)
+            (minibuffer-completion-table '("anthropic/claude-opus-4-8" "anthropic/claude-opus-5"
+                                           "github-copilot/claude-opus-4.8"))
+            (minibuffer-completion-predicate nil))
+        (model-picker-tests--with-consult-stub (model-picker-setup-h))
+        (expect minibuffer-completion-table
+                :to-equal '("anthropic/claude-opus-5" "github-copilot/claude-opus-4.8")))))
+
+  ;; gptel looks the pick up in its own alist, by the whole entry's key
+  (it "hides superseded entries of gptel's alist table"
+    (with-temp-buffer
+      (let ((this-command 'gptel--infix-provider)
+            (minibuffer-completion-table '(("Copilot:grok-4.6" b m) ("Copilot:grok-4.7" b m)))
+            (minibuffer-completion-predicate nil))
+        (model-picker-tests--with-consult-stub (model-picker-setup-h))
+        (expect minibuffer-completion-table :to-equal '(("Copilot:grok-4.7" b m))))))
+
   (it "drops the default, so RET after narrowing takes the first candidate in view"
     (with-temp-buffer
       (let ((this-command 'eca-chat-select-model)
@@ -185,8 +305,10 @@ lexical in the spec that expands this."
   (it "leaves any other command's minibuffer alone"
     (with-temp-buffer
       (let ((this-command 'find-file)
+            (minibuffer-completion-table '("claude-opus-4-8" "claude-opus-5"))
             (minibuffer-default "keep"))
         (model-picker-tests--with-consult-stub (model-picker-setup-h))
-        (expect minibuffer-default :to-equal "keep"))
+        (expect minibuffer-default :to-equal "keep")
+        (expect minibuffer-completion-table :to-equal '("claude-opus-4-8" "claude-opus-5")))
       (expect narrow :to-be nil)
       (expect (local-variable-p 'completion-extra-properties) :to-be nil))))
