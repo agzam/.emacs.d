@@ -298,8 +298,9 @@
               "l" #'tab-line-switch-to-next-tab
               "h" #'tab-line-switch-to-prev-tab
               "b" #'eca-chat-cycle-agent
-              "t" #'eca-chat-toggle-trust
+              "T" #'eca-chat-toggle-trust
               "f" #'eca-chat-flag-and-fork
+              "t" #'eca-chat-ghostel-buffers
               ( :prefix ("w" . "workspace")
                 "a" #'eca-chat-add-workspace-root
                 "r" #'eca-chat-remove-workspace-root

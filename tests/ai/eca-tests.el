@@ -596,3 +596,125 @@ the order given, oldest first, so recency is deterministic."
         (eca-toggle-workspaces)
         (expect (window-live-p win) :to-be nil)
         (expect 'eca-workspaces :not :to-have-been-called)))))
+
+
+;; eca-ghostel.el is not part of this config, so its `eca-ghostel-list'
+;; entries are written out here; the e2e scenario presses the real key.
+(defun eca-tests--run (buffer origin &rest props)
+  "An `eca-ghostel-list' entry for BUFFER, started from the chat named ORIGIN.
+PROPS override the defaults."
+  (append props
+          (list :buffer buffer :status "exited 0 after 1.0s" :command "make test"
+                :origin origin :started "12:00:00" :log nil)))
+
+(defun eca-tests--fake-consult (pick)
+  "Make `consult--read' answer with its PICK-th candidate.
+Return a function giving what the read saw: its candidates, its options
+and `display-buffer-overriding-action'."
+  (let (seen)
+    (spy-on 'consult--buffer-preview :and-return-value 'buffer-preview)
+    (spy-on 'consult--read :and-call-fake
+            (lambda (candidates &rest options)
+              (setq seen (list candidates options display-buffer-overriding-action))
+              (nth pick candidates)))
+    (lambda () seen)))
+
+(describe "eca-chat-ghostel-buffers"
+  ;; the stand-in picks the second row, so a picker that dropped the
+  ;; order, or offered another chat's run, hands back a different buffer
+  (it "offers only the runs this chat started, in the order eca-ghostel lists them"
+    (with-temp-buffer
+      (let ((chat (buffer-name)))
+        (spy-on 'eca-ghostel-list :and-return-value
+                (list (eca-tests--run "*eca-ghostel: zeta*" chat)
+                      (eca-tests--run "*eca-ghostel: theirs*" "eca-chat - other")
+                      (eca-tests--run "*eca-ghostel: alpha*" chat)
+                      (eca-tests--run "*eca-ghostel: mid*" chat)))
+        (spy-on 'eca-ghostel-visit)
+        (let ((seen (eca-tests--fake-consult 1)))
+          (with-fake-feature 'consult
+            (eca-chat-ghostel-buffers))
+          (expect (car (funcall seen))
+                  :to-equal '("*eca-ghostel: zeta*" "*eca-ghostel: alpha*"
+                              "*eca-ghostel: mid*"))
+          (expect 'eca-ghostel-visit :to-have-been-called-with "*eca-ghostel: alpha*")))))
+
+  (it "keeps that order, annotates each row and previews it as the selection moves"
+    (with-temp-buffer
+      (spy-on 'eca-ghostel-list :and-return-value
+              (list (eca-tests--run "*eca-ghostel: a*" (buffer-name))))
+      (spy-on 'eca-ghostel-visit)
+      (let ((seen (eca-tests--fake-consult 0)))
+        (with-fake-feature 'consult
+          (eca-chat-ghostel-buffers))
+        (let ((options (nth 1 (funcall seen))))
+          (expect (plist-member options :sort) :to-be-truthy)
+          (expect (plist-get options :sort) :to-be nil)
+          (expect (funcall (plist-get options :annotate) "*eca-ghostel: a*")
+                  :to-match "exited 0 after 1\\.0s +12:00:00  make test\\'")
+          ;; `any' previews with no key to press
+          (expect (plist-get options :preview-key) :to-be 'any)
+          (expect (plist-get options :state) :to-be 'buffer-preview)))))
+
+  ;; the read itself runs unoverridden, or vertico-buffer would land in the
+  ;; window the previews need
+  (it "shows the picked buffer in the window that previewed it"
+    (with-temp-buffer
+      (let (action)
+        (spy-on 'eca-ghostel-list :and-return-value
+                (list (eca-tests--run "*eca-ghostel: a*" (buffer-name))))
+        (spy-on 'eca-ghostel-visit :and-call-fake
+                (lambda (_name) (setq action display-buffer-overriding-action)))
+        (let ((seen (eca-tests--fake-consult 0)))
+          (with-fake-feature 'consult
+            (eca-chat-ghostel-buffers))
+          (expect action :to-equal '(display-buffer-same-window))
+          (expect (nth 2 (funcall seen))
+                  :to-equal (default-value 'display-buffer-overriding-action))))))
+
+  (it "says so when the chat started no run"
+    (with-temp-buffer
+      (spy-on 'eca-ghostel-list :and-return-value
+              (list (eca-tests--run "*eca-ghostel: theirs*" "eca-chat - other")))
+      (spy-on 'consult--read)
+      (expect (eca-chat-ghostel-buffers) :to-throw 'user-error)
+      (expect 'consult--read :not :to-have-been-called)))
+
+  ;; a fresh Emacs, before the elisp-eval MCP has loaded eca-ghostel.el
+  (it "says so before eca-ghostel has loaded"
+    (expect (fboundp 'eca-ghostel-list) :to-be nil)
+    (with-temp-buffer
+      (expect (eca-chat-ghostel-buffers) :to-throw 'user-error))))
+
+(describe "eca-chat-ghostel--annotations"
+  (it "starts every status and every start time in the same column"
+    (let* ((rows (eca-chat-ghostel--annotations
+                  (list (eca-tests--run "*eca-ghostel: a-long-label*" "c"
+                                        :status "running 3.0s" :started "12:00:01")
+                        (eca-tests--run "*eca-ghostel: b*" "c"
+                                        :status "exited 1 after 120.5s" :started "11:59:00"))))
+           (columns (lambda (regexp)
+                      (seq-uniq (mapcar (lambda (row)
+                                          (string-match-p regexp (concat (car row) (cdr row))))
+                                        rows)))))
+      (expect (length (funcall columns "running\\|exited")) :to-equal 1)
+      (expect (length (funcall columns "[0-9][0-9]:[0-9][0-9]:[0-9][0-9]")) :to-equal 1)))
+
+  (it "shows each run's own status, start time and command"
+    (let ((rows (eca-chat-ghostel--annotations
+                 (list (eca-tests--run "*eca-ghostel: a*" "c" :status "running 3.0s"
+                                       :started "12:00:01" :command "bb test")
+                       (eca-tests--run "*eca-ghostel: b*" "c" :status "exited 2 after 9.0s"
+                                       :started "11:00:00" :command "bb e2e")))))
+      (expect (cdr (assoc "*eca-ghostel: a*" rows))
+              :to-match "running 3\\.0s +12:00:01  bb test\\'")
+      (expect (cdr (assoc "*eca-ghostel: b*" rows))
+              :to-match "exited 2 after 9\\.0s +11:00:00  bb e2e\\'")))
+
+  ;; vertico prints an annotation as is, so a newline in it splits the row
+  (it "puts a multi-line command on one line"
+    (let ((annotation (cdar (eca-chat-ghostel--annotations
+                             (list (eca-tests--run "*eca-ghostel: a*" "c"
+                                                   :command "set -x\n  cd /tmp &&\n\tmake"))))))
+      (expect annotation :to-match "set -x cd /tmp && make\\'")
+      (expect annotation :not :to-match "\n"))))

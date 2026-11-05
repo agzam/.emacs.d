@@ -110,6 +110,21 @@
                           :n "o"  #'ticket-tldr-open-spec
                           :n "q"  #'quit-window)))))
 
+(describe "eca chat localleader in ai/config.el"
+  (let ((keys (lambda ()
+                (map-form-key-pairs
+                 (seq-some (lambda (body)
+                             (seq-some (lambda (sub)
+                                         (and (eq (car-safe sub) :localleader) (cdr sub)))
+                                       body))
+                           (map-form-groups ai-tests--forms 'eca-chat-mode-map))))))
+    ;; t for terminal: the key outlives whichever terminal the runs use
+    (it "binds t to the picker of the terminals the chat started"
+      (expect (cdr (assoc "t" (funcall keys))) :to-equal '#'eca-chat-ghostel-buffers))
+
+    (it "binds T to trust"
+      (expect (cdr (assoc "T" (funcall keys))) :to-equal '#'eca-chat-toggle-trust))))
+
 (describe "gptel-send in ai/config.el"
   (it "names the model in its Querying message"
     (expect (member '(advice-add #'gptel-send :around #'gptel-send-show-model-a)

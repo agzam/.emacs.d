@@ -643,3 +643,62 @@ NAME, else the current buffer's."
                           (eca-info "Restarted MCP server %s" name))
                       (run-with-timer 0.1 nil #'resume))))
         (resume)))))
+
+
+;;;; eca-ghostel buffers a chat started
+
+(declare-function consult--read "consult")
+(declare-function consult--buffer-preview "consult")
+
+;; eca-ghostel.el comes with the elisp-eval MCP and loads on its first
+;; call; before that no chat can have started a run.
+(declare-function eca-ghostel-list "eca-ghostel")
+(declare-function eca-ghostel-visit "eca-ghostel")
+
+(defun eca-chat-ghostel--runs (chat)
+  "The `eca-ghostel-list' entries of the runs CHAT started, newest first."
+  (when (fboundp 'eca-ghostel-list)
+    (seq-filter (lambda (run) (equal (plist-get run :origin) (buffer-name chat)))
+                (eca-ghostel-list))))
+
+(defun eca-chat-ghostel--annotations (runs)
+  "Alist of buffer name to annotation for RUNS, in aligned columns."
+  (let ((name-width (apply #'max 0 (mapcar (lambda (run) (string-width (plist-get run :buffer)))
+                                           runs)))
+        (status-width (apply #'max 0 (mapcar (lambda (run) (string-width (plist-get run :status)))
+                                             runs))))
+    (mapcar
+     (lambda (run)
+       (let ((name (plist-get run :buffer)))
+         (cons name
+               (concat (make-string (- (+ name-width 2) (string-width name)) ?\s)
+                       (truncate-string-to-width (plist-get run :status) status-width nil ?\s)
+                       "  "
+                       (propertize (concat (plist-get run :started) "  "
+                                           (string-join (split-string (plist-get run :command)) " "))
+                                   'face 'completions-annotations)))))
+     runs)))
+
+(defun eca-chat-ghostel--read (runs)
+  "Prompt for one of RUNS, in the order given, and return its buffer name.
+Moving the selection shows that buffer in the window the prompt came from."
+  (require 'consult)
+  (let ((annotations (eca-chat-ghostel--annotations runs)))
+    (consult--read (mapcar #'car annotations)
+                   :prompt "eca-ghostel buffer: "
+                   :require-match t
+                   :sort nil
+                   :annotate (lambda (name) (cdr (assoc name annotations)))
+                   :preview-key 'any
+                   :state (consult--buffer-preview))))
+
+;;;###autoload
+(defun eca-chat-ghostel-buffers ()
+  "Pick one of the eca-ghostel buffers this chat started and show it.
+The picked buffer stays in the window that previewed it."
+  (interactive)
+  (if-let* ((runs (eca-chat-ghostel--runs (current-buffer))))
+      (let ((name (eca-chat-ghostel--read runs)))
+        (let ((display-buffer-overriding-action '(display-buffer-same-window)))
+          (eca-ghostel-visit name)))
+    (user-error "No eca-ghostel buffers from this chat")))
