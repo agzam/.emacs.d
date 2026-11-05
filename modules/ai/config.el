@@ -164,6 +164,13 @@
 ;; The map comes from autoload/gptel.el; general holds this until it loads.
 (map! :map gptel-summary-mode-map :n "q" #'quit-window)
 
+;; The map comes from autoload/ticket-tldr.el; general holds this until it loads.
+(map! :map ticket-tldr-mode-map
+      :n "m"  #'ticket-tldr-pick-model
+      :n "gr" #'ticket-tldr-regenerate
+      :n "o"  #'ticket-tldr-open-spec
+      :n "q"  #'quit-window)
+
 ;; Karthik's experimental overlay UI for gptel: prompt in a small window,
 ;; response in an overlay at point, chat session routed per project in the
 ;; background.

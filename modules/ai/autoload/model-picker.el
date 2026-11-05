@@ -18,7 +18,8 @@
 (declare-function consult--key-parse "consult")
 
 (defvar model-picker-commands
-  '(gptel--infix-provider eca-chat-select-model eca-chat-inline-select-model)
+  '(gptel--infix-provider eca-chat-select-model eca-chat-inline-select-model
+    ticket-tldr-pick-model)
   "Commands whose `completing-read' lists models as PROVIDER<sep>MODEL.")
 
 (defvar model-picker-narrow-pins '((?a . "Claude-OAuth") (?g . "Copilot"))

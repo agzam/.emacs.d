@@ -96,6 +96,20 @@
                       (ai-tests--calls 'add-hook!))
             :to-be-truthy)))
 
+(describe "ticket summary keys in ai/config.el"
+  ;; evil's normal state owns m, o, q and the g prefix; the summary takes
+  ;; them back in its own map, gr rather than g so that gg still works
+  (it "binds m, gr, o and q in normal state"
+    (let ((form (seq-find (lambda (f)
+                            (and (eq (car-safe f) 'map!)
+                                 (memq 'ticket-tldr-mode-map f)))
+                          ai-tests--forms)))
+      (expect (car (map-form-groups form 'ticket-tldr-mode-map))
+              :to-equal '(:n "m"  #'ticket-tldr-pick-model
+                          :n "gr" #'ticket-tldr-regenerate
+                          :n "o"  #'ticket-tldr-open-spec
+                          :n "q"  #'quit-window)))))
+
 (describe "gptel-send in ai/config.el"
   (it "names the model in its Querying message"
     (expect (member '(advice-add #'gptel-send :around #'gptel-send-show-model-a)

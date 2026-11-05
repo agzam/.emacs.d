@@ -173,6 +173,15 @@ lexical in the spec that expands this."
         (model-picker-tests--with-consult-stub (model-picker-setup-h))
         (expect minibuffer-default :to-be nil))))
 
+  (it "groups the model picker of a ticket summary by backend"
+    (with-temp-buffer
+      (let ((this-command 'ticket-tldr-pick-model)
+            (minibuffer-completion-table '(("Claude-OAuth:x" b m) ("Copilot:y" b m)))
+            (minibuffer-completion-predicate nil))
+        (model-picker-tests--with-consult-stub (model-picker-setup-h))
+        (expect (plist-get narrow :keys)
+                :to-equal '((?a . "Claude-OAuth") (?g . "Copilot"))))))
+
   (it "leaves any other command's minibuffer alone"
     (with-temp-buffer
       (let ((this-command 'find-file)
