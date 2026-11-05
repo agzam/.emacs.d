@@ -7,11 +7,10 @@
                                   "helper.el")))
 (require 'buttercup)
 
-;; circadian isn't installed in the batch tier.  These reductions keep the two
-;; shapes the module's advice corrects: `circadian-encode-time' builds an
-;; absolute moment through the obsolescent `encode-time' call, and
-;; `circadian-enable-theme' releases `circadian-next-timer' only on the branch
-;; that changes the theme.
+;; circadian isn't installed in the batch tier.  These reductions keep the
+;; upstream shapes the module's advice corrects: the obsolescent
+;; `encode-time' call, the timer released on one branch only, and sun times
+;; that take no offset.
 (provide 'circadian)
 (defvar circadian-themes nil)
 (defvar circadian-next-timer nil)
@@ -34,6 +33,15 @@
       (cancel-timer circadian-next-timer))
     (setq circadian-next-timer nil))
   (circadian-schedule))
+
+(defvar colors-tests--sunset '(17 31))
+
+(defun circadian-match-sun (input)
+  "Answer a fixed sunrise and sunset for INPUT, else parse it as HH:MM."
+  (pcase input
+    (:sunrise '(7 5))
+    (:sunset colors-tests--sunset)
+    (_ (mapcar #'string-to-number (split-string input ":")))))
 
 (defvar colors-tests--packages nil)
 
@@ -74,6 +82,37 @@
     (let ((current-time-list nil))
       (expect (format-time-string "%H:%M" (circadian-encode-time 21 30))
               :to-equal "21:30"))))
+
+(describe "circadian-sun-offset-a"
+  (it "shifts sunrise and sunset by the given minutes"
+    (expect (circadian-match-sun '(:sunset -110)) :to-equal '(15 41))
+    (expect (circadian-match-sun '(:sunrise 30)) :to-equal '(7 35)))
+
+  (it "wraps the shifted time around midnight"
+    (expect (circadian-match-sun '(:sunset 420)) :to-equal '(0 31))
+    (expect (circadian-match-sun '(:sunrise -480)) :to-equal '(23 5)))
+
+  (it "leaves fixed times and bare sun keys to circadian"
+    (expect (circadian-match-sun "6:00") :to-equal '(6 0))
+    (expect (circadian-match-sun :sunset) :to-equal '(17 31)))
+
+  (it "reads every time in the schedule as an hour and minute of the day"
+    (dolist (entry circadian-themes)
+      (pcase-let ((`(,hour ,minute) (circadian-match-sun (car entry))))
+        (expect (and (<= 0 hour 23) (<= 0 minute 59)) :to-be-truthy))))
+
+  (it "goes around the clock once in written order at the earliest and latest sunset"
+    (dolist (colors-tests--sunset '((17 18) (20 40)))
+      (let* ((minutes (mapcar (lambda (entry)
+                                (pcase-let ((`(,hour ,minute)
+                                             (circadian-match-sun (car entry))))
+                                  (+ (* 60 hour) minute)))
+                              circadian-themes))
+             (gaps (seq-mapn (lambda (from to) (mod (- to from) 1440))
+                             minutes
+                             (append (cdr minutes) (list (car minutes))))))
+        (expect (seq-every-p (lambda (gap) (< 0 gap)) gaps) :to-be-truthy)
+        (expect (apply #'+ gaps) :to-equal 1440)))))
 
 (describe "circadian-clear-fired-timer-a"
   (it "arms the following switch when the due theme is already enabled"

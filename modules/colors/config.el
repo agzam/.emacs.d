@@ -40,12 +40,27 @@
   ;; North of TX
   (setopt calendar-latitude 33.16
           calendar-longitude -96.93)
+  ;; (:sunset N) switches N minutes after sunset, or before it when N is
+  ;; negative.  Sunset here runs from 17:18 (late Nov) to 20:40 (late Jun);
+  ;; the comments show each switch on those two days.  Keep the numbers
+  ;; growing down the list, or the lower theme switches first.
   (setopt circadian-themes
           '(("6:00" . ag-themes-spacemacs-light)
-            ("18:00" . ag-themes-doom-feather-light)
-            ("19:30" . ag-themes-base16-ocean)
-            ("21:00" . ag-themes-base16-ashes)
-            ("23:00" . ag-themes-doom-plain-dark)))
+            ((:sunset -110) . ag-themes-doom-feather-light) ; Nov 15:28, Jun 18:50
+            ((:sunset -20) . ag-themes-base16-ocean)        ; Nov 16:58, Jun 20:20
+            ((:sunset 270) . ag-themes-base16-ashes)        ; Nov 21:48, Jun 1:10
+            ((:sunset 330) . ag-themes-doom-plain-dark)))   ; Nov 22:48, Jun 2:10
+
+  (defadvice! circadian-sun-offset-a (fn time)
+    "Accept (:sunrise MINUTES) and (:sunset MINUTES) as TIME.
+FN answers the bare sun time, and MINUTES shifts it, wrapping past midnight."
+    :around #'circadian-match-sun
+    (pcase time
+      (`(,(and sun (or :sunrise :sunset)) ,minutes)
+       (pcase-let* ((`(,hour ,minute) (funcall fn sun))
+                    (total (mod (+ (* 60 hour) minute minutes) 1440)))
+         (list (/ total 60) (% total 60))))
+      (_ (funcall fn time))))
 
   (defadvice! circadian-encode-time-as-time-value-a (time)
     "Keep the next switch off `run-at-time''s relative-seconds path.
