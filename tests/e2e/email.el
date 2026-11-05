@@ -766,14 +766,20 @@ buffers, summary and queued files the cases leave are cleared after."
          (reddit-fetched-at nil)
          ;; Gnus shows one message more than display, so the subreddit shows
          ;; its two newest and leaves its post out, the way older posts
-         ;; fall out of the real group's display
+         ;; fall out of the real group's display.  It highlights its code
+         ;; blocks as the config has r/emacs highlight them
          (gnus-parameters
-          (mapcar (lambda (entry)
-                    (if (equal (car entry) "\\`nnmaildir\\+reddit:")
-                        `(,(car entry) (display . 1)
-                          ,@(assq-delete-all 'display (copy-sequence (cdr entry))))
-                      entry))
-                  gnus-parameters))
+          (append
+           (mapcar (lambda (entry)
+                     (if (equal (car entry) "\\`nnmaildir\\+reddit:")
+                         `(,(car entry) (display . 1)
+                           ,@(assq-delete-all 'display (copy-sequence (cdr entry))))
+                       entry))
+                   gnus-parameters)
+           `(("\\`nnmaildir\\+reddit:r\\.test\\'"
+              (mail-code-major-mode
+               . ,(alist-get 'mail-code-major-mode
+                             (gnus-parameters-get-parameter "nnmaildir+reddit:r.emacs")))))))
          ;; the real batch reads the groups, held back while load-hold
          ;; exists, and saves its tables here
          (load-hold (expand-file-name "load-hold" e2e-work-dir))
@@ -918,7 +924,8 @@ buffers, summary and queued files the cases leave are cleared after."
              (current-buffer)))
     ;; a read post, a comment on it, a reply to the comment and a second
     ;; comment; the stand-in's fetch brings a reply to the reply.  The
-    ;; reply's paragraph and quote are longer than any window is wide
+    ;; reply's paragraph and quote are longer than any window is wide,
+    ;; and it ends on code, as Reddit writes it, after code in its quote
     (dolist (sub '("cur" "new" "tmp"))
       (make-directory (expand-file-name sub reddit-dir) t))
     (make-directory reddit-outbox t)
@@ -934,7 +941,11 @@ buffers, summary and queued files the cases leave are cleared after."
                                              (string-join (make-list 30 "wrapping") " ")
                                              "</p><blockquote><p>long quote "
                                              (string-join (make-list 30 "quoted") " ")
-                                             "</p></blockquote>"))
+                                             "</p><pre><code>(quoted-code)\n    (kept-indent)\n"
+                                             "</code></pre></blockquote>"
+                                             "<p>run <code>inline-code</code> first:</p>"
+                                             "<pre><code>(setq fixture-code &quot;value&quot;)\n"
+                                             "  (indented-call)\n</code></pre>"))
     (email-e2e--write-reddit-message (expand-file-name "cur/1700000054.54.fixture" reddit-dir)
                                      "c4.p1" "Mon, 28 Sep 2026 14:00:00 +0000"
                                      "<p1@reddit.com>" "")
@@ -1026,6 +1037,7 @@ buffers, summary and queued files the cases leave are cleared after."
              "<p>paragraph start " (string-join (make-list 60 "wrapping") " ")
              " paragraph end</p>"
              "<p style=\"color:#ffffff;background-color:#ffffff\">white on white</p>"
+             "<p>run <code>(foo)</code> first</p><pre><code>(bar)\n  (baz)\n</code></pre>"
              "<blockquote><p>quoted once</p>"
              "<blockquote><p>quoted twice</p></blockquote></blockquote>"))
     ;; longer than any window, so J has an article to scroll
@@ -1303,6 +1315,16 @@ buffers, summary and queued files the cases leave are cleared after."
                                          (or (plist-get spec :foreground)
                                              (plist-get spec :background))))
                                   (if (keywordp (car-safe face)) (list face) (ensure-list face)))))))
+              ;; the face on the HTML letter's inline code, then its code
+              ;; block's indented line with the face at its start
+              (code-faces ()
+                (save-excursion
+                  (goto-char (point-min))
+                  (list (and (search-forward "(foo)" nil t)
+                             (get-char-property (match-beginning 0) 'face))
+                        (and (search-forward "(baz)" nil t)
+                             (list (buffer-substring-no-properties (line-beginning-position) (point))
+                                   (get-char-property (line-beginning-position) 'face))))))
               ;; each window's buffer, left column and width
               (layout ()
                 (format "%S" (mapcar (lambda (window)
@@ -1801,6 +1823,30 @@ buffers, summary and queued files the cases leave are cleared after."
                           (and (< 1 (length quoted))
                                (seq-every-p (lambda (column) (eql column (+ bars 2))) quoted))
                           :got (format "columns %S, bars %d wide" quoted bars)))
+                (cl-flet ((faces-at (text &optional offset)
+                            (save-excursion
+                              (goto-char (point-min))
+                              (and (search-forward text nil t)
+                                   (ensure-list (get-text-property
+                                                 (+ (match-beginning 0) (or offset 0)) 'face))))))
+                  (let ((faces (list (faces-at "inline-code")
+                                     (faces-at "setq fixture-code")
+                                     (faces-at "\"value\"")
+                                     ;; the newline that reaches the window edge
+                                     (faces-at "(indented-call)\n" (length "(indented-call)")))))
+                    (record "a Reddit comment shows inline code in mail-code and its last code block as Emacs Lisp to the edge"
+                            (equal faces '((mail-code)
+                                           (font-lock-keyword-face mail-code-block)
+                                           (font-lock-string-face mail-code-block)
+                                           (mail-code-block)))
+                            :got (format "%s: %S" major-mode faces)))
+                  (record "a Reddit comment's quoted code keeps its own indentation after the > marker"
+                          (memq 'mail-code-block (faces-at ">     (kept-indent)" 6))
+                          :got (format "%S" (save-excursion
+                                              (goto-char (point-min))
+                                              (and (search-forward "(kept-indent)" nil t)
+                                                   (buffer-substring-no-properties
+                                                    (line-beginning-position) (point)))))))
                 (let (opened)
                   (when (derived-mode-p 'mail-thread-mode)
                     (cl-letf (((symbol-function 'browse-url)
@@ -2523,6 +2569,12 @@ buffers, summary and queued files the cases leave are cleared after."
                 (record "the thread view drops the sender's colors"
                         (null (sender-colors))
                         :got (format "%S" (sender-colors)))
+                (record "the thread view reads in variable pitch, its code in the code faces, indentation kept"
+                        (and buffer-face-mode
+                             (eq buffer-face-mode-face 'variable-pitch)
+                             (equal (code-faces) '(mail-code ("  (baz)" mail-code-block))))
+                        :got (format "buffer face %S %S, code %S"
+                                     buffer-face-mode buffer-face-mode-face (code-faces)))
                 (record "the thread view wraps a long HTML paragraph instead of cutting it"
                         (pcase (paragraph-lines) (`(1 ,screen) (< 1 screen)))
                         :got (format "%S buffer and screen lines" (paragraph-lines)))
@@ -2539,6 +2591,9 @@ buffers, summary and queued files the cases leave are cleared after."
                 (record "the article buffer drops the sender's colors"
                         (null (sender-colors))
                         :got (format "%S" (sender-colors)))
+                (record "the article buffer shows code in the code faces, indentation kept"
+                        (equal (code-faces) '(mail-code ("  (baz)" mail-code-block)))
+                        :got (format "%S" (code-faces)))
                 (record "the article buffer wraps a long HTML paragraph instead of cutting it"
                         (pcase (paragraph-lines) (`(1 ,screen) (< 1 screen)))
                         :got (format "%S buffer and screen lines, truncate-lines %S"

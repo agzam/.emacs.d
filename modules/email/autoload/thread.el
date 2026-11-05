@@ -7,7 +7,6 @@
 ;;; Code:
 
 (require 'cl-lib)
-(require 'color)
 (require 'gnus)
 (require 'gnus-art)
 (require 'gnus-search)
@@ -193,20 +192,11 @@ They stop at `mail-thread-max-indent' levels."
     (propertize (apply #'concat (make-list (min depth mail-thread-max-indent) "│ "))
                 'face 'mail-thread-guide)))
 
-(defun mail-thread-shade (share)
-  "Color SHARE of the way from the theme's background to its text, or nil."
-  (when-let* ((background (color-name-to-rgb (or (face-background 'default nil t) "")))
-              (text (color-name-to-rgb (or (face-foreground 'default nil t) ""))))
-    (apply #'color-rgb-to-hex
-           (append (cl-mapcar (lambda (from to) (+ from (* share (- to from))))
-                              background text)
-                   '(2)))))
-
 (defun mail-thread-shade-faces (&rest _)
   "Color the guide bars and the senders as shades of the current theme.
 A terminal whose colors Emacs does not know keeps their `shadow'."
-  (when-let* ((guide (mail-thread-shade mail-thread-guide-shade))
-              (from (mail-thread-shade mail-thread-from-shade)))
+  (when-let* ((guide (mail-shade mail-thread-guide-shade))
+              (from (mail-shade mail-thread-from-shade)))
     (set-face-foreground 'mail-thread-guide guide)
     (set-face-foreground 'mail-thread-from from)))
 
@@ -296,12 +286,17 @@ a fallback font draws it at the wrong size."
 Markers where the body goes end up after it, so a point or window start
 on the next message stays there while a body lands above it."
   (goto-char (mail-thread-body-start message))
-  (let ((start (point)))
+  (let ((start (point))
+        (body (or (mail-thread-render mail-thread-group
+                                      (mail-thread-message-article message))
+                  "[the store no longer holds this message]")))
+    ;; the render comes trimmed, and a code block ending it reaches the
+    ;; window edge only through the face of its last line's newline
     (insert-before-markers
-     (or (mail-thread-render mail-thread-group
-                             (mail-thread-message-article message))
-         "[the store no longer holds this message]")
-     "\n\n")
+     body
+     (propertize "\n" 'face (and (< 0 (length body))
+                                 (get-text-property (1- (length body)) 'face body)))
+     "\n")
     (mail-thread-indent message start (point) t)))
 
 (defun mail-thread-expand (message)

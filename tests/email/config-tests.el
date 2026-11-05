@@ -75,9 +75,19 @@ in this process, which the mail suite performs."
     (expect gnus-gcc-mark-as-read :to-be t)))
 
 (describe "email module thread view"
+  ;; the view's shading at load goes through html.el, autoloaded in a session
+  (before-all
+    (load-module-file "modules/email/autoload/html.el"))
   (it "shades its guide bars and senders again whenever a theme is enabled"
     (load-module-file "modules/email/autoload/thread.el")
-    (expect (memq #'mail-thread-shade-faces enable-theme-functions) :to-be-truthy)))
+    (expect (memq #'mail-thread-shade-faces enable-theme-functions) :to-be-truthy))
+  (it "reads in variable pitch"
+    (load-module-file "modules/email/autoload/thread.el")
+    (expect (memq #'variable-pitch-mode mail-thread-mode-hook) :to-be-truthy)
+    (with-temp-buffer
+      (mail-thread-mode)
+      (expect buffer-face-mode :to-be-truthy)
+      (expect buffer-face-mode-face :to-be 'variable-pitch))))
 
 (describe "email module servers"
   (it "reads the mbsync maildir through nnmaildir without fetching mail itself"
@@ -194,6 +204,16 @@ in this process, which the mail suite performs."
       (expect (gnus-group-find-parameter "nnmaildir+news:gmane.emacs.devel"
                                          'mail-thread-unfold-read)
               :to-be nil)))
+  (it "highlights the code blocks of r/emacs as Emacs Lisp, and of no other group"
+    ;; Reddit's HTML names no language for a code block
+    (email-tests--with-empty-newsrc
+      (expect (gnus-group-find-parameter "nnmaildir+reddit:r.emacs" 'mail-code-major-mode)
+              :to-be 'emacs-lisp-mode)
+      (dolist (group '("nnmaildir+reddit:r.clojure" "nnmaildir+gmail:inbox"
+                       "nnmaildir+news:gmane.emacs.devel"))
+        (expect (gnus-group-find-parameter group 'mail-code-major-mode) :to-be nil))
+      ;; the entry of every subreddit still applies to r/emacs
+      (expect (gnus-group-find-parameter "nnmaildir+reddit:r.emacs" 'display) :to-equal 5000)))
   (it "posts a followup from a news group to the server it came from"
     (require 'gnus-msg)
     (email-tests--with-empty-newsrc
@@ -598,6 +618,9 @@ KEYS holds a prefix's key and the key under it apart by a space, as
        (expand-file-name "modules/email/autoload/html.el" test-config-root))
       (expect (buffer-string)
               :to-match "^;;;###autoload\n(defun render-mail-html ")))
+  (it "shades the background of code again whenever a theme is enabled"
+    (load-module-file "modules/email/autoload/html.el")
+    (expect (memq #'shade-mail-code-face enable-theme-functions) :to-be-truthy))
   (it "wraps article lines at the window edge instead of cutting them"
     ;; Gnus applies gnus-article-truncate-lines after the mode hooks, so
     ;; the hooks alone would lose to it on every article
@@ -765,6 +788,8 @@ window and deletes the summary's."
                      ;; C-c C-c, Gnus's hooks, its demon and an advice call these
                      ("delay.el" send-later send-due-mail send-queued-article-a
                       start-mail-queue stop-mail-queue)
+                     ;; the thread view shades its faces through it
+                     ("html.el" mail-shade)
                      ("similar.el" count-mail)))
       (with-temp-buffer
         (insert-file-contents

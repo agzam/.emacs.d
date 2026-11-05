@@ -441,16 +441,6 @@ The guide and sender faces get their colors back after."
        (set-face-attribute 'mail-thread-guide nil :foreground guide)
        (set-face-attribute 'mail-thread-from nil :foreground from))))
 
-(describe "mail-thread-shade"
-  (it "mixes the share of the text color into the background"
-    (thread-tests-with-theme "#000000" "#ffffff"
-      (expect (mail-thread-shade 0.2) :to-equal "#333333"))
-    (thread-tests-with-theme "#ffffff" "#000000"
-      (expect (mail-thread-shade 0.2) :to-equal "#cccccc")))
-  (it "gives nothing where the theme's colors are unknown"
-    (thread-tests-with-theme "unspecified-bg" "unspecified-fg"
-      (expect (mail-thread-shade 0.2) :to-be nil))))
-
 (describe "mail-thread-shade-faces"
   (it "colors the bars and the senders each its share of the way to the text"
     (let ((mail-thread-guide-shade 0.2)
@@ -831,7 +821,25 @@ The guide and sender faces get their colors back after."
       (expect (thread-tests-line-face text "> The plan, as posted.")
               :to-be 'message-cited-text-1)
       (expect (thread-tests-line-face text "> > And its first draft.")
-              :to-be 'message-cited-text-2))))
+              :to-be 'message-cited-text-2)))
+  (it "end on a code block whose last line keeps its face through the newline"
+    ;; the render comes trimmed, and that newline's face reaches the edge
+    (let* ((mm-text-html-renderer #'render-mail-html)
+           (text (thread-tests-thread-text
+                  (thread-tests-html-article
+                   "<p>Try this:</p><pre><code>(first)\n(last)\n</code></pre>")))
+           (end (+ (string-search "(last)" text) (length "(last)"))))
+      (expect (substring text end (+ end 2)) :to-equal "\n\n")
+      (expect (get-text-property end 'face text) :to-be 'mail-code-block)
+      (expect (get-text-property (1+ end) 'face text) :to-be nil)))
+  (it "end on prose with a bare newline"
+    (let* ((mm-text-html-renderer #'render-mail-html)
+           (text (thread-tests-thread-text
+                  (thread-tests-html-article "<p>Run <code>make</code> now.</p>")))
+           (end (+ (string-search "now." text) (length "now."))))
+      (expect (substring text end (+ end 2)) :to-equal "\n\n")
+      (expect (get-text-property end 'face text) :to-be nil)
+      (expect (get-text-property (1+ end) 'face text) :to-be nil))))
 
 (describe "mail-thread-mode"
   (it "wraps long lines at the column, keeping their indentation"

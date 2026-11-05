@@ -118,6 +118,14 @@ Any other label's chip takes the face `mail-label'.")
   (mail-thread-shade-faces)
   (add-hook 'enable-theme-functions #'mail-thread-shade-faces))
 
+;; and so is the background of code in HTML mail
+(after! mail-html
+  (shade-mail-code-face)
+  (add-hook 'enable-theme-functions #'shade-mail-code-face))
+
+;; the thread view reads in the reading font, as reddigg and hnreader do
+(add-hook 'mail-thread-mode-hook #'variable-pitch-mode)
+
 (use-package gnus
   :ensure nil
   :defer t
@@ -182,7 +190,10 @@ Any other label's chip takes the face `mail-label'.")
           ;; fetched too; `some' would have nnmaildir hand over every header.
           ;; The fetch delivers old comments read, and a thread reads whole
           ("\\`nnmaildir\\+reddit:" (display . 5000) (gnus-fetch-old-headers 2000)
-           (mail-thread-unfold-read . t)))
+           (mail-thread-unfold-read . t))
+          ;; Reddit names no language for a code block, and r/emacs
+          ;; mostly shares Emacs Lisp
+          ("\\`nnmaildir\\+reddit:r\\.emacs\\'" (mail-code-major-mode . emacs-lisp-mode)))
         ;; the function already puts the newest thread first; (not ...)
         ;; would sort oldest first
         gnus-thread-sort-functions '(gnus-thread-sort-by-most-recent-date)
