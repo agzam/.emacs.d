@@ -298,6 +298,10 @@
   :ensure nil
   :after vertico
   :config
+  ;; A window of its own at the frame's left edge: consult previews land in
+  ;; the window the command started from, and no window moves while they do.
+  (setopt vertico-buffer-display-action
+          '(display-buffer-in-direction (direction . leftmost) (window-width . 0.35)))
   (add-hook! 'vertico-buffer-mode-hook
     (defun vertico-buffer-h ()
       (vertico-posframe-mode (if vertico-buffer-mode -1 +1)))))

@@ -57,6 +57,25 @@
     (expect (funcall delay 'consult-async-input-debounce)
             :to-be-less-than (funcall delay 'consult-async-input-throttle))))
 
+(describe "vertico-buffer display"
+  ;; the configured action runs against real windows, so a wrong direction
+  ;; or a reused window fails here, not only in a booted config
+  (it "opens a new full-height window at the frame's left edge"
+    (save-window-excursion
+      (delete-other-windows)
+      (let* ((right (split-window-right))
+             (action (eval (plist-get (completion-config-tests--settings 'vertico-buffer)
+                                      'vertico-buffer-display-action)
+                           t))
+             (buffer (get-buffer-create " *vertico-buffer-probe*"))
+             (window (with-selected-window right (display-buffer buffer action))))
+        (unwind-protect
+            (progn
+              (expect (window-left-column window) :to-equal 0)
+              (expect (window-full-height-p window) :to-be t)
+              (expect (length (window-list nil 'no)) :to-equal 3))
+          (kill-buffer buffer))))))
+
 (describe "yasnippet-capf search distance"
   ;; completion-preview calls the capf on every keystroke; unbounded, its
   ;; symbol lookup scans from point-min, so deep in a big file typing lags.
