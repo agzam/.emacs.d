@@ -165,6 +165,7 @@ A comment carries its post's TITLE and the ids of its ANCESTORS, top first."
           :author (concat "u/" (or (gethash "author" data) "[deleted]"))
           :title (if comment title (gethash "title" data))
           :time (gethash "created_utc" data)
+          :edited (gethash "edited" data)
           :link (concat base (gethash "permalink" data))
           :html (if (or comment (gethash "is_self" data))
                     html
@@ -216,6 +217,17 @@ A comment comes after its parent."
           author
           (replace-regexp-in-string "[^[:alnum:]_-]" "_" (string-remove-prefix "u/" author))))
 
+(defun reddit-fetch-date (time)
+  "TIME, in seconds since the epoch, as a Date header value."
+  (let ((system-time-locale "C"))
+    (format-time-string "%a, %d %b %Y %T +0000" time t)))
+
+(defun reddit-fetch-edited (entry)
+  "When ENTRY was last edited, as its X-Edited header says it, or nil."
+  (let ((edited (plist-get entry :edited)))
+    ;; for some old edits Reddit says true instead of the time
+    (and (numberp edited) (reddit-fetch-date edited))))
+
 (defun reddit-fetch-message (entry)
   "The message of ENTRY, a reply to its last ancestor, or to its post."
   (let* ((post (plist-get entry :post))
@@ -228,9 +240,10 @@ A comment comes after its parent."
             "Subject: " (rfc2047-encode-string
                          (concat (if comment "Re: " "") (plist-get entry :title)))
             "\n"
-            "Date: " (let ((system-time-locale "C"))
-                       (format-time-string "%a, %d %b %Y %T +0000" (plist-get entry :time) t))
-            "\n"
+            "Date: " (reddit-fetch-date (plist-get entry :time)) "\n"
+            (if-let* ((edited (reddit-fetch-edited entry)))
+                (concat "X-Edited: " edited "\n")
+              "")
             "Message-ID: " (reddit-fetch-entry-message-id entry) "\n"
             (if references
                 (format "References: %s\nIn-Reply-To: %s\n"
@@ -295,6 +308,30 @@ A comment comes after its parent."
                                     reddit-fetch-server))
       (cdr delivered))))
 
+(defun reddit-fetch-file (store group article)
+  "File of nnmaildir ARTICLE in folder GROUP under STORE, as named now, or nil.
+The session renames a file when it saves a flag."
+  (car (directory-files (expand-file-name (concat group "/cur") store) t
+                        (concat "\\`" (regexp-quote (nnmaildir--art-prefix article))
+                                "\\(?::\\|\\'\\)"))))
+
+(defun reddit-fetch-stored-edit (file)
+  "The X-Edited header of the message in FILE, or nil."
+  (with-temp-buffer
+    (insert-file-contents file)
+    (narrow-to-region (point-min) (or (search-forward "\n\n" nil t) (point-max)))
+    (mail-fetch-field "X-Edited")))
+
+(defun reddit-fetch-rewrite (entry file)
+  "Write the message of ENTRY over FILE, which a folder's cur/ holds.
+The name stays, so nnmaildir keeps the message's number and flags.  The
+text goes through tmp/, so no reader sees half of it."
+  (let ((tmp (expand-file-name (file-name-nondirectory file)
+                               (expand-file-name "../tmp" (file-name-directory file))))
+        (coding-system-for-write 'no-conversion))
+    (write-region (encode-coding-string (reddit-fetch-message entry) 'utf-8) nil tmp nil 'silent)
+    (rename-file tmp file t)))
+
 ;;; A subreddit
 
 (defun reddit-fetch-old-p (entry)
@@ -304,15 +341,17 @@ A comment comes after its parent."
 
 (defun reddit-fetch-group (store group base &optional threads)
   "Fetch subreddit folder GROUP under STORE, its links leading to BASE.
-New posts arrive first, then every thread with new comments, oldest
-first, until a fetch fails; with THREADS, post ids, those threads alone.
-Return (GROUP POSTS COMMENTS WAITING PROBLEM)."
+New posts arrive first, then every thread with new or edited comments,
+oldest first, until a fetch fails; with THREADS, post ids, those threads
+alone.  An edited message is written over.  Return (GROUP POSTS COMMENTS
+EDITS WAITING PROBLEM)."
   (let* ((name (reddit-fetch-subreddit group))
          (mlist (reddit-fetch-scan store group))
          (known (make-hash-table :test #'equal))
          (counts (reddit-fetch-read-state store group reddit-fetch-threads-file))
          (posts 0)
          (comments 0)
+         (edits 0)
          (fetched 0)
          problem)
     (dolist (id (reddit-fetch-read-state store group reddit-fetch-known-file))
@@ -320,6 +359,17 @@ Return (GROUP POSTS COMMENTS WAITING PROBLEM)."
     (cl-labels ((seen-p (entry)
                   (or (gethash (plist-get entry :id) known)
                       (gethash (reddit-fetch-entry-message-id entry) mlist)))
+                (outdated (entry)
+                  ;; the file of the entry's message while it holds an older text
+                  (when-let* ((edited (reddit-fetch-edited entry))
+                              (article (gethash (reddit-fetch-entry-message-id entry) mlist))
+                              (file (reddit-fetch-file store group article))
+                              ((not (equal edited (reddit-fetch-stored-edit file)))))
+                    file))
+                (refresh (entry)
+                  (when-let* ((file (outdated entry)))
+                    (reddit-fetch-rewrite entry file)
+                    (cl-incf edits)))
                 (deliver (entry read)
                   (reddit-fetch-deliver group entry (or read (reddit-fetch-old-p entry)))
                   (puthash (plist-get entry :id) t known))
@@ -342,9 +392,10 @@ Return (GROUP POSTS COMMENTS WAITING PROBLEM)."
             (dolist (post (reddit-fetch-oldest-first (seq-remove #'seen-p listed)))
               (deliver post nil)
               (cl-incf posts))
-            ;; a thread past the listing is found by its new comments alone,
-            ;; and the oldest thread goes first: article numbers follow time,
-            ;; and a group shows its newest numbers
+            (mapc #'refresh listed)
+            ;; a thread past the listing is found by its new or edited
+            ;; comments alone, and the oldest thread goes first: article
+            ;; numbers follow time, and a group shows its newest numbers
             (unless threads
               (setq counts (seq-filter (lambda (count) (member (car count) ids)) counts)
                     threads (sort (delete-dups
@@ -356,7 +407,10 @@ Return (GROUP POSTS COMMENTS WAITING PROBLEM)."
                                                                           counts 0 nil #'equal)))
                                                         listed))
                                     (mapcar (lambda (comment) (plist-get comment :post))
-                                            (seq-remove #'seen-p recent))))
+                                            (seq-filter (lambda (comment)
+                                                          (or (not (seen-p comment))
+                                                              (outdated comment)))
+                                                        recent))))
                                   (lambda (a b)
                                     (< (alist-get a times 0 nil #'equal)
                                        (alist-get b times 0 nil #'equal))))))
@@ -376,12 +430,13 @@ Return (GROUP POSTS COMMENTS WAITING PROBLEM)."
                       (unless (seen-p comment)
                         (deliver comment nil)
                         (cl-incf comments)))
+                    (mapc #'refresh thread)
                     (setf (alist-get (pop threads) counts nil nil #'equal)
                           (plist-get post :comments))
                     (cl-incf fetched)
                     (save))
                 (error (setq problem (error-message-string err)))))
-            (list group posts comments (length threads) problem))
+            (list group posts comments edits (length threads) problem))
         (save)))))
 
 ;;; Entry point
@@ -389,7 +444,7 @@ Return (GROUP POSTS COMMENTS WAITING PROBLEM)."
 (defun reddit-fetch-run (store base &optional threads)
   "Fetch every subreddit folder under STORE, its links leading to BASE.
 THREADS, as ((GROUP POST...)...), limits the run to those threads.
-Returns one (GROUP POSTS COMMENTS WAITING PROBLEM) or (GROUP error
+Returns one (GROUP POSTS COMMENTS EDITS WAITING PROBLEM) or (GROUP error
 MESSAGE) row per folder."
   (let ((gnus-newsrc-hashtb (gnus-make-hashtable))
         (gnus-verbose-backends 0)
@@ -431,11 +486,11 @@ THREADS limits the fetch as in `reddit-fetch-run'."
             (`(,group error ,text)
              (setq failed t)
              (message "%s: %s" group text))
-            (`(,group ,posts ,comments ,waiting ,problem)
+            (`(,group ,posts ,comments ,edits ,waiting ,problem)
              (when problem
                (setq failed t))
-             (message "%s: %d posts, %d comments, %d threads waiting%s"
-                      group posts comments waiting
+             (message "%s: %d posts, %d comments, %d edits, %d threads waiting%s"
+                      group posts comments edits waiting
                       (if problem (concat "; " problem) "")))))
       (error
        (setq failed t)

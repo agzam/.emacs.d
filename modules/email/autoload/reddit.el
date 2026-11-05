@@ -6,6 +6,8 @@
 ;;; Code:
 
 (require 'gnus)
+(require 'gnus-art)
+(require 'gnus-bcklg)
 (require 'gnus-group)
 (require 'gnus-sum)
 (require 'subr-x)
@@ -98,11 +100,32 @@ With THREAD, (GROUP . POST), it fetches that thread alone."
     ;; a question the batch Emacs asked would wait for an answer forever
     (process-send-eof reddit-fetch-process)))
 
+(defun reddit-fetch-count (process what)
+  "Sum of the counts of WHAT, such as \"comments\", the fetch PROCESS reported."
+  (let ((count 0))
+    (when (buffer-live-p (process-buffer process))
+      (with-current-buffer (process-buffer process)
+        (goto-char (point-min))
+        (while (re-search-forward
+                (format "^[^:\n]+: [0-9]+ posts, \\(?:[0-9]+ [a-z]+, \\)*?\\([0-9]+\\) %s," what)
+                nil t)
+          (setq count (+ count (string-to-number (match-string 1)))))))
+    count))
+
+(defun forget-shown-articles ()
+  "Drop the copies Gnus keeps of the articles it showed.
+A fetch writes an edited message over its file, and Gnus would show the
+older text again."
+  (gnus-backlog-shutdown)
+  (gnus-flush-original-article-buffer))
+
 (defun reddit-fetch-sentinel (process event)
   "Read the Reddit groups again in the background once PROCESS ended with EVENT.
 A failed fetch reads them too, for what it delivered first.  A thread an
 opened view asked for meanwhile is fetched next."
   (when (memq (process-status process) '(exit signal))
+    (when (< 0 (reddit-fetch-count process "edits"))
+      (forget-shown-articles))
     (when (gnus-alive-p)
       (load-mail-groups (seq-filter #'reddit-group-p gnus-group-list)))
     (if (and (eq (process-status process) 'exit)
@@ -177,49 +200,48 @@ nothing within `reddit-thread-fetch-interval' of its last fetch."
                                (lambda (process event)
                                  (reddit-thread-sentinel process event group post)))))))
 
-(defun reddit-fetch-comments (process)
-  "Comments the Reddit fetch PROCESS reported delivering."
-  (let ((count 0))
-    (when (buffer-live-p (process-buffer process))
-      (with-current-buffer (process-buffer process)
-        (goto-char (point-min))
-        (while (re-search-forward "^[^:\n]+: [0-9]+ posts, \\([0-9]+\\) comments" nil t)
-          (setq count (+ count (string-to-number (match-string 1)))))))
-    count))
-
 (defun reddit-thread-sentinel (process event group post)
-  "Bring the replies the fetch PROCESS of thread POST delivered on screen.
+  "Bring on screen what the fetch PROCESS of thread POST brought.
 EVENT says how it ended.  GROUP is read again first, ahead of others."
   (when (memq (process-status process) '(exit signal))
     (unless (and (eq (process-status process) 'exit)
                  (zerop (process-exit-status process)))
       (message "Reddit thread fetch failed: %s (see %s)"
                (string-trim event) (buffer-name (process-buffer process))))
-    (let ((count (reddit-fetch-comments process)))
-      (when (and (< 0 count) (gnus-alive-p))
+    (let ((count (reddit-fetch-count process "comments"))
+          (edits (reddit-fetch-count process "edits")))
+      (when (< 0 edits)
+        (forget-shown-articles))
+      (when (and (< 0 (+ count edits)) (gnus-alive-p))
         (load-mail-groups (list group) t)
-        (wait-for-mail-load 'reddit-thread "for the new replies"
+        (wait-for-mail-load 'reddit-thread "for the fetched thread"
                             (lambda () (not (mail-group-pending-p group)))
-                            (lambda () (show-reddit-replies group post count)))))
+                            (lambda () (show-reddit-replies group post count edits)))))
     (fetch-pending-reddit-thread)))
 
-(defun show-reddit-replies (group post count)
-  "Bring COUNT replies fetched into thread POST of GROUP on screen.
-GROUP's summary takes them in, and a thread view showing POST in a
-window lays the thread out again."
+(defun show-reddit-replies (group post count edits)
+  "Show the COUNT replies and EDITS edits fetched into thread POST of GROUP.
+GROUP's summary takes the replies in, and a thread view showing POST in
+a window lays the thread out again."
   (when-let* ((summary (get-buffer (gnus-summary-buffer-name group))))
-    (if-let* ((window (get-buffer-window summary t)))
-        (with-selected-window window
-          (gnus-summary-insert-new-articles))
-      (with-current-buffer summary
-        (gnus-summary-insert-new-articles)))
+    (when (< 0 count)
+      (if-let* ((window (get-buffer-window summary t)))
+          (with-selected-window window
+            (gnus-summary-insert-new-articles))
+        (with-current-buffer summary
+          (gnus-summary-insert-new-articles))))
     (when-let* ((view (get-buffer mail-thread-buffer-name))
                 ((get-buffer-window view t))
                 ((eq (buffer-local-value 'mail-thread-summary-buffer view) summary)))
       (with-current-buffer view
         (when (member post (mapcar #'reddit-post-id (mail-thread-message-ids)))
           (mail-thread-reload)
-          (message "%d new %s" count (if (= count 1) "reply" "replies")))))))
+          (message "%s" (string-join
+                         (delq nil (list (and (< 0 count)
+                                              (format "%d new %s" count
+                                                      (if (= count 1) "reply" "replies")))
+                                         (and (< 0 edits) (format "%d edited" edits))))
+                         ", ")))))))
 
 ;;;###autoload
 (defun fetch-pending-reddit-thread ()

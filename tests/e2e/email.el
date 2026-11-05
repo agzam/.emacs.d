@@ -941,16 +941,25 @@ buffers, summary and queued files the cases leave are cleared after."
     (email-e2e--write-reddit-message (expand-file-name "1700000053.53.fixture" reddit-outbox)
                                      "c3.p1" "Mon, 28 Sep 2026 13:00:00 +0000"
                                      "<p1@reddit.com> <c1.p1@reddit.com> <c2.p1@reddit.com>")
+    ;; an outbox file named as one cur/ holds is an edit, written over it
     (with-temp-file reddit-fetch-script
       (prin1 `(defun reddit-fetch-main (store _base &optional _threads)
                 (while (not (file-exists-p ,reddit-go))
                   (sleep-for 0.05))
-                (let ((files (directory-files ,reddit-outbox t "\\`[^.]")))
-                  (dolist (file files)
-                    (rename-file file (expand-file-name
-                                       (concat "r.test/new/" (file-name-nondirectory file))
-                                       store)))
-                  (message "r.test: 0 posts, %d comments, 0 threads waiting" (length files)))
+                (let ((comments 0)
+                      (edits 0))
+                  (dolist (file (directory-files ,reddit-outbox t "\\`[^.]"))
+                    (let* ((name (file-name-nondirectory file))
+                           (old (car (directory-files
+                                      (expand-file-name "r.test/cur" store) t
+                                      (concat "\\`" (regexp-quote name) "\\(?::\\|\\'\\)")))))
+                      (if old
+                          (progn (rename-file file old t)
+                                 (setq edits (1+ edits)))
+                        (rename-file file (expand-file-name (concat "r.test/new/" name) store))
+                        (setq comments (1+ comments)))))
+                  (message "r.test: 0 posts, %d comments, %d edits, 0 threads waiting"
+                           comments edits))
                 (kill-emacs 0))
              (current-buffer)))
     ;; the real batch reader, which waits while load-hold exists
@@ -1892,6 +1901,33 @@ buffers, summary and queued files the cases leave are cleared after."
                                        (with-current-buffer mail-thread-buffer-name
                                          (mail-header-id (mail-thread-message-header
                                                           (mail-thread-message-at-point)))))))
+                ;; Reddit holds c2 edited since, and the next opening
+                ;; writes it over its file with nothing new besides
+                (email-e2e--write-reddit-message (expand-file-name "1700000052.52.fixture"
+                                                                   reddit-outbox)
+                                                 "c2.p1" "Mon, 28 Sep 2026 12:00:00 +0000"
+                                                 "<p1@reddit.com> <c1.p1@reddit.com>" nil
+                                                 "<p>c2 as edited</p>")
+                (when (derived-mode-p 'mail-thread-mode)
+                  (execute-kbd-macro "q"))
+                (set-buffer (window-buffer (selected-window)))
+                (when (derived-mode-p 'gnus-summary-mode)
+                  (let ((reddit-thread-fetch-interval 0))
+                    (execute-kbd-macro (kbd "RET"))))
+                (cl-flet ((shows (text)
+                            (with-current-buffer mail-thread-buffer-name
+                              (save-excursion
+                                (goto-char (point-min))
+                                (and (search-forward text nil t) t)))))
+                  (with-timeout (20)
+                    (while (not (shows "c2 as edited"))
+                      (accept-process-output nil 0.05)))
+                  (record "RET on a Reddit thread shows a comment edited since in its newest text"
+                          (and (shows "c2 as edited") (not (shows "long comment")))
+                          :got (with-current-buffer mail-thread-buffer-name
+                                 (format "%s: %S" major-mode
+                                         (buffer-substring-no-properties
+                                          (point-min) (min (point-max) 300))))))
                 (when (derived-mode-p 'mail-thread-mode)
                   (execute-kbd-macro "q"))
                 (set-buffer (window-buffer (selected-window)))

@@ -38,7 +38,8 @@
                     :url (or link (format "https://www.reddit.com/r/test/comments/%s/slug/" id))
                     :is_self (if link :false t)
                     :selftext_html (if link :null (format "<p>%s says %s</p>" author id))
-                    :num_comments (or comments 0))))
+                    :num_comments (or comments 0)
+                    :edited :false)))
 
 (defun reddit-fetch-tests--comment (id post author days &rest replies)
   "Comment ID on POST by AUTHOR, DAYS old, answered by REPLIES."
@@ -48,7 +49,16 @@
                     :created_utc (reddit-fetch-tests--time days)
                     :permalink (format "/r/test/comments/%s/slug/%s/" post id)
                     :body_html (format "<p>%s says %s</p>" author id)
+                    :edited :false
                     :replies (if replies (reddit-fetch-tests--listing replies) ""))))
+
+(defun reddit-fetch-tests--edit (thing text)
+  "THING, a post or a comment, as edited an hour ago to say TEXT."
+  (let ((data (copy-sequence (plist-get thing :data))))
+    (list :kind (plist-get thing :kind)
+          :data (plist-put (plist-put data :edited (reddit-fetch-tests--time (/ 1.0 24)))
+                           (if (equal (plist-get thing :kind) "t1") :body_html :selftext_html)
+                           (format "<p>%s</p>" text)))))
 
 (defun reddit-fetch-tests--thread (post &rest comments)
   "The thread of POST holding the top-level COMMENTS."
@@ -171,6 +181,38 @@ BODY sees `store', `fixtures' and `log'."
                       (mail-fetch-field "Archived-At")))
                   (directory-files cur nil "\\`[^.]"))
           #'string<)))
+
+(defun reddit-fetch-tests--files (store)
+  "Names of the files in cur/ of r.test under STORE."
+  (directory-files (expand-file-name "r.test/cur" store) nil "\\`[^.]"))
+
+(defun reddit-fetch-tests--file-of (store id)
+  "File of the message of r.test under STORE whose Message-ID is ID, or nil."
+  (seq-find (lambda (file)
+              (with-temp-buffer
+                (insert-file-contents file)
+                (narrow-to-region (point-min) (or (search-forward "\n\n" nil t) (point-max)))
+                (equal (mail-fetch-field "Message-ID") id)))
+            (directory-files (expand-file-name "r.test/cur" store) t "\\`[^.]")))
+
+(defun reddit-fetch-tests--message (store id)
+  "Text of the message of r.test under STORE whose Message-ID is ID."
+  (with-temp-buffer
+    (let ((coding-system-for-read 'utf-8))
+      (insert-file-contents (reddit-fetch-tests--file-of store id)))
+    (buffer-string)))
+
+(defun reddit-fetch-tests--numbers (store)
+  "Each message of r.test under STORE as (MESSAGE-ID . NUMBER), by Message-ID.
+The numbers are nnmaildir's, read from its overview files."
+  (let ((nov (expand-file-name "r.test/.nnmaildir/nov" store)))
+    (sort (mapcar (lambda (file)
+                    (with-temp-buffer
+                      (insert-file-contents (expand-file-name file nov))
+                      (let ((data (read (current-buffer))))
+                        (cons (aref data 2) (aref data 1)))))
+                  (directory-files nov nil "\\`[^.]"))
+          (lambda (a b) (string< (car a) (car b))))))
 
 (defun reddit-fetch-tests--requests (log)
   "URLs the stand-in was asked for, in order, from LOG."
@@ -339,7 +381,18 @@ nobody; c4 is older than a week.  p3 holds c5."
                     (plist-get entry :ancestors) (plist-get entry :author) (plist-get entry :title))
               :to-equal '("t1_c2" "p2" "c2" ("c1") "u/[deleted]" "Post two"))
       (expect (plist-get entry :link) :to-equal "http://reddit.test/r/test/comments/p2/slug/c2/")
-      (expect (plist-get entry :html) :to-equal "<p>[deleted] says c2</p>"))))
+      (expect (plist-get entry :html) :to-equal "<p>[deleted] says c2</p>")))
+  (it "reads when a thing was last edited, and nothing of one never edited"
+    (cl-flet ((edited (thing)
+                (plist-get (reddit-fetch-entry (reddit-fetch-tests--parse thing)
+                                               reddit-fetch-tests--base)
+                           :edited)))
+      (expect (- (float-time)
+                 (edited (reddit-fetch-tests--edit (reddit-fetch-tests--post "p2" "bob" "Two" 1)
+                                                   "new")))
+              :to-be-close-to 3600 -1)
+      (expect (edited (reddit-fetch-tests--post "p2" "bob" "Two" 1)) :to-be nil)
+      (expect (edited (reddit-fetch-tests--comment "c1" "p2" "cat" 1)) :to-be nil))))
 
 (describe "reddit-fetch-thread"
   (it "lists the post, then each comment after its parent, with its ancestors"
@@ -401,13 +454,66 @@ nobody; c4 is older than a week.  p3 holds c5."
         (expect (mail-fetch-field "References")
                 :to-equal "<p2@reddit.com> <c1.p2@reddit.com> <c2.p2@reddit.com>")
         (expect (mail-fetch-field "In-Reply-To") :to-equal "<c2.p2@reddit.com>")
-        (expect (mail-fetch-field "From") :to-equal "\"u/[deleted]\" <_deleted_@reddit.invalid>")))))
+        (expect (mail-fetch-field "From") :to-equal "\"u/[deleted]\" <_deleted_@reddit.invalid>")))
+    (it "says when a message was last edited, and nothing where Reddit gives no time"
+      (with-temp-buffer
+        (insert (reddit-fetch-message (append '(:edited 86400.0) post)))
+        (expect (mail-fetch-field "X-Edited") :to-equal "Fri, 02 Jan 1970 00:00:00 +0000"))
+      ;; Reddit marks some old edits true
+      (dolist (edited '(nil t))
+        (with-temp-buffer
+          (insert (reddit-fetch-message (append (list :edited edited) post)))
+          (expect (mail-fetch-field "X-Edited") :to-be nil))))))
+
+(describe "reddit-fetch-file"
+  (it "finds a message's file by its prefix, whatever flags its name carries now"
+    (let ((store (make-temp-file "reddit-fetch-file" t)))
+      (unwind-protect
+          (let ((cur (expand-file-name "r.test/cur" store)))
+            (make-directory cur t)
+            ;; 1.2.host2 sorts first and starts with 1.2.host
+            (dolist (name '("1.2.host:2,S" "1.2.host2:2," "1.3.host"))
+              (write-region "" nil (expand-file-name name cur)))
+            ;; the scan saw 1.2.host unflagged, and the session marked it read since
+            (expect (reddit-fetch-file store "r.test"
+                                       (make-nnmaildir--art :prefix "1.2.host" :suffix ":2,"))
+                    :to-equal (expand-file-name "1.2.host:2,S" cur))
+            (expect (reddit-fetch-file store "r.test" (make-nnmaildir--art :prefix "1.3.host"))
+                    :to-equal (expand-file-name "1.3.host" cur))
+            (expect (reddit-fetch-file store "r.test" (make-nnmaildir--art :prefix "1.4.host"))
+                    :to-be nil))
+        (delete-directory store t)))))
+
+(describe "reddit-fetch-rewrite"
+  (it "writes a message over its file through tmp/, the name kept"
+    (let ((store (make-temp-file "reddit-fetch-rewrite" t)))
+      (unwind-protect
+          (let ((file (expand-file-name "r.test/cur/1.2.host:2,S" store)))
+            (dolist (sub '("cur" "tmp"))
+              (make-directory (expand-file-name sub (expand-file-name "r.test" store)) t))
+            (write-region "old" nil file)
+            (let ((inode (file-attribute-inode-number (file-attributes file))))
+              (reddit-fetch-rewrite '(:id "t3_p2" :post "p2" :author "u/bob" :title "Two"
+                                          :time 0 :edited 60 :link "l" :html "<p>now ü</p>")
+                                    file)
+              ;; a new file took the name, so a reader of the old one saw it whole
+              (expect (file-attribute-inode-number (file-attributes file)) :not :to-equal inode))
+            (expect (directory-files (expand-file-name "r.test/cur" store) nil "\\`[^.]")
+                    :to-equal '("1.2.host:2,S"))
+            (expect (directory-files (expand-file-name "r.test/tmp" store) nil "\\`[^.]")
+                    :to-equal nil)
+            (with-temp-buffer
+              (let ((coding-system-for-read 'utf-8))
+                (insert-file-contents file))
+              (expect (buffer-string) :to-match "\n\n<p>now ü</p>\n\\'")
+              (expect (mail-fetch-field "X-Edited") :to-equal "Thu, 01 Jan 1970 00:01:00 +0000")))
+        (delete-directory store t)))))
 
 (describe "reddit-fetch-run"
   (it "delivers new posts, then every comment of each thread that has any, oldest first"
     (reddit-fetch-tests--with-store
       (reddit-fetch-tests--serve-subreddit fixtures)
-      (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 3 5 0 nil)))
+      (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 3 5 0 0 nil)))
       ;; posts and comments older than a week arrive read
       (expect (reddit-fetch-tests--messages store) :to-equal reddit-fetch-tests--delivered)
       ;; p1 holds no comment, so its thread is never asked for
@@ -445,7 +551,7 @@ nobody; c4 is older than a week.  p3 holds c5."
        (reddit-fetch-tests--thread
         (reddit-fetch-tests--post "p0" "eve" "Post zero" 30 1)
         (reddit-fetch-tests--comment "c8" "p0" "ann" 0.1)))
-      (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 3 6 0 nil)))
+      (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 3 6 0 0 nil)))
       (expect (cddr (reddit-fetch-tests--requests log))
               :to-equal (list (reddit-fetch-tests--url 'thread "p0")
                               (reddit-fetch-tests--url 'thread "p2")
@@ -456,7 +562,7 @@ nobody; c4 is older than a week.  p3 holds c5."
       (reddit-fetch-tests--serve-subreddit fixtures)
       (reddit-fetch-tests--run store)
       (delete-file log)
-      (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 0 0 0 nil)))
+      (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 0 0 0 0 nil)))
       (expect (reddit-fetch-tests--requests log)
               :to-equal (list (reddit-fetch-tests--url 'posts)
                               (reddit-fetch-tests--url 'comments)))))
@@ -479,7 +585,7 @@ nobody; c4 is older than a week.  p3 holds c5."
          "c5" "p3" "dan" 0.1
          (reddit-fetch-tests--comment "c6" "p3" "eve" 0.05))))
       (delete-file log)
-      (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 0 1 0 nil)))
+      (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 0 1 0 0 nil)))
       (expect (assoc "<c6.p3@reddit.com>" (reddit-fetch-tests--messages store))
               :to-equal '("<c6.p3@reddit.com>" "<p3@reddit.com> <c5.p3@reddit.com>" nil))
       (expect (reddit-fetch-tests--requests log)
@@ -501,13 +607,13 @@ nobody; c4 is older than a week.  p3 holds c5."
         (reddit-fetch-tests--comment
          "c7" "p0" "cat" 2
          (reddit-fetch-tests--comment "c8" "p0" "ann" 0.1))))
-      (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 0 2 0 nil)))
+      (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 0 2 0 0 nil)))
       (expect (reddit-fetch-tests--messages store)
               :to-equal '(("<c7.p0@reddit.com>" "<p0@reddit.com>" nil)
                           ("<c8.p0@reddit.com>" "<p0@reddit.com> <c7.p0@reddit.com>" nil)
                           ("<p0@reddit.com>" nil t)))
       ;; the thread's count is kept only while the listing holds it
-      (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 0 0 0 nil)))
+      (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 0 0 0 0 nil)))
       (expect (reddit-fetch-read-state store "r.test" reddit-fetch-threads-file) :to-be nil)))
 
   (it "never delivers an id twice, even one deleted from the folder or delivered before"
@@ -515,7 +621,7 @@ nobody; c4 is older than a week.  p3 holds c5."
       (reddit-fetch-tests--serve-subreddit fixtures)
       ;; an earlier fetch delivered c5, and the user deleted it since
       (reddit-fetch-save-state store "r.test" reddit-fetch-known-file '("t1_c5"))
-      (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 3 4 0 nil)))
+      (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 3 4 0 0 nil)))
       (let ((cur (expand-file-name "r.test/cur" store)))
         (dolist (file (directory-files cur t "\\`[^.]"))
           (with-temp-buffer
@@ -524,7 +630,7 @@ nobody; c4 is older than a week.  p3 holds c5."
               (delete-file file)))))
       ;; with no count kept, every thread is fetched again
       (reddit-fetch-save-state store "r.test" reddit-fetch-threads-file nil)
-      (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 0 0 0 nil)))
+      (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 0 0 0 0 nil)))
       (expect (mapcar #'car (reddit-fetch-tests--messages store))
               :to-equal '("<c1.p2@reddit.com>" "<c2.p2@reddit.com>" "<c3.p2@reddit.com>"
                           "<c4.p2@reddit.com>" "<p1@reddit.com>" "<p3@reddit.com>"))))
@@ -535,7 +641,7 @@ nobody; c4 is older than a week.  p3 holds c5."
       (reddit-fetch-tests--run store)
       (delete-file (reddit-fetch-state-file store "r.test" reddit-fetch-known-file))
       (delete-file (reddit-fetch-state-file store "r.test" reddit-fetch-threads-file))
-      (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 0 0 0 nil)))
+      (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 0 0 0 0 nil)))
       (expect (reddit-fetch-tests--messages store) :to-equal reddit-fetch-tests--delivered)))
 
   (it "stops at a thread that fails, reports it, and fetches what waits next run"
@@ -545,9 +651,9 @@ nobody; c4 is older than a week.  p3 holds c5."
             (failed (expand-file-name "failed" fixtures)))
         (rename-file (expand-file-name (replace-regexp-in-string "[^A-Za-z0-9]" "_" p2) fixtures)
                      failed)
-        (pcase-let ((`((,group ,posts ,comments ,waiting ,problem))
+        (pcase-let ((`((,group ,posts ,comments ,edits ,waiting ,problem))
                      (reddit-fetch-tests--run store)))
-          (expect (list group posts comments waiting) :to-equal '("r.test" 3 0 2))
+          (expect (list group posts comments edits waiting) :to-equal '("r.test" 3 0 0 2))
           (expect problem :to-equal (reddit-fetch-tests--no-json p2)))
         (expect (reddit-fetch-tests--requests log)
                 :to-equal (list (reddit-fetch-tests--url 'posts)
@@ -555,15 +661,15 @@ nobody; c4 is older than a week.  p3 holds c5."
                                 p2))
         (rename-file failed (expand-file-name (replace-regexp-in-string "[^A-Za-z0-9]" "_" p2)
                                               fixtures))
-        (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 0 5 0 nil)))
+        (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 0 5 0 0 nil)))
         (expect (reddit-fetch-tests--messages store) :to-equal reddit-fetch-tests--delivered))))
 
   (it "fetches as many threads a run as Reddit's limit leaves room for, the rest next run"
     (reddit-fetch-tests--with-store
       (reddit-fetch-tests--serve-subreddit fixtures)
       (let ((reddit-fetch-max-threads 1))
-        (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 3 4 1 nil)))
-        (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 0 1 0 nil))))
+        (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 3 4 0 1 nil)))
+        (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 0 1 0 0 nil))))
       (expect (reddit-fetch-tests--messages store) :to-equal reddit-fetch-tests--delivered)))
 
   (it "reports a folder whose listing fails, and still fetches the others"
@@ -575,13 +681,13 @@ nobody; c4 is older than a week.  p3 holds c5."
                            ,(reddit-fetch-tests--no-json
                              (format "%s/r/gone/new?limit=100&raw_json=1"
                                      reddit-fetch-tests--api)))
-                          ("r.test" 3 5 0 nil)))))
+                          ("r.test" 3 5 0 0 nil)))))
 
   (it "fetches only the threads it is given, asking for no listing"
     (reddit-fetch-tests--with-store
       (reddit-fetch-tests--serve-subreddit fixtures)
       (expect (reddit-fetch-run store reddit-fetch-tests--base '(("r.test" "p2")))
-              :to-equal '(("r.test" 0 4 0 nil)))
+              :to-equal '(("r.test" 0 4 0 0 nil)))
       (expect (reddit-fetch-tests--requests log)
               :to-equal (list (reddit-fetch-tests--url 'thread "p2")))
       ;; the post comes as context, read
@@ -589,7 +695,7 @@ nobody; c4 is older than a week.  p3 holds c5."
               :to-equal (seq-filter (lambda (message) (string-match-p "p2@" (car message)))
                                     reddit-fetch-tests--delivered))
       (expect (reddit-fetch-run store reddit-fetch-tests--base '(("r.test" "p2")))
-              :to-equal '(("r.test" 0 0 0 nil)))))
+              :to-equal '(("r.test" 0 0 0 0 nil)))))
 
   (it "keeps the count of every thread it knows, the given one's brought up to date"
     (reddit-fetch-tests--with-store
@@ -598,6 +704,110 @@ nobody; c4 is older than a week.  p3 holds c5."
       (reddit-fetch-run store reddit-fetch-tests--base '(("r.test" "p2")))
       (expect (reddit-fetch-read-state store "r.test" reddit-fetch-threads-file)
               :to-equal '(("p2" . 4) ("p9" . 7)))))
+
+  (it "writes an edited post over its message, its file's name and so its number and flags kept"
+    (reddit-fetch-tests--with-store
+      (reddit-fetch-tests--serve-subreddit fixtures)
+      (reddit-fetch-tests--run store)
+      (let ((files (reddit-fetch-tests--files store))
+            (numbers (reddit-fetch-tests--numbers store)))
+        ;; p1 arrived read, before Reddit held an edit of it
+        (reddit-fetch-tests--serve
+         fixtures (reddit-fetch-tests--url 'posts)
+         (reddit-fetch-tests--listing
+          (list (reddit-fetch-tests--post "p3" "eve" "Post three" 0.5 1)
+                (reddit-fetch-tests--post "p2" "bob" "Post two" 9 4)
+                (reddit-fetch-tests--edit (reddit-fetch-tests--post "p1" "ann" "Post one" 10)
+                                          "ann edits p1"))))
+        (delete-file log)
+        (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 0 0 1 0 nil)))
+        ;; the listing holds the whole post, so no thread is asked for
+        (expect (reddit-fetch-tests--requests log)
+                :to-equal (list (reddit-fetch-tests--url 'posts)
+                                (reddit-fetch-tests--url 'comments)))
+        (expect (reddit-fetch-tests--files store) :to-equal files)
+        (expect (reddit-fetch-tests--messages store) :to-equal reddit-fetch-tests--delivered)
+        (with-temp-buffer
+          (insert (reddit-fetch-tests--message store "<p1@reddit.com>"))
+          (expect (buffer-string) :to-match "\n\n<p>ann edits p1</p>\n\\'")
+          (expect (- (float-time) (float-time (date-to-time (mail-fetch-field "X-Edited"))))
+                  :to-be-close-to 3600 -1))
+        ;; the next run writes nothing, and its read of the folder numbers
+        ;; the message as before
+        (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 0 0 0 0 nil)))
+        (expect (reddit-fetch-tests--numbers store) :to-equal numbers))))
+
+  (it "fetches the thread of an edited comment the comments listing shows, and writes it over"
+    (reddit-fetch-tests--with-store
+      (reddit-fetch-tests--serve-subreddit fixtures)
+      (reddit-fetch-tests--run store)
+      (let ((c5 (reddit-fetch-tests--edit (reddit-fetch-tests--comment "c5" "p3" "dan" 0.1)
+                                          "dan edits c5")))
+        (reddit-fetch-tests--serve
+         fixtures (reddit-fetch-tests--url 'comments)
+         (reddit-fetch-tests--listing (list c5 (reddit-fetch-tests--comment "c3" "p2" "cat" 0.2))))
+        (reddit-fetch-tests--serve
+         fixtures (reddit-fetch-tests--url 'thread "p3")
+         (reddit-fetch-tests--thread (reddit-fetch-tests--post "p3" "eve" "Post three" 0.5 1) c5)))
+      (delete-file log)
+      (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 0 0 1 0 nil)))
+      (expect (reddit-fetch-tests--requests log)
+              :to-equal (list (reddit-fetch-tests--url 'posts)
+                              (reddit-fetch-tests--url 'comments)
+                              (reddit-fetch-tests--url 'thread "p3")))
+      (expect (reddit-fetch-tests--message store "<c5.p3@reddit.com>")
+              :to-match "\n\n<p>dan edits c5</p>\n\\'")
+      (expect (reddit-fetch-tests--messages store) :to-equal reddit-fetch-tests--delivered)
+      ;; written once, the comment asks for its thread no more
+      (delete-file log)
+      (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 0 0 0 0 nil)))
+      (expect (reddit-fetch-tests--requests log)
+              :to-equal (list (reddit-fetch-tests--url 'posts)
+                              (reddit-fetch-tests--url 'comments)))))
+
+  (it "writes over every edited message of a thread it is given, the post too"
+    (reddit-fetch-tests--with-store
+      (reddit-fetch-tests--serve-subreddit fixtures)
+      (reddit-fetch-tests--run store)
+      (reddit-fetch-tests--serve
+       fixtures (reddit-fetch-tests--url 'thread "p2")
+       (reddit-fetch-tests--thread
+        (reddit-fetch-tests--edit (reddit-fetch-tests--post "p2" "bob" "Post two" 9 4)
+                                  "bob edits p2")
+        (reddit-fetch-tests--comment "c4" "p2" "dan" 8)
+        (reddit-fetch-tests--comment
+         "c1" "p2" "cat" 1
+         (reddit-fetch-tests--edit
+          (reddit-fetch-tests--comment
+           "c2" "p2" "ann" 0.5
+           (reddit-fetch-tests--comment "c3" "p2" "cat" 0.2))
+          "ann edits c2"))))
+      (expect (reddit-fetch-run store reddit-fetch-tests--base '(("r.test" "p2")))
+              :to-equal '(("r.test" 0 0 2 0 nil)))
+      (expect (reddit-fetch-tests--message store "<p2@reddit.com>")
+              :to-match "\n\n<p>bob edits p2</p>\n\\'")
+      (expect (reddit-fetch-tests--message store "<c2.p2@reddit.com>")
+              :to-match "\n\n<p>ann edits c2</p>\n\\'")
+      ;; threaded as before, the old post still read
+      (expect (reddit-fetch-tests--messages store) :to-equal reddit-fetch-tests--delivered)))
+
+  (it "never brings back an edited message deleted from the folder"
+    (reddit-fetch-tests--with-store
+      (reddit-fetch-tests--serve-subreddit fixtures)
+      (reddit-fetch-tests--run store)
+      (delete-file (reddit-fetch-tests--file-of store "<c5.p3@reddit.com>"))
+      (let ((c5 (reddit-fetch-tests--edit (reddit-fetch-tests--comment "c5" "p3" "dan" 0.1)
+                                          "dan edits c5")))
+        (reddit-fetch-tests--serve
+         fixtures (reddit-fetch-tests--url 'comments)
+         (reddit-fetch-tests--listing (list c5)))
+        (reddit-fetch-tests--serve
+         fixtures (reddit-fetch-tests--url 'thread "p3")
+         (reddit-fetch-tests--thread (reddit-fetch-tests--post "p3" "eve" "Post three" 0.5 1) c5)))
+      (expect (reddit-fetch-tests--run store) :to-equal '(("r.test" 0 0 0 0 nil)))
+      (expect (reddit-fetch-run store reddit-fetch-tests--base '(("r.test" "p3")))
+              :to-equal '(("r.test" 0 0 0 0 nil)))
+      (expect (reddit-fetch-tests--file-of store "<c5.p3@reddit.com>") :to-be nil)))
 
   (it "deletes the browser profile of the run, which holds the user's login"
     (reddit-fetch-tests--with-store
@@ -629,7 +839,7 @@ nobody; c4 is older than a week.  p3 holds c5."
         (reddit-fetch-tests--serve-subreddit fixtures)
         (pcase-let ((`(,status ,output) (main store)))
           (expect status :to-equal 0)
-          (expect output :to-match "^r.test: 3 posts, 5 comments, 0 threads waiting$"))
+          (expect output :to-match "^r.test: 3 posts, 5 comments, 0 edits, 0 threads waiting$"))
         (expect (reddit-fetch-tests--messages store) :to-equal reddit-fetch-tests--delivered)
         (expect (seq-filter #'file-exists-p
                             (reddit-fetch-tests--requests (concat log ".profiles")))
@@ -639,9 +849,22 @@ nobody; c4 is older than a week.  p3 holds c5."
         (reddit-fetch-tests--serve-subreddit fixtures)
         (pcase-let ((`(,status ,output) (main store '(("r.test" "p3")))))
           (expect status :to-equal 0)
-          (expect output :to-match "^r.test: 0 posts, 1 comments, 0 threads waiting$"))
+          (expect output :to-match "^r.test: 0 posts, 1 comments, 0 edits, 0 threads waiting$"))
         (expect (reddit-fetch-tests--requests log)
                 :to-equal (list (reddit-fetch-tests--url 'thread "p3")))))
+    (it "reports the messages it wrote over"
+      (reddit-fetch-tests--with-store
+        (reddit-fetch-tests--serve-subreddit fixtures)
+        (main store '(("r.test" "p3")))
+        (reddit-fetch-tests--serve
+         fixtures (reddit-fetch-tests--url 'thread "p3")
+         (reddit-fetch-tests--thread
+          (reddit-fetch-tests--post "p3" "eve" "Post three" 0.5 1)
+          (reddit-fetch-tests--edit (reddit-fetch-tests--comment "c5" "p3" "dan" 0.1)
+                                    "dan edits c5")))
+        (pcase-let ((`(,status ,output) (main store '(("r.test" "p3")))))
+          (expect status :to-equal 0)
+          (expect output :to-match "^r.test: 0 posts, 0 comments, 1 edits, 0 threads waiting$"))))
     (it "exits 1 when a listing fails"
       (reddit-fetch-tests--with-store
         (pcase-let ((`(,status ,output) (main store)))

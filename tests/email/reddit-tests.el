@@ -175,6 +175,8 @@ says OUTPUT before it exits."
                              (funcall action)))
                           ((symbol-function 'show-reddit-replies)
                            (lambda (&rest args) (push (cons 'show args) calls)))
+                          ((symbol-function 'forget-shown-articles)
+                           (lambda () (push '(forget) calls)))
                           ((symbol-function 'message)
                            (lambda (format &rest args)
                              (push (list 'said (apply #'format format args)) calls))))
@@ -184,21 +186,29 @@ says OUTPUT before it exits."
                 (nreverse calls))))
     (it "reads the group ahead of the others once replies came, then shows them"
       (reddit-tests--with-store
-        (expect (fetch "r.test: 0 posts, 2 comments, 0 threads waiting" 0)
+        (expect (fetch "r.test: 0 posts, 2 comments, 0 edits, 0 threads waiting" 0)
                 :to-equal '((load ("nnmaildir+reddit:r.test") t)
                             (wait reddit-thread)
-                            (show "nnmaildir+reddit:r.test" "p1" 2)))))
+                            (show "nnmaildir+reddit:r.test" "p1" 2 0)))))
+    (it "reads the group and shows the thread for edits alone, Gnus's copies dropped first"
+      (reddit-tests--with-store
+        (expect (fetch "r.test: 0 posts, 0 comments, 2 edits, 0 threads waiting" 0)
+                :to-equal '((forget)
+                            (load ("nnmaildir+reddit:r.test") t)
+                            (wait reddit-thread)
+                            (show "nnmaildir+reddit:r.test" "p1" 0 2)))))
     (it "reads nothing when the fetch brought nothing"
       (reddit-tests--with-store
-        (expect (fetch "r.test: 0 posts, 0 comments, 0 threads waiting" 0) :to-equal nil)))
+        (expect (fetch "r.test: 0 posts, 0 comments, 0 edits, 0 threads waiting" 0)
+                :to-equal nil)))
     (it "says a fetch failed, and still shows what it brought first"
       (reddit-tests--with-store
-        (let ((calls (fetch "r.test: 0 posts, 1 comments, 1 threads waiting; blocked" 1)))
+        (let ((calls (fetch "r.test: 0 posts, 1 comments, 0 edits, 1 threads waiting; blocked" 1)))
           (expect (cadr (assq 'said calls)) :to-match "Reddit thread fetch failed")
-          (expect (assq 'show calls) :to-equal '(show "nnmaildir+reddit:r.test" "p1" 1)))))))
+          (expect (assq 'show calls) :to-equal '(show "nnmaildir+reddit:r.test" "p1" 1 0)))))))
 
 (describe "show-reddit-replies"
-  (cl-flet ((show (ids displayed)
+  (cl-flet ((show (ids displayed count edits)
               (let ((summary (get-buffer-create "*Summary nnmaildir+reddit:r.test*"))
                     (view (get-buffer-create mail-thread-buffer-name))
                     calls)
@@ -216,20 +226,27 @@ says OUTPUT before it exits."
                                 ((symbol-function 'message)
                                  (lambda (format &rest args)
                                    (push (list 'said (apply #'format format args)) calls))))
-                        (show-reddit-replies "nnmaildir+reddit:r.test" "p1" 2)))
+                        (show-reddit-replies "nnmaildir+reddit:r.test" "p1" count edits)))
                   (kill-buffer summary)
                   (kill-buffer view))
                 (nreverse calls))))
     (it "has the summary take the replies in, and the view showing the thread lay it out again"
-      (expect (show '("<p1@reddit.com>" "<c1.p1@reddit.com>") t)
+      (expect (show '("<p1@reddit.com>" "<c1.p1@reddit.com>") t 2 0)
               :to-equal `((insert "*Summary nnmaildir+reddit:r.test*")
                           (reload ,mail-thread-buffer-name)
                           (said "2 new replies"))))
+    (it "lays the thread out again for edits alone, the summary having nothing to take in"
+      (expect (show '("<p1@reddit.com>") t 0 1)
+              :to-equal `((reload ,mail-thread-buffer-name)
+                          (said "1 edited"))))
+    (it "says both what came and what was edited"
+      (expect (cdr (assq 'said (show '("<p1@reddit.com>") t 1 2)))
+              :to-equal '("1 new reply, 2 edited")))
     (it "leaves alone a view that shows another thread"
-      (expect (show '("<p2@reddit.com>") t)
+      (expect (show '("<p2@reddit.com>") t 2 0)
               :to-equal '((insert "*Summary nnmaildir+reddit:r.test*"))))
     (it "leaves alone a view no window shows: laying it out renders, and marks read, unseen"
-      (expect (show '("<p1@reddit.com>") nil)
+      (expect (show '("<p1@reddit.com>") nil 2 0)
               :to-equal '((insert "*Summary nnmaildir+reddit:r.test*"))))))
 
 (describe "fetch-reddit-thread-h"
@@ -329,7 +346,68 @@ says OUTPUT before it exits."
           (reddit-tests--wait-exit))
         (expect asked :to-equal '((("nnmaildir+reddit:r.test"))))
         (expect said :to-match "Reddit fetch failed")
-        (expect reddit-fetched-at :to-be nil)))))
+        (expect reddit-fetched-at :to-be nil))))
+  (it "drops Gnus's copies of the articles it showed once a fetch wrote edits, and only then"
+    (reddit-tests--with-store
+      (let* ((root (file-name-directory (directory-file-name reddit-maildir)))
+             (gnus-group-list '("nnmaildir+reddit:r.test"))
+             forgot)
+        (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
+                  ((symbol-function 'load-mail-groups) #'ignore)
+                  ((symbol-function 'forget-shown-articles) (lambda () (push 'forgot forgot))))
+          (write-region "" nil (expand-file-name "go" root))
+          (let ((reddit-fetch-script
+                 (reddit-tests--stand-in
+                  root 0 "r.test: 0 posts, 3 comments, 0 edits, 0 threads waiting")))
+            (fetch-reddit)
+            (reddit-tests--wait-exit))
+          (expect forgot :to-be nil)
+          (let ((reddit-fetch-script
+                 (reddit-tests--stand-in
+                  root 0 "r.test: 0 posts, 0 comments, 1 edits, 0 threads waiting")))
+            (fetch-reddit)
+            (reddit-tests--wait-exit)))
+        (expect forgot :to-equal '(forgot))))))
+
+(describe "reddit-fetch-count"
+  (it "sums what each folder's line of the fetch reports"
+    (let ((buffer (generate-new-buffer " *reddit-tests-fetch*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'process-buffer) (lambda (_) buffer)))
+            (with-current-buffer buffer
+              (insert "r.a: 1 posts, 2 comments, 3 edits, 4 threads waiting\n"
+                      "r.b: 0 posts, 5 comments, 6 edits, 0 threads waiting; blocked\n"
+                      "r.c: no JSON in the page\n"))
+            (expect (reddit-fetch-count 'fetch "comments") :to-equal 7)
+            (expect (reddit-fetch-count 'fetch "edits") :to-equal 9))
+        (kill-buffer buffer)))))
+
+(describe "forget-shown-articles"
+  (it "drops the backlog and the original article, so Gnus reads the files again"
+    (let ((gnus-keep-backlog 20)
+          (gnus-backlog-articles nil)
+          ;; the backlog asks Gnus's group table whether a group is virtual
+          (gnus-newsrc-hashtb (gnus-make-hashtable))
+          (gnus-original-article-buffer " *reddit-tests-original*")
+          (group "nnmaildir+reddit:r.test"))
+      (unwind-protect
+          (progn
+            (with-temp-buffer
+              (insert "the older text")
+              (gnus-backlog-enter-article group 7 (current-buffer)))
+            (with-current-buffer (get-buffer-create gnus-original-article-buffer)
+              (setq-local gnus-original-article (cons group 7)))
+            (expect (with-temp-buffer (gnus-backlog-request-article group 7 (current-buffer)))
+                    :to-be-truthy)
+            (forget-shown-articles)
+            (expect (with-temp-buffer (gnus-backlog-request-article group 7 (current-buffer)))
+                    :to-be nil)
+            (expect (buffer-local-value 'gnus-original-article
+                                        (get-buffer gnus-original-article-buffer))
+                    :to-be nil))
+        (gnus-backlog-shutdown)
+        (when (get-buffer gnus-original-article-buffer)
+          (kill-buffer gnus-original-article-buffer))))))
 
 (describe "fetch-stale-reddit"
   (it "fetches when no fetch ended well within the interval"
