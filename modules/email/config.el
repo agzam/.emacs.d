@@ -246,6 +246,9 @@ Any other label's chip takes the face `mail-label'.")
   (add-hook 'mail-load-finished-hook #'fetch-pending-reddit-thread)
   ;; a Reddit thread on view fetches its newest replies
   (add-hook 'mail-thread-open-hook #'fetch-reddit-thread-h)
+  ;; a Reddit message's line shows its score, drawn again as a fetch ends
+  (add-hook 'mail-thread-line-functions #'reddit-score-line)
+  (add-hook 'reddit-fetch-end-hook #'redraw-reddit-scores)
   (add-hook 'mail-sync-hook #'fetch-news)
   (add-hook 'mail-sync-hook #'fetch-feeds)
   (add-hook 'mail-sync-hook #'fetch-reddit)
@@ -264,12 +267,16 @@ are applied again from `evil-collection-setup-hook'."
       ;; a key reads the same wherever a message is read; the thread
       ;; view's map exists once its file loads, and general waits for it
       (map! :map (gnus-summary-mode-map gnus-article-mode-map mail-thread-mode-map)
-            ;; both quote the message; the capital answers everyone
-            :n "r" #'reply-to-sender
-            :n "R" #'reply-to-everyone
+            ;; both quote the message; the capital answers everyone.  On
+            ;; Reddit both draft a reply in the thread view
+            :n "r" (cmds! (reddit-on-screen-p) #'reply-on-reddit #'reply-to-sender)
+            :n "R" (cmds! (reddit-on-screen-p) #'reply-on-reddit #'reply-to-everyone)
             ;; no state, so insert state reaches it too
             "C-c C-o" #'open-mail-on-web
             (:localleader
+             ;; Reddit's arrows, as vim's up and down
+             :desc "upvote"           "k" #'reddit-upvote
+             :desc "downvote"         "j" #'reddit-downvote
              :desc "sync"             "u" #'sync-mail
              :desc "search all mail"  "/" #'search-mail-live
              :desc "search like this" "?" #'search-mail-like-this
@@ -372,6 +379,7 @@ are applied again from `evil-collection-setup-hook'."
         :n "j" #'evil-next-visual-line
         :n "k" #'evil-previous-visual-line
         :n "q" #'mail-thread-quit
+        :n "gr" #'refetch-reddit-thread
         ;; the summary's , n narrows as well
         (:localleader :desc "narrow to a query" "n" #'mail-thread-filter)
         ;; the summary's mark keys, on the message at point or its
@@ -383,7 +391,31 @@ are applied again from `evil-collection-setup-hook'."
         :n "u" (cmd! (run-in-mail-summary #'mail-unmark t))
         :n "U" (cmd! (run-in-mail-summary #'mail-unmark-thread t))
         :n "!" (cmd! (run-in-mail-summary #'mail-toggle-read t))
-        :n "=" (cmd! (run-in-mail-summary #'mail-toggle-star t))))
+        :n "=" (cmd! (run-in-mail-summary #'mail-toggle-star t)))
+
+  ;; a thread view holding a reply draft edits as text, read-only but for
+  ;; the draft: the letters the view takes for marks edit again, and so do
+  ;; the commands evil-collection turns off in special-mode buffers
+  (map! :after reddit-reply
+        :map reddit-reply-mode-map
+        :n "d" #'evil-delete
+        :n "D" #'evil-delete-line
+        :n "a" #'evil-append
+        :n "A" #'evil-append-line
+        :n "u" #'evil-undo
+        :n "r" #'evil-replace
+        :n "R" #'evil-enter-replace-state
+        :n "RET" #'evil-ret
+        :n "<return>" #'evil-ret)
+  (after! (reddit-reply evil-collection)
+    (when-let* ((special (evil-get-auxiliary-keymap special-mode-map 'normal))
+                (off (lookup-key special [remap]))
+                ((keymapp off)))
+      (map-keymap (lambda (command _)
+                    (evil-define-key* 'normal reddit-reply-mode-map (vector 'remap command) command))
+                  off)))
+  ;; the mode turns on in a view already in normal state
+  (add-hook 'reddit-reply-mode-hook #'evil-normalize-keymaps))
 
 (use-package gnus-win
   :ensure nil

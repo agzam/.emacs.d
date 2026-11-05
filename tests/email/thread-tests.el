@@ -256,6 +256,14 @@ is the only treatment."
       (when-let* ((shown (get-text-property slot 'display)))
         (substring-no-properties shown)))))
 
+(defun thread-tests-line-extras (message)
+  "What MESSAGE's line shows of the line functions, or nil before it is drawn."
+  (save-excursion
+    (goto-char (mail-thread-message-marker message))
+    (when-let* ((slot (text-property-not-all (point) (line-end-position) 'mail-thread-line nil))
+                (shown (get-text-property slot 'display)))
+      (substring-no-properties shown))))
+
 (defun thread-tests-line-face (text line)
   "Face on the last character of LINE in TEXT."
   (let ((start (string-match (concat "^" (regexp-quote line) "$") text)))
@@ -304,6 +312,15 @@ is the only treatment."
         (expect (get-text-property slot 'mail-labels line) :to-equal "<2@x>")
         (expect (substring line (1- slot) slot) :to-match "[0-9]")
         (expect (text-property-not-all (1+ slot) (length line) 'mail-labels nil line)
+                :to-be nil)))
+    (it "leaves a slot after the labels' for what the line functions give, holding the header"
+      (let* ((line (mail-thread-message-line message "Plan" t))
+             (labels (text-property-not-all 0 (length line) 'mail-labels nil line))
+             (slot (text-property-not-all 0 (length line) 'mail-thread-line nil line)))
+        (expect slot :to-equal (1+ labels))
+        (expect (get-text-property slot 'mail-thread-line line)
+                :to-be (mail-thread-message-header message))
+        (expect (text-property-not-all (1+ slot) (length line) 'mail-thread-line nil line)
                 :to-be nil)))))
 
 (describe "mail-thread-arrange"
@@ -410,6 +427,28 @@ is the only treatment."
                           '(10 11 12))
                   :to-equal '("   job " "" "   Inbox   job "))
           (expect (buffer-modified-p) :to-be nil)))))
+  (it "shows on each message's line what the line functions give for it, in their order"
+    (let ((mail-thread-line-functions
+           (list (lambda (header) (and (equal (mail-header-id header) "<2@x>") "two"))
+                 (lambda (header) (format "#%d" (mail-header-number header))))))
+      (thread-tests-with-buffer 11 nil
+        (expect (mapcar (lambda (article)
+                          (thread-tests-line-extras (thread-tests-message article)))
+                        '(10 11 12))
+                :to-equal '("  #10" "  two  #11" "  #12"))
+        (expect (buffer-modified-p) :to-be nil))))
+  (it "draws the lines again from what the line functions give now, and nothing for nil"
+    (let* ((score 1)
+           (mail-thread-line-functions (list (lambda (_header) (and score (format "↑%d" score))))))
+      (thread-tests-with-buffer 11 nil
+        (expect (thread-tests-line-extras (thread-tests-message 11)) :to-equal "  ↑1")
+        (setq score 5)
+        (mail-thread-draw-lines)
+        (expect (thread-tests-line-extras (thread-tests-message 11)) :to-equal "  ↑5")
+        (setq score nil)
+        (mail-thread-draw-lines)
+        (expect (thread-tests-line-extras (thread-tests-message 11)) :to-equal "")
+        (expect (buffer-modified-p) :to-be nil))))
   (it "gives every message a line of its own"
     (thread-tests-with-buffer 11 nil
       (expect (length (seq-filter (lambda (line) (string-match-p "\\`[▼▶]" line))
@@ -483,6 +522,21 @@ The guide and sender faces get their colors back after."
                                                     (mail-thread-body-start message)))
                         mail-thread-messages)
                 :to-equal '((nil) ("│ ") ("│ │ ") ("│ ") ("│ "))))))
+  (it "give each of the ten levels Reddit nests comments to a level of its own"
+    ;; a chain of replies, each answering the one before
+    (let ((thread-tests-entries
+           (cl-loop for depth from 0 to 10
+                    collect (thread-tests-entry
+                             (+ 30 depth) (1+ depth) (format "<d%d@x>" depth)
+                             (mapconcat (lambda (above) (format "<d%d@x>" above))
+                                        (number-sequence 0 (1- depth)) " ")))))
+      (thread-tests-with-buffer 30 nil
+        (expect (mapcar (lambda (message)
+                          (length (car (thread-tests-guides-from
+                                        (mail-thread-message-marker message)
+                                        (mail-thread-body-start message)))))
+                        mail-thread-messages)
+                :to-equal '(0 2 4 6 8 10 12 14 16 18 20)))))
   (it "start every line of a body, the blank line after it too"
     (let ((thread-tests-entries thread-tests-branches))
       (thread-tests-with-buffer 21 nil
@@ -724,12 +778,37 @@ The guide and sender faces get their colors back after."
       (mail-thread-next-message)
       (expect (mail-thread-message-article (mail-thread-message-at-point))
               :to-equal 11)))
-  (it "moves from inside a body, not only from a message line"
-    (thread-tests-with-buffer 10 nil
-      (goto-char (point-max))
+  (it "moves forward from inside a body to the next message's line"
+    (thread-tests-with-buffer 11 nil
+      (goto-char (mail-thread-body-start (thread-tests-message 11)))
+      (forward-line 1)
+      (mail-thread-next-message)
+      (expect (point) :to-equal (marker-position
+                                 (mail-thread-message-marker (thread-tests-message 12))))))
+  (it "moves backward from inside a body to that message's line first, as org does"
+    (thread-tests-with-buffer 11 nil
+      (goto-char (mail-thread-body-start (thread-tests-message 11)))
+      (forward-line 1)
       (mail-thread-previous-message)
-      (expect (mail-thread-message-article (mail-thread-message-at-point))
-              :to-equal 11)))
+      (expect (point) :to-equal (marker-position
+                                 (mail-thread-message-marker (thread-tests-message 11))))
+      (mail-thread-previous-message)
+      (expect (point) :to-equal (marker-position
+                                 (mail-thread-message-marker (thread-tests-message 10))))))
+  (it "moves backward from anywhere on a message's line to the message before"
+    (thread-tests-with-buffer 11 nil
+      (goto-char (mail-thread-message-marker (thread-tests-message 11)))
+      (end-of-line)
+      (mail-thread-previous-message)
+      (expect (point) :to-equal (marker-position
+                                 (mail-thread-message-marker (thread-tests-message 10))))))
+  (it "counts the step from a body to its own line as one of COUNT"
+    (thread-tests-with-buffer 12 nil
+      (goto-char (mail-thread-body-start (thread-tests-message 12)))
+      (forward-line 1)
+      (mail-thread-previous-message 2)
+      (expect (point) :to-equal (marker-position
+                                 (mail-thread-message-marker (thread-tests-message 11))))))
   (it "refuses to walk past the last message"
     (thread-tests-with-buffer 12 nil
       (expect (mail-thread-next-message) :to-throw 'user-error)))
@@ -855,7 +934,11 @@ The guide and sender faces get their colors back after."
       (with-temp-buffer
         (mail-thread-mode)
         (expect visual-fill-column-width :to-equal 80)
-        (expect visual-fill-column-center-text :to-be nil)))))
+        (expect visual-fill-column-center-text :to-be nil))))
+  (it "keeps the column 92 wide with all ten levels, 72 columns of text beside the deepest"
+    (with-temp-buffer
+      (mail-thread-mode)
+      (expect visual-fill-column-width :to-equal 92))))
 
 (describe "open-mail-thread"
   (it "says so when point is on no article"
@@ -1238,3 +1321,53 @@ The guide and sender faces get their colors back after."
               (expect (thread-tests-shown) :to-equal '(10 11 12))
               (expect 'message :to-have-been-called-with "notmuch could not filter the thread"))
           (delete-file gnus-search-notmuch-program))))))
+
+(describe "a draft in the thread view"
+  (it "holds a reload back, and says the reload waits"
+    (let ((full thread-tests-entries)
+          (gnus-newsgroup-name "nnmaildir+gmail:inbox")
+          (gnus-newsgroup-unreads nil)
+          (gnus-newsrc-hashtb (gnus-make-hashtable)))
+      (let ((thread-tests-entries (seq-take full 2)))
+        (thread-tests-with-buffer 11 nil
+          (setq mail-thread-draft (make-overlay (point-min) (point-min)))
+          (let ((before (buffer-string)))
+            (cl-letf (((symbol-function 'mail-thread-entries) (lambda () full)))
+              (mail-thread-reload))
+            (expect (buffer-string) :to-equal before)
+            (expect mail-thread-reload-waiting :to-be t)
+            (setq mail-thread-draft nil)
+            (cl-letf (((symbol-function 'mail-thread-entries) (lambda () full)))
+              (mail-thread-reload))
+            (expect (mapcar #'mail-thread-message-article mail-thread-messages)
+                    :to-equal '(10 11 12)))))))
+  (it "pauses the fill, which keeps its queue for after"
+    (thread-tests-with-buffer 11 '(12)
+      (setq mail-thread-draft (make-overlay (point-min) (point-min)))
+      (mail-thread-start-fill)
+      (let ((timer mail-thread-fill-timer))
+        (mail-thread-fill (current-buffer) timer)
+        (expect (thread-tests-open-articles) :to-equal '(11))
+        (expect (thread-tests-waiting) :to-equal '(12))
+        (expect (thread-tests-timer-active-p timer) :to-be t)
+        (setq mail-thread-draft nil)
+        (mail-thread-fill (current-buffer) timer)
+        (expect (thread-tests-open-articles) :to-equal '(11 12)))))
+  (it "keeps open-mail-thread from laying another thread over it, and shows it"
+    (let ((summary (generate-new-buffer " *thread-tests summary*"))
+          (gnus-newsgroup-unreads nil)
+          (gnus-newsgroup-name "nnmaildir+gmail:inbox"))
+      (unwind-protect
+          (save-window-excursion
+            (with-current-buffer (get-buffer-create mail-thread-buffer-name)
+              (insert "the view with a draft")
+              (setq mail-thread-draft (make-overlay (point-min) (point-max))))
+            (expect (thread-tests-open-thread summary) :to-throw 'user-error)
+            ;; the layout's stand-in shows the view in the selected window
+            (expect (buffer-name (window-buffer)) :to-equal mail-thread-buffer-name)
+            (with-current-buffer mail-thread-buffer-name
+              (expect (buffer-string) :to-equal "the view with a draft")
+              (expect (overlayp mail-thread-draft) :to-be t)))
+        (when-let* ((thread (get-buffer mail-thread-buffer-name)))
+          (kill-buffer thread))
+        (kill-buffer summary)))))

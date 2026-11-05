@@ -39,7 +39,8 @@
                     :is_self (if link :false t)
                     :selftext_html (if link :null (format "<p>%s says %s</p>" author id))
                     :num_comments (or comments 0)
-                    :edited :false)))
+                    :edited :false
+                    :score 1 :hide_score :false :likes :null)))
 
 (defun reddit-fetch-tests--comment (id post author days &rest replies)
   "Comment ID on POST by AUTHOR, DAYS old, answered by REPLIES."
@@ -50,6 +51,7 @@
                     :permalink (format "/r/test/comments/%s/slug/%s/" post id)
                     :body_html (format "<p>%s says %s</p>" author id)
                     :edited :false
+                    :score 1 :score_hidden :false :likes :null
                     :replies (if replies (reddit-fetch-tests--listing replies) ""))))
 
 (defun reddit-fetch-tests--edit (thing text)
@@ -60,6 +62,15 @@
                            (if (equal (plist-get thing :kind) "t1") :body_html :selftext_html)
                            (format "<p>%s</p>" text)))))
 
+(defun reddit-fetch-tests--scored (thing score &optional likes hidden)
+  "THING, a post or a comment, at SCORE, the login's vote LIKES (t or :false).
+With HIDDEN, Reddit hides the score."
+  (let ((data (copy-sequence (plist-get thing :data))))
+    (list :kind (plist-get thing :kind)
+          :data (plist-put (plist-put (plist-put data :score score) :likes (or likes :null))
+                           (if (equal (plist-get thing :kind) "t1") :score_hidden :hide_score)
+                           (if hidden t :false)))))
+
 (defun reddit-fetch-tests--thread (post &rest comments)
   "The thread of POST holding the top-level COMMENTS."
   (vector (reddit-fetch-tests--listing (list post))
@@ -67,8 +78,7 @@
 
 (defun reddit-fetch-tests--parse (data)
   "DATA as a fetch hands it over: serialized, then parsed."
-  (json-parse-string (json-serialize data)
-                     :object-type 'hash-table :null-object nil :false-object nil))
+  (reddit-fetch-parse (json-serialize data)))
 
 (defun reddit-fetch-tests--url (kind &optional post)
   "URL of the posts listing, the comments listing or POST's thread, by KIND."
@@ -318,6 +328,11 @@ nobody; c4 is older than a week.  p3 holds c5."
       (expect (gethash "n" json) :to-equal [1])))
   (it "finds none in a page without a <pre>"
     (expect (reddit-fetch-page-json "<html><head></head><body></body></html>") :to-be nil))
+  (it "tells false from null, as the login's vote on a thing is either"
+    (let ((json (reddit-fetch-page-json
+                 "<html><body><pre>{\"down\": false, \"none\": null, \"up\": true}</pre></body></html>")))
+      (expect (mapcar (lambda (key) (gethash key json)) '("down" "none" "up"))
+              :to-equal '(:false nil t))))
   (it "reads an answer past a megabyte"
     (let ((text (make-string 2000000 ?x)))
       (expect (gethash "a" (reddit-fetch-page-json
@@ -392,7 +407,23 @@ nobody; c4 is older than a week.  p3 holds c5."
                                                    "new")))
               :to-be-close-to 3600 -1)
       (expect (edited (reddit-fetch-tests--post "p2" "bob" "Two" 1)) :to-be nil)
-      (expect (edited (reddit-fetch-tests--comment "c1" "p2" "cat" 1)) :to-be nil))))
+      (expect (edited (reddit-fetch-tests--comment "c1" "p2" "cat" 1)) :to-be nil)))
+  (it "reads a thing's score, whether Reddit hides it, and the login's vote as 1, -1 or nil"
+    (cl-flet ((score (thing)
+                (let ((entry (reddit-fetch-entry (reddit-fetch-tests--parse thing)
+                                                 reddit-fetch-tests--base)))
+                  (list (plist-get entry :score) (plist-get entry :hidden)
+                        (plist-get entry :likes)))))
+      (expect (score (reddit-fetch-tests--scored (reddit-fetch-tests--post "p2" "bob" "Two" 1)
+                                                 22 t))
+              :to-equal '(22 nil 1))
+      (expect (score (reddit-fetch-tests--scored (reddit-fetch-tests--comment "c1" "p2" "cat" 1)
+                                                 -3 :false))
+              :to-equal '(-3 nil -1))
+      (expect (score (reddit-fetch-tests--comment "c1" "p2" "cat" 1)) :to-equal '(1 nil nil))
+      (dolist (thing (list (reddit-fetch-tests--post "p2" "bob" "Two" 1)
+                           (reddit-fetch-tests--comment "c1" "p2" "cat" 1)))
+        (expect (score (reddit-fetch-tests--scored thing 1 nil t)) :to-equal '(1 t nil))))))
 
 (describe "reddit-fetch-thread"
   (it "lists the post, then each comment after its parent, with its ancestors"
@@ -704,6 +735,68 @@ nobody; c4 is older than a week.  p3 holds c5."
       (reddit-fetch-run store reddit-fetch-tests--base '(("r.test" "p2")))
       (expect (reddit-fetch-read-state store "r.test" reddit-fetch-threads-file)
               :to-equal '(("p2" . 4) ("p9" . 7)))))
+
+  (it "saves each message's score and the login's vote, a thread's over its listing's"
+    (reddit-fetch-tests--with-store
+      (reddit-fetch-tests--serve-subreddit fixtures)
+      (reddit-fetch-tests--serve
+       fixtures (reddit-fetch-tests--url 'posts)
+       (reddit-fetch-tests--listing
+        (list (reddit-fetch-tests--post "p3" "eve" "Post three" 0.5 1)
+              (reddit-fetch-tests--post "p2" "bob" "Post two" 9 4)
+              (reddit-fetch-tests--scored (reddit-fetch-tests--post "p1" "ann" "Post one" 10)
+                                          40 t))))
+      ;; the comments listing still shows c3's score
+      (reddit-fetch-tests--serve
+       fixtures (reddit-fetch-tests--url 'thread "p2")
+       (reddit-fetch-tests--thread
+        (reddit-fetch-tests--post "p2" "bob" "Post two" 9 4)
+        (reddit-fetch-tests--comment "c4" "p2" "dan" 8)
+        (reddit-fetch-tests--scored
+         (reddit-fetch-tests--comment
+          "c1" "p2" "cat" 1
+          (reddit-fetch-tests--scored
+           (reddit-fetch-tests--comment
+            "c2" "p2" "ann" 0.5
+            (reddit-fetch-tests--scored (reddit-fetch-tests--comment "c3" "p2" "cat" 0.2)
+                                        3 nil t))
+           -2 :false))
+         5)))
+      (reddit-fetch-tests--run store)
+      (expect (reddit-fetch-read-state store "r.test" reddit-fetch-scores-file)
+              :to-equal '(("<c1.p2@reddit.com>" 5 nil) ("<c2.p2@reddit.com>" -2 -1)
+                          ("<c3.p2@reddit.com>" nil nil) ("<c4.p2@reddit.com>" 1 nil)
+                          ("<c5.p3@reddit.com>" 1 nil) ("<p1@reddit.com>" 40 1)
+                          ("<p2@reddit.com>" 1 nil) ("<p3@reddit.com>" 1 nil)))))
+
+  (it "keeps the score of a message no run saw since, and drops a deleted message's"
+    (reddit-fetch-tests--with-store
+      (reddit-fetch-tests--serve-subreddit fixtures)
+      (reddit-fetch-tests--run store)
+      (reddit-fetch-save-state store "r.test" reddit-fetch-scores-file
+                               '(("<c1.p2@reddit.com>" 7 1) ("<gone@reddit.com>" 9 nil)
+                                 ("<p3@reddit.com>" 2 nil)))
+      ;; the listings hold p1 to p3, c3 and c5, and no thread changed
+      (reddit-fetch-tests--run store)
+      (expect (reddit-fetch-read-state store "r.test" reddit-fetch-scores-file)
+              :to-equal '(("<c1.p2@reddit.com>" 7 1) ("<c3.p2@reddit.com>" 1 nil)
+                          ("<c5.p3@reddit.com>" 1 nil) ("<p1@reddit.com>" 1 nil)
+                          ("<p2@reddit.com>" 1 nil) ("<p3@reddit.com>" 1 nil)))))
+
+  (it "brings every score of a thread it is given up to date, and keeps the others"
+    (reddit-fetch-tests--with-store
+      (reddit-fetch-tests--serve-subreddit fixtures)
+      (reddit-fetch-tests--run store)
+      (reddit-fetch-tests--serve
+       fixtures (reddit-fetch-tests--url 'thread "p3")
+       (reddit-fetch-tests--thread
+        (reddit-fetch-tests--scored (reddit-fetch-tests--post "p3" "eve" "Post three" 0.5 1) 12)
+        (reddit-fetch-tests--scored (reddit-fetch-tests--comment "c5" "p3" "dan" 0.1) 4 t)))
+      (reddit-fetch-run store reddit-fetch-tests--base '(("r.test" "p3")))
+      (let ((scores (reddit-fetch-read-state store "r.test" reddit-fetch-scores-file)))
+        (expect (assoc "<p3@reddit.com>" scores) :to-equal '("<p3@reddit.com>" 12 nil))
+        (expect (assoc "<c5.p3@reddit.com>" scores) :to-equal '("<c5.p3@reddit.com>" 4 1))
+        (expect (length scores) :to-equal 8))))
 
   (it "writes an edited post over its message, its file's name and so its number and flags kept"
     (reddit-fetch-tests--with-store

@@ -26,8 +26,10 @@
 (defvar mail-load-parked-functions)
 (defvar mail-load-finished-hook)
 (defvar mail-sync-hook)
-;; thread.el defines it, and the Reddit spec binds it
+;; thread.el and reddit.el define these, and the Reddit specs bind them
 (defvar mail-thread-open-hook)
+(defvar mail-thread-line-functions)
+(defvar reddit-fetch-end-hook)
 
 (defun email-tests--load ()
   "Load the module config with `use-package' reduced to its :init forms.
@@ -371,6 +373,11 @@ KEYS holds a prefix's key and the key under it apart by a space, as
                 ("[[" function mail-thread-previous-message)
                 ("q" function mail-thread-quit)))))
 
+  (it "fetches a Reddit thread again on g r, as g r reads a summary's group again"
+    (let ((pairs (mapcan #'map-form-key-pairs
+                         (map-form-groups config 'mail-thread-mode-map))))
+      (expect (assoc "gr" pairs) :to-equal '("gr" function refetch-reddit-thread))))
+
   (it "marks from the thread buffer through the summary, which draws the marks"
     (let ((pairs (mapcan #'map-form-key-pairs
                          (map-form-groups config 'mail-thread-mode-map))))
@@ -405,7 +412,8 @@ KEYS holds a prefix's key and the key under it apart by a space, as
       (let ((pairs (mapcan #'map-form-key-pairs (map-form-groups config map)))
             (leader (email-tests--localleader-pairs config map)))
         (expect (list (cdr (assoc "r" pairs)) (cdr (assoc "R" pairs)))
-                :to-equal '((function reply-to-sender) (function reply-to-everyone)))
+                :to-equal '((cmds! (reddit-on-screen-p) #'reply-on-reddit #'reply-to-sender)
+                            (cmds! (reddit-on-screen-p) #'reply-on-reddit #'reply-to-everyone)))
         (expect (mapcar (lambda (keys) (cdr (assoc keys leader)))
                         '("u" "/" "?" "c" "f" "r l" "r n" "o g" "o l"))
                 :to-equal '((function sync-mail) (function search-mail-live)
@@ -414,6 +422,15 @@ KEYS holds a prefix's key and the key under it apart by a space, as
                             (function reply-to-list) (function follow-up-on-newsgroup)
                             (function open-message-in-gmail)
                             (function open-message-in-list-archive))))))
+
+  (it "votes on , k and , j wherever a message is read, as vim's up and down"
+    (dolist (map '(gnus-summary-mode-map gnus-article-mode-map mail-thread-mode-map))
+      (let ((leader (email-tests--localleader-pairs config map))
+            (pairs (mapcan #'map-form-key-pairs (map-form-groups config map))))
+        (expect (list (cdr (assoc "k" leader)) (cdr (assoc "j" leader)))
+                :to-equal '((function reddit-upvote) (function reddit-downvote)))
+        ;; evil's own + and - stay
+        (expect (list (assoc "+" pairs) (assoc "-" pairs)) :to-equal '(nil nil)))))
 
   (it "opens the message on the web on C-c C-o wherever a message is read, in any state"
     (dolist (map '(gnus-summary-mode-map gnus-article-mode-map mail-thread-mode-map))
@@ -426,6 +443,33 @@ KEYS holds a prefix's key and the key under it apart by a space, as
       (let ((states (email-tests--key-states config map)))
         (expect (list (cdr (assoc "r" states)) (cdr (assoc "R" states)))
                 :to-equal '(:n :n)))))
+
+  (it "drafts a reply on Reddit for r and R on a Reddit message, and mails one elsewhere"
+    (let ((pairs (mapcan #'map-form-key-pairs (map-form-groups config 'mail-thread-mode-map))))
+      (pcase-dolist (`(,key . ,mail) '(("r" . reply-to-sender) ("R" . reply-to-everyone)))
+        (let ((filter (plist-get (cdddr (eval (cdr (assoc key pairs)) t)) :filter)))
+          (cl-letf (((symbol-function 'reddit-on-screen-p) (lambda () t)))
+            (expect (funcall filter) :to-be 'reply-on-reddit))
+          (cl-letf (((symbol-function 'reddit-on-screen-p) #'ignore))
+            (expect (funcall filter) :to-be mail))))))
+
+  (it "edits a reply drafted in the thread view with evil's own keys"
+    (let ((pairs (mapcan #'map-form-key-pairs (map-form-groups config 'reddit-reply-mode-map))))
+      (expect (mapcar (lambda (key) (cdr (assoc key pairs)))
+                      '("d" "D" "a" "A" "u" "r" "R" "RET" "<return>"))
+              :to-equal '((function evil-delete) (function evil-delete-line)
+                          (function evil-append) (function evil-append-line)
+                          (function evil-undo) (function evil-replace)
+                          (function evil-enter-replace-state)
+                          (function evil-ret) (function evil-ret)))
+      (expect (seq-uniq (mapcar #'cdr (email-tests--key-states config 'reddit-reply-mode-map)))
+              :to-equal '(:n)))
+    ;; evil-collection's special-mode turns its editing commands off
+    (expect (seq-find (lambda (form) (equal (seq-take form 2) '(after! (reddit-reply evil-collection))))
+                      config)
+            :to-be-truthy)
+    (expect (member '(add-hook 'reddit-reply-mode-hook #'evil-normalize-keymaps) config)
+            :to-be-truthy))
 
   (it "folds threads with vim's fold keys"
     (let ((pairs (mapcan #'map-form-key-pairs
@@ -730,7 +774,7 @@ window and deletes the summary's."
                    '(("thread.el" reply-to-sender reply-to-everyone reply-to-list
                       follow-up-on-newsgroup forward-mail compose-new-mail
                       run-in-mail-summary mail-on-screen mail-thread-update-header-line
-                      mail-render-message mail-thread-draw-labels)
+                      mail-render-message mail-thread-draw-labels mail-thread-draw-lines)
                      ("mail.el" sort-mail-by-date sort-mail-by-author
                       sort-mail-by-subject toggle-mail-thread-fold open-mail-on-web
                       ;; a search, an advice or a sibling file calls these
@@ -777,7 +821,12 @@ window and deletes the summary's."
                       news-group-parked-p fetch-pending-news)
                      ("reddit.el" fetch-reddit fetch-stale-reddit start-reddit-fetch-timer
                       ensure-reddit-folders reddit-group-p reddit-group-parked-p
-                      fetch-pending-reddit fetch-pending-reddit-thread fetch-reddit-thread-h)
+                      fetch-pending-reddit fetch-pending-reddit-thread fetch-reddit-thread-h
+                      ;; g r in a Reddit thread's view
+                      refetch-reddit-thread)
+                     ;; the thread view's line, the end of a fetch, , k and , j call these
+                     ("reddit-scores.el" reddit-score-line redraw-reddit-scores
+                      reddit-upvote reddit-downvote)
                      ;; , u, the hook that starts the timer, and the label commands
                      ("sync.el" sync-mail start-mail-sync start-mail-sync-timer
                       mail-sync-running-p start-gmail-label-change)
@@ -790,7 +839,11 @@ window and deletes the summary's."
                       start-mail-queue stop-mail-queue)
                      ;; the thread view shades its faces through it
                      ("html.el" mail-shade)
-                     ("similar.el" count-mail)))
+                     ("similar.el" count-mail)
+                     ;; r and R on a Reddit message go through these
+                     ("reddit-reply.el" reply-on-reddit reddit-on-screen-p)
+                     ;; a reply posts through it, and so does a vote
+                     ("reddit-api.el" reddit-api-post reddit-thing-id)))
       (with-temp-buffer
         (insert-file-contents
          (expand-file-name (concat "modules/email/autoload/" file) test-config-root))
@@ -1188,6 +1241,15 @@ window and deletes the summary's."
                    (equal (cadr form) ''mail-thread-open-hook))
           (eval form t)))
       (expect mail-thread-open-hook :to-equal '(fetch-reddit-thread-h))))
+  (it "shows a Reddit message's score on its line, drawn again as each fetch ends"
+    (let ((mail-thread-line-functions nil)
+          (reddit-fetch-end-hook nil))
+      (dolist (form (email-tests--config-forms 'gnus))
+        (when (and (eq (car-safe form) 'add-hook)
+                   (member (cadr form) '('mail-thread-line-functions 'reddit-fetch-end-hook)))
+          (eval form t)))
+      (expect mail-thread-line-functions :to-equal '(reddit-score-line))
+      (expect reddit-fetch-end-hook :to-equal '(redraw-reddit-scores))))
   (it "loads the advice and the hook functions before any command of their file ran"
     (pcase-dolist (`(,file . ,fns)
                    '(("mail.el" defer-mail-server-scan-a scan-mail-group-on-miss-a)

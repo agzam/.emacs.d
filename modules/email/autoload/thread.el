@@ -47,17 +47,29 @@
 (defvar-local mail-thread-filter-process nil
   "The notmuch process answering the latest filter query.")
 
-(defvar mail-thread-max-indent 6
-  "Levels the thread view indents at most.")
+(defvar-local mail-thread-draft nil
+  "Overlay over text drafted in the view, such as a reply, or nil.
+While there is one the fill pauses, and a reload waits for it to go.")
 
-(defvar mail-thread-width 80
-  "Text width of the thread view's column, besides the deepest guide bars.")
+(defvar-local mail-thread-reload-waiting nil
+  "Non-nil when a reload waits for `mail-thread-draft' to go.")
+
+(defvar mail-thread-max-indent 10
+  "Levels the thread view indents at most, as deep as Reddit nests comments.")
+
+(defvar mail-thread-width 72
+  "Text width of the thread view's column, besides the deepest guide bars.
+Plain-text mail comes wrapped at 72 columns.")
 
 (defvar mail-thread-body-indent 2
   "Columns a top-level message's body sits off the edge, under its sender.")
 
 (defvar mail-thread-open-hook nil
   "Hook run in the thread view once it shows a thread opened from a summary.")
+
+(defvar mail-thread-line-functions nil
+  "Functions of a message's header, each giving a string for its line or nil.
+They run in the thread view, and the line shows the strings after its labels.")
 
 (defface mail-thread-guide '((t :inherit shadow))
   "Guide bars left of a reply in the thread view."
@@ -179,6 +191,8 @@ SUBJECT is the thread's, shown again only where a message changed it."
             (propertize (gnus-user-date (mail-header-date header)) 'face 'shadow)
             ;; `mail-thread-draw-labels' shows the message's labels here
             (propertize " " 'mail-labels (mail-header-id header))
+            ;; and `mail-thread-draw-lines' what `mail-thread-line-functions' give
+            (propertize " " 'mail-thread-line header)
             (unless (string= (gnus-simplify-subject-re own)
                              (gnus-simplify-subject-re subject))
               (concat "  " (propertize own 'face 'gnus-header-subject))))))
@@ -370,6 +384,22 @@ on the next message stays there while a body lands above it."
         (setq pos (1+ pos))))))
 
 ;;;###autoload
+(defun mail-thread-draw-lines ()
+  "Show on each message's line what `mail-thread-line-functions' give for it."
+  (let ((pos (point-min)))
+    (with-silent-modifications
+      (while (setq pos (text-property-not-all pos (point-max) 'mail-thread-line nil))
+        (let ((header (get-text-property pos 'mail-thread-line))
+              strings)
+          (run-hook-wrapped 'mail-thread-line-functions
+                            (lambda (fn)
+                              (when-let* ((string (funcall fn header)))
+                                (push (concat "  " string) strings))
+                              nil))
+          (put-text-property pos (1+ pos) 'display (apply #'concat (nreverse strings))))
+        (setq pos (1+ pos))))))
+
+;;;###autoload
 (defun mail-thread-update-header-line ()
   "Show the thread's subject, its labels, and how many messages are on show."
   (let* ((subject (mail-thread-subject
@@ -488,7 +518,9 @@ gone or holds another."
         ;; timers run with quitting inhibited, and an NNTP fetch can hang
         (let ((inhibit-quit nil))
           (condition-case nil
+              ;; a render under a draft would join the draft's undo history
               (while-let ((message (and (not (input-pending-p))
+                                        (not mail-thread-draft)
                                         (mail-thread-next-waiting))))
                 ;; off the queue first, so a render that signals is not
                 ;; retried every idle period
@@ -531,9 +563,13 @@ The cursor of a point in hidden text shows at the end of that message."
   (when (get-buffer-window) (recenter 0)))
 
 (defun mail-thread-move (count)
-  "Move COUNT shown messages forward, or backward when COUNT is negative."
+  "Move COUNT shown messages forward, or backward when COUNT is negative.
+Backward from inside a body, the first step goes to that message's own
+line, the way org moves between headings."
   (let* ((shown (mail-thread-shown-messages))
-         (index (+ (seq-position shown (mail-thread-message-at-point)) count)))
+         (here (mail-thread-message-at-point))
+         (inside (and (< count 0) (<= (mail-thread-body-start here) (point))))
+         (index (+ (seq-position shown here) count (if inside 1 0))))
     (cond ((< index 0) (user-error "First message"))
           ((<= (length shown) index) (user-error "Last message"))
           (t (mail-thread-goto-message (nth index shown))))))
@@ -664,6 +700,7 @@ ENTRY is the article the summary was on.  The articles of UNFOLD wait in
                                  (memq (mail-thread-message-article message) unfold))
                                (mail-thread-fill-order shown)))
     (mail-thread-draw-labels)
+    (mail-thread-draw-lines)
     (mail-thread-update-header-line)
     (set-buffer-modified-p nil)))
 
@@ -679,7 +716,7 @@ unread ones."
 (defun open-mail-thread ()
   "Read every message of the thread at point in one buffer.
 The read ones stay folded unless the group parameter
-`mail-thread-unfold-read' is set."
+`mail-thread-unfold-read' is set.  A view holding a draft stays."
   (interactive nil gnus-summary-mode)
   (let* ((entry (or (gnus-summary-article-number)
                     (user-error "No article on this line")))
@@ -689,6 +726,10 @@ The read ones stay folded unless the group parameter
                       (user-error "No article Gnus can fetch in this thread")))
          (unfold (mail-thread-unfolded entries))
          (buffer (get-buffer-create mail-thread-buffer-name)))
+    (when (buffer-local-value 'mail-thread-draft buffer)
+      (let ((gnus-summary-buffer summary))
+        (gnus-configure-windows 'mail-thread))
+      (user-error "The thread view holds a draft: send it or drop it first"))
     (with-current-buffer buffer
       (let ((inhibit-read-only t))
         (erase-buffer)
@@ -728,34 +769,37 @@ The read ones stay folded unless the group parameter
 (defun mail-thread-reload ()
   "Lay the thread out again from its summary, which has new messages of it.
 Point stays in its message, on the same row of the window showing the
-view, and a filter is asked again; folds the reader made are gone."
+view, and a filter is asked again; folds the reader made are gone.
+A draft in the view holds the reload back until the draft goes."
   (let ((window (get-buffer-window (current-buffer) t)))
     (if (and window (not (eq window (selected-window))))
         (with-selected-window window
           (mail-thread-reload))
-      (when-let* ((here (mail-thread-message-at-point))
-                  (article (mail-thread-message-article here))
-                  (thread (mail-thread-summary-thread article)))
-        (let ((offset (- (point) (mail-thread-message-marker here)))
-              (row (when-let* ((window) (posn (posn-at-point)))
-                     (cdr (posn-col-row posn))))
-              (query mail-thread-filter-query))
-          (mail-thread-stop-fill)
-          (let ((inhibit-read-only t))
-            (erase-buffer)
-            (remove-overlays))
-          (setq mail-thread-filter-query nil)
-          (mail-thread-build (car thread) article (cdr thread))
-          (mail-thread-start-fill)
-          (when-let* ((message (seq-find (lambda (message)
-                                           (eql (mail-thread-message-article message) article))
-                                         mail-thread-messages)))
-            (goto-char (min (+ (mail-thread-message-marker message) offset)
-                            (mail-thread-body-end message)))
-            (when row
-              (recenter row)))
-          (when query
-            (mail-thread-start-filter query)))))))
+      (if mail-thread-draft
+          (setq mail-thread-reload-waiting t)
+        (when-let* ((here (mail-thread-message-at-point))
+                    (article (mail-thread-message-article here))
+                    (thread (mail-thread-summary-thread article)))
+          (let ((offset (- (point) (mail-thread-message-marker here)))
+                (row (when-let* ((window) (posn (posn-at-point)))
+                       (cdr (posn-col-row posn))))
+                (query mail-thread-filter-query))
+            (mail-thread-stop-fill)
+            (let ((inhibit-read-only t))
+              (erase-buffer)
+              (remove-overlays))
+            (setq mail-thread-filter-query nil)
+            (mail-thread-build (car thread) article (cdr thread))
+            (mail-thread-start-fill)
+            (when-let* ((message (seq-find (lambda (message)
+                                             (eql (mail-thread-message-article message) article))
+                                           mail-thread-messages)))
+              (goto-char (min (+ (mail-thread-message-marker message) offset)
+                              (mail-thread-body-end message)))
+              (when row
+                (recenter row)))
+            (when query
+              (mail-thread-start-filter query))))))))
 
 ;;; Acting on the message on screen
 ;;

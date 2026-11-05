@@ -55,6 +55,9 @@
 (defvar reddit-thread-pending nil
   "(GROUP . POST) of the thread to fetch once the running fetch or read ends.")
 
+(defvar reddit-fetch-end-hook nil
+  "Hook run once a Reddit fetch ended, a thread's or every folder's.")
+
 (defconst reddit-group-prefix "nnmaildir+reddit:"
   "Prefix of the groups in `reddit-maildir'.")
 
@@ -133,6 +136,7 @@ opened view asked for meanwhile is fetched next."
         (setq reddit-fetched-at (float-time))
       (message "Reddit fetch failed: %s (see %s)"
                (string-trim event) (buffer-name (process-buffer process))))
+    (run-hooks 'reddit-fetch-end-hook)
     (fetch-pending-reddit-thread)))
 
 ;;;###autoload
@@ -174,6 +178,9 @@ starts it when done: both would number the messages it delivers."
 
 ;;; The thread a view opened
 
+(defvar reddit-thread-asked nil
+  "Post of the thread the user asked to fetch, shown again whatever came.")
+
 (defun reddit-post-id (message-id)
   "Reddit post of MESSAGE-ID, a post's or a comment's, or nil."
   (when (and message-id
@@ -202,29 +209,37 @@ nothing within `reddit-thread-fetch-interval' of its last fetch."
 
 (defun reddit-thread-sentinel (process event group post)
   "Bring on screen what the fetch PROCESS of thread POST brought.
-EVENT says how it ended.  GROUP is read again first, ahead of others."
+EVENT says how it ended.  GROUP is read again first, ahead of others.
+A good fetch the user asked for shows the thread whatever it brought."
   (when (memq (process-status process) '(exit signal))
-    (unless (and (eq (process-status process) 'exit)
-                 (zerop (process-exit-status process)))
-      (message "Reddit thread fetch failed: %s (see %s)"
-               (string-trim event) (buffer-name (process-buffer process))))
-    (let ((count (reddit-fetch-count process "comments"))
-          (edits (reddit-fetch-count process "edits")))
+    (let* ((ok (and (eq (process-status process) 'exit)
+                    (zerop (process-exit-status process))))
+           (asked (and ok (equal post reddit-thread-asked)))
+           (count (reddit-fetch-count process "comments"))
+           (edits (reddit-fetch-count process "edits")))
+      (unless ok
+        (message "Reddit thread fetch failed: %s (see %s)"
+                 (string-trim event) (buffer-name (process-buffer process))))
+      (when asked
+        (setq reddit-thread-asked nil))
       (when (< 0 edits)
         (forget-shown-articles))
-      (when (and (< 0 (+ count edits)) (gnus-alive-p))
+      ;; the store may hold what an earlier fetch brought
+      (when (and (or asked (< 0 (+ count edits))) (gnus-alive-p))
         (load-mail-groups (list group) t)
         (wait-for-mail-load 'reddit-thread "for the fetched thread"
                             (lambda () (not (mail-group-pending-p group)))
-                            (lambda () (show-reddit-replies group post count edits)))))
+                            (lambda () (show-reddit-replies group post count edits asked)))))
+    (run-hooks 'reddit-fetch-end-hook)
     (fetch-pending-reddit-thread)))
 
-(defun show-reddit-replies (group post count edits)
+(defun show-reddit-replies (group post count edits &optional asked)
   "Show the COUNT replies and EDITS edits fetched into thread POST of GROUP.
 GROUP's summary takes the replies in, and a thread view showing POST in
-a window lays the thread out again."
+a window lays the thread out again.  A fetch the user ASKED for takes in
+and lays out whatever the store holds, though it brought nothing."
   (when-let* ((summary (get-buffer (gnus-summary-buffer-name group))))
-    (when (< 0 count)
+    (when (or asked (< 0 count))
       (if-let* ((window (get-buffer-window summary t)))
           (with-selected-window window
             (gnus-summary-insert-new-articles))
@@ -236,12 +251,12 @@ a window lays the thread out again."
       (with-current-buffer view
         (when (member post (mapcar #'reddit-post-id (mail-thread-message-ids)))
           (mail-thread-reload)
-          (message "%s" (string-join
-                         (delq nil (list (and (< 0 count)
-                                              (format "%d new %s" count
-                                                      (if (= count 1) "reply" "replies")))
-                                         (and (< 0 edits) (format "%d edited" edits))))
-                         ", ")))))))
+          (if-let* ((said (delq nil (list (and (< 0 count)
+                                               (format "%d new %s" count
+                                                       (if (= count 1) "reply" "replies")))
+                                          (and (< 0 edits) (format "%d edited" edits))))))
+              (message "%s" (string-join said ", "))
+            (message "The thread is up to date")))))))
 
 ;;;###autoload
 (defun fetch-pending-reddit-thread ()
@@ -255,5 +270,18 @@ a window lays the thread out again."
   (when (reddit-group-p mail-thread-group)
     (when-let* ((post (seq-some #'reddit-post-id (mail-thread-message-ids))))
       (fetch-reddit-thread mail-thread-group post))))
+
+;;;###autoload
+(defun refetch-reddit-thread ()
+  "Fetch the Reddit thread in the view now, then lay it out again."
+  (interactive nil mail-thread-mode)
+  (let ((post (or (and (reddit-group-p mail-thread-group)
+                       (seq-some #'reddit-post-id (mail-thread-message-ids)))
+                  (user-error "Not a Reddit thread"))))
+    ;; the view's opening fetched it within the interval
+    (setq reddit-thread-fetched-at (assoc-delete-all post reddit-thread-fetched-at)
+          reddit-thread-asked post)
+    (fetch-reddit-thread mail-thread-group post)
+    (message "Fetching the thread from Reddit...")))
 
 ;;; reddit.el ends here

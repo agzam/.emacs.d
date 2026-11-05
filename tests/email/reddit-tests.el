@@ -189,26 +189,52 @@ says OUTPUT before it exits."
         (expect (fetch "r.test: 0 posts, 2 comments, 0 edits, 0 threads waiting" 0)
                 :to-equal '((load ("nnmaildir+reddit:r.test") t)
                             (wait reddit-thread)
-                            (show "nnmaildir+reddit:r.test" "p1" 2 0)))))
+                            (show "nnmaildir+reddit:r.test" "p1" 2 0 nil)))))
     (it "reads the group and shows the thread for edits alone, Gnus's copies dropped first"
       (reddit-tests--with-store
         (expect (fetch "r.test: 0 posts, 0 comments, 2 edits, 0 threads waiting" 0)
                 :to-equal '((forget)
                             (load ("nnmaildir+reddit:r.test") t)
                             (wait reddit-thread)
-                            (show "nnmaildir+reddit:r.test" "p1" 0 2)))))
+                            (show "nnmaildir+reddit:r.test" "p1" 0 2 nil)))))
     (it "reads nothing when the fetch brought nothing"
       (reddit-tests--with-store
         (expect (fetch "r.test: 0 posts, 0 comments, 0 edits, 0 threads waiting" 0)
                 :to-equal nil)))
+    (it "reads and shows a thread the user asked for, though the fetch brought nothing"
+      (reddit-tests--with-store
+        (let ((reddit-thread-asked "p1"))
+          (expect (fetch "r.test: 0 posts, 0 comments, 0 edits, 0 threads waiting" 0)
+                  :to-equal '((load ("nnmaildir+reddit:r.test") t)
+                              (wait reddit-thread)
+                              (show "nnmaildir+reddit:r.test" "p1" 0 0 t)))
+          (expect reddit-thread-asked :to-be nil))))
+    (it "shows nothing more for a failed fetch the user asked for, which says it failed"
+      (reddit-tests--with-store
+        (let* ((reddit-thread-asked "p1")
+               (calls (fetch "r.test: 0 posts, 0 comments, 0 edits, 1 threads waiting; blocked" 1)))
+          (expect (mapcar #'car calls) :to-equal '(said))
+          (expect (cadr (car calls)) :to-match "Reddit thread fetch failed"))))
+    (it "leaves the ask of another thread for that thread's fetch"
+      (reddit-tests--with-store
+        (let ((reddit-thread-asked "p2"))
+          (expect (fetch "r.test: 0 posts, 0 comments, 0 edits, 0 threads waiting" 0)
+                  :to-equal nil)
+          (expect reddit-thread-asked :to-equal "p2"))))
     (it "says a fetch failed, and still shows what it brought first"
       (reddit-tests--with-store
         (let ((calls (fetch "r.test: 0 posts, 1 comments, 0 edits, 1 threads waiting; blocked" 1)))
           (expect (cadr (assq 'said calls)) :to-match "Reddit thread fetch failed")
-          (expect (assq 'show calls) :to-equal '(show "nnmaildir+reddit:r.test" "p1" 1 0)))))))
+          (expect (assq 'show calls) :to-equal '(show "nnmaildir+reddit:r.test" "p1" 1 0 nil)))))
+    (it "runs the end hook once the fetch ended, though it brought nothing"
+      (reddit-tests--with-store
+        (let* ((ended 0)
+               (reddit-fetch-end-hook (list (lambda () (setq ended (1+ ended))))))
+          (fetch "r.test: 0 posts, 0 comments, 0 edits, 0 threads waiting" 0)
+          (expect ended :to-equal 1))))))
 
 (describe "show-reddit-replies"
-  (cl-flet ((show (ids displayed count edits)
+  (cl-flet ((show (ids displayed count edits &optional asked)
               (let ((summary (get-buffer-create "*Summary nnmaildir+reddit:r.test*"))
                     (view (get-buffer-create mail-thread-buffer-name))
                     calls)
@@ -226,7 +252,7 @@ says OUTPUT before it exits."
                                 ((symbol-function 'message)
                                  (lambda (format &rest args)
                                    (push (list 'said (apply #'format format args)) calls))))
-                        (show-reddit-replies "nnmaildir+reddit:r.test" "p1" count edits)))
+                        (show-reddit-replies "nnmaildir+reddit:r.test" "p1" count edits asked)))
                   (kill-buffer summary)
                   (kill-buffer view))
                 (nreverse calls))))
@@ -247,7 +273,13 @@ says OUTPUT before it exits."
               :to-equal '((insert "*Summary nnmaildir+reddit:r.test*"))))
     (it "leaves alone a view no window shows: laying it out renders, and marks read, unseen"
       (expect (show '("<p1@reddit.com>") nil 2 0)
-              :to-equal '((insert "*Summary nnmaildir+reddit:r.test*"))))))
+              :to-equal '((insert "*Summary nnmaildir+reddit:r.test*"))))
+    (it "takes in and lays out what the store holds for a fetch the user asked for, though it brought nothing"
+      ;; an earlier fetch may have filled the store
+      (expect (show '("<p1@reddit.com>") t 0 0 t)
+              :to-equal `((insert "*Summary nnmaildir+reddit:r.test*")
+                          (reload ,mail-thread-buffer-name)
+                          (said "The thread is up to date"))))))
 
 (describe "fetch-reddit-thread-h"
   (it "fetches the thread a view opened from a Reddit group, and nothing for mail"
@@ -261,6 +293,32 @@ says OUTPUT before it exits."
         (let ((mail-thread-group "nnmaildir+gmail:inbox"))
           (fetch-reddit-thread-h)))
       (expect fetched :to-equal '(("nnmaildir+reddit:r.test" "p1"))))))
+
+(describe "refetch-reddit-thread"
+  (it "fetches the view's thread at once, though its opening fetched it, to show it whatever came"
+    (reddit-tests--with-store
+      (let* ((root (file-name-directory (directory-file-name reddit-maildir)))
+             (reddit-fetch-script (reddit-tests--stand-in root))
+             (reddit-thread-asked nil)
+             (reddit-thread-fetched-at (list (cons "p1" (float-time)))))
+        (cl-letf (((symbol-function 'mail-thread-message-ids)
+                   (lambda () '("<p1@reddit.com>" "<c1.p1@reddit.com>")))
+                  ((symbol-function 'message) #'ignore)
+                  ((symbol-function 'gnus-alive-p) #'ignore))
+          (let ((mail-thread-group "nnmaildir+reddit:r.test"))
+            (refetch-reddit-thread))
+          (expect (process-live-p reddit-fetch-process) :to-be-truthy)
+          (expect reddit-thread-asked :to-equal "p1")
+          (write-region "" nil (expand-file-name "go" root))
+          (reddit-tests--wait-exit))
+        (expect (car (reddit-tests--ran root))
+                :to-equal (list reddit-maildir "http://reddit.test" '(("r.test" "p1"))))
+        ;; its fetch's end took the ask
+        (expect reddit-thread-asked :to-be nil))))
+  (it "refuses a thread of mail"
+    (cl-letf (((symbol-function 'mail-thread-message-ids) (lambda () '("<1@x>"))))
+      (let ((mail-thread-group "nnmaildir+gmail:inbox"))
+        (expect (refetch-reddit-thread) :to-throw 'user-error)))))
 
 (describe "fetch-reddit"
   (it "fetches in the background, never twice at once, and the fetch reads no input"
@@ -347,6 +405,20 @@ says OUTPUT before it exits."
         (expect asked :to-equal '((("nnmaildir+reddit:r.test"))))
         (expect said :to-match "Reddit fetch failed")
         (expect reddit-fetched-at :to-be nil))))
+  (it "runs the end hook once a fetch ended, a failed one too"
+    (reddit-tests--with-store
+      (let* ((root (file-name-directory (directory-file-name reddit-maildir)))
+             (reddit-fetch-script (reddit-tests--stand-in root 1))
+             (gnus-group-list '("nnmaildir+reddit:r.test"))
+             (ended 0)
+             (reddit-fetch-end-hook (list (lambda () (setq ended (1+ ended))))))
+        (cl-letf (((symbol-function 'gnus-alive-p) (lambda () t))
+                  ((symbol-function 'load-mail-groups) #'ignore)
+                  ((symbol-function 'message) #'ignore))
+          (write-region "" nil (expand-file-name "go" root))
+          (fetch-reddit)
+          (reddit-tests--wait-exit))
+        (expect ended :to-equal 1))))
   (it "drops Gnus's copies of the articles it showed once a fetch wrote edits, and only then"
     (reddit-tests--with-store
       (let* ((root (file-name-directory (directory-file-name reddit-maildir)))

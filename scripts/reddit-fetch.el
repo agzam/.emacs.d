@@ -25,6 +25,9 @@
 (defconst reddit-fetch-threads-file "reddit-threads"
   "File in a folder's .nnmaildir/ holding the comment count of each thread fetched.")
 
+(defconst reddit-fetch-scores-file "reddit-scores"
+  "File in a folder's .nnmaildir/ holding each message's score and the login's vote.")
+
 (defvar reddit-fetch-limit 100
   "Posts, and recent comments, a listing is asked for.")
 
@@ -103,6 +106,11 @@ The browser may be writing SOURCE, so its WAL files come along."
         (concat "--user-agent=" reddit-fetch-user-agent)
         "--no-first-run" "--no-default-browser-check" "--dump-dom" url))
 
+(defun reddit-fetch-parse (text)
+  "Reddit's JSON TEXT, parsed, false as :false and null as nil.
+The login's vote on a thing is true, false or null."
+  (json-parse-string text :object-type 'hash-table :null-object nil :false-object :false))
+
 (defun reddit-fetch-page-json (page)
   "The JSON a browser's dump PAGE of a JSON document holds, parsed, or nil.
 The document holds it escaped in one <pre>; `&amp;' unescapes last, once.
@@ -114,8 +122,7 @@ A regexp spanning the <pre> overflows on a listing past a megabyte."
           (pcase-dolist (`(,entity . ,char) '(("&lt;" . "<") ("&gt;" . ">")
                                                ("&nbsp;" . "\u00a0") ("&amp;" . "&")))
             (setq text (string-replace entity char text)))
-          (json-parse-string text :object-type 'hash-table
-                             :null-object nil :false-object nil))))))
+          (reddit-fetch-parse text))))))
 
 (defun reddit-fetch-json (url)
   "The parsed JSON at URL, read by a headless browser on the user's Reddit login."
@@ -152,26 +159,33 @@ A regexp spanning the <pre> overflows on a listing past a megabyte."
 
 (defun reddit-fetch-entry (thing base &optional title ancestors)
   "Reddit's THING, a post or a comment, as a plist; its link leads to BASE.
-A comment carries its post's TITLE and the ids of its ANCESTORS, top first."
+A comment carries its post's TITLE and the ids of its ANCESTORS, top first.
+Its :likes is the login's vote: 1 up, -1 down, nil for none."
   (let* ((data (gethash "data" thing))
          (comment (equal (gethash "kind" thing) "t1"))
          (html (or (gethash (if comment "body_html" "selftext_html") data) "")))
-    (list :id (gethash "name" data)
-          :post (if comment
-                    (string-remove-prefix "t3_" (gethash "link_id" data))
-                  (gethash "id" data))
-          :comment (and comment (gethash "id" data))
-          :ancestors ancestors
-          :author (concat "u/" (or (gethash "author" data) "[deleted]"))
-          :title (if comment title (gethash "title" data))
-          :time (gethash "created_utc" data)
-          :edited (gethash "edited" data)
-          :link (concat base (gethash "permalink" data))
-          :html (if (or comment (gethash "is_self" data))
-                    html
-                  (let ((url (xml-escape-string (gethash "url" data))))
-                    (format "%s<p><a href=\"%s\">%s</a></p>" html url url)))
-          :comments (gethash "num_comments" data))))
+    (cl-flet ((value (key)
+                (let ((value (gethash key data)))
+                  (unless (eq value :false) value))))
+      (list :id (gethash "name" data)
+            :post (if comment
+                      (string-remove-prefix "t3_" (gethash "link_id" data))
+                    (gethash "id" data))
+            :comment (and comment (gethash "id" data))
+            :ancestors ancestors
+            :author (concat "u/" (or (gethash "author" data) "[deleted]"))
+            :title (if comment title (gethash "title" data))
+            :time (gethash "created_utc" data)
+            :edited (value "edited")
+            :link (concat base (gethash "permalink" data))
+            :html (if (or comment (value "is_self"))
+                      html
+                    (let ((url (xml-escape-string (gethash "url" data))))
+                      (format "%s<p><a href=\"%s\">%s</a></p>" html url url)))
+            :comments (gethash "num_comments" data)
+            :score (gethash "score" data)
+            :hidden (value (if comment "score_hidden" "hide_score"))
+            :likes (pcase (gethash "likes" data) ('t 1) (:false -1))))))
 
 (defun reddit-fetch-thread (json base)
   "The post, then every comment, of the thread JSON; links lead to BASE.
@@ -343,11 +357,12 @@ text goes through tmp/, so no reader sees half of it."
   "Fetch subreddit folder GROUP under STORE, its links leading to BASE.
 New posts arrive first, then every thread with new or edited comments,
 oldest first, until a fetch fails; with THREADS, post ids, those threads
-alone.  An edited message is written over.  Return (GROUP POSTS COMMENTS
-EDITS WAITING PROBLEM)."
+alone.  An edited message is written over, each score seen saved.
+Return (GROUP POSTS COMMENTS EDITS WAITING PROBLEM)."
   (let* ((name (reddit-fetch-subreddit group))
          (mlist (reddit-fetch-scan store group))
          (known (make-hash-table :test #'equal))
+         (scores (make-hash-table :test #'equal))
          (counts (reddit-fetch-read-state store group reddit-fetch-threads-file))
          (posts 0)
          (comments 0)
@@ -356,6 +371,8 @@ EDITS WAITING PROBLEM)."
          problem)
     (dolist (id (reddit-fetch-read-state store group reddit-fetch-known-file))
       (puthash id t known))
+    (pcase-dolist (`(,id . ,score) (reddit-fetch-read-state store group reddit-fetch-scores-file))
+      (puthash id score scores))
     (cl-labels ((seen-p (entry)
                   (or (gethash (plist-get entry :id) known)
                       (gethash (reddit-fetch-entry-message-id entry) mlist)))
@@ -379,10 +396,24 @@ EDITS WAITING PROBLEM)."
                            (reddit-fetch-json (format "%s/r/%s/%s?limit=%d&raw_json=1"
                                                       reddit-fetch-api name path
                                                       reddit-fetch-limit)))))
+                (score (entry)
+                  (puthash (reddit-fetch-entry-message-id entry)
+                           (list (unless (plist-get entry :hidden) (plist-get entry :score))
+                                 (plist-get entry :likes))
+                           scores))
                 (save ()
                   (reddit-fetch-save-state store group reddit-fetch-known-file
                                            (hash-table-keys known))
-                  (reddit-fetch-save-state store group reddit-fetch-threads-file counts)))
+                  (reddit-fetch-save-state store group reddit-fetch-threads-file counts))
+                (save-scores ()
+                  ;; a message deleted from the folder takes its score along
+                  (let (rows)
+                    (maphash (lambda (id score)
+                               (when (gethash id mlist)
+                                 (push (cons id score) rows)))
+                             scores)
+                    (reddit-fetch-save-state store group reddit-fetch-scores-file
+                                             (sort rows :key #'car)))))
       (unwind-protect
           (let* ((listed (unless threads (listing "new")))
                  (recent (unless threads (listing "comments")))
@@ -393,6 +424,7 @@ EDITS WAITING PROBLEM)."
               (deliver post nil)
               (cl-incf posts))
             (mapc #'refresh listed)
+            (mapc #'score (append listed recent))
             ;; a thread past the listing is found by its new or edited
             ;; comments alone, and the oldest thread goes first: article
             ;; numbers follow time, and a group shows its newest numbers
@@ -431,13 +463,15 @@ EDITS WAITING PROBLEM)."
                         (deliver comment nil)
                         (cl-incf comments)))
                     (mapc #'refresh thread)
+                    (mapc #'score thread)
                     (setf (alist-get (pop threads) counts nil nil #'equal)
                           (plist-get post :comments))
                     (cl-incf fetched)
                     (save))
                 (error (setq problem (error-message-string err)))))
             (list group posts comments edits (length threads) problem))
-        (save)))))
+        (save)
+        (save-scores)))))
 
 ;;; Entry point
 

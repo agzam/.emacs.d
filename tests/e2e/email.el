@@ -37,6 +37,7 @@
 (defvar reddit-fetch-pending)
 (defvar reddit-fetched-at)
 (defvar reddit-thread-fetch-interval)
+(defvar reddit-api-program)
 (defvar mail-load-script)
 (defvar mail-load-directory)
 (defvar mail-table-directory)
@@ -758,6 +759,8 @@ buffers, summary and queued files the cases leave are cleared after."
          (reddit-dir (expand-file-name "r.test/" reddit-root))
          (reddit-outbox (expand-file-name "reddit-outbox/" e2e-work-dir))
          (reddit-go (expand-file-name "reddit-go" e2e-work-dir))
+         ;; the scores the stand-in's next fetch saves in r.test
+         (reddit-scores-next (expand-file-name "reddit-scores-next" e2e-work-dir))
          (reddit-maildir reddit-root)
          (reddit-fetch-directory (expand-file-name "reddit-fetch/" e2e-work-dir))
          (reddit-fetch-script (expand-file-name "reddit-fetch.el" e2e-work-dir))
@@ -969,6 +972,12 @@ buffers, summary and queued files the cases leave are cleared after."
                                  (setq edits (1+ edits)))
                         (rename-file file (expand-file-name (concat "r.test/new/" name) store))
                         (setq comments (1+ comments)))))
+                  ;; saved anew, as each real fetch saves the scores
+                  (when (file-exists-p ,reddit-scores-next)
+                    (let ((scores (expand-file-name "r.test/.nnmaildir/reddit-scores" store)))
+                      (make-directory (file-name-directory scores) t)
+                      (rename-file ,reddit-scores-next scores t)
+                      (set-file-times scores)))
                   (message "r.test: 0 posts, %d comments, %d edits, 0 threads waiting"
                            comments edits))
                 (kill-emacs 0))
@@ -1861,7 +1870,8 @@ buffers, summary and queued files the cases leave are cleared after."
                   (execute-kbd-macro "q"))
                 (set-buffer (window-buffer (selected-window)))
                 (when (derived-mode-p 'gnus-summary-mode)
-                  (let ((mail-thread-width 20))
+                  ;; 32 columns with the bars of ten levels
+                  (let ((mail-thread-width 12))
                     (execute-kbd-macro (kbd "RET"))))
                 ;; the harness inhibits redisplay, whose window change
                 ;; hooks make this call
@@ -1974,6 +1984,123 @@ buffers, summary and queued files the cases leave are cleared after."
                                  (format "%s: %S" major-mode
                                          (buffer-substring-no-properties
                                           (point-min) (min (point-max) 300))))))
+                ;; the scores as the last fetch saved them: Reddit hides
+                ;; c3's, c4 came after that fetch, and c5 is below zero
+                (make-directory (expand-file-name ".nnmaildir" reddit-dir) t)
+                (with-temp-file (expand-file-name ".nnmaildir/reddit-scores" reddit-dir)
+                  (prin1 '(("<c1.p1@reddit.com>" 5 1) ("<c2.p1@reddit.com>" 3 -1)
+                           ("<c3.p1@reddit.com>" nil nil) ("<c5.p1@reddit.com>" -7 nil)
+                           ("<p1@reddit.com>" 22 nil))
+                         (current-buffer)))
+                (when (derived-mode-p 'mail-thread-mode)
+                  (execute-kbd-macro "q"))
+                (set-buffer (window-buffer (selected-window)))
+                (when (derived-mode-p 'gnus-summary-mode)
+                  (execute-kbd-macro (kbd "RET")))
+                (cl-flet ((scores ()
+                            (with-current-buffer mail-thread-buffer-name
+                              (mapcar (lambda (message)
+                                        (save-excursion
+                                          (goto-char (mail-thread-message-marker message))
+                                          (let* ((slot (text-property-not-all
+                                                        (point) (pos-eol) 'mail-thread-line nil))
+                                                 (shown (and slot (get-text-property slot 'display))))
+                                            (list (mail-header-id
+                                                   (mail-thread-message-header message))
+                                                  (and shown (substring-no-properties shown))
+                                                  (and shown (< 2 (length shown))
+                                                       (get-text-property 2 'face shown))))))
+                                      mail-thread-messages))))
+                  (record "RET on a Reddit thread shows each message's score on its line, the login's votes in their colors"
+                          (equal (scores)
+                                 '(("<p1@reddit.com>" "  ↑22" reddit-score)
+                                   ("<c1.p1@reddit.com>" "  ↑5" reddit-upvoted)
+                                   ("<c2.p1@reddit.com>" "  ↑3" reddit-downvoted)
+                                   ("<c3.p1@reddit.com>" "" nil)
+                                   ("<c4.p1@reddit.com>" "" nil)
+                                   ("<c5.p1@reddit.com>" "  ↓7" reddit-negative-score)))
+                          :got (format "%S" (scores)))
+                  ;; the next opening's fetch brings no reply, only scores:
+                  ;; c3's shows, and the login voted the post up elsewhere
+                  (with-temp-file reddit-scores-next
+                    (prin1 '(("<c1.p1@reddit.com>" 5 1) ("<c2.p1@reddit.com>" 3 -1)
+                             ("<c3.p1@reddit.com>" 4 nil) ("<c5.p1@reddit.com>" -7 nil)
+                             ("<p1@reddit.com>" 23 1))
+                           (current-buffer)))
+                  (when (derived-mode-p 'mail-thread-mode)
+                    (execute-kbd-macro "q"))
+                  (set-buffer (window-buffer (selected-window)))
+                  (when (derived-mode-p 'gnus-summary-mode)
+                    (let ((reddit-thread-fetch-interval 0))
+                      (execute-kbd-macro (kbd "RET"))))
+                  (let ((laid-out (buffer-local-value 'mail-thread-messages
+                                                      (get-buffer mail-thread-buffer-name))))
+                    (with-timeout (20)
+                      (while (not (equal (cadr (car (scores))) "  ↑23"))
+                        (accept-process-output nil 0.05)))
+                    (record "a Reddit fetch that brings only scores draws them on the open thread's lines"
+                            (and (equal (car (scores)) '("<p1@reddit.com>" "  ↑23" reddit-upvoted))
+                                 (equal (nth 3 (scores)) '("<c3.p1@reddit.com>" "  ↑4" reddit-score))
+                                 ;; drawn again, not laid out again
+                                 (eq laid-out (buffer-local-value 'mail-thread-messages
+                                                                  (get-buffer mail-thread-buffer-name))))
+                            :got (format "%S" (scores))))
+                  ;; , k and , j post through a stand-in for osascript, which
+                  ;; logs each vote and answers as Reddit answers one
+                  (let* ((votes (expand-file-name "reddit-votes" e2e-work-dir))
+                         (reddit-api-program (expand-file-name "osascript-votes" e2e-work-dir))
+                         (c3 (seq-find (lambda (message)
+                                         (equal (mail-header-id (mail-thread-message-header message))
+                                                "<c3.p1@reddit.com>"))
+                                       (buffer-local-value 'mail-thread-messages
+                                                           (get-buffer mail-thread-buffer-name)))))
+                    (with-temp-file reddit-api-program
+                      (insert "#!/bin/sh\n"
+                              "for arg; do path=$form; form=$arg; done\n"
+                              "printf '%s %s\\n' \"$path\" \"$form\" >> '" votes "'\n"
+                              "printf 'HTTP 200\\n{}\\n'\n"))
+                    (set-file-modes reddit-api-program #o755)
+                    (cl-flet* ((logged ()
+                                 (when (file-exists-p votes)
+                                   (with-temp-buffer
+                                     (insert-file-contents votes)
+                                     (split-string (buffer-string) "\n" t))))
+                               ;; what the stand-in logged, once COUNT votes came
+                               (sent (count)
+                                 (with-timeout (10)
+                                   (while (< (length (logged)) count)
+                                     (accept-process-output nil 0.05)))
+                                 (logged)))
+                      (when (and c3 (derived-mode-p 'mail-thread-mode))
+                        (goto-char (mail-thread-message-marker c3))
+                        (execute-kbd-macro (kbd ", k")))
+                      (let ((shown (nth 3 (scores))))
+                        (record ", k on a Reddit comment in the thread view votes it up through the browser, its line showing the vote at once"
+                                (and (equal shown '("<c3.p1@reddit.com>" "  ↑5" reddit-upvoted))
+                                     (equal (sent 1) '("/api/vote id=t1_c3&dir=1&api_type=json")))
+                                :got (format "line %S, sent %S" shown (sent 1))))
+                      (when (derived-mode-p 'mail-thread-mode)
+                        (execute-kbd-macro (kbd ", k")))
+                      (let ((shown (nth 3 (scores))))
+                        (record ", k again on the comment takes the vote back"
+                                (and (equal shown '("<c3.p1@reddit.com>" "  ↑4" reddit-score))
+                                     (equal (nth 1 (sent 2)) "/api/vote id=t1_c3&dir=0&api_type=json"))
+                                :got (format "line %S, sent %S" shown (sent 2))))
+                      (when (derived-mode-p 'mail-thread-mode)
+                        (execute-kbd-macro "q"))
+                      (set-buffer (window-buffer (selected-window)))
+                      (when-let* (((derived-mode-p 'gnus-summary-mode))
+                                  (data (seq-find (lambda (data)
+                                                    (equal (mail-header-id (gnus-data-header data))
+                                                           "<c3.p1@reddit.com>"))
+                                                  gnus-newsgroup-data)))
+                        (gnus-summary-goto-subject (gnus-data-number data))
+                        (execute-kbd-macro (kbd ", j")))
+                      (record ", j on a Reddit comment in the summary votes it down"
+                              (equal (nth 2 (sent 3)) "/api/vote id=t1_c3&dir=-1&api_type=json")
+                              :got (format "%s, sent %S" major-mode (sent 3)))
+                      ;; the cases after read the scores alone
+                      (clrhash reddit-votes))))
                 (when (derived-mode-p 'mail-thread-mode)
                   (execute-kbd-macro "q"))
                 (set-buffer (window-buffer (selected-window)))
@@ -1997,6 +2124,248 @@ buffers, summary and queued files the cases leave are cleared after."
                                      (mapcar #'mail-header-subject gnus-newsgroup-headers)))
                 (when (derived-mode-p 'gnus-summary-mode)
                   (gnus-summary-exit-no-update))
+                ;; a reply to the newest comment, c5, drafted where the
+                ;; thread is read: a stand-in for osascript takes the post,
+                ;; and Reddit's side of it, c6, comes with the next fetch
+                (let ((posted (expand-file-name "reddit-posted/" e2e-work-dir))
+                      (calls (expand-file-name "reddit-api-calls" e2e-work-dir))
+                      (reddit-api-program (expand-file-name "osascript" e2e-work-dir))
+                      errors)
+                  (make-directory posted t)
+                  (email-e2e--write-reddit-message
+                   (expand-file-name "1700000056.56.fixture" posted)
+                   "c6.p1" "Mon, 28 Sep 2026 16:00:00 +0000"
+                   "<p1@reddit.com> <c4.p1@reddit.com> <c5.p1@reddit.com>" nil "<p>my reply</p>")
+                  (with-temp-file reddit-api-program
+                    (insert "#!/bin/sh\n"
+                            "for arg; do path=$form; form=$arg; done\n"
+                            "printf '%s\\n%s\\n' \"$path\" \"$form\" > '" calls "'\n"
+                            "mv '" posted "'* '" reddit-outbox "'\n"
+                            "printf 'HTTP 200\\n{\"json\": {\"errors\": []}}\\n'\n"))
+                  (set-file-modes reddit-api-program #o755)
+                  (cl-flet* ((view () (get-buffer mail-thread-buffer-name))
+                             ;; keys that signal fail their case, not the cases after
+                             (press (keys)
+                               (condition-case err
+                                   (execute-kbd-macro keys)
+                                 (error (push (cons keys (error-message-string err)) errors))))
+                             (message-at (id)
+                               (seq-find (lambda (message)
+                                           (equal (mail-header-id (mail-thread-message-header message))
+                                                  id))
+                                         (buffer-local-value 'mail-thread-messages (view))))
+                             (goto-article (id)
+                               (gnus-summary-goto-subject
+                                (gnus-data-number
+                                 (seq-find (lambda (data)
+                                             (equal (mail-header-id (gnus-data-header data)) id))
+                                           gnus-newsgroup-data))))
+                             (draft () (buffer-local-value 'mail-thread-draft (view)))
+                             (draft-text ()
+                               (with-current-buffer (view)
+                                 (let ((text (overlay-get mail-thread-draft 'reddit-reply-text)))
+                                   (buffer-substring-no-properties (overlay-start text)
+                                                                   (overlay-end text)))))
+                             (header ()
+                               (with-current-buffer (view)
+                                 (if (stringp header-line-format)
+                                     header-line-format
+                                   (apply #'concat header-line-format))))
+                             (layout ()
+                               (mapcar (lambda (message)
+                                         (cons (mail-header-id (mail-thread-message-header message))
+                                               (mail-thread-message-depth message)))
+                                       (buffer-local-value 'mail-thread-messages (view)))))
+                    (unwind-protect
+                        (progn
+                          (gnus-group-jump-to-group reddit-group)
+                          (execute-kbd-macro (kbd "RET"))
+                          (when (derived-mode-p 'gnus-summary-mode)
+                            (goto-article "<c5.p1@reddit.com>")
+                            (execute-kbd-macro (kbd "RET")))
+                          (when (derived-mode-p 'mail-thread-mode)
+                            (press "r"))
+                          (let ((c5 (and (view) (message-at "<c5.p1@reddit.com>"))))
+                            (record "r on a Reddit comment in the thread view drafts a reply below its body, typing at once"
+                                    (and c5 (draft) (evil-insert-state-p)
+                                         (with-current-buffer (view)
+                                           (and (eql (overlay-end mail-thread-draft) (point-max))
+                                                (string-suffix-p
+                                                 "body of c5.p1\n\n"
+                                                 (buffer-substring-no-properties
+                                                  (mail-thread-body-start c5)
+                                                  (overlay-start mail-thread-draft)))
+                                                (equal (substring-no-properties
+                                                        (get-char-property (point) 'line-prefix))
+                                                       "│ │ │ ")))
+                                         (string-match-p "Reply to u/ann.*C-c C-c submit.*C-c C-k abort"
+                                                         (header)))
+                                    :got (format "%s in %s, header %S, draft %S" major-mode evil-state
+                                                 (and (view) (header))
+                                                 (and (draft) (with-current-buffer (view)
+                                                                (buffer-substring-no-properties
+                                                                 (overlay-start mail-thread-draft)
+                                                                 (point-max)))))))
+                          ;; typing with no draft would run the view's keys
+                          (when (and (draft) (evil-insert-state-p))
+                            (press "great 1st quote"))
+                          (record "the draft types q, g, 1 and the space, which the view binds to commands"
+                                  (and (draft) (equal (draft-text) "great 1st quote\n"))
+                                  :got (format "%S, errors %S" (and (draft) (draft-text)) errors))
+                          (when (draft)
+                            (press (vconcat [escape] "dd" "imy reply")))
+                          (record "dd in the draft deletes its line and i types again, where the view marks and ignores"
+                                  (and (draft) (equal (draft-text) "my reply\n") (evil-insert-state-p))
+                                  :got (format "%S in %s, errors %S" (and (draft) (draft-text))
+                                               evil-state errors))
+                          ;; a y nothing asks for would start a yank
+                          (let ((typed (and (draft) (not (string-blank-p (draft-text))))))
+                            (when (draft)
+                              (press (kbd (if typed "C-c C-k y" "C-c C-k"))))
+                            (record "C-c C-k drops a draft holding text once asked, and the view reads as before"
+                                    (and typed (not (draft)) (evil-normal-state-p)
+                                         (with-current-buffer (view)
+                                           (and buffer-read-only (not reddit-reply-mode)
+                                                (stringp header-line-format)
+                                                (not (text-property-not-all (point-min) (point-max)
+                                                                            'read-only nil)))))
+                                    :got (format "draft %S in %s, header %S" (draft) evil-state (header))))
+                          (when (and (not (draft)) (derived-mode-p 'mail-thread-mode))
+                            (press "rmy reply"))
+                          (when (draft)
+                            (press (kbd "C-c C-c")))
+                          (with-timeout (20)
+                            (while (not (assoc "<c6.p1@reddit.com>" (layout)))
+                              (accept-process-output nil 0.05)))
+                          (let ((call (with-temp-buffer
+                                        (when (file-exists-p calls)
+                                          (insert-file-contents calls))
+                                        (buffer-string))))
+                            (record "C-c C-c posts the reply through the browser, and the thread's fetch lays it out under c5"
+                                    (and (equal call (concat "/api/comment\n"
+                                                             "thing_id=t1_c5&text=my%20reply&api_type=json\n"))
+                                         (equal (car (last (layout))) '("<c6.p1@reddit.com>" . 3))
+                                         (not (draft))
+                                         (buffer-local-value 'buffer-read-only (view)))
+                                    :got (format "call %S, layout %S, draft %S, errors %S"
+                                                 call (layout) (draft) errors)))
+                          (when (derived-mode-p 'mail-thread-mode)
+                            (press "q"))
+                          (set-buffer (window-buffer (selected-window)))
+                          (when (derived-mode-p 'gnus-summary-mode)
+                            (goto-article "<c4.p1@reddit.com>")
+                            (press "r"))
+                          (let ((c5 (and (view) (message-at "<c5.p1@reddit.com>"))))
+                            (record "r on a Reddit comment in the summary opens the thread view, the draft below the comment"
+                                    (and (derived-mode-p 'mail-thread-mode) c5 (draft)
+                                         (eql (overlay-end (draft))
+                                              (marker-position (mail-thread-message-marker c5))))
+                                    :got (format "%s, draft %S, errors %S" major-mode (draft) errors)))
+                          (let ((drafted (draft)))
+                            (when drafted
+                              (press (kbd "C-c C-k")))
+                            (record "C-c C-k drops an empty draft unasked"
+                                    (and drafted (not (draft)) (derived-mode-p 'mail-thread-mode))
+                                    :got (format "%s, draft %S, errors %S" major-mode (draft) errors)))
+                          ;; Reddit has a reply to the post the store lacks, and the
+                          ;; view's opening fetched the thread within the interval
+                          (email-e2e--write-reddit-message
+                           (expand-file-name "1700000057.57.fixture" reddit-outbox)
+                           "c7.p1" "Mon, 28 Sep 2026 17:00:00 +0000" "<p1@reddit.com>")
+                          (let ((said (with-current-buffer (messages-buffer) (point-max-marker)))
+                                (c5 (and (view) (message-at "<c5.p1@reddit.com>"))))
+                            (when (and c5 (derived-mode-p 'mail-thread-mode))
+                              (goto-char (mail-thread-message-marker c5))
+                              (press "gr"))
+                            (with-timeout (20)
+                              (while (not (assoc "<c7.p1@reddit.com>" (layout)))
+                                (accept-process-output nil 0.05)))
+                            (let ((here (with-current-buffer (view)
+                                          (mail-header-id (mail-thread-message-header
+                                                           (mail-thread-message-at-point)))))
+                                  (told (with-current-buffer (messages-buffer)
+                                          (buffer-substring-no-properties said (point-max)))))
+                              (record "g r fetches a Reddit thread again within the interval, its new reply laid out, point kept"
+                                      (and (equal (car (last (layout))) '("<c7.p1@reddit.com>" . 1))
+                                           (equal here "<c5.p1@reddit.com>")
+                                           (string-match-p "^1 new reply$" told))
+                                      :got (format "layout %S, at %S, said %S, errors %S"
+                                                   (layout) here told errors))))
+                          ;; a fetch of all of r.test brought c8 since, and Reddit
+                          ;; has nothing newer for the thread
+                          (email-e2e--write-reddit-message
+                           (expand-file-name "new/1700000058.58.fixture" reddit-dir)
+                           "c8.p1" "Mon, 28 Sep 2026 18:00:00 +0000" "<p1@reddit.com>")
+                          (let ((said (with-current-buffer (messages-buffer) (point-max-marker))))
+                            (when (derived-mode-p 'mail-thread-mode)
+                              (press "gr"))
+                            (with-timeout (20)
+                              (while (not (assoc "<c8.p1@reddit.com>" (layout)))
+                                (accept-process-output nil 0.05)))
+                            (let ((told (with-current-buffer (messages-buffer)
+                                          (buffer-substring-no-properties said (point-max)))))
+                              (record "g r lays out what the store got meanwhile, and says the thread is up to date when Reddit has nothing new"
+                                      (and (equal (car (last (layout))) '("<c8.p1@reddit.com>" . 1))
+                                           (string-match-p "^The thread is up to date$" told)
+                                           (not (string-match-p "new repl" told)))
+                                      :got (format "layout %S, said %S, errors %S" (layout) told errors))))
+                          ;; the layout rendered c5, the message at point
+                          (let* ((c4 (and (view) (message-at "<c4.p1@reddit.com>")))
+                                 (c5 (and (view) (message-at "<c5.p1@reddit.com>")))
+                                 (rendered (and c4 c5 (with-current-buffer (view)
+                                                        (mail-thread-rendered-p c5))))
+                                 stops)
+                            (when (and rendered (derived-mode-p 'mail-thread-mode))
+                              (goto-char (+ 3 (mail-thread-body-start c5)))
+                              (press "[[")
+                              (push (point) stops)
+                              (press "[[")
+                              (push (point) stops))
+                            (setq stops (nreverse stops))
+                            (record "[[ from inside a body goes to its message's line first, then to the message before"
+                                    (and rendered
+                                         (equal stops (list (marker-position (mail-thread-message-marker c5))
+                                                            (marker-position (mail-thread-message-marker c4)))))
+                                    :got (format "rendered %S, stops %S, errors %S" rendered stops errors)))
+                          ;; a fetch of all of r.test brought a chain of replies
+                          ;; under c6, down to the tenth level Reddit nests
+                          (let ((above (list "<p1@reddit.com>" "<c4.p1@reddit.com>"
+                                             "<c5.p1@reddit.com>" "<c6.p1@reddit.com>")))
+                            (dotimes (i 7)
+                              (let ((id (format "c%d.p1" (+ 9 i))))
+                                (email-e2e--write-reddit-message
+                                 (expand-file-name (format "new/%d.%d.fixture" (+ 1700000059 i) (+ 59 i))
+                                                   reddit-dir)
+                                 id (format "Mon, 28 Sep 2026 19:%02d:00 +0000" i)
+                                 (string-join above " "))
+                                (setq above (append above (list (format "<%s@reddit.com>" id)))))))
+                          (when (derived-mode-p 'mail-thread-mode)
+                            (press "gr"))
+                          (with-timeout (20)
+                            (while (not (assoc "<c15.p1@reddit.com>" (layout)))
+                              (accept-process-output nil 0.05)))
+                          (let ((bars (mapcar (lambda (n)
+                                                (when-let* ((message (message-at (format "<c%d.p1@reddit.com>" n))))
+                                                  (with-current-buffer (view)
+                                                    (seq-count (lambda (char) (eq char ?│))
+                                                               (or (get-text-property
+                                                                    (mail-thread-message-marker message) 'line-prefix)
+                                                                   "")))))
+                                              (number-sequence 9 15))))
+                            (record "replies past six levels keep an indent of their own, down to the tenth Reddit nests"
+                                    (equal bars '(4 5 6 7 8 9 10))
+                                    :got (format "bars %S, layout %S, errors %S" bars (layout) errors))))
+                      ;; a case that failed midway leaves no draft to the rest
+                      (when-let* ((buffer (view)))
+                        (with-current-buffer buffer
+                          (when mail-thread-draft
+                            (setq reddit-reply-posting nil)
+                            (reddit-reply-end))))))
+                  (when (derived-mode-p 'mail-thread-mode)
+                    (execute-kbd-macro "q"))
+                  (set-buffer (window-buffer (selected-window)))
+                  (when (derived-mode-p 'gnus-summary-mode)
+                    (gnus-summary-exit-no-update)))
                 ;; entering a label is where Gnus asks nnmaildir for it
                 (gnus-group-jump-to-group "nnmaildir+gmail:emacs")
                 (execute-kbd-macro (kbd "RET"))
