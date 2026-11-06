@@ -269,6 +269,20 @@ Rendering, marking read and the labels are stubbed; the view reads r.test."
       (expect (reddit-reply-text) :to-equal "my reply")
       (expect reddit-reply-posting :to-be nil)
       (expect (reddit-reply-tests--header-line) :to-match "C-c C-c submit")))
+  (it "fetches every folder once a reply from the inbox or mine posted, as it lands in mine"
+    (dolist (group '("nnmaildir+reddit:inbox" "nnmaildir+reddit:mine"))
+      (reddit-reply-tests--with-view 52
+        (setq mail-thread-group group)
+        (reddit-reply-tests--reply-to 52)
+        (insert-and-inherit "my reply")
+        (reddit-reply-tests--submit)
+        (let (calls)
+          (cl-letf (((symbol-function 'fetch-reddit-thread)
+                     (lambda (&rest args) (push (cons 'thread args) calls)))
+                    ((symbol-function 'fetch-reddit) (lambda () (push '(all) calls))))
+            (funcall reddit-reply-tests--callback nil nil))
+          (expect calls :to-equal '((all)))
+          (expect mail-thread-draft :to-be nil)))))
   (it "fetches the thread even when the view went meanwhile"
     (let (gone fetched)
       (reddit-reply-tests--with-view 52

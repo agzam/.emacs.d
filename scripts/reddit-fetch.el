@@ -1,9 +1,9 @@
-;;; scripts/reddit-fetch.el --- fill local subreddit folders from Reddit's JSON -*- lexical-binding: t; -*-
+;;; scripts/reddit-fetch.el --- fill local Reddit folders from Reddit's JSON -*- lexical-binding: t; -*-
 ;;; Commentary:
 ;; Usage: emacs -Q --batch --init-directory DIR -l scripts/reddit-fetch.el
 ;;        --eval '(reddit-fetch-main "STORE" "BASE-URL")'
-;; Each folder r.NAME under STORE holds subreddit NAME, every thread whole and
-;; threaded by reply.  Reddit serves its JSON only to a browser on a login.
+;; Folder r.NAME under STORE holds subreddit NAME, its threads whole; inbox and
+;; mine, the login's inbox and own posts.  Reddit's JSON needs a browser's login.
 ;;; Code:
 
 (require 'cl-lib)
@@ -27,6 +27,12 @@
 
 (defconst reddit-fetch-scores-file "reddit-scores"
   "File in a folder's .nnmaildir/ holding each message's score and the login's vote.")
+
+(defconst reddit-fetch-inbox-folder "inbox"
+  "Folder of the login's inbox: the replies to it and the mentions of it.")
+
+(defconst reddit-fetch-mine-folder "mine"
+  "Folder of the login's own posts and comments.")
 
 (defvar reddit-fetch-limit 100
   "Posts, and recent comments, a listing is asked for.")
@@ -155,12 +161,35 @@ A regexp spanning the <pre> overflows on a listing past a megabyte."
   "The things of Reddit's LISTING, as a list."
   (append (gethash "children" (gethash "data" listing)) nil))
 
+(defun reddit-fetch-login-name ()
+  "Name of the Reddit login the browser's cookies carry."
+  ;; /api/me answers only with its .json
+  (or (when-let* ((data (gethash "data" (reddit-fetch-json (concat reddit-fetch-api "/api/me.json")))))
+        (gethash "name" data))
+      (error "No Reddit login in the browser")))
+
 ;;; Entries
+
+(defun reddit-fetch-comment-post (data)
+  "Id of the post the comment of DATA is on.
+An inbox item names it in its context link alone."
+  (if-let* ((link (gethash "link_id" data)))
+      (string-remove-prefix "t3_" link)
+    (let ((context (or (gethash "context" data) "")))
+      (when (string-match "/comments/\\([^/]+\\)/" context)
+        (match-string 1 context)))))
+
+(defun reddit-fetch-parent-ids (thing)
+  "Ids of the comments above THING a listing tells: its parent, if a comment."
+  (let ((parent (gethash "parent_id" (gethash "data" thing))))
+    (when (and parent (string-prefix-p "t1_" parent))
+      (list (string-remove-prefix "t1_" parent)))))
 
 (defun reddit-fetch-entry (thing base &optional title ancestors)
   "Reddit's THING, a post or a comment, as a plist; its link leads to BASE.
-A comment carries its post's TITLE and the ids of its ANCESTORS, top first.
-Its :likes is the login's vote: 1 up, -1 down, nil for none."
+A comment carries its post's TITLE, else the one Reddit names, and the ids
+of its ANCESTORS, top first.  :likes is the login's vote: 1 up, -1 down, nil
+for none; :new is non-nil while Reddit counts it unread in the inbox."
   (let* ((data (gethash "data" thing))
          (comment (equal (gethash "kind" thing) "t1"))
          (html (or (gethash (if comment "body_html" "selftext_html") data) "")))
@@ -168,16 +197,15 @@ Its :likes is the login's vote: 1 up, -1 down, nil for none."
                 (let ((value (gethash key data)))
                   (unless (eq value :false) value))))
       (list :id (gethash "name" data)
-            :post (if comment
-                      (string-remove-prefix "t3_" (gethash "link_id" data))
-                    (gethash "id" data))
+            :post (if comment (reddit-fetch-comment-post data) (gethash "id" data))
             :comment (and comment (gethash "id" data))
             :ancestors ancestors
             :author (concat "u/" (or (gethash "author" data) "[deleted]"))
-            :title (if comment title (gethash "title" data))
+            :title (if comment (or title (gethash "link_title" data)) (gethash "title" data))
             :time (gethash "created_utc" data)
             :edited (value "edited")
-            :link (concat base (gethash "permalink" data))
+            :new (value "new")
+            :link (concat base (or (gethash "permalink" data) (gethash "context" data)))
             :html (if (or comment (value "is_self"))
                       html
                     (let ((url (xml-escape-string (gethash "url" data))))
@@ -214,6 +242,17 @@ A comment comes after its parent."
 (defun reddit-fetch-subreddit (group)
   "Subreddit of the folder GROUP, named r.NAME."
   (string-remove-prefix "r." group))
+
+(defun reddit-fetch-listing-url (group)
+  "URL of the one listing folder GROUP mirrors, or nil for a subreddit's folder.
+Mine's asks Reddit the login's name first."
+  (cond ((equal group reddit-fetch-inbox-folder)
+         ;; mark=false leaves the inbox's unread flags on Reddit as they are
+         (format "%s/message/inbox?limit=%d&mark=false&raw_json=1"
+                 reddit-fetch-api reddit-fetch-limit))
+        ((equal group reddit-fetch-mine-folder)
+         (format "%s/user/%s/overview?limit=%d&raw_json=1"
+                 reddit-fetch-api (reddit-fetch-login-name) reddit-fetch-limit))))
 
 ;;; Messages
 
@@ -272,7 +311,7 @@ A comment comes after its parent."
 ;;; The store
 
 (defun reddit-fetch-groups (store)
-  "Subreddit folders under STORE."
+  "Folders under STORE."
   (seq-filter (lambda (name) (file-directory-p (expand-file-name name store)))
               (directory-files store nil "\\`[^.]")))
 
@@ -354,13 +393,13 @@ text goes through tmp/, so no reader sees half of it."
                (time-subtract nil (* reddit-fetch-unread-days 86400))))
 
 (defun reddit-fetch-group (store group base &optional threads)
-  "Fetch subreddit folder GROUP under STORE, its links leading to BASE.
-New posts arrive first, then every thread with new or edited comments,
-oldest first, until a fetch fails; with THREADS, post ids, those threads
-alone.  An edited message is written over, each score seen saved.
-Return (GROUP POSTS COMMENTS EDITS WAITING PROBLEM)."
+  "Fetch folder GROUP under STORE, its links leading to BASE.
+A subreddit's takes new posts, then each thread with new or edited comments,
+oldest first, or only THREADS, post ids; the inbox and mine take their one
+listing.  Return (GROUP POSTS COMMENTS EDITS WAITING PROBLEM)."
   (let* ((name (reddit-fetch-subreddit group))
          (mlist (reddit-fetch-scan store group))
+         (url (reddit-fetch-listing-url group))
          (known (make-hash-table :test #'equal))
          (scores (make-hash-table :test #'equal))
          (counts (reddit-fetch-read-state store group reddit-fetch-threads-file))
@@ -415,68 +454,82 @@ Return (GROUP POSTS COMMENTS EDITS WAITING PROBLEM)."
                     (reddit-fetch-save-state store group reddit-fetch-scores-file
                                              (sort rows :key #'car)))))
       (unwind-protect
-          (let* ((listed (unless threads (listing "new")))
-                 (recent (unless threads (listing "comments")))
-                 (ids (mapcar (lambda (post) (plist-get post :post)) listed))
-                 (times (mapcar (lambda (post) (cons (plist-get post :post) (plist-get post :time)))
-                                listed)))
-            (dolist (post (reddit-fetch-oldest-first (seq-remove #'seen-p listed)))
-              (deliver post nil)
-              (cl-incf posts))
-            (mapc #'refresh listed)
-            (mapc #'score (append listed recent))
-            ;; a thread past the listing is found by its new or edited
-            ;; comments alone, and the oldest thread goes first: article
-            ;; numbers follow time, and a group shows its newest numbers
-            (unless threads
-              (setq counts (seq-filter (lambda (count) (member (car count) ids)) counts)
-                    threads (sort (delete-dups
-                                   (append
-                                    (mapcar (lambda (post) (plist-get post :post))
-                                            (seq-remove (lambda (post)
-                                                          (eql (plist-get post :comments)
-                                                               (alist-get (plist-get post :post)
-                                                                          counts 0 nil #'equal)))
-                                                        listed))
-                                    (mapcar (lambda (comment) (plist-get comment :post))
-                                            (seq-filter (lambda (comment)
-                                                          (or (not (seen-p comment))
-                                                              (outdated comment)))
-                                                        recent))))
-                                  (lambda (a b)
-                                    (< (alist-get a times 0 nil #'equal)
-                                       (alist-get b times 0 nil #'equal))))))
-            (while (and threads (not problem) (< fetched reddit-fetch-max-threads))
-              (condition-case err
-                  (let* ((thread (reddit-fetch-thread
-                                  (reddit-fetch-json
-                                   (format "%s/r/%s/comments/%s?limit=%d&raw_json=1"
-                                           reddit-fetch-api name (car threads)
-                                           reddit-fetch-thread-limit))
-                                  base))
-                         (post (car thread)))
-                    ;; a post the listing no longer holds comes as context
-                    (unless (seen-p post)
-                      (deliver post t))
-                    (dolist (comment (cdr thread))
-                      (unless (seen-p comment)
-                        (deliver comment nil)
-                        (cl-incf comments)))
-                    (mapc #'refresh thread)
-                    (mapc #'score thread)
-                    (setf (alist-get (pop threads) counts nil nil #'equal)
-                          (plist-get post :comments))
-                    (cl-incf fetched)
-                    (save))
-                (error (setq problem (error-message-string err)))))
-            (list group posts comments edits (length threads) problem))
+          (if url
+              (let ((listed (mapcar (lambda (thing)
+                                      (reddit-fetch-entry thing base nil
+                                                          (reddit-fetch-parent-ids thing)))
+                                    ;; a message, t4, would pass for the post of its id
+                                    (seq-filter (lambda (thing)
+                                                  (member (gethash "kind" thing) '("t1" "t3")))
+                                                (reddit-fetch-children (reddit-fetch-json url))))))
+                (dolist (entry (reddit-fetch-oldest-first (seq-remove #'seen-p listed)))
+                  (deliver entry (not (plist-get entry :new)))
+                  (if (plist-get entry :comment) (cl-incf comments) (cl-incf posts)))
+                (mapc #'refresh listed)
+                (mapc #'score listed)
+                (list group posts comments edits 0 nil))
+            (let* ((listed (unless threads (listing "new")))
+                   (recent (unless threads (listing "comments")))
+                   (ids (mapcar (lambda (post) (plist-get post :post)) listed))
+                   (times (mapcar (lambda (post) (cons (plist-get post :post) (plist-get post :time)))
+                                  listed)))
+              (dolist (post (reddit-fetch-oldest-first (seq-remove #'seen-p listed)))
+                (deliver post nil)
+                (cl-incf posts))
+              (mapc #'refresh listed)
+              (mapc #'score (append listed recent))
+              ;; a thread past the listing is found by its new or edited
+              ;; comments alone, and the oldest thread goes first: article
+              ;; numbers follow time, and a group shows its newest numbers
+              (unless threads
+                (setq counts (seq-filter (lambda (count) (member (car count) ids)) counts)
+                      threads (sort (delete-dups
+                                     (append
+                                      (mapcar (lambda (post) (plist-get post :post))
+                                              (seq-remove (lambda (post)
+                                                            (eql (plist-get post :comments)
+                                                                 (alist-get (plist-get post :post)
+                                                                            counts 0 nil #'equal)))
+                                                          listed))
+                                      (mapcar (lambda (comment) (plist-get comment :post))
+                                              (seq-filter (lambda (comment)
+                                                            (or (not (seen-p comment))
+                                                                (outdated comment)))
+                                                          recent))))
+                                    (lambda (a b)
+                                      (< (alist-get a times 0 nil #'equal)
+                                         (alist-get b times 0 nil #'equal))))))
+              (while (and threads (not problem) (< fetched reddit-fetch-max-threads))
+                (condition-case err
+                    (let* ((thread (reddit-fetch-thread
+                                    (reddit-fetch-json
+                                     (format "%s/r/%s/comments/%s?limit=%d&raw_json=1"
+                                             reddit-fetch-api name (car threads)
+                                             reddit-fetch-thread-limit))
+                                    base))
+                           (post (car thread)))
+                      ;; a post the listing no longer holds comes as context
+                      (unless (seen-p post)
+                        (deliver post t))
+                      (dolist (comment (cdr thread))
+                        (unless (seen-p comment)
+                          (deliver comment nil)
+                          (cl-incf comments)))
+                      (mapc #'refresh thread)
+                      (mapc #'score thread)
+                      (setf (alist-get (pop threads) counts nil nil #'equal)
+                            (plist-get post :comments))
+                      (cl-incf fetched)
+                      (save))
+                  (error (setq problem (error-message-string err)))))
+              (list group posts comments edits (length threads) problem)))
         (save)
         (save-scores)))))
 
 ;;; Entry point
 
 (defun reddit-fetch-run (store base &optional threads)
-  "Fetch every subreddit folder under STORE, its links leading to BASE.
+  "Fetch every folder under STORE, its links leading to BASE.
 THREADS, as ((GROUP POST...)...), limits the run to those threads.
 Returns one (GROUP POSTS COMMENTS EDITS WAITING PROBLEM) or (GROUP error
 MESSAGE) row per folder."
@@ -507,7 +560,7 @@ MESSAGE) row per folder."
         (setq reddit-fetch-profile nil)))))
 
 (defun reddit-fetch-main (store base &optional threads)
-  "Fetch the subreddit folders under STORE, links leading to BASE; report, exit.
+  "Fetch the folders under STORE, links leading to BASE; report, exit.
 THREADS limits the fetch as in `reddit-fetch-run'."
   (run-at-time reddit-fetch-watchdog nil
                (lambda ()

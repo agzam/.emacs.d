@@ -122,7 +122,24 @@
     (it "leaves a view of mail alone"
       (expect (redraw "nnmaildir+gmail:inbox") :to-be nil))
     (it "does nothing without a thread view"
-      (expect (redraw nil) :to-be nil))))
+      (expect (redraw nil) :to-be nil))
+    (it "does nothing in an Emacs that loaded only the module's autoloads"
+      ;; a fetch ends before any thread view opened, its file unloaded
+      (let ((dir (make-temp-file "reddit-scores-tests" t)))
+        (unwind-protect
+            (let ((loaddefs (expand-file-name "email-loaddefs.el" dir))
+                  (inhibit-message t))
+              (loaddefs-generate (expand-file-name "modules/email/autoload/" test-config-root)
+                                 loaddefs)
+              (with-temp-buffer
+                (expect (cons (call-process (expand-file-name invocation-name invocation-directory)
+                                            nil t nil "-Q" "--batch" "--init-directory" dir
+                                            ;; the autoloads name their files from dir
+                                            "-L" dir "-l" loaddefs
+                                            "--eval" "(redraw-reddit-scores)")
+                              (buffer-string))
+                        :to-equal '(0 . ""))))
+          (delete-directory dir t))))))
 
 (defmacro reddit-scores-tests--voting (&rest body)
   "Run BODY on r.test's message c1.p1 on screen, its votes left unanswered.

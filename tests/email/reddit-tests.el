@@ -281,17 +281,24 @@ says OUTPUT before it exits."
                           (reload ,mail-thread-buffer-name)
                           (said "The thread is up to date"))))))
 
+(describe "subreddit-group-p"
+  (it "tells a subreddit's group from the inbox, mine and every other"
+    (expect (subreddit-group-p "nnmaildir+reddit:r.emacs") :to-be-truthy)
+    (dolist (group '("nnmaildir+reddit:inbox" "nnmaildir+reddit:mine" "nnmaildir+gmail:inbox"
+                     "nnmaildir+news:gmane.emacs.devel"))
+      (expect (subreddit-group-p group) :to-be nil))))
+
 (describe "fetch-reddit-thread-h"
-  (it "fetches the thread a view opened from a Reddit group, and nothing for mail"
+  (it "fetches the thread a view opened from a subreddit, and nothing for the inbox, mine or mail"
     (let (fetched)
       (cl-letf (((symbol-function 'fetch-reddit-thread)
                  (lambda (&rest args) (push args fetched)))
                 ((symbol-function 'mail-thread-message-ids)
                  (lambda () '("<p1@reddit.com>" "<c1.p1@reddit.com>"))))
-        (let ((mail-thread-group "nnmaildir+reddit:r.test"))
-          (fetch-reddit-thread-h))
-        (let ((mail-thread-group "nnmaildir+gmail:inbox"))
-          (fetch-reddit-thread-h)))
+        (dolist (group '("nnmaildir+reddit:r.test" "nnmaildir+reddit:inbox"
+                         "nnmaildir+reddit:mine" "nnmaildir+gmail:inbox"))
+          (let ((mail-thread-group group))
+            (fetch-reddit-thread-h))))
       (expect fetched :to-equal '(("nnmaildir+reddit:r.test" "p1"))))))
 
 (describe "refetch-reddit-thread"

@@ -71,6 +71,27 @@ With HIDDEN, Reddit hides the score."
                            (if (equal (plist-get thing :kind) "t1") :score_hidden :hide_score)
                            (if hidden t :false)))))
 
+(defun reddit-fetch-tests--reply (id post parent author days &optional new)
+  "Inbox item of comment ID on POST by AUTHOR, DAYS old, answering PARENT.
+PARENT is the fullname of a post or a comment; NEW keeps it unread on Reddit."
+  (list :kind "t1"
+        :data (list :id id :name (concat "t1_" id) :parent_id parent :author author
+                    :type (if (string-prefix-p "t3_" parent) "post_reply" "comment_reply")
+                    :created_utc (reddit-fetch-tests--time days)
+                    :context (format "/r/test/comments/%s/slug/%s/?context=3" post id)
+                    :link_title (concat "Post " post)
+                    :body_html (format "<p>%s says %s</p>" author id)
+                    :new (if new t :false)
+                    :score 1 :likes :null)))
+
+(defun reddit-fetch-tests--own (comment parent)
+  "COMMENT as the login's overview lists it, answering PARENT, a fullname."
+  (let ((data (copy-sequence (plist-get comment :data))))
+    (list :kind "t1"
+          :data (plist-put (plist-put data :parent_id parent)
+                           :link_title (concat "Post " (string-remove-prefix
+                                                        "t3_" (plist-get data :link_id)))))))
+
 (defun reddit-fetch-tests--thread (post &rest comments)
   "The thread of POST holding the top-level COMMENTS."
   (vector (reddit-fetch-tests--listing (list post))
@@ -81,10 +102,13 @@ With HIDDEN, Reddit hides the score."
   (reddit-fetch-parse (json-serialize data)))
 
 (defun reddit-fetch-tests--url (kind &optional post)
-  "URL of the posts listing, the comments listing or POST's thread, by KIND."
+  "URL a fetch asks for, by KIND: a listing, the login or POST's thread."
   (pcase kind
     ('posts (format "%s/r/test/new?limit=100&raw_json=1" reddit-fetch-tests--api))
     ('comments (format "%s/r/test/comments?limit=100&raw_json=1" reddit-fetch-tests--api))
+    ('inbox (format "%s/message/inbox?limit=100&mark=false&raw_json=1" reddit-fetch-tests--api))
+    ('me (format "%s/api/me.json" reddit-fetch-tests--api))
+    ('mine (format "%s/user/ann/overview?limit=100&raw_json=1" reddit-fetch-tests--api))
     ('thread (format "%s/r/test/comments/%s?limit=500&raw_json=1"
                      reddit-fetch-tests--api post))))
 
@@ -168,9 +192,10 @@ BODY sees `store', `fixtures' and `log'."
   "Fetch every folder under STORE from the stand-in."
   (reddit-fetch-run store reddit-fetch-tests--base))
 
-(defun reddit-fetch-tests--messages (store)
-  "Messages of r.test under STORE as (MESSAGE-ID REFERENCES READ), by Message-ID."
-  (let ((cur (expand-file-name "r.test/cur" store)))
+(defun reddit-fetch-tests--messages (store &optional folder)
+  "Messages of FOLDER, r.test if nil, under STORE as (MESSAGE-ID REFERENCES READ).
+They are sorted by Message-ID."
+  (let ((cur (expand-file-name (concat (or folder "r.test") "/cur") store)))
     (sort (mapcar (lambda (file)
                     (with-temp-buffer
                       (insert-file-contents (expand-file-name file cur))
@@ -196,20 +221,22 @@ BODY sees `store', `fixtures' and `log'."
   "Names of the files in cur/ of r.test under STORE."
   (directory-files (expand-file-name "r.test/cur" store) nil "\\`[^.]"))
 
-(defun reddit-fetch-tests--file-of (store id)
-  "File of the message of r.test under STORE whose Message-ID is ID, or nil."
+(defun reddit-fetch-tests--file-of (store id &optional folder)
+  "File of the message of FOLDER, r.test if nil, under STORE whose Message-ID is ID.
+Nil when there is none."
   (seq-find (lambda (file)
               (with-temp-buffer
                 (insert-file-contents file)
                 (narrow-to-region (point-min) (or (search-forward "\n\n" nil t) (point-max)))
                 (equal (mail-fetch-field "Message-ID") id)))
-            (directory-files (expand-file-name "r.test/cur" store) t "\\`[^.]")))
+            (directory-files (expand-file-name (concat (or folder "r.test") "/cur") store)
+                             t "\\`[^.]")))
 
-(defun reddit-fetch-tests--message (store id)
-  "Text of the message of r.test under STORE whose Message-ID is ID."
+(defun reddit-fetch-tests--message (store id &optional folder)
+  "Text of the message of FOLDER, r.test if nil, under STORE whose Message-ID is ID."
   (with-temp-buffer
     (let ((coding-system-for-read 'utf-8))
-      (insert-file-contents (reddit-fetch-tests--file-of store id)))
+      (insert-file-contents (reddit-fetch-tests--file-of store id folder)))
     (buffer-string)))
 
 (defun reddit-fetch-tests--numbers (store)
@@ -272,6 +299,40 @@ nobody; c4 is older than a week.  p3 holds c5."
     ("<p2@reddit.com>" nil t)
     ("<p3@reddit.com>" nil nil))
   "What a first run over `reddit-fetch-tests--serve-subreddit' delivers.")
+
+(defun reddit-fetch-tests--serve-login (fixtures)
+  "Serve under FIXTURES the login ann's name, inbox and overview.
+The inbox holds r1, an unread reply to her c1, r2, a reply to her post p3
+read on Reddit, r3, unread and older than a week, and a message.  The
+overview holds c1, her answer to c0, and p3."
+  (reddit-fetch-tests--serve fixtures (reddit-fetch-tests--url 'me)
+                             '(:kind "t2" :data (:name "ann")))
+  (reddit-fetch-tests--serve
+   fixtures (reddit-fetch-tests--url 'inbox)
+   (reddit-fetch-tests--listing
+    (list (reddit-fetch-tests--reply "r1" "p2" "t1_c1" "bob" 0.1 t)
+          (reddit-fetch-tests--reply "r2" "p3" "t3_p3" "cat" 0.2)
+          (reddit-fetch-tests--reply "r3" "p4" "t1_c9" "dan" 9 t)
+          (list :kind "t4"
+                :data (list :id "m1" :name "t4_m1" :author "eve" :subject "Hi" :context ""
+                            :created_utc (reddit-fetch-tests--time 0.3) :new t
+                            :body_html "<p>hi</p>")))))
+  (reddit-fetch-tests--serve
+   fixtures (reddit-fetch-tests--url 'mine)
+   (reddit-fetch-tests--listing
+    (list (reddit-fetch-tests--own (reddit-fetch-tests--comment "c1" "p2" "ann" 0.5) "t1_c0")
+          (reddit-fetch-tests--post "p3" "ann" "Post three" 1 1)))))
+
+(defconst reddit-fetch-tests--inbox
+  '(("<r1.p2@reddit.com>" "<p2@reddit.com> <c1.p2@reddit.com>" nil)
+    ("<r2.p3@reddit.com>" "<p3@reddit.com>" t)
+    ("<r3.p4@reddit.com>" "<p4@reddit.com> <c9.p4@reddit.com>" t))
+  "What a first run over `reddit-fetch-tests--serve-login' delivers to the inbox.")
+
+(defconst reddit-fetch-tests--mine
+  '(("<c1.p2@reddit.com>" "<p2@reddit.com> <c0.p2@reddit.com>" t)
+    ("<p3@reddit.com>" nil t))
+  "What a first run over `reddit-fetch-tests--serve-login' delivers to mine.")
 
 ;;; Specs
 
@@ -397,6 +458,29 @@ nobody; c4 is older than a week.  p3 holds c5."
               :to-equal '("t1_c2" "p2" "c2" ("c1") "u/[deleted]" "Post two"))
       (expect (plist-get entry :link) :to-equal "http://reddit.test/r/test/comments/p2/slug/c2/")
       (expect (plist-get entry :html) :to-equal "<p>[deleted] says c2</p>")))
+  (it "reads an inbox item's post and link from its context, its title, and that it is new"
+    (let ((entry (reddit-fetch-entry
+                  (reddit-fetch-tests--parse (reddit-fetch-tests--reply "r1" "p2" "t1_c1" "bob" 0.1 t))
+                  reddit-fetch-tests--base nil '("c1"))))
+      (expect (list (plist-get entry :id) (plist-get entry :post) (plist-get entry :comment)
+                    (plist-get entry :ancestors) (plist-get entry :title) (plist-get entry :new))
+              :to-equal '("t1_r1" "p2" "r1" ("c1") "Post p2" t))
+      (expect (plist-get entry :link)
+              :to-equal "http://reddit.test/r/test/comments/p2/slug/r1/?context=3"))
+    (expect (plist-get (reddit-fetch-entry
+                        (reddit-fetch-tests--parse
+                         (reddit-fetch-tests--reply "r2" "p3" "t3_p3" "cat" 0.2))
+                        reddit-fetch-tests--base)
+                       :new)
+            :to-be nil))
+  (it "reads the title Reddit names for a comment a listing holds"
+    (expect (plist-get (reddit-fetch-entry
+                        (reddit-fetch-tests--parse
+                         (reddit-fetch-tests--own (reddit-fetch-tests--comment "c1" "p2" "ann" 1)
+                                                  "t3_p2"))
+                        reddit-fetch-tests--base)
+                       :title)
+            :to-equal "Post p2"))
   (it "reads when a thing was last edited, and nothing of one never edited"
     (cl-flet ((edited (thing)
                 (plist-get (reddit-fetch-entry (reddit-fetch-tests--parse thing)
@@ -424,6 +508,18 @@ nobody; c4 is older than a week.  p3 holds c5."
       (dolist (thing (list (reddit-fetch-tests--post "p2" "bob" "Two" 1)
                            (reddit-fetch-tests--comment "c1" "p2" "cat" 1)))
         (expect (score (reddit-fetch-tests--scored thing 1 nil t)) :to-equal '(1 t nil))))))
+
+(describe "reddit-fetch-parent-ids"
+  (it "names the comment a listed comment answers, and none for one on its post"
+    (expect (reddit-fetch-parent-ids
+             (reddit-fetch-tests--parse (reddit-fetch-tests--reply "r1" "p2" "t1_c1" "bob" 0.1)))
+            :to-equal '("c1"))
+    (expect (reddit-fetch-parent-ids
+             (reddit-fetch-tests--parse (reddit-fetch-tests--reply "r2" "p3" "t3_p3" "cat" 0.2)))
+            :to-be nil)
+    (expect (reddit-fetch-parent-ids
+             (reddit-fetch-tests--parse (reddit-fetch-tests--post "p3" "ann" "Post three" 1)))
+            :to-be nil)))
 
 (describe "reddit-fetch-thread"
   (it "lists the post, then each comment after its parent, with its ancestors"
@@ -910,6 +1006,96 @@ nobody; c4 is older than a week.  p3 holds c5."
         (expect (length profiles) :to-equal 1)
         (expect (file-exists-p (car profiles)) :to-be nil)
         (expect reddit-fetch-profile :to-be nil)))))
+
+(describe "reddit-fetch-run over the inbox and mine"
+  (it "fills the inbox with replies, each under what it answers, unread while Reddit says so"
+    (reddit-fetch-tests--with-store
+      (make-directory (expand-file-name "inbox" store))
+      (reddit-fetch-tests--serve-login fixtures)
+      (expect (reddit-fetch-run store reddit-fetch-tests--base '(("inbox")))
+              :to-equal '(("inbox" 0 3 0 0 nil)))
+      ;; r2 was read on Reddit, r3 is older than a week, and the message
+      ;; has no post to answer
+      (expect (reddit-fetch-tests--messages store "inbox") :to-equal reddit-fetch-tests--inbox)
+      ;; the inbox needs no name, and the request leaves Reddit's unread flags
+      (expect (reddit-fetch-tests--requests log) :to-equal (list (reddit-fetch-tests--url 'inbox)))
+      (with-temp-buffer
+        (insert (reddit-fetch-tests--message store "<r1.p2@reddit.com>" "inbox"))
+        (expect (mail-fetch-field "From") :to-equal "\"u/bob\" <bob@reddit.invalid>")
+        (expect (rfc2047-decode-string (mail-fetch-field "Subject")) :to-equal "Re: Post p2")
+        (expect (mail-fetch-field "Archived-At")
+                :to-equal (format "<%s/r/test/comments/p2/slug/r1/?context=3>"
+                                  reddit-fetch-tests--base)))
+      (expect (reddit-fetch-run store reddit-fetch-tests--base '(("inbox")))
+              :to-equal '(("inbox" 0 0 0 0 nil)))))
+
+  (it "fills mine with the login's own posts and comments, read, once Reddit names her"
+    (reddit-fetch-tests--with-store
+      (make-directory (expand-file-name "mine" store))
+      (reddit-fetch-tests--serve-login fixtures)
+      (expect (reddit-fetch-run store reddit-fetch-tests--base '(("mine")))
+              :to-equal '(("mine" 1 1 0 0 nil)))
+      (expect (reddit-fetch-tests--messages store "mine") :to-equal reddit-fetch-tests--mine)
+      (expect (reddit-fetch-tests--requests log)
+              :to-equal (list (reddit-fetch-tests--url 'me) (reddit-fetch-tests--url 'mine)))
+      (with-temp-buffer
+        (insert (reddit-fetch-tests--message store "<c1.p2@reddit.com>" "mine"))
+        (expect (rfc2047-decode-string (mail-fetch-field "Subject")) :to-equal "Re: Post p2")
+        (expect (mail-fetch-field "In-Reply-To") :to-equal "<c0.p2@reddit.com>"))))
+
+  (it "fetches every folder in a run, the inbox and mine beside the subreddits"
+    (reddit-fetch-tests--with-store
+      (dolist (folder '("inbox" "mine"))
+        (make-directory (expand-file-name folder store)))
+      (reddit-fetch-tests--serve-subreddit fixtures)
+      (reddit-fetch-tests--serve-login fixtures)
+      (expect (reddit-fetch-tests--run store)
+              :to-equal '(("inbox" 0 3 0 0 nil) ("mine" 1 1 0 0 nil) ("r.test" 3 5 0 0 nil)))
+      (expect (reddit-fetch-tests--messages store "inbox") :to-equal reddit-fetch-tests--inbox)
+      (expect (reddit-fetch-tests--messages store "mine") :to-equal reddit-fetch-tests--mine)
+      (expect (reddit-fetch-tests--messages store) :to-equal reddit-fetch-tests--delivered)))
+
+  (it "fetches the listing of the inbox or mine for a thread asked of it"
+    (reddit-fetch-tests--with-store
+      (make-directory (expand-file-name "inbox" store))
+      (reddit-fetch-tests--serve-login fixtures)
+      (expect (reddit-fetch-run store reddit-fetch-tests--base '(("inbox" "p2")))
+              :to-equal '(("inbox" 0 3 0 0 nil)))
+      (expect (reddit-fetch-tests--requests log) :to-equal (list (reddit-fetch-tests--url 'inbox)))))
+
+  (it "saves the scores of mine, and writes an edited comment over its message"
+    (reddit-fetch-tests--with-store
+      (make-directory (expand-file-name "mine" store))
+      (reddit-fetch-tests--serve-login fixtures)
+      (let ((c1 (reddit-fetch-tests--own (reddit-fetch-tests--comment "c1" "p2" "ann" 0.5)
+                                         "t1_c0")))
+        (reddit-fetch-tests--serve
+         fixtures (reddit-fetch-tests--url 'mine)
+         (reddit-fetch-tests--listing
+          (list (reddit-fetch-tests--scored c1 5 t)
+                (reddit-fetch-tests--post "p3" "ann" "Post three" 1 1))))
+        (reddit-fetch-run store reddit-fetch-tests--base '(("mine")))
+        (expect (reddit-fetch-read-state store "mine" reddit-fetch-scores-file)
+                :to-equal '(("<c1.p2@reddit.com>" 5 1) ("<p3@reddit.com>" 1 nil)))
+        (reddit-fetch-tests--serve
+         fixtures (reddit-fetch-tests--url 'mine)
+         (reddit-fetch-tests--listing (list (reddit-fetch-tests--edit c1 "ann edits c1"))))
+        (expect (reddit-fetch-run store reddit-fetch-tests--base '(("mine")))
+                :to-equal '(("mine" 0 0 1 0 nil)))
+        (expect (reddit-fetch-tests--message store "<c1.p2@reddit.com>" "mine")
+                :to-match "\n\n<p>ann edits c1</p>\n\\'")
+        (expect (reddit-fetch-tests--messages store "mine") :to-equal reddit-fetch-tests--mine))))
+
+  (it "reports mine when the browser carries no login, and still fetches the inbox"
+    (reddit-fetch-tests--with-store
+      (delete-directory (expand-file-name "r.test" store) t)
+      (dolist (folder '("inbox" "mine"))
+        (make-directory (expand-file-name folder store)))
+      (reddit-fetch-tests--serve-login fixtures)
+      ;; what Reddit says of the login to a browser without one
+      (reddit-fetch-tests--serve fixtures (reddit-fetch-tests--url 'me) (make-hash-table))
+      (expect (reddit-fetch-tests--run store)
+              :to-equal '(("inbox" 0 3 0 0 nil) ("mine" error "No Reddit login in the browser"))))))
 
 (describe "reddit-fetch-main"
   (cl-flet ((main (store &optional threads)

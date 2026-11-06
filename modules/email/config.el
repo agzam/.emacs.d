@@ -19,7 +19,7 @@
   "NNTP server the news groups are fetched from.")
 
 (defvar reddit-maildir (expand-file-name "~/.mail/reddit/")
-  "Maildir root the Reddit fetch fills; subreddit NAME is the subdir r.NAME.")
+  "Maildir root the Reddit fetch fills: r.NAME per subreddit, inbox and mine.")
 
 (defvar mail-from-address "agzam.ibragimov@gmail.com"
   "Address every outgoing message is sent from.")
@@ -39,7 +39,8 @@ It is private, so custom.el sets it and this public repo never holds it.")
   "Group mbsync mirrors from Gmail's All Mail, where archived mail lives.")
 
 (defvar mail-groups (list mail-inbox-group "nnmaildir+news:gmane.emacs.devel"
-                          "nnmaildir+news:gmane.emacs.orgmode" "nnmaildir+reddit:r.emacs")
+                          "nnmaildir+news:gmane.emacs.orgmode" "nnmaildir+reddit:r.emacs"
+                          "nnmaildir+reddit:inbox" "nnmaildir+reddit:mine")
   "Groups Gnus subscribes to on startup, on top of every maildir group.")
 
 (defvar mail-remote-backends '(nntp nnatom)
@@ -48,8 +49,8 @@ It is private, so custom.el sets it and this public repo never holds it.")
 (defvar mail-bulk-groups
   '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs" "nnmaildir+gmail:org-mode"
     "nnmaildir+news:gmane.emacs.devel" "nnmaildir+news:gmane.emacs.orgmode"
-    "nnmaildir+reddit:r.emacs")
-  "Groups no sync rescans: tens of thousands of files each.")
+    "nnmaildir+reddit:r.emacs" "nnmaildir+reddit:inbox" "nnmaildir+reddit:mine")
+  "Groups no sync rescans: tens of thousands of files, or a fetch's own.")
 
 (defvar mail-topics
   '(("Gmail"
@@ -70,9 +71,12 @@ It is private, so custom.el sets it and this public repo never holds it.")
      ("nnmaildir+news:gmane.emacs.devel" . "emacs-devel, fetched from gmane")
      ("nnmaildir+news:gmane.emacs.orgmode" . "emacs-orgmode, fetched from gmane")
      ("nnmaildir+gmail:emacs" . "emacs-devel, delivered to Gmail")
-     ("nnmaildir+reddit:r.emacs" . "Reddit, posts and comments")
      ("nnmaildir+gmail:org-mode" . "emacs-orgmode, delivered to Gmail")
-     ("nnmaildir+gmail:clojure" . "Clojure groups, Clojurists Together")))
+     ("nnmaildir+gmail:clojure" . "Clojure groups, Clojurists Together"))
+    ("Reddit"
+     ("nnmaildir+reddit:inbox" . "Replies to you, mentions of you")
+     ("nnmaildir+reddit:mine" . "Your posts and comments")
+     ("nnmaildir+reddit:r.emacs" . "r/emacs, posts and comments")))
   "Topics under Gnus's root topic, in order: (TOPIC (GROUP . DESCRIPTION)...).
 Every start puts these groups back into their topic, in this order, and
 lists them even with nothing unread.  Other groups and topics stay put,

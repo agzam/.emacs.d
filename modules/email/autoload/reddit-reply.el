@@ -192,7 +192,8 @@ The draft goes once Reddit took it, and a fetch of the thread brings it in."
                        (reddit-reply-posted view group (reddit-post-id id) error)))))
 
 (defun reddit-reply-posted (view group post error)
-  "End the draft in VIEW and fetch thread POST of GROUP, unless Reddit said ERROR."
+  "End the draft in VIEW and fetch thread POST of GROUP, unless Reddit said ERROR.
+A reply from the inbox or mine lands in mine, so every folder is fetched."
   (when (buffer-live-p view)
     (with-current-buffer view
       (setq reddit-reply-posting nil)
@@ -200,12 +201,16 @@ The draft goes once Reddit took it, and a fetch of the thread brings it in."
         (if error
             (reddit-reply-update-header-line)
           (reddit-reply-end)))))
-  (if error
-      (message "Reddit refused the reply: %s" error)
-    ;; the view's opening fetched the thread within the interval
-    (setq reddit-thread-fetched-at (assoc-delete-all post reddit-thread-fetched-at))
-    (fetch-reddit-thread group post)
-    (message "Replied; fetching the thread")))
+  (cond (error
+         (message "Reddit refused the reply: %s" error))
+        ((subreddit-group-p group)
+         ;; the view's opening fetched the thread within the interval
+         (setq reddit-thread-fetched-at (assoc-delete-all post reddit-thread-fetched-at))
+         (fetch-reddit-thread group post)
+         (message "Replied; fetching the thread"))
+        (t
+         (fetch-reddit)
+         (message "Replied; fetching Reddit"))))
 
 (defun reddit-reply-abort ()
   "Drop the reply drafted in the view, asking first when it holds text."

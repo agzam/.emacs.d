@@ -16,6 +16,8 @@
 (require 'seq)
 (require 'visual-fill-column)
 
+;; a Reddit fetch's end reads it before any view loads this file
+;;;###autoload
 (defvar mail-thread-buffer-name "*mail thread*"
   "Buffer every thread is rendered into.")
 

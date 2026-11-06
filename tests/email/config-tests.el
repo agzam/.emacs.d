@@ -977,10 +977,12 @@ window and deletes the summary's."
       (expect recentered :to-equal (list summary)))))
 
 (describe "email module subscriptions"
-  (it "subscribes the inbox, emacs-devel, emacs-orgmode and r/emacs on startup"
+  (it "subscribes the inbox, emacs-devel, emacs-orgmode, r/emacs and the login's Reddit on startup"
+    ;; the start creates the folders of these groups, which the fetch fills
     (expect mail-groups :to-equal
             '("nnmaildir+gmail:inbox" "nnmaildir+news:gmane.emacs.devel"
-              "nnmaildir+news:gmane.emacs.orgmode" "nnmaildir+reddit:r.emacs"))
+              "nnmaildir+news:gmane.emacs.orgmode" "nnmaildir+reddit:r.emacs"
+              "nnmaildir+reddit:inbox" "nnmaildir+reddit:mine"))
     (expect (member mail-inbox-group mail-groups) :to-be-truthy)))
 
 (describe "email module group buffer"
@@ -996,9 +998,17 @@ window and deletes the summary's."
       (dolist (topic mail-topics)
         (dolist (entry (cdr topic))
           (expect (< (length (gnus-group-real-name (car entry))) width) :to-be t)))))
-  (it "names each group once, under three topics, the startup subscriptions among them"
+  (it "lists every Reddit group under Reddit, the inbox first, and under no other topic"
+    (expect (mapcar #'car (cdr (assoc "Reddit" mail-topics)))
+            :to-equal '("nnmaildir+reddit:inbox" "nnmaildir+reddit:mine"
+                        "nnmaildir+reddit:r.emacs"))
+    (expect (seq-filter (lambda (group) (string-prefix-p "nnmaildir+reddit:" group))
+                        (mapcan (lambda (topic) (mapcar #'car (cdr topic)))
+                                (remove (assoc "Reddit" mail-topics) mail-topics)))
+            :to-be nil))
+  (it "names each group once, under four topics, the startup subscriptions among them"
     (let ((groups (mapcan (lambda (topic) (mapcar #'car (cdr topic))) mail-topics)))
-      (expect (mapcar #'car mail-topics) :to-equal '("Gmail" "Labels" "Lists"))
+      (expect (mapcar #'car mail-topics) :to-equal '("Gmail" "Labels" "Lists" "Reddit"))
       (expect (length groups) :to-equal (length (seq-uniq groups)))
       (dolist (group mail-groups)
         (expect (member group groups) :to-be-truthy))
@@ -1036,13 +1046,13 @@ window and deletes the summary's."
             '("nnmaildir+gmail:archive" "nnmaildir+gmail:emacs"
               "nnmaildir+gmail:org-mode"
               "nnmaildir+news:gmane.emacs.devel" "nnmaildir+news:gmane.emacs.orgmode"
-              "nnmaildir+reddit:r.emacs")))
+              "nnmaildir+reddit:r.emacs" "nnmaildir+reddit:inbox" "nnmaildir+reddit:mine")))
   (it "keeps every group a fetch fills that it subscribes on startup out of the routine scan"
     ;; a scan reads every message it has no overview for: a year of a list
     (let ((fetched (seq-filter (lambda (group)
                                  (string-match-p "\\`nnmaildir\\+\\(news\\|reddit\\):" group))
                                mail-groups)))
-      (expect (length fetched) :to-equal 3)
+      (expect (length fetched) :to-equal 5)
       (dolist (group fetched)
         (expect (member group mail-bulk-groups) :to-be-truthy))))
   (it "leaves every bulk group inside the group buffer's list level"

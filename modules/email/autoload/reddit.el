@@ -1,8 +1,9 @@
 ;;; modules/email/autoload/reddit.el -*- lexical-binding: t; -*-
 ;;; Commentary:
-;; Subreddits as groups of the reddit server: scripts/reddit-fetch.el turns
-;; Reddit's JSON, which a headless Brave on the user's login fetches, into
-;; messages threaded by reply, and this file runs it the way news.el runs news.
+;; Subreddits, the inbox and the login's own posts as groups of the reddit
+;; server: scripts/reddit-fetch.el turns Reddit's JSON, which a headless Brave
+;; on the user's login fetches, into messages threaded by reply, and this file
+;; runs it the way news.el runs news.
 ;;; Code:
 
 (require 'gnus)
@@ -65,6 +66,11 @@
 (defun reddit-group-p (group)
   "Non-nil when GROUP lives in `reddit-maildir'."
   (string-prefix-p reddit-group-prefix group))
+
+;;;###autoload
+(defun subreddit-group-p (group)
+  "Non-nil when GROUP is a subreddit's folder of `reddit-maildir'."
+  (string-prefix-p (concat reddit-group-prefix "r.") group))
 
 ;;;###autoload
 (defun ensure-reddit-folders ()
@@ -266,8 +272,9 @@ and lays out whatever the store holds, though it brought nothing."
 
 ;;;###autoload
 (defun fetch-reddit-thread-h ()
-  "Fetch the newest replies of the Reddit thread the view just opened."
-  (when (reddit-group-p mail-thread-group)
+  "Fetch the newest replies of the subreddit thread the view just opened.
+The inbox and mine take theirs with the next fetch of their listing."
+  (when (subreddit-group-p mail-thread-group)
     (when-let* ((post (seq-some #'reddit-post-id (mail-thread-message-ids))))
       (fetch-reddit-thread mail-thread-group post))))
 
