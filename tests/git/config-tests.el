@@ -73,6 +73,19 @@
       (expect (car layout) :to-be nil)
       (expect (cdr layout) :to-equal '("o")))))
 
+(describe "code-review recipe"
+  ;; past the pin the fork requires code-review-lazy, a file it lacks, and
+  ;; a fresh clone would fail to load
+  (it "pins ag91's fork to the last commit that loads"
+    (let* ((form (cl-find-if (lambda (f)
+                               (and (eq (car-safe f) 'use-package)
+                                    (eq (cadr f) 'code-review)))
+                             (git-config-tests--top-level-forms)))
+           (recipe (cadr (memq :ensure form))))
+      (expect (car-safe recipe) :to-be 'code-review)
+      (expect (plist-get (cdr recipe) :repo) :to-equal "ag91/code-review")
+      (expect (plist-get (cdr recipe) :ref) :to-equal "68e5f55"))))
+
 (describe "code-review browse-url handler"
   ;; the package autoloads register it at boot and on every live package
   ;; update; :init and :config wait for magit and forge
