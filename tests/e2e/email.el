@@ -1070,8 +1070,8 @@ buffers, summary and queued files the cases leave are cleared after."
                 "    fi;;\n"
                 "esac\n"))
       (set-file-modes notmuch #o755))
-    ;; the sender's colors would paint white on white, and the paragraph
-    ;; is longer than any terminal line
+    ;; the sender's colors would paint white on white, the paragraph
+    ;; is longer than any terminal line, and the link carries shr's keys
     (email-e2e--write-alternative
      (expand-file-name "cur/1700000005.6.fixture:2,S" html) "html letter" "html"
      "PLAIN alternative\n\n> quoted once\n> > quoted twice"
@@ -1080,6 +1080,7 @@ buffers, summary and queued files the cases leave are cleared after."
              " paragraph end</p>"
              "<p style=\"color:#ffffff;background-color:#ffffff\">white on white</p>"
              "<p>run <code>(foo)</code> first</p><pre><code>(bar)\n  (baz)\n</code></pre>"
+             "<p>read <a href=\"https://www.gnu.org/software/emacs/manual/\">the manual</a> too</p>"
              "<blockquote><p>quoted once</p>"
              "<blockquote><p>quoted twice</p></blockquote></blockquote>"))
     ;; longer than any window, so J has an article to scroll
@@ -1367,6 +1368,24 @@ buffers, summary and queued files the cases leave are cleared after."
                         (and (search-forward "(baz)" nil t)
                              (list (buffer-substring-no-properties (line-beginning-position) (point))
                                    (get-char-property (line-beginning-position) 'face))))))
+              ;; the evil state v on the HTML letter's link leaves, and
+              ;; whether shr followed the link instead.  Visual state opens
+              ;; expreg-transient: one escape closes it, the next leaves
+              ;; visual state, each its own macro as a tty reads ESC
+              (v-on-link ()
+                (save-excursion
+                  (goto-char (point-min))
+                  (if (not (search-forward "the manual" nil t))
+                      :missing
+                    (goto-char (match-beginning 0))
+                    (let ((followed nil))
+                      (cl-letf (((symbol-function 'shr-browse-url)
+                                 (lambda (&rest _) (interactive) (setq followed t))))
+                        (execute-kbd-macro "v"))
+                      (prog1 (list evil-state followed)
+                        (when (evil-visual-state-p)
+                          (execute-kbd-macro (vector 'escape))
+                          (execute-kbd-macro (vector 'escape))))))))
               ;; each window's buffer, left column and width
               (layout ()
                 (format "%S" (mapcar (lambda (window)
@@ -3077,6 +3096,10 @@ buffers, summary and queued files the cases leave are cleared after."
                 (record "the thread view wraps a long HTML paragraph instead of cutting it"
                         (pcase (paragraph-lines) (`(1 ,screen) (< 1 screen)))
                         :got (format "%S buffer and screen lines" (paragraph-lines)))
+                (let ((got (v-on-link)))
+                  (record "v on a link of the thread view selects text instead of following it"
+                          (equal got '(visual nil))
+                          :got (format "state and followed: %S" got)))
                 (execute-kbd-macro (kbd "RET"))
                 (redisplay t)
                 (record "the article buffer shows the HTML part, its quote levels drawn as > lines"
@@ -3097,6 +3120,10 @@ buffers, summary and queued files the cases leave are cleared after."
                         (pcase (paragraph-lines) (`(1 ,screen) (< 1 screen)))
                         :got (format "%S buffer and screen lines, truncate-lines %S"
                                      (paragraph-lines) truncate-lines))
+                (let ((got (v-on-link)))
+                  (record "v on a link of the article buffer selects text instead of following it"
+                          (equal got '(visual nil))
+                          :got (format "state and followed: %S" got)))
                 ;; the thread and the article open right of the summary,
                 ;; and a window left of Gnus keeps its width while Gnus
                 ;; lays out again: every read forces the article layout,

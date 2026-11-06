@@ -31,9 +31,6 @@
     #'visual-line-mode
     #'variable-pitch-mode
     (defun eww-set-local-keys-h ()
-      (map! :map shr-map
-            "z" nil
-            "v" nil)
       (map! :map eww-mode-map
             "C-c C-o" #'eww-browse-with-external-browser
             :n "C-j" (cmd! () (pixel-scroll-precision-scroll-down 50))
@@ -69,6 +66,13 @@
 
   ;; (advice-add #'eww-display-html :around #'eww-make-readable-a)
   )
+
+;; Each shr link carries shr-map as a text property, which outranks evil's
+;; maps.  Gnus and the mail thread view render HTML with shr, not only eww.
+(after! shr
+  (map! :map shr-map
+        "z" nil
+        "v" nil))
 
 (after! xwidget
   (map!
