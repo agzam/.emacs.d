@@ -85,6 +85,9 @@ but a label in the root topic goes under `mail-label-topic'.")
 (defvar mail-label-topic "Labels"
   "Topic of `mail-topics' that a Gmail label Gnus subscribed moves under.")
 
+(defvar reddit-topic "Reddit"
+  "Topic of `mail-topics' a subreddit's group made for one thread goes under.")
+
 (defvar mail-label-colors
   '(("clojure" "#3e9a5e" "white")
     ("emacs" "#5279df" "white")

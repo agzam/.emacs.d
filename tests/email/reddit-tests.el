@@ -9,6 +9,7 @@
 
 ;; each spec binds these, so a suite loaded later still sees config.el's
 (defvar reddit-maildir)
+(defvar reddit-topic)
 (defvar mail-groups)
 (defvar mail-load-running)
 ;; the thread view's, which thread-tests loads
@@ -99,9 +100,18 @@ says OUTPUT before it exits."
                 :to-equal (list "-Q" "--batch" "--init-directory" reddit-fetch-directory))
         (expect (cadr (member "-l" command)) :to-equal reddit-fetch-script)
         (expect (car (last command))
-                :to-equal (format "(reddit-fetch-main %S %S)" reddit-maildir "http://reddit.test"))
+                :to-equal (format "(reddit-fetch-main %S %S '((\"r.test\")))"
+                                  reddit-maildir "http://reddit.test"))
         ;; the fetch needs no package of this session
         (expect (member "-L" command) :to-be nil))))
+  (it "fetches only the folders mail-groups names, not one made for a single thread"
+    (reddit-tests--with-store
+      (let ((mail-groups '("nnmaildir+gmail:inbox" "nnmaildir+reddit:r.test"
+                           "nnmaildir+reddit:inbox" "nnmaildir+reddit:mine")))
+        (make-directory (expand-file-name "r.other/cur" reddit-maildir) t)
+        (expect (car (last (reddit-fetch-command)))
+                :to-equal (format "(reddit-fetch-main %S %S '((\"r.test\") (\"inbox\") (\"mine\")))"
+                                  reddit-maildir "http://reddit.test")))))
   (it "limits the fetch to the thread it is given"
     (reddit-tests--with-store
       (expect (car (last (reddit-fetch-command '("nnmaildir+reddit:r.test" . "p1"))))
@@ -231,7 +241,32 @@ says OUTPUT before it exits."
         (let* ((ended 0)
                (reddit-fetch-end-hook (list (lambda () (setq ended (1+ ended))))))
           (fetch "r.test: 0 posts, 0 comments, 0 edits, 0 threads waiting" 0)
-          (expect ended :to-equal 1))))))
+          (expect ended :to-equal 1))))
+    (it "calls the function waiting on the thread once its group is read, though nothing came"
+      (reddit-tests--with-store
+        (let* ((ran 0)
+               (reddit-thread-then (cons "p1" (lambda () (setq ran (1+ ran))))))
+          (expect (fetch "r.test: 0 posts, 0 comments, 0 edits, 0 threads waiting" 0)
+                  :to-equal '((load ("nnmaildir+reddit:r.test") t)
+                              (wait reddit-thread)
+                              (show "nnmaildir+reddit:r.test" "p1" 0 0 nil)))
+          (expect ran :to-equal 1)
+          (expect reddit-thread-then :to-be nil))))
+    (it "drops the function waiting on the thread when the fetch failed, which says so"
+      (reddit-tests--with-store
+        (let* ((ran 0)
+               (reddit-thread-then (cons "p1" (lambda () (setq ran (1+ ran)))))
+               (calls (fetch "r.test: 0 posts, 0 comments, 0 edits, 1 threads waiting; blocked" 1)))
+          (expect (mapcar #'car calls) :to-equal '(said))
+          (expect ran :to-equal 0)
+          (expect reddit-thread-then :to-be nil))))
+    (it "leaves the function waiting on another thread to that thread's fetch"
+      (reddit-tests--with-store
+        (let* ((ran 0)
+               (reddit-thread-then (cons "p2" (lambda () (setq ran (1+ ran))))))
+          (fetch "r.test: 0 posts, 0 comments, 0 edits, 0 threads waiting" 0)
+          (expect ran :to-equal 0)
+          (expect (car reddit-thread-then) :to-equal "p2"))))))
 
 (describe "show-reddit-replies"
   (cl-flet ((show (ids displayed count edits &optional asked)
@@ -348,7 +383,7 @@ says OUTPUT before it exits."
         (write-region "" nil (expand-file-name "go" root))
         (reddit-tests--wait-exit)
         (pcase-let ((`(,args ,eof) (reddit-tests--ran root)))
-          (expect args :to-equal (list reddit-maildir "http://reddit.test"))
+          (expect args :to-equal (list reddit-maildir "http://reddit.test" '(("r.test"))))
           (expect eof :to-be t))))))
 
 (describe "fetch-reddit while a Reddit group loads"
@@ -569,13 +604,15 @@ says OUTPUT before it exits."
           (expect (subreddit-copy "<c9.p9@reddit.com>") :to-be nil))))))
 
 (describe "show-in-subreddit"
-  (cl-flet ((show (copy &optional unloaded)
-              ;; the loads it asks for, its wait, and where it goes or what it says
+  (cl-flet ((show (&optional unloaded)
+              ;; the loads it asks for, its wait, and what it looks for once they end
               (let ((pending unloaded)
                     calls)
                 (cl-letf (((symbol-function 'reddit-message-on-screen)
                            (lambda () (cons "nnmaildir+reddit:inbox"
                                             (reddit-tests--header "<c2.p1@reddit.com>"))))
+                          ((symbol-function 'reddit-message-link)
+                           (lambda (group article) (push (list 'link group article) calls) "LINK"))
                           ((symbol-function 'mail-group-loaded-p)
                            (lambda (group) (not (member group unloaded))))
                           ((symbol-function 'mail-group-pending-p)
@@ -589,32 +626,165 @@ says OUTPUT before it exits."
                              (setq pending nil)
                              (when (funcall predicate)
                                (funcall action))))
-                          ((symbol-function 'subreddit-copy)
-                           (lambda (id) (push (list 'copy id) calls) copy))
-                          ((symbol-function 'goto-mail-summary-article)
-                           (lambda (&rest args) (push (cons 'goto args) calls)))
-                          ((symbol-function 'message)
-                           (lambda (format &rest args)
-                             (push (list 'said (apply #'format format args)) calls))))
+                          ((symbol-function 'show-subreddit-copy)
+                           (lambda (&rest args) (push (cons 'show args) calls))))
                   (let ((gnus-group-list '("nnmaildir+reddit:inbox" "nnmaildir+reddit:r.test")))
                     (show-in-subreddit)))
                 (nreverse calls))))
-    (it "goes to the copy of the message on screen in its subreddit's summary"
-      (expect (show '("nnmaildir+reddit:r.test" . 52))
-              :to-equal '((wait t) (copy "<c2.p1@reddit.com>")
-                          (goto "nnmaildir+reddit:r.test" 52))))
+    (it "looks for the copy of the message on screen, its permalink at hand"
+      (expect (show)
+              :to-equal '((link "nnmaildir+reddit:inbox" 7) (wait t)
+                          (show "<c2.p1@reddit.com>" "LINK"))))
     (it "reads a subreddit's group nnmaildir lacks first, and looks once it is read"
-      (expect (show '("nnmaildir+reddit:r.test" . 52) '("nnmaildir+reddit:r.test"))
-              :to-equal '((load ("nnmaildir+reddit:r.test") t) (wait nil)
-                          (copy "<c2.p1@reddit.com>") (goto "nnmaildir+reddit:r.test" 52))))
-    (it "says so when no subreddit's group holds the message, and how to open it on Reddit"
-      (let ((calls (show nil)))
-        (expect (butlast calls) :to-equal '((wait t) (copy "<c2.p1@reddit.com>")))
-        (expect (car (last calls))
-                :to-equal (list 'said (format "No subreddit's group holds this message; %s opens it on Reddit"
-                                              (substitute-command-keys "\\[open-mail-on-web]")))))))
+      (expect (show '("nnmaildir+reddit:r.test"))
+              :to-equal '((link "nnmaildir+reddit:inbox" 7) (load ("nnmaildir+reddit:r.test") t)
+                          (wait nil) (show "<c2.p1@reddit.com>" "LINK")))))
   (it "refuses where no Reddit message is on screen"
     (cl-letf (((symbol-function 'reddit-message-on-screen) #'ignore))
       (expect (show-in-subreddit) :to-throw 'user-error '("No Reddit message here")))))
+
+(defmacro reddit-tests--showing (&rest body)
+  "Run BODY with the steps of `show-subreddit-copy' stubbed and logged in `calls'.
+BODY sets `copy', what `subreddit-copy' finds, and `shown', whether a
+window shows Gnus.  The subreddit Gnus knows is r.test."
+  (declare (indent 0))
+  `(let ((copy nil)
+         (shown t)
+         (calls nil)
+         (gnus-group-list '("nnmaildir+reddit:inbox" "nnmaildir+reddit:r.test"))
+         (reddit-thread-then nil)
+         (reddit-thread-fetched-at nil))
+     (cl-letf (((symbol-function 'subreddit-copy) (lambda (_id) copy))
+               ((symbol-function 'gnus-shown-p) (lambda () shown))
+               ((symbol-function 'goto-mail-summary-article)
+                (lambda (&rest args) (push (cons 'goto args) calls)))
+               ((symbol-function 'ensure-subreddit-group)
+                (lambda (group) (push (list 'ensure group) calls)))
+               ((symbol-function 'fetch-reddit-thread)
+                (lambda (group post) (push (list 'fetch group post) calls)))
+               ((symbol-function 'message)
+                (lambda (format &rest args) (push (list 'said (apply #'format format args)) calls))))
+       ,@body)))
+
+(defun reddit-tests--no-copy ()
+  "What `show-subreddit-copy' says when no group holds the message."
+  (list 'said (format "No subreddit's group holds this message; %s opens it on Reddit"
+                      (substitute-command-keys "\\[open-mail-on-web]"))))
+
+(describe "show-subreddit-copy"
+  (it "goes to the copy a subreddit's group holds"
+    (reddit-tests--showing
+      (setq copy '("nnmaildir+reddit:r.test" . 52))
+      (show-subreddit-copy "<c2.p1@reddit.com>" "https://www.reddit.com/r/test/comments/p1/slug/c2/")
+      (expect calls :to-equal '((goto "nnmaildir+reddit:r.test" 52)))))
+  (it "fetches a thread the subreddit's group lacks into it, then goes to the copy"
+    (reddit-tests--showing
+      (setq reddit-thread-fetched-at (list (cons "p9" (float-time))))
+      (show-subreddit-copy "<c9.p9@reddit.com>" "https://www.reddit.com/r/test/comments/p9/slug/c9/")
+      (expect (reverse calls) :to-equal '((ensure "nnmaildir+reddit:r.test")
+                                          (fetch "nnmaildir+reddit:r.test" "p9")
+                                          (said "Fetching the thread into r.test...")))
+      ;; a thread fetched within the interval would not be fetched again
+      (expect reddit-thread-fetched-at :to-be nil)
+      (expect (car reddit-thread-then) :to-equal "p9")
+      (setq calls nil
+            copy '("nnmaildir+reddit:r.test" . 60))
+      (funcall (cdr reddit-thread-then))
+      (expect calls :to-equal '((goto "nnmaildir+reddit:r.test" 60)))))
+  (it "fetches a thread of a subreddit Gnus has no group for into one made for it"
+    (reddit-tests--showing
+      (show-subreddit-copy "<c9.p9@reddit.com>" "https://www.reddit.com/r/other/comments/p9/slug/c9/")
+      (expect (seq-take (reverse calls) 2) :to-equal '((ensure "nnmaildir+reddit:r.other")
+                                                       (fetch "nnmaildir+reddit:r.other" "p9")))))
+  (it "says where the thread came in when no window shows Gnus by then"
+    (reddit-tests--showing
+      (show-subreddit-copy "<c9.p9@reddit.com>" "https://www.reddit.com/r/test/comments/p9/slug/c9/")
+      (setq calls nil
+            copy '("nnmaildir+reddit:r.test" . 60)
+            shown nil)
+      (funcall (cdr reddit-thread-then))
+      (expect calls :to-equal '((said "The thread is in r.test")))))
+  (it "says there is no copy when the thread came without it, and fetches nothing more"
+    (reddit-tests--showing
+      (show-subreddit-copy "<c9.p9@reddit.com>" "https://www.reddit.com/r/test/comments/p9/slug/c9/")
+      (setq calls nil)
+      (funcall (cdr reddit-thread-then))
+      (expect calls :to-equal (list (reddit-tests--no-copy)))))
+  (it "says there is no copy when no permalink names a subreddit"
+    (reddit-tests--showing
+      (show-subreddit-copy "<c9.p9@reddit.com>" nil)
+      (expect calls :to-equal (list (reddit-tests--no-copy)))
+      (expect reddit-thread-then :to-be nil))))
+
+(describe "reddit-message-link"
+  (it "reads the permalink the Archived-At header names, and none where there is none"
+    (let ((nntp-server-buffer (generate-new-buffer " *reddit-tests nntp*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'gnus-request-head)
+                     (lambda (article group)
+                       (with-current-buffer nntp-server-buffer
+                         (erase-buffer)
+                         (insert "Message-ID: <c9.p9@reddit.com>\n"
+                                 (if (eql article 7)
+                                     "Archived-At: <https://www.reddit.com/r/test/comments/p9/slug/c9/>\n"
+                                   "")))
+                       (equal group "nnmaildir+reddit:inbox"))))
+            (expect (reddit-message-link "nnmaildir+reddit:inbox" 7)
+                    :to-equal "https://www.reddit.com/r/test/comments/p9/slug/c9/")
+            (expect (reddit-message-link "nnmaildir+reddit:inbox" 8) :to-be nil)
+            (expect (reddit-message-link "nnmaildir+gmail:inbox" 7) :to-be nil))
+        (kill-buffer nntp-server-buffer)))))
+
+(describe "subreddit-group-of-link"
+  (it "names the group of the subreddit a permalink lies in, as Gnus spells it"
+    (let ((gnus-group-list '("nnmaildir+reddit:inbox" "nnmaildir+reddit:r.emacs")))
+      (expect (subreddit-group-of-link "https://www.reddit.com/r/emacs/comments/p1/slug/c1/?context=3")
+              :to-equal "nnmaildir+reddit:r.emacs")
+      (expect (subreddit-group-of-link "https://www.reddit.com/r/Emacs/comments/p1/slug/")
+              :to-equal "nnmaildir+reddit:r.emacs")
+      (expect (subreddit-group-of-link "https://www.reddit.com/r/AskReddit/comments/p2/slug/")
+              :to-equal "nnmaildir+reddit:r.AskReddit")
+      (dolist (link '(nil "https://www.reddit.com/message/messages/m1" "https://example.com/x"))
+        (expect (subreddit-group-of-link link) :to-be nil)))))
+
+(describe "ensure-subreddit-group"
+  (it "makes the folder, and the group above the routine scan under the Reddit topic, once"
+    (reddit-tests--with-store
+      (let ((reddit-topic "Reddit")
+            (gnus-topic-alist '(("Reddit" "nnmaildir+reddit:inbox")))
+            (gnus-activate-level 3)
+            ;; gnus-group-entry, a macro, reads it
+            (gnus-newsrc-hashtb (gnus-make-hashtable))
+            calls)
+        (cl-letf (((symbol-function 'subscribe-mail-group)
+                   (lambda (group)
+                     (puthash group (list 3 nil) gnus-newsrc-hashtb)
+                     (push (list 'subscribe group) calls)))
+                  ((symbol-function 'gnus-group-level) (lambda (_group) 3))
+                  ((symbol-function 'gnus-group-change-level)
+                   (lambda (group level old) (push (list 'level group level old) calls)))
+                  ((symbol-function 'put-group-in-topic)
+                   (lambda (group topic) (push (list 'topic group topic) calls))))
+          (ensure-subreddit-group "nnmaildir+reddit:r.other")
+          (ensure-subreddit-group "nnmaildir+reddit:r.other"))
+        (expect (directory-files (expand-file-name "r.other" reddit-maildir) nil "\\`[^.]")
+                :to-equal '("cur" "new" "tmp"))
+        (expect (nreverse calls)
+                :to-equal '((subscribe "nnmaildir+reddit:r.other")
+                            (level "nnmaildir+reddit:r.other" 4 3)
+                            (topic "nnmaildir+reddit:r.other" "Reddit"))))))
+  (it "leaves the group where Gnus put it when the topic is missing"
+    (reddit-tests--with-store
+      (let ((reddit-topic "Reddit")
+            (gnus-topic-alist '(("Gnus")))
+            (gnus-newsrc-hashtb (gnus-make-hashtable))
+            moved)
+        (cl-letf (((symbol-function 'subscribe-mail-group)
+                   (lambda (group) (puthash group (list 3 nil) gnus-newsrc-hashtb)))
+                  ((symbol-function 'gnus-group-level) (lambda (_group) 3))
+                  ((symbol-function 'gnus-group-change-level) #'ignore)
+                  ((symbol-function 'put-group-in-topic) (lambda (&rest args) (push args moved))))
+          (ensure-subreddit-group "nnmaildir+reddit:r.other"))
+        (expect moved :to-be nil)))))
 
 ;;; reddit-tests.el ends here

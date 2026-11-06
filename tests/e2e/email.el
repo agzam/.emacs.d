@@ -195,11 +195,11 @@ gmane has.  FLAGS, when given, ends the name as a maildir suffix."
             "\n"
             "body of " subject "\n")))
 
-(defun email-e2e--write-reddit-message (file id date &optional references flags html)
+(defun email-e2e--write-reddit-message (file id date &optional references flags html link)
   "Write to FILE a message of r.test shaped as the Reddit fetch writes one.
 ID is its Message-ID's local part, REFERENCES its References, FLAGS,
-when given, ends the name as a maildir suffix, and HTML, when given,
-replaces the body."
+when given, ends the name as a maildir suffix, and HTML and LINK, when
+given, replace the body and the Archived-At permalink."
   (with-temp-file (if flags (concat file ":2," flags) file)
     (insert "From: \"u/ann\" <ann@reddit.invalid>\n"
             "Subject: " (if references "Re: " "") "Reddit post\n"
@@ -209,7 +209,7 @@ replaces the body."
                 (format "References: %s\nIn-Reply-To: %s\n"
                         references (car (last (split-string references))))
               "")
-            "Archived-At: <https://www.reddit.com/r/test/" id "/>\n"
+            "Archived-At: <" (or link (concat "https://www.reddit.com/r/test/" id "/")) ">\n"
             "MIME-Version: 1.0\n"
             "Content-Type: text/html; charset=utf-8\n\n"
             (or html (concat "<p>body of " id "</p>")) "\n")))
@@ -234,6 +234,12 @@ Each post is (ID TITLE HOUR), published on 26 Sep 2026 at HOUR."
               "<content type=\"html\">&lt;p&gt;body of the " id " post&lt;/p&gt;</content>\n"
               "</entry>\n"))
     (insert "</feed>\n")))
+
+(defun email-e2e--goto-id (id)
+  "Move to the line of the message whose Message-ID is ID in this summary."
+  (when-let* ((data (seq-find (lambda (data) (equal (mail-header-id (gnus-data-header data)) id))
+                              gnus-newsgroup-data)))
+    (gnus-summary-goto-subject (gnus-data-number data))))
 
 (defun email-e2e--article (subject)
   "Number of the article with SUBJECT in the current summary."
@@ -786,7 +792,11 @@ buffers, summary and queued files the cases leave are cleared after."
            `(("\\`nnmaildir\\+reddit:r\\.test\\'"
               (mail-code-major-mode
                . ,(alist-get 'mail-code-major-mode
-                             (gnus-parameters-get-parameter "nnmaildir+reddit:r.emacs")))))))
+                             (gnus-parameters-get-parameter "nnmaildir+reddit:r.emacs"))))
+             ;; every reply of the inbox, each a thread of its own
+             ("\\`nnmaildir\\+reddit:inbox\\'" (display . 5)))))
+         ;; a subreddit's group made for one thread goes where r.test is
+         (reddit-topic "Lists")
          ;; the real batch reads the groups, held back while load-hold
          ;; exists, and saves its tables here
          (load-hold (expand-file-name "load-hold" e2e-work-dir))
@@ -967,24 +977,33 @@ buffers, summary and queued files the cases leave are cleared after."
     (email-e2e--write-reddit-message (expand-file-name "cur/1700000060.60.fixture" reddit-inbox-dir)
                                      "c2.p1" "Mon, 28 Sep 2026 12:00:00 +0000"
                                      "<p1@reddit.com> <c1.p1@reddit.com>" "S")
-    (email-e2e--write-reddit-message (expand-file-name "cur/1700000061.61.fixture" reddit-inbox-dir)
-                                     "c9.p9" "Mon, 28 Sep 2026 15:00:00 +0000" "<p9@reddit.com>" "S")
-    ;; an outbox file named as one cur/ holds is an edit, written over it
+    ;; replies whose threads no group holds: p9 of r/test, p7 of r/other,
+    ;; which no group reads, and p6, which Reddit sends without its reply
+    (pcase-dolist (`(,file ,id ,post ,link)
+                   '(("1700000061.61" "c9.p9" "p9" "https://www.reddit.com/r/test/comments/p9/slug/c9/")
+                     ("1700000062.62" "c7.p7" "p7" "https://www.reddit.com/r/other/comments/p7/slug/c7/")
+                     ("1700000063.63" "c6.p6" "p6" "https://www.reddit.com/r/test/comments/p6/slug/c6/")))
+      (email-e2e--write-reddit-message (expand-file-name (concat "cur/" file ".fixture") reddit-inbox-dir)
+                                       id "Mon, 28 Sep 2026 15:00:00 +0000"
+                                       (format "<%s@reddit.com>" post) "S" nil link))
+    ;; an outbox file named as one cur/ holds is an edit, written over it.
+    ;; The outbox goes to the folder the fetch names first
     (with-temp-file reddit-fetch-script
-      (prin1 `(defun reddit-fetch-main (store _base &optional _threads)
+      (prin1 `(defun reddit-fetch-main (store _base &optional threads)
                 (while (not (file-exists-p ,reddit-go))
                   (sleep-for 0.05))
-                (let ((comments 0)
+                (let ((folder (or (car (car threads)) "r.test"))
+                      (comments 0)
                       (edits 0))
                   (dolist (file (directory-files ,reddit-outbox t "\\`[^.]"))
                     (let* ((name (file-name-nondirectory file))
                            (old (car (directory-files
-                                      (expand-file-name "r.test/cur" store) t
+                                      (expand-file-name (concat folder "/cur") store) t
                                       (concat "\\`" (regexp-quote name) "\\(?::\\|\\'\\)")))))
                       (if old
                           (progn (rename-file file old t)
                                  (setq edits (1+ edits)))
-                        (rename-file file (expand-file-name (concat "r.test/new/" name) store))
+                        (rename-file file (expand-file-name (concat folder "/new/" name) store))
                         (setq comments (1+ comments)))))
                   ;; saved anew, as each real fetch saves the scores
                   (when (file-exists-p ,reddit-scores-next)
@@ -992,8 +1011,8 @@ buffers, summary and queued files the cases leave are cleared after."
                       (make-directory (file-name-directory scores) t)
                       (rename-file ,reddit-scores-next scores t)
                       (set-file-times scores)))
-                  (message "r.test: 0 posts, %d comments, %d edits, 0 threads waiting"
-                           comments edits))
+                  (message "%s: 0 posts, %d comments, %d edits, 0 threads waiting"
+                           folder comments edits))
                 (kill-emacs 0))
              (current-buffer)))
     ;; the real batch reader, which waits while load-hold exists
@@ -1785,33 +1804,15 @@ buffers, summary and queued files the cases leave are cleared after."
                 (gnus-group-jump-to-group reddit-inbox-group)
                 (execute-kbd-macro (kbd "RET"))
                 (let ((inbox-summary (and (derived-mode-p 'gnus-summary-mode) (current-buffer)))
-                      said shown)
-                  (cl-flet ((goto (id)
-                              (gnus-summary-goto-subject
-                               (gnus-data-number
-                                (seq-find (lambda (data)
-                                            (equal (mail-header-id (gnus-data-header data)) id))
-                                          gnus-newsgroup-data)))))
-                    (when inbox-summary
-                      (goto "<c9.p9@reddit.com>")
-                      (let ((logged (with-current-buffer (messages-buffer) (point-max-marker))))
-                        (execute-kbd-macro (kbd ", o r"))
-                        (setq said (with-current-buffer (messages-buffer)
-                                     (buffer-substring-no-properties logged (point-max)))))
-                      ;; message curls the apostrophe
-                      (record ", o r on an inbox message no subreddit's group holds says so and names C-c C-o"
-                              (and (eq (current-buffer) inbox-summary)
-                                   (string-match-p (concat "^No subreddit.s group holds this message; "
-                                                           "C-c C-o opens it on Reddit$")
-                                                   said))
-                              :got (format "%s, said %S" (buffer-name) said))
-                      (goto "<c2.p1@reddit.com>")
-                      (execute-kbd-macro (kbd ", o r"))
-                      (setq shown (and (derived-mode-p 'gnus-summary-mode)
-                                       (list gnus-newsgroup-name
-                                             (mail-header-id (gnus-summary-article-header))
-                                             (eq (window-buffer (selected-window))
-                                                 (current-buffer)))))))
+                      shown)
+                  (when inbox-summary
+                    (email-e2e--goto-id "<c2.p1@reddit.com>")
+                    (execute-kbd-macro (kbd ", o r"))
+                    (setq shown (and (derived-mode-p 'gnus-summary-mode)
+                                     (list gnus-newsgroup-name
+                                           (mail-header-id (gnus-summary-article-header))
+                                           (eq (window-buffer (selected-window))
+                                               (current-buffer))))))
                   (record ", o r on an inbox message shows its copy in the subreddit's summary"
                           (equal shown (list reddit-group "<c2.p1@reddit.com>" t))
                           :got (format "%s: %S" major-mode shown))
@@ -2420,6 +2421,81 @@ buffers, summary and queued files the cases leave are cleared after."
                   (set-buffer (window-buffer (selected-window)))
                   (when (derived-mode-p 'gnus-summary-mode)
                     (gnus-summary-exit-no-update)))
+                ;; , o r on a reply whose thread no group holds fetches the
+                ;; thread into its subreddit's group, made if need be, and
+                ;; goes there once it came in
+                (cl-flet ((inbox ()
+                            ;; the inbox's summary, entered or selected again
+                            (delete-other-windows)
+                            (switch-to-buffer gnus-group-buffer)
+                            (gnus-group-jump-to-group reddit-inbox-group)
+                            (execute-kbd-macro (kbd "RET"))
+                            (and (derived-mode-p 'gnus-summary-mode) (current-buffer)))
+                          (jump (id group)
+                            ;; , o r on ID, then the group and message on show once
+                            ;; GROUP's summary is
+                            (email-e2e--goto-id id)
+                            (execute-kbd-macro (kbd ", o r"))
+                            (with-timeout (20)
+                              (while (not (equal (buffer-name (window-buffer (selected-window)))
+                                                 (gnus-summary-buffer-name group)))
+                                (accept-process-output nil 0.05)))
+                            (set-buffer (window-buffer (selected-window)))
+                            (and (derived-mode-p 'gnus-summary-mode)
+                                 (list gnus-newsgroup-name
+                                       (mail-header-id (gnus-summary-article-header)))))
+                          (serve (post)
+                            ;; POST and its reply, what Reddit sends of the thread
+                            (email-e2e--write-reddit-message
+                             (expand-file-name (format "1700000070.%s.fixture" post) reddit-outbox)
+                             post "Mon, 28 Sep 2026 14:30:00 +0000")
+                            (email-e2e--write-reddit-message
+                             (expand-file-name (format "1700000071.%s.fixture" post) reddit-outbox)
+                             (format "c%s.%s" (substring post 1) post) "Mon, 28 Sep 2026 15:00:00 +0000"
+                             (format "<%s@reddit.com>" post))))
+                  (serve "p9")
+                  (let ((shown (and (inbox) (jump "<c9.p9@reddit.com>" reddit-group))))
+                    (record ", o r on a reply whose thread its subreddit's group lacks fetches it there, then goes to it"
+                            (equal shown (list reddit-group "<c9.p9@reddit.com>"))
+                            :got (format "%S" shown)))
+                  (when (derived-mode-p 'gnus-summary-mode)
+                    (gnus-summary-exit-no-update))
+                  (serve "p7")
+                  (let* ((other "nnmaildir+reddit:r.other")
+                         (shown (and (inbox) (jump "<c7.p7@reddit.com>" other))))
+                    (record ", o r on a reply of a subreddit no group reads makes its group, fetches the thread there, goes to it"
+                            (and (equal shown (list other "<c7.p7@reddit.com>"))
+                                 (equal (gnus-group-topic other) "Lists")
+                                 (eql (gnus-group-level other) (1+ gnus-activate-level)))
+                            :got (format "%S, topic %S, level %S" shown
+                                         (gnus-group-topic other) (gnus-group-level other))))
+                  (when (derived-mode-p 'gnus-summary-mode)
+                    (gnus-summary-exit-no-update))
+                  ;; Reddit sends p6 without the reply
+                  (let ((summary (inbox))
+                        (logged (with-current-buffer (messages-buffer) (point-max-marker)))
+                        (said ""))
+                    (when summary
+                      (email-e2e--goto-id "<c6.p6@reddit.com>")
+                      (execute-kbd-macro (kbd ", o r"))
+                      (with-timeout (20)
+                        (while (not (string-match-p
+                                     "^No subreddit"
+                                     (setq said (with-current-buffer (messages-buffer)
+                                                  (buffer-substring-no-properties logged (point-max))))))
+                          (accept-process-output nil 0.05))))
+                    ;; message curls the apostrophe
+                    (record ", o r says so when the thread came without the reply, and the inbox stays"
+                            (and summary
+                                 (eq (window-buffer (selected-window)) summary)
+                                 (string-match-p "^Fetching the thread into r\\.test\\.\\.\\.$" said)
+                                 (string-match-p (concat "^No subreddit.s group holds this message; "
+                                                         "C-c C-o opens it on Reddit$")
+                                                 said))
+                            :got (format "%S, said %S" (window-buffer (selected-window)) said))
+                    (when (buffer-live-p summary)
+                      (set-buffer summary)
+                      (gnus-summary-exit-no-update))))
                 ;; entering a label is where Gnus asks nnmaildir for it
                 (gnus-group-jump-to-group "nnmaildir+gmail:emacs")
                 (execute-kbd-macro (kbd "RET"))

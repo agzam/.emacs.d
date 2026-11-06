@@ -530,9 +530,9 @@ listing.  Return (GROUP POSTS COMMENTS EDITS WAITING PROBLEM)."
 
 (defun reddit-fetch-run (store base &optional threads)
   "Fetch every folder under STORE, its links leading to BASE.
-THREADS, as ((GROUP POST...)...), limits the run to those threads.
-Returns one (GROUP POSTS COMMENTS EDITS WAITING PROBLEM) or (GROUP error
-MESSAGE) row per folder."
+THREADS, as ((GROUP POST...)...), limits the run to those folders, each to
+the threads of its POSTs if any.  Returns one (GROUP POSTS COMMENTS EDITS
+WAITING PROBLEM) or (GROUP error MESSAGE) row per folder."
   (let ((gnus-newsrc-hashtb (gnus-make-hashtable))
         (gnus-verbose-backends 0)
         (defs `((directory ,store) (get-new-mail nil))))

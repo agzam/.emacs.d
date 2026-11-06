@@ -11,12 +11,15 @@
 (require 'gnus-bcklg)
 (require 'gnus-group)
 (require 'gnus-sum)
+(require 'gnus-topic)
+(require 'mail-utils)
 (require 'nnmaildir)
 (require 'subr-x)
 
 (defvar doom-cache-dir)
 (defvar doom-emacs-dir)
 (defvar reddit-maildir)
+(defvar reddit-topic)
 (defvar mail-groups)
 (defvar mail-load-running)
 ;; the thread view's, which runs the hook that fetches its thread
@@ -86,17 +89,18 @@ only the folders it finds."
                       t))))
 
 (defun reddit-fetch-command (&optional thread)
-  "Command line of the batch Emacs that fetches every subreddit folder.
-With THREAD, (GROUP . POST), it fetches that thread alone."
+  "Command line of the batch Emacs that fetches each folder `mail-groups' names.
+With THREAD, (GROUP . POST), it fetches that thread alone.  A folder made
+for the threads `show-in-subreddit' asks for gets no listing fetched."
   (list (expand-file-name invocation-name invocation-directory)
         "-Q" "--batch" "--init-directory" reddit-fetch-directory
         "-l" reddit-fetch-script
-        "--eval" (if thread
-                     (format "(reddit-fetch-main %S %S '%S)"
-                             (expand-file-name reddit-maildir) reddit-url
-                             `((,(gnus-group-real-name (car thread)) ,(cdr thread))))
-                   (format "(reddit-fetch-main %S %S)"
-                           (expand-file-name reddit-maildir) reddit-url))))
+        "--eval" (format "(reddit-fetch-main %S %S '%S)"
+                         (expand-file-name reddit-maildir) reddit-url
+                         (if thread
+                             `((,(gnus-group-real-name (car thread)) ,(cdr thread)))
+                           (mapcar (lambda (group) (list (gnus-group-real-name group)))
+                                   (seq-filter #'reddit-group-p mail-groups))))))
 
 (defun start-reddit-fetch (command sentinel)
   "Run the batch fetch COMMAND in the background, SENTINEL watching it."
@@ -188,6 +192,9 @@ starts it when done: both would number the messages it delivers."
 (defvar reddit-thread-asked nil
   "Post of the thread the user asked to fetch, shown again whatever came.")
 
+(defvar reddit-thread-then nil
+  "(POST . FUNCTION) to call once a good fetch of thread POST was read in.")
+
 (defun reddit-post-id (message-id)
   "Reddit post of MESSAGE-ID, a post's or a comment's, or nil."
   (when (and message-id
@@ -217,11 +224,15 @@ nothing within `reddit-thread-fetch-interval' of its last fetch."
 (defun reddit-thread-sentinel (process event group post)
   "Bring on screen what the fetch PROCESS of thread POST brought.
 EVENT says how it ended.  GROUP is read again first, ahead of others.
-A good fetch the user asked for shows the thread whatever it brought."
+A good fetch the user asked for shows the thread whatever it brought, and
+one `reddit-thread-then' waits on calls its function once GROUP is read."
   (when (memq (process-status process) '(exit signal))
     (let* ((ok (and (eq (process-status process) 'exit)
                     (zerop (process-exit-status process))))
            (asked (and ok (equal post reddit-thread-asked)))
+           (then (when (equal post (car reddit-thread-then))
+                   (prog1 (and ok (cdr reddit-thread-then))
+                     (setq reddit-thread-then nil))))
            (count (reddit-fetch-count process "comments"))
            (edits (reddit-fetch-count process "edits")))
       (unless ok
@@ -232,11 +243,14 @@ A good fetch the user asked for shows the thread whatever it brought."
       (when (< 0 edits)
         (forget-shown-articles))
       ;; the store may hold what an earlier fetch brought
-      (when (and (or asked (< 0 (+ count edits))) (gnus-alive-p))
+      (when (and (or asked then (< 0 (+ count edits))) (gnus-alive-p))
         (load-mail-groups (list group) t)
         (wait-for-mail-load 'reddit-thread "for the fetched thread"
                             (lambda () (not (mail-group-pending-p group)))
-                            (lambda () (show-reddit-replies group post count edits asked)))))
+                            (lambda ()
+                              (show-reddit-replies group post count edits asked)
+                              (when then
+                                (funcall then))))))
     (run-hooks 'reddit-fetch-end-hook)
     (fetch-pending-reddit-thread)))
 
@@ -321,27 +335,75 @@ An ARTICLE the summary leaves out comes into it."
     (select-window window)
     (gnus-summary-goto-subject article t)))
 
-(defun show-subreddit-copy (id)
-  "Go to the copy of Message-ID ID in its subreddit's summary, or say it has none."
+(defun reddit-message-link (group article)
+  "URL the Archived-At header of ARTICLE of GROUP names, or nil."
+  (when (gnus-request-head article group)
+    (with-current-buffer nntp-server-buffer
+      (when-let* ((value (mail-fetch-field "Archived-At")))
+        (string-trim value "[ \t\n<]+" "[ \t\n>]+")))))
+
+(defun subreddit-group-of-link (link)
+  "Group of the subreddit whose permalink LINK is, or nil.
+A group Gnus knows under the name in another case is that group."
+  (when (and link (string-match "\\`https?://[^/]+/r/\\([^/]+\\)/" link))
+    (let ((group (concat reddit-group-prefix "r." (match-string 1 link))))
+      (or (seq-find (lambda (known) (string-equal-ignore-case known group))
+                    (seq-filter #'subreddit-group-p gnus-group-list))
+          group))))
+
+(defun ensure-subreddit-group (group)
+  "Make subreddit GROUP's folder, and the group unless Gnus has it.
+It goes under `reddit-topic', and no routine scan reads it: the fetch of
+a thread fills it, then reads it."
+  (dolist (sub '("cur" "new" "tmp"))
+    (make-directory (expand-file-name (concat (gnus-group-real-name group) "/" sub)
+                                      reddit-maildir)
+                    t))
+  (unless (gnus-group-entry group)
+    (subscribe-mail-group group)
+    (gnus-group-change-level group (1+ gnus-activate-level) (gnus-group-level group))
+    ;; a group moved to a topic Gnus lacks would leave every topic
+    (when (assoc reddit-topic gnus-topic-alist)
+      (put-group-in-topic group reddit-topic))))
+
+(defun show-subreddit-copy (id &optional link)
+  "Go to the copy of Message-ID ID in its subreddit's summary.
+Without one, the thread comes first into the group of the subreddit whose
+permalink LINK is, made if need be; with no LINK it says there is none."
   (if-let* ((copy (subreddit-copy id)))
       (goto-mail-summary-article (car copy) (cdr copy))
-    (message "No subreddit's group holds this message; %s opens it on Reddit"
-             (substitute-command-keys "\\[open-mail-on-web]"))))
+    (if-let* ((post (reddit-post-id id))
+              (group (subreddit-group-of-link link)))
+        (progn
+          (ensure-subreddit-group group)
+          ;; Gnus may be off screen by the time the thread is in
+          (setq reddit-thread-then (cons post (lambda ()
+                                                (if (gnus-shown-p)
+                                                    (show-subreddit-copy id)
+                                                  (message "The thread is in %s"
+                                                           (gnus-group-short-name group)))))
+                reddit-thread-fetched-at (assoc-delete-all post reddit-thread-fetched-at))
+          (fetch-reddit-thread group post)
+          (message "Fetching the thread into %s..." (gnus-group-short-name group)))
+      (message "No subreddit's group holds this message; %s opens it on Reddit"
+               (substitute-command-keys "\\[open-mail-on-web]")))))
 
 ;;;###autoload
 (defun show-in-subreddit ()
   "Go to the Reddit message on screen in the summary of its subreddit.
 The inbox and mine hold copies of what a subreddit's group holds, under
-the same Message-ID."
+the same Message-ID; a thread the group lacks is fetched into it first."
   (interactive nil gnus-summary-mode mail-thread-mode gnus-article-mode)
-  (let ((id (mail-header-id (or (cdr (reddit-message-on-screen))
-                                (user-error "No Reddit message here"))))
-        (unloaded (seq-remove #'mail-group-loaded-p
-                              (seq-filter #'subreddit-group-p gnus-group-list))))
+  (pcase-let* ((`(,group . ,header) (or (reddit-message-on-screen)
+                                        (user-error "No Reddit message here")))
+               (id (mail-header-id header))
+               (link (reddit-message-link group (mail-header-number header)))
+               (unloaded (seq-remove #'mail-group-loaded-p
+                                     (seq-filter #'subreddit-group-p gnus-group-list))))
     (when unloaded
       (load-mail-groups unloaded t))
     (wait-for-mail-load 'subreddit "to find the message in its subreddit"
                         (lambda () (not (seq-some #'mail-group-pending-p unloaded)))
-                        (lambda () (show-subreddit-copy id)))))
+                        (lambda () (show-subreddit-copy id link)))))
 
 ;;; reddit.el ends here
