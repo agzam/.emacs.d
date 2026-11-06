@@ -101,20 +101,11 @@ While Reddit hides the score, only a vote shows, as its arrow alone."
 
 ;;; Votes
 
-(defun reddit-vote-target ()
-  "(GROUP . HEADER) of the Reddit message on screen, or nil."
-  (pcase-let ((`(,summary . ,article) (mail-on-screen)))
-    (when (and summary article (buffer-live-p (get-buffer summary)))
-      (with-current-buffer summary
-        (when-let* (((reddit-group-p gnus-newsgroup-name))
-                    (header (gnus-summary-article-header article)))
-          (cons gnus-newsgroup-name header))))))
-
 (defun reddit-vote (wanted)
   "Vote the Reddit message on screen WANTED, 1 up or -1 down.
 The same vote again takes it back, as Reddit's arrows do.  The line shows
 the vote at once, and the vote before it again if Reddit refuses."
-  (pcase-let* ((`(,group . ,header) (or (reddit-vote-target)
+  (pcase-let* ((`(,group . ,header) (or (reddit-message-on-screen)
                                         (user-error "No Reddit message here")))
                (id (mail-header-id header))
                (dir (if (eql (cadr (reddit-score-row group id)) wanted) 0 wanted))

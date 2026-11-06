@@ -415,13 +415,14 @@ KEYS holds a prefix's key and the key under it apart by a space, as
                 :to-equal '((cmds! (reddit-on-screen-p) #'reply-on-reddit #'reply-to-sender)
                             (cmds! (reddit-on-screen-p) #'reply-on-reddit #'reply-to-everyone)))
         (expect (mapcar (lambda (keys) (cdr (assoc keys leader)))
-                        '("u" "/" "?" "c" "f" "r l" "r n" "o g" "o l"))
+                        '("u" "/" "?" "c" "f" "r l" "r n" "o g" "o l" "o r"))
                 :to-equal '((function sync-mail) (function search-mail-live)
                             (function search-mail-like-this)
                             (function compose-new-mail) (function forward-mail)
                             (function reply-to-list) (function follow-up-on-newsgroup)
                             (function open-message-in-gmail)
-                            (function open-message-in-list-archive))))))
+                            (function open-message-in-list-archive)
+                            (function show-in-subreddit))))))
 
   (it "votes on , k and , j wherever a message is read, as vim's up and down"
     (dolist (map '(gnus-summary-mode-map gnus-article-mode-map mail-thread-mode-map))

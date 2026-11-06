@@ -151,7 +151,7 @@ the echo area got last, and `redraws', how often the view was drawn again."
            (header (reddit-scores-tests--header "<c1.p1@reddit.com>"))
            (redraws 0)
            posts said)
-       (cl-letf (((symbol-function 'reddit-vote-target)
+       (cl-letf (((symbol-function 'reddit-message-on-screen)
                   (lambda () (cons "nnmaildir+reddit:r.test" header)))
                  ((symbol-function 'reddit-api-post)
                   (lambda (path params callback) (push (list path params callback) posts)))
@@ -233,7 +233,7 @@ the echo area got last, and `redraws', how often the view was drawn again."
       (expect (reddit-scores-tests--line "<c1.p1@reddit.com>") :to-equal '("↓" reddit-downvoted))))
   (it "say so when no Reddit message is on screen"
     (reddit-scores-tests--voting
-      (cl-letf (((symbol-function 'reddit-vote-target) #'ignore))
+      (cl-letf (((symbol-function 'reddit-message-on-screen) #'ignore))
         (expect (reddit-upvote) :to-throw 'user-error '("No Reddit message here")))
       (expect posts :to-be nil)))
   (it "leave read marks alone"
@@ -246,24 +246,6 @@ the echo area got last, and `redraws', how often the view was drawn again."
           (reddit-upvote)
           (reddit-scores-tests--answer (car posts)))
         (expect marked :to-be nil)))))
-
-(describe "reddit-vote-target"
-  (it "finds the message on screen through its summary, in a Reddit group only"
-    (let ((summary (generate-new-buffer " *reddit-scores-tests summary*"))
-          (header (reddit-scores-tests--header "<c1.p1@reddit.com>")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'mail-on-screen) (lambda () (cons summary 7))))
-            (with-current-buffer summary
-              (setq-local gnus-newsgroup-data (list (gnus-data-make 7 gnus-unread-mark 1 header 0)))
-              (setq-local gnus-newsgroup-name "nnmaildir+reddit:r.test"))
-            (expect (reddit-vote-target) :to-equal (cons "nnmaildir+reddit:r.test" header))
-            (with-current-buffer summary
-              (setq-local gnus-newsgroup-name "nnmaildir+gmail:inbox"))
-            (expect (reddit-vote-target) :to-be nil))
-        (kill-buffer summary))))
-  (it "finds nothing in an article buffer no summary shows"
-    (cl-letf (((symbol-function 'mail-on-screen) (lambda () (cons nil nil))))
-      (expect (reddit-vote-target) :to-be nil))))
 
 (describe "the score faces"
   (it "draw a score smaller than its line, a vote or one below zero too"

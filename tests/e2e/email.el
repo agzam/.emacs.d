@@ -757,6 +757,10 @@ buffers, summary and queued files the cases leave are cleared after."
          (reddit-root (expand-file-name "reddit/" e2e-work-dir))
          (reddit-group "nnmaildir+reddit:r.test")
          (reddit-dir (expand-file-name "r.test/" reddit-root))
+         ;; the login's inbox: a copy of c2 and a reply in a subreddit no
+         ;; group reads, both read, so the group buffer lists no line
+         (reddit-inbox-group "nnmaildir+reddit:inbox")
+         (reddit-inbox-dir (expand-file-name "inbox/" reddit-root))
          (reddit-outbox (expand-file-name "reddit-outbox/" e2e-work-dir))
          (reddit-go (expand-file-name "reddit-go" e2e-work-dir))
          ;; the scores the stand-in's next fetch saves in r.test
@@ -827,7 +831,7 @@ buffers, summary and queued files the cases leave are cleared after."
          ;; the module's mail-groups would add gmane and Reddit, which
          ;; CI cannot reach
          (gmail-maildir root)
-         (mail-groups (list feed-group news-group reddit-group))
+         (mail-groups (list feed-group news-group reddit-group reddit-inbox-group))
          ;; html and moved are left out; trash and labelled start empty
          (mail-topics `(("Gmail" ("nnmaildir+gmail:inbox" . "Inbox")
                          ("nnmaildir+gmail:archive" . "All Mail")
@@ -850,7 +854,10 @@ buffers, summary and queued files the cases leave are cleared after."
           `((nnmaildir "gmail" (directory ,root) (get-new-mail nil))
             (nnmaildir "news" (directory ,news-root) (get-new-mail nil)
                        (gnus-search-engine gnus-search-notmuch (remove-prefix ,news-root)))
-            (nnmaildir "reddit" (directory ,reddit-root) (get-new-mail nil))
+            ;; as the module's: a hit in the Gmail store's inbox would
+            ;; read as one of the Reddit inbox otherwise
+            (nnmaildir "reddit" (directory ,reddit-root) (get-new-mail nil)
+                       (gnus-search-engine gnus-search-notmuch (remove-prefix ,reddit-root)))
             (nnatom ,feed (nnatom-read-title-function ,(lambda (_) "r/emacs"))
                     (nnatom-read-feed-function read-atom-feed))))
          (gnus-startup-file (expand-file-name "newsrc" e2e-work-dir))
@@ -955,6 +962,13 @@ buffers, summary and queued files the cases leave are cleared after."
     (email-e2e--write-reddit-message (expand-file-name "1700000053.53.fixture" reddit-outbox)
                                      "c3.p1" "Mon, 28 Sep 2026 13:00:00 +0000"
                                      "<p1@reddit.com> <c1.p1@reddit.com> <c2.p1@reddit.com>")
+    (dolist (sub '("cur" "new" "tmp"))
+      (make-directory (expand-file-name sub reddit-inbox-dir) t))
+    (email-e2e--write-reddit-message (expand-file-name "cur/1700000060.60.fixture" reddit-inbox-dir)
+                                     "c2.p1" "Mon, 28 Sep 2026 12:00:00 +0000"
+                                     "<p1@reddit.com> <c1.p1@reddit.com>" "S")
+    (email-e2e--write-reddit-message (expand-file-name "cur/1700000061.61.fixture" reddit-inbox-dir)
+                                     "c9.p9" "Mon, 28 Sep 2026 15:00:00 +0000" "<p9@reddit.com>" "S")
     ;; an outbox file named as one cur/ holds is an edit, written over it
     (with-temp-file reddit-fetch-script
       (prin1 `(defun reddit-fetch-main (store _base &optional _threads)
@@ -1766,6 +1780,46 @@ buffers, summary and queued files the cases leave are cleared after."
                           :got (format "%S" opened)))
                 (when (derived-mode-p 'gnus-summary-mode)
                   (gnus-summary-exit-no-update))
+                ;; , o r goes from the inbox's copy of c2 to the one the
+                ;; subreddit's summary shows
+                (gnus-group-jump-to-group reddit-inbox-group)
+                (execute-kbd-macro (kbd "RET"))
+                (let ((inbox-summary (and (derived-mode-p 'gnus-summary-mode) (current-buffer)))
+                      said shown)
+                  (cl-flet ((goto (id)
+                              (gnus-summary-goto-subject
+                               (gnus-data-number
+                                (seq-find (lambda (data)
+                                            (equal (mail-header-id (gnus-data-header data)) id))
+                                          gnus-newsgroup-data)))))
+                    (when inbox-summary
+                      (goto "<c9.p9@reddit.com>")
+                      (let ((logged (with-current-buffer (messages-buffer) (point-max-marker))))
+                        (execute-kbd-macro (kbd ", o r"))
+                        (setq said (with-current-buffer (messages-buffer)
+                                     (buffer-substring-no-properties logged (point-max)))))
+                      ;; message curls the apostrophe
+                      (record ", o r on an inbox message no subreddit's group holds says so and names C-c C-o"
+                              (and (eq (current-buffer) inbox-summary)
+                                   (string-match-p (concat "^No subreddit.s group holds this message; "
+                                                           "C-c C-o opens it on Reddit$")
+                                                   said))
+                              :got (format "%s, said %S" (buffer-name) said))
+                      (goto "<c2.p1@reddit.com>")
+                      (execute-kbd-macro (kbd ", o r"))
+                      (setq shown (and (derived-mode-p 'gnus-summary-mode)
+                                       (list gnus-newsgroup-name
+                                             (mail-header-id (gnus-summary-article-header))
+                                             (eq (window-buffer (selected-window))
+                                                 (current-buffer)))))))
+                  (record ", o r on an inbox message shows its copy in the subreddit's summary"
+                          (equal shown (list reddit-group "<c2.p1@reddit.com>" t))
+                          :got (format "%s: %S" major-mode shown))
+                  (when (derived-mode-p 'gnus-summary-mode)
+                    (gnus-summary-exit-no-update))
+                  (when (buffer-live-p inbox-summary)
+                    (set-buffer inbox-summary)
+                    (gnus-summary-exit-no-update)))
                 ;; the start's fetch delivers once reddit-go exists, and
                 ;; its end reads the group again
                 (write-region "" nil reddit-go)

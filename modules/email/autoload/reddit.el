@@ -11,6 +11,7 @@
 (require 'gnus-bcklg)
 (require 'gnus-group)
 (require 'gnus-sum)
+(require 'nnmaildir)
 (require 'subr-x)
 
 (defvar doom-cache-dir)
@@ -290,5 +291,57 @@ The inbox and mine take theirs with the next fetch of their listing."
           reddit-thread-asked post)
     (fetch-reddit-thread mail-thread-group post)
     (message "Fetching the thread from Reddit...")))
+
+;;; The message on screen in its subreddit
+
+;;;###autoload
+(defun reddit-message-on-screen ()
+  "(GROUP . HEADER) of the Reddit message on screen, or nil."
+  (pcase-let ((`(,summary . ,article) (mail-on-screen)))
+    (when (and summary article (buffer-live-p (get-buffer summary)))
+      (with-current-buffer summary
+        (when-let* (((reddit-group-p gnus-newsgroup-name))
+                    (header (gnus-summary-article-header article)))
+          (cons gnus-newsgroup-name header))))))
+
+(defun subreddit-copy (id)
+  "(GROUP . ARTICLE) of the copy of Message-ID ID a subreddit's group holds, or nil."
+  (seq-some (lambda (group)
+              (when-let* ((loaded (mail-group-loaded-p group))
+                          (article (gethash id (nnmaildir--grp-mlist loaded))))
+                (cons group (nnmaildir--art-num article))))
+            (seq-filter #'subreddit-group-p gnus-group-list)))
+
+(defun goto-mail-summary-article (group article)
+  "Show GROUP's summary, entering GROUP unless it is open, at ARTICLE.
+An ARTICLE the summary leaves out comes into it."
+  (with-current-buffer gnus-group-buffer
+    (gnus-group-read-group nil t group))
+  (when-let* ((window (get-buffer-window (gnus-summary-buffer-name group))))
+    (select-window window)
+    (gnus-summary-goto-subject article t)))
+
+(defun show-subreddit-copy (id)
+  "Go to the copy of Message-ID ID in its subreddit's summary, or say it has none."
+  (if-let* ((copy (subreddit-copy id)))
+      (goto-mail-summary-article (car copy) (cdr copy))
+    (message "No subreddit's group holds this message; %s opens it on Reddit"
+             (substitute-command-keys "\\[open-mail-on-web]"))))
+
+;;;###autoload
+(defun show-in-subreddit ()
+  "Go to the Reddit message on screen in the summary of its subreddit.
+The inbox and mine hold copies of what a subreddit's group holds, under
+the same Message-ID."
+  (interactive nil gnus-summary-mode mail-thread-mode gnus-article-mode)
+  (let ((id (mail-header-id (or (cdr (reddit-message-on-screen))
+                                (user-error "No Reddit message here"))))
+        (unloaded (seq-remove #'mail-group-loaded-p
+                              (seq-filter #'subreddit-group-p gnus-group-list))))
+    (when unloaded
+      (load-mail-groups unloaded t))
+    (wait-for-mail-load 'subreddit "to find the message in its subreddit"
+                        (lambda () (not (seq-some #'mail-group-pending-p unloaded)))
+                        (lambda () (show-subreddit-copy id)))))
 
 ;;; reddit.el ends here

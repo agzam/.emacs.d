@@ -525,4 +525,96 @@ says OUTPUT before it exits."
         (when (timerp reddit-fetch-timer)
           (cancel-timer reddit-fetch-timer))))))
 
+(defun reddit-tests--header (id)
+  "Header of article 7, a Reddit message whose Message-ID is ID."
+  (make-full-mail-header 7 "Re: Reddit post" "\"u/ann\" <ann@reddit.invalid>"
+                         "Mon, 28 Sep 2026 10:00:00 +0000" id "" 0 0))
+
+(describe "reddit-message-on-screen"
+  (it "finds the message on screen through its summary, in a Reddit group only"
+    (let ((summary (generate-new-buffer " *reddit-tests summary*"))
+          (header (reddit-tests--header "<c1.p1@reddit.com>")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'mail-on-screen) (lambda () (cons summary 7))))
+            (with-current-buffer summary
+              (setq-local gnus-newsgroup-data (list (gnus-data-make 7 gnus-unread-mark 1 header 0)))
+              (setq-local gnus-newsgroup-name "nnmaildir+reddit:inbox"))
+            (expect (reddit-message-on-screen) :to-equal (cons "nnmaildir+reddit:inbox" header))
+            (with-current-buffer summary
+              (setq-local gnus-newsgroup-name "nnmaildir+gmail:inbox"))
+            (expect (reddit-message-on-screen) :to-be nil))
+        (kill-buffer summary))))
+  (it "finds nothing in an article buffer no summary shows"
+    (cl-letf (((symbol-function 'mail-on-screen) (lambda () (cons nil nil))))
+      (expect (reddit-message-on-screen) :to-be nil))))
+
+(describe "subreddit-copy"
+  (it "finds the copy a subreddit's group holds, never the inbox's or mine's"
+    (let ((groups (make-hash-table :test #'equal)))
+      (pcase-dolist (`(,group . ,articles)
+                     '(("nnmaildir+reddit:inbox" ("<c2.p1@reddit.com>" . 3))
+                       ("nnmaildir+reddit:mine" ("<c2.p1@reddit.com>" . 4))
+                       ("nnmaildir+reddit:r.test" ("<p1@reddit.com>" . 50)
+                        ("<c2.p1@reddit.com>" . 52))))
+        (let ((mlist (make-hash-table :test #'equal)))
+          (pcase-dolist (`(,id . ,number) articles)
+            (puthash id (make-nnmaildir--art :msgid id :num number) mlist))
+          (puthash group (make-nnmaildir--grp :mlist mlist) groups)))
+      ;; nnmaildir holds no r.other yet
+      (cl-letf (((symbol-function 'mail-group-loaded-p) (lambda (group) (gethash group groups))))
+        (let ((gnus-group-list '("nnmaildir+reddit:inbox" "nnmaildir+reddit:mine"
+                                 "nnmaildir+reddit:r.other" "nnmaildir+reddit:r.test"
+                                 "nnmaildir+gmail:inbox")))
+          (expect (subreddit-copy "<c2.p1@reddit.com>") :to-equal '("nnmaildir+reddit:r.test" . 52))
+          (expect (subreddit-copy "<c9.p9@reddit.com>") :to-be nil))))))
+
+(describe "show-in-subreddit"
+  (cl-flet ((show (copy &optional unloaded)
+              ;; the loads it asks for, its wait, and where it goes or what it says
+              (let ((pending unloaded)
+                    calls)
+                (cl-letf (((symbol-function 'reddit-message-on-screen)
+                           (lambda () (cons "nnmaildir+reddit:inbox"
+                                            (reddit-tests--header "<c2.p1@reddit.com>"))))
+                          ((symbol-function 'mail-group-loaded-p)
+                           (lambda (group) (not (member group unloaded))))
+                          ((symbol-function 'mail-group-pending-p)
+                           (lambda (group) (member group pending)))
+                          ((symbol-function 'load-mail-groups)
+                           (lambda (groups &optional first) (push (list 'load groups first) calls)))
+                          ((symbol-function 'wait-for-mail-load)
+                           (lambda (_key _what predicate action)
+                             (push (list 'wait (and (funcall predicate) t)) calls)
+                             ;; the loads end
+                             (setq pending nil)
+                             (when (funcall predicate)
+                               (funcall action))))
+                          ((symbol-function 'subreddit-copy)
+                           (lambda (id) (push (list 'copy id) calls) copy))
+                          ((symbol-function 'goto-mail-summary-article)
+                           (lambda (&rest args) (push (cons 'goto args) calls)))
+                          ((symbol-function 'message)
+                           (lambda (format &rest args)
+                             (push (list 'said (apply #'format format args)) calls))))
+                  (let ((gnus-group-list '("nnmaildir+reddit:inbox" "nnmaildir+reddit:r.test")))
+                    (show-in-subreddit)))
+                (nreverse calls))))
+    (it "goes to the copy of the message on screen in its subreddit's summary"
+      (expect (show '("nnmaildir+reddit:r.test" . 52))
+              :to-equal '((wait t) (copy "<c2.p1@reddit.com>")
+                          (goto "nnmaildir+reddit:r.test" 52))))
+    (it "reads a subreddit's group nnmaildir lacks first, and looks once it is read"
+      (expect (show '("nnmaildir+reddit:r.test" . 52) '("nnmaildir+reddit:r.test"))
+              :to-equal '((load ("nnmaildir+reddit:r.test") t) (wait nil)
+                          (copy "<c2.p1@reddit.com>") (goto "nnmaildir+reddit:r.test" 52))))
+    (it "says so when no subreddit's group holds the message, and how to open it on Reddit"
+      (let ((calls (show nil)))
+        (expect (butlast calls) :to-equal '((wait t) (copy "<c2.p1@reddit.com>")))
+        (expect (car (last calls))
+                :to-equal (list 'said (format "No subreddit's group holds this message; %s opens it on Reddit"
+                                              (substitute-command-keys "\\[open-mail-on-web]")))))))
+  (it "refuses where no Reddit message is on screen"
+    (cl-letf (((symbol-function 'reddit-message-on-screen) #'ignore))
+      (expect (show-in-subreddit) :to-throw 'user-error '("No Reddit message here")))))
+
 ;;; reddit-tests.el ends here

@@ -293,8 +293,9 @@ are applied again from `evil-collection-setup-hook'."
               :desc "to the list only" "l" #'reply-to-list
               :desc "on the newsgroup" "n" #'follow-up-on-newsgroup)
              (:prefix ("o" . "open")
-              :desc "in Gmail"        "g" #'open-message-in-gmail
-              :desc "in list archive" "l" #'open-message-in-list-archive)))
+              :desc "in Gmail"         "g" #'open-message-in-gmail
+              :desc "in list archive"  "l" #'open-message-in-list-archive
+              :desc "in its subreddit" "r" #'show-in-subreddit)))
       (map! :map gnus-summary-mode-map
             :n "RET" #'open-mail-thread
             :n "<return>" #'open-mail-thread
