@@ -33,10 +33,10 @@
                (key-binding (kbd keys))
                command))
             '(;; the leader keys eca apart from gptel, under its own prefix
-              ("SPC x e n" . eca)
-              ("SPC x e r" . eca-chat-resume)
-              ("SPC x e a" . eca-continue-from-file)
-              ("SPC x e e" . eca-toggle-workspaces)))))
+              ("SPC e n" . eca)
+              ("SPC e r" . eca-chat-resume)
+              ("SPC e a" . eca-continue-from-file)
+              ("SPC e e" . eca-toggle-workspaces)))))
 
 (defun eca-continue-e2e--guards ()
   "The guards are attached to the commands they protect."

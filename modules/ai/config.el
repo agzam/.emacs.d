@@ -187,7 +187,7 @@
                 #'gptel-inline-project-chat-buffer))
 
   ;; ESC stash-dismisses the visible overlay through the escape-hook
-  ;; chain (like evil-mc and lsp); the SPC x g i dwim re-attaches it.
+  ;; chain (like evil-mc and lsp); the SPC g i dwim re-attaches it.
   ;; M-RET stays as upstream's action-menu key.
   (add-hook 'doom-escape-hook #'gptel-inline-dismiss-overlay-h)
 

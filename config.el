@@ -309,8 +309,13 @@
           :desc "act on url" "a" #'browser-tab-act
           :desc "in eww" "e" #'browser-active-tab->eww))
 
-      ( :prefix ("e" . "edit")
-        :desc "edit indirect" "i" #'edit-indirect-region)
+      ( :prefix ("e" . "eca/edit")
+        :desc "edit indirect" "i" #'edit-indirect-region
+        ( :when (modulep! :custom ai)
+          :desc "workspaces" "e" #'eca-toggle-workspaces
+          "n" #'eca
+          "r" #'eca-chat-resume
+          :desc "continue archived eca chat" "a" #'eca-continue-from-file))
 
       ( :prefix ("f" . "files")
         ( :when (modulep! :custom search)
@@ -325,12 +330,23 @@
           ( :when (featurep :system 'linux)
             :desc "awesomewm config" "a" (cmd! (dired "~/.config/awesome/")))))
 
-      ( :prefix ("g" . "goto/git")
+      ( :prefix ("g" . "git/gptel")
         :desc "magit file" "f" #'magit-file-dispatch
         :desc "jump list" "j" #'evil-show-jumps
         :desc "git status" "s" #'magit-status
         :desc "blame" "b" #'magit-blame-addition
         :desc "clone" "C" #'git-clone
+        ( :when (modulep! :custom ai)
+          "g" #'gptel-menu
+          :desc "check text" "e" #'gptel-improve-text-transient
+          "i" #'gptel-inline-dwim
+          "m" #'gptel-mode
+          "n" #'open-gptel
+          :desc "quick" "q" #'gptel-quick-question-buffer
+          ;; s is magit-status
+          "RET" #'gptel-send
+          "v" #'gptel-inline-visit-last-chat
+          :desc "search" "/" #'gptel-log-find)
         ( :prefix ("c" . "consult-gh")
           "o" #'consult-gh-orgs
           "r" #'consult-gh-search-repos
@@ -479,23 +495,7 @@
             :desc "es->en" "s" #'google-translate-es->en
             :desc "en->es" "S" #'google-translate-en->es
             :desc "translate" "t" #'translate-transient
-            :desc "popup" "p" #'google-translate-posframe-at-point))
-        ( :when (modulep! :custom ai)
-          ( :prefix ("g" . "gptel")
-            :desc "check text" "e" #'gptel-improve-text-transient
-            "i" #'gptel-inline-dwim
-            "g" #'gptel-menu
-            "m" #'gptel-mode
-            "n" #'open-gptel
-            :desc "quick" "q" #'gptel-quick-question-buffer
-            "s" #'gptel-send
-            "v" #'gptel-inline-visit-last-chat
-            :desc "search" "/" #'gptel-log-find)
-          ( :prefix ("e" . "eca")
-            "e" #'eca-toggle-workspaces
-            "n" #'eca
-            "r" #'eca-chat-resume
-            :desc "continue archived eca chat" "a" #'eca-continue-from-file)))
+            :desc "popup" "p" #'google-translate-posframe-at-point)))
       ( :prefix ("z" . "zoom")
         :desc "frame" "f" #'frame-zoom-transient))
 

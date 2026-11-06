@@ -41,7 +41,7 @@
                   (beginning-of-line))
                 (discard-input))
               (open-menu ()
-                (execute-kbd-macro (kbd "SPC x g e"))
+                (execute-kbd-macro (kbd "SPC g e"))
                 (and (bound-and-true-p transient--prefix)
                      (oref transient--prefix command)))
               (summarize-stub (prompt &rest args)
