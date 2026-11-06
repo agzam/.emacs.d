@@ -595,7 +595,37 @@ the order given, oldest first, so recency is deterministic."
         (select-window win)
         (eca-toggle-workspaces)
         (expect (window-live-p win) :to-be nil)
-        (expect 'eca-workspaces :not :to-have-been-called)))))
+        (expect 'eca-workspaces :not :to-have-been-called))))
+
+  ;; the leader key can come before anything has loaded eca-workspaces.el,
+  ;; which is what defines the buffer name
+  (it "opens the dashboard before eca-workspaces.el has loaded"
+    (let ((name eca-workspaces-buffer-name))
+      (makunbound 'eca-workspaces-buffer-name)
+      (unwind-protect
+          (progn (eca-toggle-workspaces)
+                 (expect 'eca-workspaces :to-have-been-called))
+        (setq eca-workspaces-buffer-name name)))))
+
+(describe "eca-workspaces-drop-button-local-map-a"
+  (it "strips local-map and keeps the keymap that runs the button"
+    (with-temp-buffer
+      (let ((button-map (make-sparse-keymap)))
+        (insert (propertize "▼ project" 'local-map button-map 'keymap button-map)
+                "  1 chat\n")
+        ;; the dashboard is a `special-mode' buffer
+        (setq buffer-read-only t)
+        (set-buffer-modified-p nil)
+        (eca-workspaces-drop-button-local-map-a)
+        (expect (text-property-not-all (point-min) (point-max) 'local-map nil)
+                :to-be nil)
+        (expect (get-text-property (point-min) 'keymap) :to-be button-map)
+        (expect (buffer-modified-p) :to-be nil))))
+
+  (it "runs after every render of the dashboard"
+    (expect (advice-member-p 'eca-workspaces-drop-button-local-map-a
+                             'eca-workspaces--render)
+            :to-be-truthy)))
 
 
 ;; eca-ghostel.el is not part of this config, so its `eca-ghostel-list'

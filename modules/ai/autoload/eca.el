@@ -165,12 +165,23 @@ against re-adding a remap that would stack multiplicatively."
 (defun eca-toggle-workspaces ()
   "Show, focus, or dismiss the eca-workspaces side window."
   (interactive)
-  (if-let* ((buf (get-buffer eca-workspaces-buffer-name))
+  (if-let* (((boundp 'eca-workspaces-buffer-name))
+            (buf (get-buffer eca-workspaces-buffer-name))
             (win (get-buffer-window buf t)))
       (if (eq win (selected-window))
           (delete-window win)
         (select-window win))
     (eca-workspaces)))
+
+;;;###autoload
+(defadvice! eca-workspaces-drop-button-local-map-a (&rest _)
+  "Strip the `local-map' property from the dashboard's buttons.
+It replaces the mode map under point, and evil rebuilds its keymaps from
+the maps active at point on each state change, so a change on a button
+drops every dashboard key.  The `keymap' property still runs the button."
+  :after #'eca-workspaces--render
+  (with-silent-modifications
+    (remove-list-of-text-properties (point-min) (point-max) '(local-map))))
 
 ;;;###autoload
 (defun eca-reauth ()

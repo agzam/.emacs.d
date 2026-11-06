@@ -304,16 +304,35 @@
               ( :prefix ("w" . "workspace")
                 "a" #'eca-chat-add-workspace-root
                 "r" #'eca-chat-remove-workspace-root
-                "w" #'eca-toggle-workspaces)))
-      (map! :map eca-workspaces-mode-map
-            "n" #'eca-workspaces-new-chat
-            "q" #'eca-toggle-workspaces
-            ( :localleader
-              "w w" #'eca-toggle-workspaces)))
+                "w" #'eca-toggle-workspaces))))
     (defun eca-chat-mode-markup-no-hiding-h ()
       (markdown-toggle-markup-hiding -1))
     (defun eca-chat-mode-scroll-margin-h ()
       (set-local 'scroll-margin 1))))
+
+;; The map comes from eca-workspaces.el; general holds this until it loads.
+;; The localleader keys repeat the letters of the ? menu.
+(map! :map eca-workspaces-mode-map
+      :n "?" #'eca-workspaces-menu
+      :n "q" #'eca-toggle-workspaces
+      :n "n" #'eca-workspaces-new-chat
+      ( :localleader
+        :desc "actions"          "," #'eca-workspaces-menu
+        :desc "new chat"         "n" #'eca-workspaces-new-chat
+        :desc "resume chat"      "R" #'eca-workspaces-resume
+        :desc "refresh"          "g" #'eca-workspaces-refresh
+        :desc "rename"           "r" #'eca-workspaces-rename-chat
+        :desc "fork"             "f" #'eca-workspaces-fork-chat
+        :desc "compact"          "C" #'eca-workspaces-compact-chat
+        :desc "model"            "m" #'eca-workspaces-select-model
+        :desc "variant"          "v" #'eca-workspaces-select-variant
+        :desc "stop prompt"      "s" #'eca-workspaces-stop-prompt
+        :desc "delete"           "d" #'eca-workspaces-delete
+        :desc "accept tool call" "a" #'eca-workspaces-tool-call-accept-next
+        :desc "accept all"       "A" #'eca-workspaces-tool-call-accept-all
+        :desc "reject tool call" "x" #'eca-workspaces-tool-call-reject-next
+        ( :prefix ("w" . "workspace")
+          :desc "close" "w" #'eca-toggle-workspaces)))
 
 (use-package mcp
   :ensure (mcp :host github :repo "lizqwerscott/mcp.el")
