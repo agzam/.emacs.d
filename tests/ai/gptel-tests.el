@@ -671,51 +671,19 @@
           (features (remq 'gptel-agent features)))
       (expect (gptel-all-tools) :to-equal '(bash-tool search-tool)))))
 
-(describe "gptel-mode-select-all-tools-h"
-  (before-each
-    (spy-on 'gptel-all-tools :and-return-value '(tool-a tool-b)))
+(describe "gptel-rewrite-without-tools-a"
+  ;; gptel is absent here; `cl-progv' stands in for its global switch
+  (it "calls the function with its arguments while tools are off"
+    (cl-progv '(gptel-use-tools) '(t)
+      (expect (gptel-rewrite-without-tools-a
+               (lambda (&rest args) (list args (symbol-value 'gptel-use-tools)))
+               'msg 'dry)
+              :to-equal '((msg dry) nil))))
 
-  (it "selects every tool in a chat that starts with none"
-    (let ((gptel-tools nil))
-      (with-temp-buffer
-        (setq-local gptel-mode t)
-        (gptel-mode-select-all-tools-h)
-        (expect (local-variable-p 'gptel-tools) :to-be t)
-        (expect gptel-tools :to-equal '(tool-a tool-b)))))
-
-  ;; restored from the chat file, applied by a preset, or set from the menu
-  (it "keeps the buffer's own selection"
-    (let ((gptel-tools nil))
-      (with-temp-buffer
-        (setq-local gptel-mode t
-                    gptel-tools '(tool-a))
-        (gptel-mode-select-all-tools-h)
-        (expect gptel-tools :to-equal '(tool-a)))))
-
-  (it "keeps the buffer's own choice of no tools"
-    (let ((gptel-tools nil))
-      (with-temp-buffer
-        (setq-local gptel-mode t
-                    gptel-tools nil)
-        (gptel-mode-select-all-tools-h)
-        (expect gptel-tools :to-be nil)
-        (expect 'gptel-all-tools :not :to-have-been-called))))
-
-  ;; the global scope of `gptel-menu' picks the tools every chat starts with
-  (it "leaves a global selection in charge"
-    (let ((gptel-tools '(tool-b)))
-      (with-temp-buffer
-        (setq-local gptel-mode t)
-        (gptel-mode-select-all-tools-h)
-        (expect (local-variable-p 'gptel-tools) :to-be nil)
-        (expect 'gptel-all-tools :not :to-have-been-called))))
-
-  (it "does nothing as gptel-mode turns off"
-    (let ((gptel-tools nil))
-      (with-temp-buffer
-        (setq-local gptel-mode nil)
-        (gptel-mode-select-all-tools-h)
-        (expect (local-variable-p 'gptel-tools) :to-be nil)))))
+  (it "turns the tools back on once the function returns"
+    (cl-progv '(gptel-use-tools) '(t)
+      (gptel-rewrite-without-tools-a #'ignore)
+      (expect (symbol-value 'gptel-use-tools) :to-be t))))
 
 (describe "gptel-send-show-model-a"
   :var (shown)
@@ -1573,7 +1541,39 @@
               (push-mark (point-min) t t)
               (goto-char (point-max))
               (gptel-improve-text)))
-          (expect seen :to-equal '(chat-backend chat-model)))))))
+          (expect seen :to-equal '(chat-backend chat-model))))))
+
+  ;; gptel selects every tool globally; a rewrite has no use for them
+  (it "rewrites in place without tools"
+    (with-current-buffer buf
+      (insert "sum txt to fix")
+      (cl-progv '(gptel-use-tools) '(t)
+        (let (seen)
+          (cl-letf (((symbol-function 'gptel--suffix-rewrite)
+                     (lambda (&rest _)
+                       (setq seen (list (symbol-value 'gptel-use-tools))))))
+            (let ((transient-mark-mode t))
+              (push-mark (point-min) t t)
+              (goto-char (point-max))
+              (gptel-improve-text)))
+          (expect seen :to-equal '(nil))
+          (expect (symbol-value 'gptel-use-tools) :to-be t)))))
+
+  (it "sends aside prompts without tools"
+    (with-current-buffer buf
+      (insert "(defun riddle ())")
+      (cl-progv '(gptel-use-tools) '(t)
+        (let (seen)
+          (cl-letf (((symbol-function 'gptel-request)
+                     (lambda (&rest _)
+                       (setq seen (list (symbol-value 'gptel-use-tools))))))
+            (setq gptel-improve-text-prompt
+                  (nth 3 gptel-improve-text-prompts-history)) ;explain code
+            (let ((transient-mark-mode t))
+              (push-mark (point-min) t t)
+              (goto-char (point-max))
+              (gptel-improve-text)))
+          (expect seen :to-equal '(nil)))))))
 
 (describe "gptel-summary-bounds"
   :var (buf)

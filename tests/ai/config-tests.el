@@ -89,11 +89,22 @@
       (expect setting :to-be-truthy)
       (expect (cadr setting) :to-be nil)))
 
-  (it "are all selected when a chat starts"
-    (expect (seq-some (lambda (call)
-                        (and (equal (cadr call) ''gptel-mode-hook)
-                             (member '#'gptel-mode-select-all-tools-h (cddr call))))
-                      (ai-tests--calls 'add-hook!))
+  ;; gptel-menu outside a chat shows the global value, and selecting before
+  ;; registration would miss every MCP tool
+  (it "are all selected globally once the MCP tools register"
+    (let* ((mcp (seq-find (lambda (form)
+                            (and (eq (car-safe form) 'use-package)
+                                 (eq (cadr form) 'mcp)))
+                          ai-tests--forms))
+           (config (cdr (memq :config mcp))))
+      (expect (member '(setq-default gptel-tools (gptel-all-tools))
+                      (member '(register-mcp-tools-lazy) config))
+              :to-be-truthy)))
+
+  (it "stay out of rewrites"
+    (expect (member '(advice-add #'gptel--suffix-rewrite
+                                 :around #'gptel-rewrite-without-tools-a)
+                    (ai-tests--calls 'advice-add))
             :to-be-truthy)))
 
 (describe "ticket summary keys in ai/config.el"

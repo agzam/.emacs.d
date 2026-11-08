@@ -56,7 +56,11 @@
 
     ;; buffer-wide keys need commands that resolve without point
     (advice-add #'gptel--rewrite-overlay-at
-                :around #'gptel-rewrite-overlay-anywhere-a))
+                :around #'gptel-rewrite-overlay-anywhere-a)
+
+    ;; every rewrite path, iterate included, sends through this suffix
+    (advice-add #'gptel--suffix-rewrite
+                :around #'gptel-rewrite-without-tools-a))
 
   (after! gptel-transient
     ;; RET stays a newline in the chat buffer; send/confirm move to
@@ -117,7 +121,6 @@
 
   (add-hook! 'gptel-mode-hook
     #'gptel-highlight-mode
-    #'gptel-mode-select-all-tools-h
     (defun gptel-mode-set-local-keys-h ()
       (map! :map gptel-mode-map
             :i "RET" nil
@@ -339,7 +342,9 @@
   :after gptel
   :config
   (setopt mcp-hub-servers (mcp-servers-from-eca-config))
-  (register-mcp-tools-lazy))
+  (register-mcp-tools-lazy)
+  ;; the global selection is what gptel-menu and every new chat start with
+  (setq-default gptel-tools (gptel-all-tools)))
 
 (use-package gptel-agent
   :ensure (gptel-agent :host github :repo "karthink/gptel-agent"

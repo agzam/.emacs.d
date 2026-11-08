@@ -413,7 +413,7 @@ follows its own precedent, so one such answer wedges the buffer."
 ;; gptel's own, special here even before gptel loads
 (defvar gptel--known-tools)
 (defvar gptel-tools)
-(defvar gptel-mode)
+(defvar gptel-use-tools)
 
 ;;;###autoload
 (defun gptel-all-tools ()
@@ -426,14 +426,11 @@ follows its own precedent, so one such answer wedges the buffer."
            append (mapcar #'cdr tools)))
 
 ;;;###autoload
-(defun gptel-mode-select-all-tools-h ()
-  "Select every known tool in a chat that starts with none.
-A selection of the buffer's own - restored from its file, or set by a
-preset or `gptel-menu' - stays, and so does a global one."
-  (when (and gptel-mode
-             (not gptel-tools)
-             (not (local-variable-p 'gptel-tools)))
-    (setq-local gptel-tools (gptel-all-tools))))
+(defun gptel-rewrite-without-tools-a (fn &rest args)
+  "Call FN with ARGS while gptel sends no tools.
+A rewrite wants the replacement text back, not tool calls."
+  (let ((gptel-use-tools nil))
+    (apply fn args)))
 
 ;;;###autoload
 (defun gptel-send-show-model-a (send &rest args)
@@ -1120,7 +1117,9 @@ in INFO."
                     "fix mistakes\\|correct mistakes\\|simplify"
                     gptel-improve-text-prompt))
         (gptel-backend (or gptel-improve-text-backend gptel-backend))
-        (gptel-model (or gptel-improve-text-model gptel-model)))
+        (gptel-model (or gptel-improve-text-model gptel-model))
+        ;; the global tool selection would ride along on both paths
+        (gptel-use-tools nil))
     (message "beep-bop... checking your crap with %s" gptel-model)
     (if in-place?
         (let ((instruction
