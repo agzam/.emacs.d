@@ -134,4 +134,13 @@ neither `use-package' nor general (behind `map!') exists."
         (expect (cdr (assoc "N" keys))
                 :to-equal '(cmd! (open-journal-date 'personal)))))))
 
+
+(describe "org-pomodoro recipe"
+  ;; past the pin a bad upstream merge leaves the file unreadable, and the
+  ;; failed require inside org's after-load hooks unprovides gptel with it
+  (it "pins org-pomodoro to the last commit that loads"
+    (let ((recipe (cadr (memq :ensure (org-config-tests--use-package 'org-pomodoro)))))
+      (expect (car-safe recipe) :to-be 'org-pomodoro)
+      (expect (plist-get (cdr recipe) :ref) :to-equal "e6c3d53"))))
+
 ;;; config-tests.el ends here

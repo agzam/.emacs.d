@@ -557,7 +557,9 @@
 ;; doom.d set edit-indirect-guess-mode-function to edit-indirect-guess-mode-fn+,
 ;; which was never defined anywhere - dropped rather than port a void ref.
 
+;; past the pin a bad merge broke a docstring and the file fails to load
 (use-package org-pomodoro
+  :ensure (org-pomodoro :ref "e6c3d53")
   :after org
   :config
   ;; C-x p p (doom.d's global bind) now belongs to popup-other; pomodoro is

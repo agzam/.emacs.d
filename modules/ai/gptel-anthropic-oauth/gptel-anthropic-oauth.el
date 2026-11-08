@@ -416,13 +416,13 @@ annotated entry carries the existing properties along."
 
 ;;;###autoload
 (cl-defun gptel-make-anthropic-oauth
-    (name &key stream key
-          models)
+    (name &key stream models &allow-other-keys)
   "Create Claude backend with OAuth authentication.
 
 NAME is the backend name.
 STREAM enables streaming responses.
-MODELS is the list of available models."
+MODELS is the list of available models.  Other keys are ignored: the
+`gptel-backend' setter passes every slot when it rebuilds a backend."
   (declare (indent 1))
   (let* ((models (gptel-anthropic-oauth--annotate-thinking
                   (or models

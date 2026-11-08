@@ -169,6 +169,23 @@
            (_ (gptel-anthropic-oauth--annotate-thinking spec)))
       (expect (plist-get (cdr (car spec)) :request-params) :to-be nil)))
 
+  (it "accepts every slot the gptel-backend setter passes when rebuilding"
+    (let ((backend (gptel-make-anthropic-oauth
+                    "OAuth-rebuild-test"
+                    :protocol "https" :host "api.anthropic.com"
+                    :endpoint "/v1/messages" :header #'ignore :key nil
+                    :models '(claude-sonnet-4-5-20250929) :stream t
+                    :curl-args nil :request-params nil)))
+      (unwind-protect
+          (progn
+            (expect (gptel-backend-stream backend) :to-be t)
+            (expect (gptel-backend-models backend)
+                    :to-equal '(claude-sonnet-4-5-20250929)))
+        (setq gptel--known-backends
+              (cl-remove-if
+               (lambda (entry) (equal (car entry) "OAuth-rebuild-test"))
+               gptel--known-backends)))))
+
   (it "reaches the models of a newly built backend"
     (let ((backend (gptel-make-anthropic-oauth
                     "OAuth-thinking-test"
