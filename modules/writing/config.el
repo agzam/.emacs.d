@@ -34,6 +34,9 @@
   :defer t
   :commands mw-thesaurus-lookup-dwim
   :config
+  (setopt mw-thesaurus-spanish-api-key "c6899142-5d17-4e10-95c1-e98dbf5d3e61"
+          mw-thesaurus-medical-api-key "2f6acc64-629f-42ae-baa7-c94cc4a3bc38")
+
   (map! :after mw-thesaurus
         :map mw-thesaurus-read-only-map
         [remap evil-record-macro] #'mw-thesaurus--quit
