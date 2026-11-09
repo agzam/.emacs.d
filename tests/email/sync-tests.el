@@ -355,6 +355,21 @@ isyncrc's account prints the login ann and the password app-password."
       (sync-tests--wait)
       (expect (sync-tests--calls dir)
               :to-equal (list (sync-tests--mbsync "inbox") (sync-tests--notmuch)))))
+  (it "keeps going when a step's program exits before the sync closes its input"
+    (sync-tests--with nil
+      (sync-tests--fresh-markers)
+      (let ((exit-first
+             (lambda (_symbol process operation _where)
+               ;; holds the step back until its program is gone, running no sentinel
+               (when (and (eq operation 'set) (processp process))
+                 (let ((deadline (+ (float-time) 5)))
+                   (while (and (process-live-p process) (< (float-time) deadline))))))))
+        (add-variable-watcher 'mail-sync-process exit-first)
+        (unwind-protect (expect (start-mail-sync) :to-be-truthy)
+          (remove-variable-watcher 'mail-sync-process exit-first)))
+      (sync-tests--wait)
+      (expect (sync-tests--calls dir)
+              :to-equal (list (sync-tests--mbsync "inbox") (sync-tests--notmuch)))))
   (it "starts nothing while a label change runs"
     (sync-tests--with '(("-ls gmail-remote" 0 "INBOX\ntravel\n"))
       (sync-tests--folder "travel" t)

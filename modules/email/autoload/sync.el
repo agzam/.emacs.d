@@ -176,8 +176,9 @@ NAME stands for COMMAND in the log."
                    (error (funcall finish 127 (error-message-string err))
                           nil))))
       (setq mail-sync-process process)
-      ;; a prompt would wait for an answer forever
-      (process-send-eof process))))
+      ;; a prompt would wait for an answer forever; a program that exited
+      ;; already has no input left, and closing it signals
+      (ignore-errors (process-send-eof process)))))
 
 ;;; Labels Gmail dropped
 ;;
