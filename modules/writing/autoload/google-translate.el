@@ -7,6 +7,7 @@
 (require 'google-translate)  ; pulls in google-translate-default-ui
 (require 'transient)
 (require 'ring)
+(require 'cape nil t)
 
 ;;;###autoload
 (defun set-google-translate-languages (&optional override-p)
@@ -100,9 +101,49 @@ text like: \"2023 was a better year than 2021\" would translate to:
           lang)))
 
 (defvar translate--last-context nil)
-(defvar translate--minibuffer-text nil)
+(defvar translate--field-text nil)
 (defvar translate--langs-src (ring-convert-sequence-to-ring '("auto" "en" "es" "ru")))
 (defvar translate--langs-target (ring-convert-sequence-to-ring '("en" "es" "ru")))
+
+(defvar translate-history nil
+  "Texts sent to translation from the translate field.")
+
+(defvar translate-field--text nil
+  "Text the open field hands back when it closes; nil when cancelled.")
+
+(defvar translate-field--buffer nil
+  "Buffer of the open translate field.")
+
+(defvar translate-field--origin nil
+  "Window the field opened from; the menu redraws with it selected.")
+
+(defvar translate-field--depth nil
+  "Recursion depth of the open field's recursive edit.")
+
+(defvar-local translate-field--method nil
+  "Input method the field saw last, to notice a switch.")
+
+(defun translate--select-source (lang)
+  "Make LANG the source language, pair a target with it, drop it from targets."
+  (translate--set-lang :source lang)
+  (setq translate--langs-target
+        (thread-last
+          translate--langs-src
+          cddr
+          (seq-remove (lambda (x) (string= lang x)))
+          ring-convert-sequence-to-ring)))
+
+(defun translate--input-method-language (method)
+  "Return the language typed with input METHOD; nil METHOD is no input method.
+The pairs come from `google-translate-preferable-input-methods-alist'."
+  (cadr (assq (and method (intern (format "%s" method)))
+              google-translate-preferable-input-methods-alist)))
+
+(defun translate--language-input-method (lang)
+  "Return the input method for typing LANG.
+The pairs come from `google-translate-preferable-input-methods-alist'."
+  (car (seq-find (lambda (entry) (member lang (cdr entry)))
+                 google-translate-preferable-input-methods-alist)))
 
 (transient-define-suffix translate--set-source ()
   :description "source"
@@ -112,14 +153,8 @@ text like: \"2023 was a better year than 2021\" would translate to:
   (interactive)
   (let* ((cur (oref (transient-suffix-object) value))
          (nxt (ring-next translate--langs-src cur)))
-    (translate--set-lang :source nxt)
+    (translate--select-source nxt)
     (oset (transient-suffix-object) value nxt)
-    (setq translate--langs-target
-          (thread-last
-            translate--langs-src
-            cddr
-            (seq-remove (lambda (x) (string= nxt x)))
-            ring-convert-sequence-to-ring))
     (translate--set-target google-translate-default-target-language)
     (transient-reset)))
 
@@ -136,33 +171,157 @@ text like: \"2023 was a better year than 2021\" would translate to:
       (translate--set-lang :target nxt)
       (oset (transient-suffix-object) value nxt))))
 
-(transient-define-infix translate--minibuffer ()
-  "Type some text in the minibuffer."
+(defun translate--field-prompt ()
+  "Return the field prompt, naming the translation direction."
+  (format "%s → %s: "
+          google-translate-default-source-language
+          google-translate-default-target-language))
+
+(defun translate--refresh-menu ()
+  "Redraw the open menu with the current languages."
+  (when (and transient--prefix (window-live-p transient--window))
+    (mapc #'transient-init-value transient--suffixes)
+    (if (window-live-p translate-field--origin)
+        (with-selected-window translate-field--origin (transient--show))
+      (transient--show))))
+
+(define-derived-mode translate-field-mode text-mode "Translate"
+  "Major mode of the small buffer that holds the text to translate.")
+
+(defun translate-field-history-capf ()
+  "Complete the field text from earlier translations."
+  (when translate-history
+    (list (point-min) (point) translate-history :exclusive 'no)))
+
+(defun translate-field--show-direction ()
+  "Show the translation direction in front of the field text."
+  (setq-local line-prefix (propertize (translate--field-prompt)
+                                      'face 'minibuffer-prompt)))
+
+(defun translate-field-follow-h ()
+  "Point the translation source at the language of a newly chosen input method."
+  (let ((method (input-method-in-effect)))
+    (unless (equal method translate-field--method)
+      (setq translate-field--method method)
+      (when-let* ((lang (translate--input-method-language method))
+                  ((not (equal lang google-translate-default-source-language))))
+        (translate--select-source lang)
+        (translate-field--show-direction)
+        (translate--refresh-menu)))))
+
+(defun translate-field-fit-h ()
+  "Fit the field window to its text, from one to six lines."
+  (when-let* ((win (get-buffer-window)))
+    (when (window-live-p transient--window)
+      (window-preserve-size transient--window nil t))
+    (let ((window-min-height 1))
+      (fit-window-to-buffer win 6 1))))
+
+(defun translate-field--abandon (depth)
+  "Cancel the field if its recursive edit at DEPTH is the innermost one."
+  (when (eql (recursion-depth) depth)
+    (setq translate-field--text nil)
+    (exit-recursive-edit)))
+
+(defun translate-field-leave-h (_frame)
+  "Cancel the field once a window other than it or the minibuffer is selected."
+  (let ((buf (window-buffer (selected-window))))
+    (unless (or (eq buf translate-field--buffer) (minibufferp buf))
+      (run-at-time 0 nil #'translate-field--abandon translate-field--depth))))
+
+(defun translate-field-submit ()
+  "Close the field and translate its text."
+  (interactive)
+  (setq translate-field--text
+        (string-trim (buffer-substring-no-properties (point-min) (point-max))))
+  (exit-recursive-edit))
+
+(defun translate-field-cancel ()
+  "Close the field and go back to the menu."
+  (interactive)
+  (setq translate-field--text nil)
+  (exit-recursive-edit))
+
+(defun translate-field--prepare ()
+  "Set up the current buffer as the field, typing in the source language."
+  (translate-field-mode)
+  (setq-local mode-line-format nil
+              completion-at-point-functions
+              (list #'translate-field-history-capf #'cape-dabbrev #'cape-dict)
+              cape-dabbrev-buffer-function #'cape-text-buffers)
+  (when-let* ((method (translate--language-input-method
+                       google-translate-default-source-language)))
+    (activate-input-method method))
+  (setq translate-field--method (input-method-in-effect))
+  (translate-field--show-direction)
+  (add-hook! 'post-command-hook :local
+             #'translate-field-follow-h #'translate-field-fit-h))
+
+(defun translate-field--open (origin buffer)
+  "Show BUFFER in a one-line window between ORIGIN and the menu below it."
+  (let* ((window-min-height 1)
+         (win (split-window origin -2 'below)))
+    (set-window-buffer win buffer)
+    (set-window-dedicated-p win t)
+    (when (window-live-p transient--window)
+      (window-preserve-size transient--window nil t))
+    (fit-window-to-buffer win 6 1)
+    win))
+
+(defun translate-field-edit ()
+  "Edit the text to translate in a small buffer above the menu.
+Return the text, or nil when the field is cancelled or left empty.
+Transient suspends the menu's keys during the recursive edit."
+  (let* ((translate-field--origin (selected-window))
+         (translate-field--depth (1+ (recursion-depth)))
+         (translate-field--buffer (generate-new-buffer "*translate*"))
+         (translate-field--text nil)
+         win)
+    (unwind-protect
+        (progn
+          (with-current-buffer translate-field--buffer
+            (translate-field--prepare))
+          (setq win (translate-field--open translate-field--origin
+                                           translate-field--buffer))
+          (select-window win)
+          (when (fboundp 'evil-insert-state)
+            (evil-insert-state))
+          (add-hook! 'window-selection-change-functions #'translate-field-leave-h)
+          (recursive-edit))
+      (remove-hook! 'window-selection-change-functions #'translate-field-leave-h)
+      (when (window-live-p win)
+        (delete-window win))
+      (kill-buffer translate-field--buffer)
+      (when (window-live-p translate-field--origin)
+        (select-window translate-field--origin)))
+    (and translate-field--text
+         (not (string-empty-p translate-field--text))
+         translate-field--text)))
+
+(transient-define-suffix translate--field ()
+  "Type the text to translate in a small buffer above the menu."
   :description (lambda ()
-                 (if translate--minibuffer-text
-                     (format "Text: %s" translate--minibuffer-text)
+                 (if translate--field-text
+                     (format "Text: %s" translate--field-text)
                    "Type some text"))
-  :variable 'translate--minibuffer-text
-  :class 'transient-lisp-variable
-  :format "%k %d"
   :key "i"
-  :reader (lambda (&rest _)
-            (let* ((src google-translate-default-source-language)
-                   (tgt google-translate-default-target-language)
-                   (pref (google-translate-find-preferable-input-method src))
-                   (current-input-method (when pref (symbol-name pref))))
-              (read-string
-               (format "Translate. %s -> %s: " src tgt)
-               nil nil nil t))))
+  :transient t
+  (interactive)
+  (when-let* ((text (translate-field-edit)))
+    (setq translate--field-text text)
+    (add-to-history 'translate-history text)
+    (setq unread-command-events
+          (append unread-command-events (listify-key-sequence (kbd "RET"))))))
 
 (defun translate--translate ()
+  "Translate the typed text, else the region, else the word at point."
   (interactive)
-  (let ((content (cond ((use-region-p)
+  (let ((content (cond (translate--field-text
+                        translate--field-text)
+                       ((use-region-p)
                         (buffer-substring
                          (region-beginning)
                          (region-end)))
-                       (translate--minibuffer-text
-                        translate--minibuffer-text)
                        (t (word-at-point)))))
     (with-temp-buffer
       (insert content)
@@ -184,7 +343,7 @@ text like: \"2023 was a better year than 2021\" would translate to:
                       google-translate-default-source-language)
                      (transient-reset))
      :transient t)
-    (translate--minibuffer)]
+    (translate--field)]
    [""
     ("p" (lambda ()
            (concat "translate popup: "
@@ -195,7 +354,7 @@ text like: \"2023 was a better year than 2021\" would translate to:
   [:hide always
    [("<return>" "Go!" translate--translate)]]
   (interactive)
-  (setq translate--minibuffer-text nil)
+  (setq translate--field-text nil)
   (transient-setup 'translate-transient))
 
 ;;;###autoload

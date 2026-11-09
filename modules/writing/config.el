@@ -136,6 +136,17 @@
   :ensure nil
   :after google-translate)
 
+(map! :map translate-field-mode-map
+      "C-c C-c" #'translate-field-submit
+      "C-c C-k" #'translate-field-cancel
+      :ni "RET" #'translate-field-submit
+      :ni "C-g" #'translate-field-cancel
+      :n [escape] #'translate-field-cancel
+      :n "q" #'translate-field-cancel)
+
+(after! savehist
+  (add-to-list 'savehist-additional-variables 'translate-history))
+
 (use-package define-it
   :defer t
   :commands define-it-at-point
