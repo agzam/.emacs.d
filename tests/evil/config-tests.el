@@ -34,6 +34,15 @@ neither evil nor general (behind `map!') is available."
 (defun evil-paste-before (&rest _) nil)
 (defun evil-paste-after (&rest _) nil)
 
+;; Batch frames have no pixel vscroll, so the window's vscroll lives in a
+;; variable, and the expander resets it the way `line-move' does.
+(defvar evil-tests--vscroll 0)
+
+(defun evil-line-expand (beg end)
+  "Answer the BEG..END range, resetting vscroll like the real expander."
+  (setq evil-tests--vscroll 0)
+  (list beg end 'line))
+
 (defvar evil-tests--paste-advice
   (evil-tests--read-form "modules/evil/config.el"
                          "(defadvice! paste-sets-visual-selection-a"))
@@ -51,12 +60,17 @@ neither evil nor general (behind `map!') is available."
   (evil-tests--read-form "modules/evil/config.el"
                          "(defadvice! unlog-noisy-errors-a"))
 
+(defvar evil-tests--vscroll-advice
+  (evil-tests--read-form "modules/evil/config.el"
+                         "(defadvice! line-expand-keeps-vscroll-a"))
+
 (eval (evil-tests--read-form "modules/evil/config.el"
                              "(defun remember-visual-selection")
       t)
 (eval evil-tests--paste-advice t)
 (eval evil-tests--yank-advice t)
 (eval evil-tests--unlog-advice t)
+(eval evil-tests--vscroll-advice t)
 
 (describe "search highlight delay"
   (it "refreshes faster than macOS's quickest key repeat (15ms)"
@@ -160,5 +174,27 @@ neither evil nor general (behind `map!') is available."
       (expect (unlog-noisy-errors-a (lambda (&rest args) (cons message-log-max args))
                                     '(error "boom") "ctx" 'some-fn)
               :to-equal '(1000 (error "boom") "ctx" some-fn)))))
+
+(describe "line-expand-keeps-vscroll-a"
+  (it "wraps the line type's expander"
+    (expect (cadr (memq :around evil-tests--vscroll-advice))
+            :to-equal '(function evil-line-expand)))
+
+  (it "puts back the vscroll the expansion reset"
+    ;; The problem it solves: in V, C-e and trackpad scrolls smaller than
+    ;; a line ended exactly where they started.
+    (cl-letf (((symbol-function 'window-vscroll)
+               (lambda (&rest _) evil-tests--vscroll))
+              ((symbol-function 'set-window-vscroll)
+               (lambda (_window vscroll &rest _)
+                 (setq evil-tests--vscroll vscroll))))
+      (let ((evil-tests--vscroll 45))
+        (evil-line-expand 1 10)
+        (expect evil-tests--vscroll :to-equal 45))))
+
+  (it "passes the range through untouched"
+    (cl-letf (((symbol-function 'window-vscroll) (lambda (&rest _) 0))
+              ((symbol-function 'set-window-vscroll) #'ignore))
+      (expect (evil-line-expand 3 7) :to-equal '(3 7 line)))))
 
 ;;; config-tests.el ends here

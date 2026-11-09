@@ -74,6 +74,15 @@ FN still shows DATA in the echo area; ARGS pass through."
            message-log-max)))
     (apply fn data args)))
 
+(defadvice! line-expand-keeps-vscroll-a (fn &rest args)
+  "Call FN with ARGS, then restore the window vscroll it reset.
+Linewise visual state runs FN after every command, and the `line-move'
+inside it would undo any pixel scroll smaller than a line."
+  :around #'evil-line-expand
+  (let ((vscroll (window-vscroll nil t)))
+    (prog1 (apply fn args)
+      (set-window-vscroll nil vscroll t t))))
+
 (defun remember-visual-selection (beg end)
   "Store BEG..END as the region `evil-visual-restore' brings back.
 It reads these three variables and nothing else, so writing them is what
