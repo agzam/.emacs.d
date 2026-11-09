@@ -47,4 +47,11 @@
   ;; keep modeline short
   (defadvice! doom-modeline--font-height-a ()
     :override #'doom-modeline--font-height
-    1))
+    1)
+
+  (defadvice! doom-modeline-evil-input-method-a (fn &rest args)
+    "Name the input method evil holds for the buffer, not the global default."
+    :around #'doom-modeline-segment--input-method
+    (let ((default-input-method (or (bound-and-true-p evil-input-method)
+                                    default-input-method)))
+      (apply fn args))))

@@ -109,7 +109,7 @@
   (setq google-translate-input-method-auto-toggling t
         google-translate-preferable-input-methods-alist
         '((nil . ("en"))
-          (spanish-prefix . ("es"))
+          (spanish-postfix . ("es"))
           (russian-computer . ("ru"))))
 
   (add-hook! 'google-translate-mode-hook
@@ -191,10 +191,11 @@
                  "[^[:alpha:]]"
                  "['’]" nil ("-B") nil utf-8))
 
-  (defadvice! change-dict-after-toggle-input (fn &optional arg interactive)
+  (defadvice! change-dict-after-toggle-input (fn &rest args)
     :around #'toggle-input-method
     :around #'set-input-method
-    (funcall fn arg interactive)
+    :around #'cycle-input-method
+    (apply fn args)
     (let ((dic+lan (pcase current-input-method
                      ("russian-computer" '("ru_RU" "russian"))
                      ((or "spanish-keyboard"
@@ -220,6 +221,10 @@
   (setopt abbrev-expand-function #'expand-abbrev-tolerating-late-apostrophe)
   (add-hook 'post-self-insert-hook #'drop-redundant-apostrophe-h :append)
   (add-hook! '(text-mode-hook git-commit-setup-hook) #'abbrev-mode))
+
+;; C-\ and C-<f12> flip between English and the last used input method
+(map! [remap toggle-input-method] #'cycle-input-method)
+(add-hook 'input-method-activate-hook #'input-method-note-h)
 
 (after! quail
   (quail-define-package
