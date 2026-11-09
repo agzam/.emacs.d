@@ -687,14 +687,8 @@
 
       ;;; <leader> s --- search
       (:prefix-map ("s" . "search")
-       :desc "Search buffer"                "b"
-       (cond ((modulep! :completion vertico)   #'search-buffer)
-             ((modulep! :completion ivy)       #'swiper)
-             ((modulep! :completion helm)      #'swiper))
-       :desc "Search all open buffers"      "B"
-       (cond ((modulep! :completion vertico)   (cmd!! #'consult-line-multi 'all-buffers))
-             ((modulep! :completion ivy)       #'swiper-all)
-             ((modulep! :completion helm)      #'swiper-all))
+       :desc "Search buffer"                "b" #'search-buffer
+       :desc "Search all open buffers"      "B" (cmd!! #'consult-line-multi 'all-buffers)
        :desc "Search current directory"     "d" #'search-cwd
        :desc "Search other directory"       "D" #'search-other-cwd
        :desc "Search .emacs.d"              "e" #'search-emacsd
