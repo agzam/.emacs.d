@@ -17,6 +17,46 @@
 ;; doom-defaults turns window dividers on at UI init; never wanted here.
 (remove-hook 'doom-init-ui-hook #'window-divider-mode)
 
+(defadvice! enable-theme-parents-first-a (theme)
+  "Order THEME's settings so each face follows the faces it inherits from.
+`enable-theme' sets faces one at a time, last defined first, and Emacs 31
+rejects a face inheriting a parent whose pending spec still inherits it."
+  :before #'enable-theme
+  (let ((settings (get theme 'theme-settings))
+        (by-face (make-hash-table :test #'eq))
+        (seen (make-hash-table :test #'eq))
+        ordered)
+    (dolist (setting settings)
+      (when (eq (car setting) 'theme-face)
+        (puthash (cadr setting) setting by-face)))
+    (cl-labels ((visit (setting)
+                  (unless (gethash setting seen)
+                    (puthash setting t seen)
+                    (when (eq (car setting) 'theme-face)
+                      (dolist (parent (ensure-list
+                                       (plist-get (face-spec-choose (nth 3 setting))
+                                                  :inherit)))
+                        (when-let* ((parent-setting (gethash parent by-face)))
+                          (visit parent-setting))))
+                    (push setting ordered))))
+      (mapc #'visit settings))
+    (put theme 'theme-settings (nreverse ordered))))
+
+(defadvice! enable-theme-all-or-nothing-a (fn theme)
+  "Call FN to enable THEME, and undo THEME when FN exits before enabling it.
+`disable-theme' skips themes outside `custom-enabled-themes', so the faces an
+error or a quit reached first would keep THEME's specs for the session."
+  :around #'enable-theme
+  (let (done)
+    (unwind-protect
+        (prog1 (funcall fn theme)
+          (setq done t))
+      ;; `user' never joins `custom-enabled-themes'; undoing it would drop
+      ;; every customized face.
+      (unless (or done (eq theme 'user) (custom-theme-enabled-p theme))
+        (push theme custom-enabled-themes)
+        (disable-theme theme)))))
+
 (use-package spacemacs-theme
   :ensure (spacemacs-theme :host github :repo "nashamri/spacemacs-theme")
   :defer t)

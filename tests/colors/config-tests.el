@@ -138,3 +138,35 @@
                  (lambda (timer) (push timer cancelled))))
         (circadian-enable-theme 'theme-a))
       (expect cancelled :to-equal '(spent)))))
+
+(describe "enable-theme-parents-first-a"
+  (it "moves a face after the face it inherits from"
+    (put 'colors-tests-order 'theme-settings
+         '((theme-face colors-tests-b colors-tests-order ((t :inherit colors-tests-a)))
+           (theme-face colors-tests-a colors-tests-order ((t :inherit bold)))))
+    (enable-theme-parents-first-a 'colors-tests-order)
+    (expect (mapcar #'cadr (get 'colors-tests-order 'theme-settings))
+            :to-equal '(colors-tests-a colors-tests-b))))
+
+(describe "enable-theme-all-or-nothing-a"
+  (it "drops the specs a theme applied before failing partway"
+    (custom-declare-theme 'colors-tests-broken 'colors-tests-broken-theme)
+    (put 'colors-tests-broken 'theme-settings
+         '((theme-face colors-tests-b colors-tests-broken ((t :foreground "red")))
+           (theme-face colors-tests-a colors-tests-broken ((t :foreground "blue")))))
+    (cl-letf (((symbol-function 'custom-theme-recalc-face)
+               (lambda (face) (when (eq face 'colors-tests-a) (error "Face fails")))))
+      (expect (enable-theme 'colors-tests-broken) :to-throw 'error))
+    (expect (get 'colors-tests-b 'theme-face) :to-be nil)
+    (expect (custom-theme-enabled-p 'colors-tests-broken) :to-be nil))
+
+  (it "never undoes the user theme"
+    (custom-theme-set-faces 'user '(colors-tests-c ((t :foreground "green"))))
+    (unwind-protect
+        (progn
+          (cl-letf (((symbol-function 'custom-theme-recalc-face)
+                     (lambda (_) (error "Face fails"))))
+            (expect (enable-theme 'user) :to-throw 'error))
+          (expect (assq 'user (get 'colors-tests-c 'theme-face)) :to-be-truthy))
+      (custom-push-theme 'theme-face 'colors-tests-c 'user 'reset)
+      (put 'colors-tests-c 'saved-face nil))))
