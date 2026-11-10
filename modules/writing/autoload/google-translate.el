@@ -6,7 +6,6 @@
 ;; loaddefs make this file lazy, so nothing loads before first use.
 (require 'google-translate)  ; pulls in google-translate-default-ui
 (require 'transient)
-(require 'ring)
 (require 'cape nil t)
 
 ;;;###autoload
@@ -86,24 +85,10 @@ text like: \"2023 was a better year than 2021\" would translate to:
         (funcall orig-fn src-lang tgt-lang txt output-dest))
     (funcall orig-fn src-lang tgt-lang text output-dest)))
 
-(defun translate--set-lang (type lang)
-  (interactive)
-  (set (if (eq type :source)
-           'google-translate-default-source-language
-         'google-translate-default-target-language)
-       lang)
-  (setq google-translate-default-target-language
-        (if (eq type :source)
-            (pcase lang
-              ("en" "es")
-              ("ru" "en")
-              ("es" "en"))
-          lang)))
-
 (defvar translate--last-context nil)
 (defvar translate--field-text nil)
-(defvar translate--langs-src (ring-convert-sequence-to-ring '("auto" "en" "es" "ru")))
-(defvar translate--langs-target (ring-convert-sequence-to-ring '("en" "es" "ru")))
+(defvar translate--langs-src '("auto" "en" "es" "ru"))
+(defvar translate--langs-target '("en" "es" "ru"))
 
 (defvar translate-history nil
   "Texts sent to translation from the translate field.")
@@ -123,15 +108,20 @@ text like: \"2023 was a better year than 2021\" would translate to:
 (defvar-local translate-field--method nil
   "Input method the field saw last, to notice a switch.")
 
-(defun translate--select-source (lang)
-  "Make LANG the source language, pair a target with it, drop it from targets."
-  (translate--set-lang :source lang)
-  (setq translate--langs-target
-        (thread-last
-          translate--langs-src
-          cddr
-          (seq-remove (lambda (x) (string= lang x)))
-          ring-convert-sequence-to-ring)))
+(defun translate--next (lang langs)
+  "Return the language after LANG in LANGS, or the first one if none follows."
+  (or (cadr (member lang langs)) (car langs)))
+
+(defun translate--select-source (lang &optional target)
+  "Make LANG the source language and pick a different target language for it.
+Prefer TARGET, then LANG's habitual pair, then the current target."
+  (let ((targets (remove lang translate--langs-target)))
+    (setq google-translate-default-source-language lang
+          google-translate-default-target-language
+          (or (car (member target targets))
+              (pcase lang ("en" "es") ("ru" "en") ("es" "en"))
+              (car (member google-translate-default-target-language targets))
+              (car targets)))))
 
 (defun translate--input-method-language (method)
   "Return the language typed with input METHOD; nil METHOD is no input method.
@@ -151,25 +141,22 @@ The pairs come from `google-translate-preferable-input-methods-alist'."
   :variable 'google-translate-default-source-language
   :class 'transient-lisp-variable
   (interactive)
-  (let* ((cur (oref (transient-suffix-object) value))
-         (nxt (ring-next translate--langs-src cur)))
-    (translate--select-source nxt)
-    (oset (transient-suffix-object) value nxt)
-    (translate--set-target google-translate-default-target-language)
-    (transient-reset)))
+  (translate--select-source
+   (translate--next google-translate-default-source-language
+                    translate--langs-src))
+  (transient-reset))
 
-(transient-define-suffix translate--set-target (&optional explicit-val)
+(transient-define-suffix translate--set-target ()
   :description "target"
   :key "t"
   :variable 'google-translate-default-target-language
   :class 'transient-lisp-variable
   (interactive)
-  (if explicit-val
-      (oset (transient-suffix-object) value explicit-val)
-    (let* ((cur (oref (transient-suffix-object) value))
-           (nxt (ring-next translate--langs-target cur)))
-      (translate--set-lang :target nxt)
-      (oset (transient-suffix-object) value nxt))))
+  (thread-last
+    translate--langs-target
+    (remove google-translate-default-source-language)
+    (translate--next google-translate-default-target-language)
+    (transient-infix-set (transient-suffix-object))))
 
 (defun translate--field-prompt ()
   "Return the field prompt, naming the translation direction."
@@ -338,7 +325,7 @@ Transient suspends the menu's keys during the recursive edit."
    [""
     ("r" "reverse" (lambda ()
                      (interactive)
-                     (cl-rotatef
+                     (translate--select-source
                       google-translate-default-target-language
                       google-translate-default-source-language)
                      (transient-reset))

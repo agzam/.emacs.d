@@ -122,22 +122,45 @@
      recorder "ru" "en" "2023 rocks")
     (expect (nth 2 received) :to-equal "2023 rocks")))
 
-(describe "translate--set-lang"
+(describe "translate--select-source"
   (it "pairs a source language with its habitual target"
     (dolist (case '(("en" . "es") ("ru" . "en") ("es" . "en")))
       (let ((google-translate-default-source-language "auto")
-            (google-translate-default-target-language "xx"))
-        (translate--set-lang :source (car case))
+            (google-translate-default-target-language "ru"))
+        (translate--select-source (car case))
         (expect google-translate-default-source-language
                 :to-equal (car case))
         (expect google-translate-default-target-language
                 :to-equal (cdr case)))))
 
-  (it "sets the target directly"
-    (let ((google-translate-default-source-language "auto")
+  (it "keeps the current target for an auto source"
+    (let ((google-translate-default-source-language "ru")
+          (google-translate-default-target-language "es"))
+      (translate--select-source "auto")
+      (expect google-translate-default-target-language :to-equal "es")))
+
+  (it "leaves a target language other than the source, whatever the target was"
+    (dolist (source translate--langs-src)
+      (dolist (target '(nil "auto" "xx" "en" "es" "ru"))
+        (let ((google-translate-default-source-language "auto")
+              (google-translate-default-target-language target))
+          (translate--select-source source)
+          (expect (remove source translate--langs-target)
+                  :to-contain google-translate-default-target-language)))))
+
+  (it "takes the given target over the habitual one, unless it is no target"
+    (let ((google-translate-default-source-language "ru")
           (google-translate-default-target-language "en"))
-      (translate--set-lang :target "ru")
-      (expect google-translate-default-target-language :to-equal "ru"))))
+      (translate--select-source "en" "ru")
+      (expect google-translate-default-target-language :to-equal "ru")
+      (translate--select-source "ru" "auto")
+      (expect google-translate-default-target-language :to-equal "en"))))
+
+(describe "translate--next"
+  (it "steps through the languages, wrapping, and starts over from a stray one"
+    (expect (translate--next "en" translate--langs-target) :to-equal "es")
+    (expect (translate--next "ru" translate--langs-target) :to-equal "en")
+    (expect (translate--next nil translate--langs-target) :to-equal "en")))
 
 (describe "translate-transient layout"
   (it "wires the documented suffixes; module-owned ones are defined"
@@ -163,16 +186,6 @@
     (expect (translate--language-input-method "en") :to-be nil)
     (expect (translate--language-input-method "auto") :to-be nil)))
 
-(describe "translate--select-source"
-  (it "pairs the target and drops the source from the target choices"
-    (let ((google-translate-default-source-language "auto")
-          (google-translate-default-target-language "en")
-          (translate--langs-target translate--langs-target))
-      (translate--select-source "ru")
-      (expect google-translate-default-source-language :to-equal "ru")
-      (expect google-translate-default-target-language :to-equal "en")
-      (expect (ring-member translate--langs-target "ru") :to-be nil))))
-
 ;; evil is absent from the batch tier; these stand in for its locals.
 (defvar evil-local-mode nil)
 (defvar-local evil-state nil)
@@ -183,7 +196,6 @@
   (declare (indent 2))
   `(let ((google-translate-default-source-language ,source)
          (google-translate-default-target-language ,target)
-         (translate--langs-target translate--langs-target)
          (input-method-activate-hook nil)
          (input-method-deactivate-hook nil)
          (redrawn 0))
