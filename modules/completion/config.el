@@ -349,6 +349,9 @@
   (consult-customize
    search-buffer
    :preview-key (list "C-SPC" :debounce 0.5 'any))
+  (consult-customize
+   consult-theme
+   :preview-key '(:debounce 0.2 any))
 
   (define-key!
     :keymaps (append default-minibuffer-maps)
