@@ -1,6 +1,6 @@
 ;;; scripts/elpaca-remote.el --- keep elpaca's clones in step with their recipes -*- lexical-binding: t; -*-
 ;; Shared by `bb update's two drivers (elpaca-update.el, elpaca-live-update.el).
-;; Three heals for the clones elpaca keeps under `elpaca-sources-directory', each
+;; Heals for the clones elpaca keeps under `elpaca-sources-directory', each
 ;; about a clone drifting from its recipe or its upstream:
 ;;
 ;; `elpaca-remote-sync-origins' - elpaca computes a clone's URL once, at clone
@@ -9,6 +9,11 @@
 ;; only; an existing clone keeps fetching from the dead host and fails every
 ;; update.  Runs before the fetch: re-points `origin' wherever the recipe's
 ;; URL differs from the clone's.
+;;
+;; `elpaca-remote-reattach-unpinned' - a pin leaves the clone on a detached
+;; HEAD, and dropping the pin does not move it back, so every later update
+;; fails at the update log.  Runs before the fetch: checks out the remote's
+;; default branch, tracking it.
 ;;
 ;; `elpaca-remote-retarget-renamed' - a clone stays on the branch it was
 ;; cloned on.  Once upstream renames its default branch, every update fails
@@ -95,6 +100,46 @@ finds it already in step."
               (when emit
                 (funcall emit "remote: %s origin %s -> %s failed: %s" id have want out)))))))
     (nreverse synced)))
+
+;;; Dropped pin
+
+(defun elpaca-remote--detached-p (dir)
+  "Non-nil when clone DIR sits on a detached HEAD.
+Reads .git/HEAD rather than spawning git: the scan covers every clone."
+  (let ((head (expand-file-name ".git/HEAD" dir)))
+    (and (file-readable-p head)
+         (not (string-prefix-p "ref: " (with-temp-buffer
+                                         (insert-file-contents head)
+                                         (buffer-string)))))))
+
+(defun elpaca-remote-reattach-unpinned (&optional packages emit)
+  "Check out the default branch in clones a dropped pin left detached.
+PACKAGES, when non-nil, limits the scan to those ids.  EMIT, when non-nil,
+is called as (EMIT FMT &rest ARGS) per clone.  Return the ids moved.  A
+clone a sibling package still pins stays where it is."
+  (seq-keep
+   (pcase-lambda (`(,id . ,e))
+     (when-let* (((or (null packages) (memq id packages)))
+                 ((not (elpaca-remote--pinned-p (elpaca<-recipe e))))
+                 (dir (ignore-errors (elpaca<-source-dir e)))
+                 ((elpaca-remote--clone-p dir))
+                 ((elpaca-remote--detached-p dir))
+                 ((not (elpaca-pinned-p e))))
+       (let* ((target (elpaca-remote--default-branch dir "origin"))
+              (err (if (null target)
+                       "no default branch on origin"
+                     (elpaca-remote--git-until-failure
+                      dir
+                      (list "fetch" "-q" "origin" target)
+                      (list "checkout" "-q" "-B" target "--track"
+                            (concat "origin/" target))))))
+         (when emit
+           (if err
+               (funcall emit "reattach (unpinned): %s failed: %s" id err)
+             (funcall emit "reattach (unpinned): %s detached HEAD -> origin/%s"
+                      id target)))
+         (unless err id))))
+   (elpaca--queued)))
 
 ;;; Renamed default branch
 

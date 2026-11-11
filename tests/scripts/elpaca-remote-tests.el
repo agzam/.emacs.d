@@ -20,6 +20,7 @@
 (unless (fboundp 'elpaca<-current-step) (defun elpaca<-current-step (_e) nil))
 (unless (fboundp 'elpaca-merge) (defun elpaca-merge (_id &optional _fetch _interactive) nil))
 (unless (fboundp 'elpaca-process-queues) (defun elpaca-process-queues (&optional _filter) nil))
+(unless (fboundp 'elpaca-pinned-p) (defun elpaca-pinned-p (_e) nil))
 (defvar elpaca-sources-directory)
 
 (defmacro elpaca-remote-tests--with-queue (queue &rest body)
@@ -151,6 +152,86 @@ Return (UPSTREAM CLONE)."
                     ((symbol-function 'elpaca<-recipe) (lambda (_e) '(:package "pkg")))
                     ((symbol-function 'elpaca-git--repo-uri) (lambda (_recipe) "https://elsewhere/x.git")))
             (expect (elpaca-remote-sync-origins '(other)) :to-be nil)))))))
+
+(describe "elpaca-remote--detached-p"
+  (let (root clone)
+    (before-each
+      (setq root (make-temp-file "elpaca-remote" t)
+            clone (cadr (elpaca-remote-tests--upstream-and-clone root))))
+    (after-each (delete-directory root t))
+
+    (it "reads a detached HEAD without spawning git"
+      (elpaca-remote-tests--git clone "checkout" "-q" "--detach")
+      (cl-letf (((symbol-function 'call-process)
+                 (lambda (&rest _) (error "no process allowed here"))))
+        (expect (elpaca-remote--detached-p clone) :to-be-truthy)))
+
+    (it "is nil on a branch, and for a directory that is no clone"
+      (expect (elpaca-remote--detached-p clone) :to-be nil)
+      (expect (elpaca-remote--detached-p root) :to-be nil))))
+
+(describe "elpaca-remote-reattach-unpinned"
+  (let (root upstream clone)
+    (before-each
+      (setq root (make-temp-file "elpaca-remote" t))
+      (pcase-let ((`(,u ,c) (elpaca-remote-tests--upstream-and-clone root)))
+        (setq upstream u clone c))
+      ;; what a pin at the first commit leaves behind
+      (elpaca-remote-tests--git clone "checkout" "-q" "--detach" "HEAD~1"))
+    (after-each (delete-directory root t))
+
+    (it "puts a clone left detached by a dropped pin on the tip of its default branch"
+      (let ((elpaca-sources-directory (expand-file-name "sources/" root))
+            (tip (elpaca-remote-tests--commit upstream "three"))
+            out)
+        (elpaca-remote-tests--with-queue '((pkg . e))
+          (cl-letf (((symbol-function 'elpaca<-source-dir) (lambda (_e) clone))
+                    ((symbol-function 'elpaca<-recipe) (lambda (_e) '(:package "pkg"))))
+            (expect (elpaca-remote-reattach-unpinned
+                     nil (lambda (fmt &rest args) (push (apply #'format fmt args) out)))
+                    :to-equal '(pkg))))
+        (expect (elpaca-remote-tests--git clone "symbolic-ref" "--short" "HEAD") :to-equal "master")
+        (expect (elpaca-remote-tests--git clone "rev-parse" "--abbrev-ref" "@{u}") :to-equal "origin/master")
+        (expect (elpaca-remote-tests--git clone "rev-parse" "--short" "HEAD") :to-equal tip)
+        (expect out :to-equal '("reattach (unpinned): pkg detached HEAD -> origin/master"))))
+
+    (it "leaves a clone detached while its recipe or a package sharing it pins it"
+      (let ((elpaca-sources-directory (expand-file-name "sources/" root)))
+        (dolist (case '(((:package "pkg" :ref "abc1234") . nil)
+                        ((:package "pkg") . (sibling :ref "abc1234"))))
+          (elpaca-remote-tests--with-queue '((pkg . e))
+            (cl-letf (((symbol-function 'elpaca<-source-dir) (lambda (_e) clone))
+                      ((symbol-function 'elpaca<-recipe) (lambda (_e) (car case)))
+                      ((symbol-function 'elpaca-pinned-p) (lambda (_e) (cdr case))))
+              (expect (elpaca-remote-reattach-unpinned) :to-be nil)))))
+      (expect (elpaca-remote-tests--git clone "rev-parse" "--abbrev-ref" "HEAD") :to-equal "HEAD"))
+
+    (it "leaves build-in-place sources, filtered-out ids and attached clones alone"
+      (elpaca-remote-tests--with-queue '((pkg . e))
+        (cl-letf (((symbol-function 'elpaca<-source-dir) (lambda (_e) clone))
+                  ((symbol-function 'elpaca<-recipe) (lambda (_e) '(:package "pkg"))))
+          (let ((elpaca-sources-directory (expand-file-name "elsewhere/" root)))
+            (expect (elpaca-remote-reattach-unpinned) :to-be nil))
+          (let ((elpaca-sources-directory (expand-file-name "sources/" root)))
+            (expect (elpaca-remote-reattach-unpinned '(other)) :to-be nil)
+            (expect (elpaca-remote-tests--git clone "rev-parse" "--abbrev-ref" "HEAD")
+                    :to-equal "HEAD")
+            (elpaca-remote-tests--git clone "checkout" "-q" "master")
+            (expect (elpaca-remote-reattach-unpinned) :to-be nil)))))
+
+    (it "reports a clone whose remote it cannot reach and moves nothing"
+      (let ((elpaca-sources-directory (expand-file-name "sources/" root))
+            out)
+        (elpaca-remote-tests--git clone "remote" "set-url" "origin"
+                                  (expand-file-name "gone" root))
+        (elpaca-remote-tests--with-queue '((pkg . e))
+          (cl-letf (((symbol-function 'elpaca<-source-dir) (lambda (_e) clone))
+                    ((symbol-function 'elpaca<-recipe) (lambda (_e) '(:package "pkg"))))
+            (expect (elpaca-remote-reattach-unpinned
+                     nil (lambda (fmt &rest args) (push (apply #'format fmt args) out)))
+                    :to-be nil)))
+        (expect out :to-equal '("reattach (unpinned): pkg failed: no default branch on origin"))
+        (expect (elpaca-remote-tests--git clone "rev-parse" "--abbrev-ref" "HEAD") :to-equal "HEAD")))))
 
 (describe "elpaca-remote-gone-upstream"
   (let (root upstream clone)

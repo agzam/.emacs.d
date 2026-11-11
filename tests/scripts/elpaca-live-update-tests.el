@@ -95,6 +95,21 @@
         (elpaca-live-update-tests--reset)
         (delete-file logfile))))
 
+  (it "puts clones a dropped pin left detached back on their branch before the update"
+    (let ((logfile (make-temp-file "elpaca-live-update-tests"))
+          calls)
+      (unwind-protect
+          (with-elpaca-stubs
+            (cl-letf (((symbol-function 'elpaca-remote-reattach-unpinned)
+                       (lambda (&rest _) (push 'reattach calls) nil))
+                      ((symbol-function 'elpaca-local-update-remotes)
+                       (lambda (&rest _) (push 'update calls) nil)))
+              (elpaca-live-update-start logfile)
+              (expect calls :to-equal '(update reattach))))
+        (with-elpaca-stubs (elpaca-live-update--cleanup))
+        (elpaca-live-update-tests--reset)
+        (delete-file logfile))))
+
   (it "returns nil and lands UPDATE-ERROR in the logfile when kickoff signals"
     (let ((logfile (make-temp-file "elpaca-live-update-tests")))
       (unwind-protect

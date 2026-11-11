@@ -172,6 +172,9 @@ that is genuinely empty."
       ;; A recipe that moved to another host steers fresh clones only; point
       ;; the existing clones there before they fetch from the old one.
       (elpaca-remote-sync-origins nil #'elpaca-update--emit)
+      ;; A dropped pin leaves its clone on a detached HEAD, which has no
+      ;; upstream for the update log to read; put it back on its branch.
+      (elpaca-remote-reattach-unpinned nil #'elpaca-update--emit)
       ;; queue fetch+merge+rebuild for every package elpaca clones
       (elpaca-local-update-remotes nil nil #'elpaca-update--emit)
       (elpaca-wait)                ; settle the update queue (streamed as it goes)

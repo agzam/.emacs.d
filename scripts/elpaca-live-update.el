@@ -310,6 +310,9 @@ UPDATE-ERROR line."
           ;; A recipe that moved to another host steers fresh clones only;
           ;; point the existing clones there before they fetch from the old one.
           (elpaca-remote-sync-origins packages #'elpaca-live-update--emit)
+          ;; A dropped pin leaves its clone on a detached HEAD, which has no
+          ;; upstream for the update log to read; put it back on its branch.
+          (elpaca-remote-reattach-unpinned packages #'elpaca-live-update--emit)
           ;; interactive=t => elpaca processes the queue (async), returns at once.
           (elpaca-local-update-remotes packages t #'elpaca-live-update--emit)
           (setq elpaca-live-update--poll
