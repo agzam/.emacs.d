@@ -111,15 +111,19 @@ is only known here."
 
 (defun elpaca-local--skip-merge-a (fn id &optional fetch interactive)
   "Leave a build-in-place package's source untouched, else call FN on ID.
+A pinned package goes to `elpaca-fetch', which only notes the pin: FN would
+fetch and merge it, and fail on the detached HEAD the pin left.
 FN is `elpaca-merge'; FETCH and INTERACTIVE are its own arguments."
-  (unless (when-let* ((e (elpaca-get id))) (elpaca-local-package-p e))
-    (funcall fn id fetch interactive)))
+  (let ((e (elpaca-get id)))
+    (cond ((and e (elpaca-local-package-p e)) nil)
+          ((and e (elpaca-pinned-p e)) (elpaca-fetch id interactive))
+          (t (funcall fn id fetch interactive)))))
 
 (defun elpaca-local-update-remotes (&optional packages interactive emit)
-  "Fetch and merge the packages elpaca cloned, leaving build-in-place ones alone.
+  "Fetch and merge cloned packages, leaving build-in-place and pinned ones alone.
 PACKAGES, when non-nil, limits the update to those ids.  INTERACTIVE processes
 the queue at once, as in `elpaca-update-all'.  EMIT, when non-nil, is called as
-\(EMIT FMT &rest ARGS) once per skipped package.
+\(EMIT FMT &rest ARGS) once per skipped or pinned package.
 
 Neither kind of build-in-place package is elpaca's to update.  A checkout
 redirected by `local-dev-packages' is a working tree its author drives with git
@@ -134,9 +138,17 @@ prints up front rather than trickling in among the fetches."
   (let ((skipped (cl-loop for (id . e) in (elpaca--queued)
                           when (and (elpaca-local-package-p e)
                                     (or (null packages) (memq id packages)))
-                          collect (cons id (elpaca<-source-dir e)))))
+                          collect (cons id (elpaca<-source-dir e))))
+        (pinned (seq-keep (pcase-lambda (`(,id . ,e))
+                            (when-let* (((or (null packages) (memq id packages)))
+                                        ((not (elpaca-local-package-p e)))
+                                        (pin (elpaca-pinned-p e)))
+                              (cons id (cdr pin))))
+                          (elpaca--queued))))
     (when emit
-      (dolist (line (elpaca-local--skip-lines skipped)) (funcall emit "%s" line)))
+      (dolist (line (elpaca-local--skip-lines skipped)) (funcall emit "%s" line))
+      (pcase-dolist (`(,id ,key ,value) pinned)
+        (funcall emit "pinned: %s %s %s" id key value)))
     (advice-add 'elpaca-merge :around #'elpaca-local--skip-merge-a)
     (unwind-protect
         (if packages

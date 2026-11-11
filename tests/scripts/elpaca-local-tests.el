@@ -21,6 +21,8 @@
 (unless (fboundp 'elpaca-merge) (defun elpaca-merge (_id &optional _fetch _interactive) nil))
 (unless (fboundp 'elpaca-update) (defun elpaca-update (_id &optional _interactive) nil))
 (unless (fboundp 'elpaca-update-all) (defun elpaca-update-all (&optional _interactive) nil))
+(unless (fboundp 'elpaca-pinned-p) (defun elpaca-pinned-p (_e) nil))
+(unless (fboundp 'elpaca-fetch) (defun elpaca-fetch (_id &optional _interactive) nil))
 ;; `elpaca--queued' gets no such stub: the report suite asserts elpaca is
 ;; absent from this sandbox, so it may only exist inside a spec that needs it.
 (defmacro elpaca-local-tests--with-queue (queue &rest body)
@@ -212,7 +214,22 @@
       (cl-letf (((symbol-function 'elpaca-get) (lambda (_id) nil)))
         (elpaca-local--skip-merge-a
          (lambda (&rest args) (push args merged)) 'unknown))
-      (expect merged :to-equal '((unknown nil nil))))))
+      (expect merged :to-equal '((unknown nil nil)))))
+
+  ;; the merge would run git log ..@{u} on the detached HEAD the pin left
+  ;; and fail with "HEAD does not point to a branch"
+  (it "sends a pinned package to elpaca-fetch, which only notes the pin"
+    (let (merged fetched)
+      (cl-letf (((symbol-function 'elpaca-get) (lambda (id) id))
+                ((symbol-function 'elpaca-local-package-p) (lambda (_e) nil))
+                ((symbol-function 'elpaca-pinned-p)
+                 (lambda (e) (list e :ref "e6c3d53")))
+                ((symbol-function 'elpaca-fetch)
+                 (lambda (&rest args) (push args fetched))))
+        (elpaca-local--skip-merge-a
+         (lambda (&rest args) (push args merged)) 'org-pomodoro 'fetch t))
+      (expect merged :to-be nil)
+      (expect fetched :to-equal '((org-pomodoro t))))))
 
 (describe "elpaca-local-update-remotes"
   ;; The advice rides elpaca's own merge-all loop rather than reimplementing
@@ -266,7 +283,24 @@
       (expect (nreverse lines)
               :to-equal '("prisma   - /x/prisma.el"
                           "pdf-text - /x/pdf-text -- mupdf-backend"
-                          "update ran")))))
+                          "update ran"))))
+
+  (it "names each pinned package after the skip block, within the package filter"
+    (dolist (case '((nil "prisma - /x/prisma.el" "pinned: org-pomodoro :ref e6c3d53")
+                    ((gptel))))
+      (let (lines)
+        (elpaca-local-tests--with-queue '((prisma . prisma-e) (org-pomodoro . pomodoro-e)
+                                          (gptel . gptel-e))
+          (cl-letf (((symbol-function 'elpaca-local-package-p) (lambda (e) (eq e 'prisma-e)))
+                    ((symbol-function 'elpaca-pinned-p)
+                     (lambda (e) (when (eq e 'pomodoro-e) '(org-pomodoro :ref "e6c3d53"))))
+                    ((symbol-function 'elpaca<-source-dir) (lambda (_e) "/x/prisma.el/"))
+                    ((symbol-function 'elpaca-local--branch) (lambda (_dir) "main"))
+                    ((symbol-function 'elpaca-update) (lambda (&rest _) nil))
+                    ((symbol-function 'elpaca-update-all) (lambda (&optional _i) nil)))
+            (elpaca-local-update-remotes
+             (car case) nil (lambda (fmt &rest args) (push (apply #'format fmt args) lines)))))
+        (expect (nreverse lines) :to-equal (cdr case))))))
 
 (describe "elpaca-local-rebuild-changed"
   ;; Regression: `elpaca-rebuild' only kicks the queue when called
