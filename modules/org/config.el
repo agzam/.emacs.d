@@ -41,7 +41,7 @@
 
   (setopt
    org-confirm-babel-evaluate nil
-   org-todo-keywords '((sequence "TODO(t!)" "ONGOING(o!)" "REVIEW" "|" "DONE(d!)" "CANCELED(c@/!)"))
+   org-todo-keywords '((sequence "TODO(t!)" "ONGOING(o!)" "REVIEW" "BLOCKED" "|" "DONE(d!)" "CANCELED(c@/!)"))
    org-enforce-todo-dependencies t
    org-enforce-todo-checkbox-dependencies t)
 
