@@ -517,7 +517,20 @@
           (when (string-prefix-p "b" (car action))
             (expect (car action) :to-match "\\`b [a-z]\\'")))
         (when-let* ((emacs-side (cdr (assoc "b b" actions))))
-          (expect emacs-side :to-be (cdr (assoc "RET" actions))))))))
+          (expect emacs-side :to-be (cdr (assoc "RET" actions)))))))
+
+  (it "opens a Slack message of any workspace as a slacko thread"
+    (with-url-type-fixture
+     (let ((embark-url-config value))
+       (embark-setup-url-types)
+       (dolist (url '("https://example.slack.com/archives/C0123456789/p1700000000000100"
+                      "https://other.slack.com/archives/C0123456789/p1700000000000100"))
+         (with-temp-buffer
+           (insert url)
+           (goto-char (point-min))
+           (expect (car (embark-target-url-at-point)) :to-be 'slack-message)))
+       (expect (lookup-key (symbol-value 'slack-message-map) (kbd "b b"))
+               :to-be 'slacko-thread-capture)))))
 
 (describe "browse actions in the module keymaps"
   :var* ((map-form (embark-tests--find-subform

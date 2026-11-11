@@ -105,7 +105,11 @@
       (circle-ci-log
        :pattern "https\\:\\/\\/circleci.com\\/api\\/.*"
        :actions (("b b" . open-circleci-log)
-                 ("RET" . open-circleci-log))))
+                 ("RET" . open-circleci-log)))
+      (slack-message
+       :pattern "\\`https://[^/]+\\.slack\\.com/archives/[^/]+/p[0-9]+"
+       :actions (("b b" . slacko-thread-capture)
+                 ("RET" . slacko-thread-capture))))
     "Complete url configuration with patterns and actions."
     :type '(alist :key-type (choice (const nil) symbol)
             :value-type plist)

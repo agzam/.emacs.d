@@ -34,11 +34,13 @@ the syntax alone.")
                 eww-open-in-other-window
                 hn-discussion
                 markdown-link-url-at-point
-                open-org-link-in-emacs))
+                open-org-link-in-emacs
+                slacko-thread-capture))
     (when (autoloadp (symbol-function fn))
       (autoload-do-load (symbol-function fn) fn)))
   ;; only the destinations are faked - each writes the url it received into
-  ;; the buffer, which is what the case compares against
+  ;; the buffer, which is what the case compares against.  For slacko that
+  ;; is its fetch and its thread buffer: the command must find the url itself
   (let ((record (lambda (url &rest _)
                   (interactive "sURL: ")
                   (goto-char (point-max))
@@ -46,7 +48,13 @@ the syntax alone.")
     (cl-letf (((symbol-function 'eww-open-in-other-window) record)
               ((symbol-function 'browse-url-externally) record)
               ((symbol-function 'forge-visit-topic-via-url) record)
-              ((symbol-function 'consult-hn) record))
+              ((symbol-function 'consult-hn) record)
+              ((symbol-function 'slacko-thread--fetch-thread)
+               (lambda (_host _channel ts) (list (list (cons 'ts ts)))))
+              ((symbol-function 'slacko-thread--display)
+               (lambda (_messages host channel _url)
+                 (goto-char (point-max))
+                 (insert (format " -> thread in %s on %s" channel host)))))
       (append
        (mapcan
         (pcase-lambda (`(,what ,ext ,text ,search ,type))
@@ -85,6 +93,16 @@ the syntax alone.")
                  :search "the PR"
                  :type 'org-url-link
                  :keys "b b"
-                 :want (concat text " -> https://github.com/agzam/foo/pull/12")))))))))
+                 :want (concat text " -> https://github.com/agzam/foo/pull/12")))))
+       (let ((text "see https://example.slack.com/archives/C0123456789/p1700000000000100 now"))
+         (list
+          (e2e-act-case
+           (list :label "Slack url -> slacko thread (b b)"
+                 :ext "txt"
+                 :text text
+                 :search "slack"
+                 :type 'slack-message
+                 :keys "b b"
+                 :want (concat text " -> thread in C0123456789 on example.slack.com")))))))))
 
 (add-to-list 'e2e-scenarios #'browse-actions-e2e)
