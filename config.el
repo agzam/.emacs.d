@@ -384,6 +384,7 @@
 
       ( :prefix ("j" . "jump")
         "j" #'avy-goto-char-timer
+        :desc "slack" "s" #'slacko-jump
         :desc "xwidget" "x" #'xwidget-webkit-url-get-create)
 
       ( :when (modulep! :custom tab-bar)
