@@ -312,8 +312,7 @@ GraphQL `errors' alist, which otherwise dies with `listp, http'."
 (use-package code-review
   ;; @tarsius broke Code-Review, ag91's fork keeps it alive:
   ;; https://github.com/wandersoncferreira/code-review/issues/245
-  ;; The fork's next commit requires code-review-lazy, a file it lacks
-  :ensure (code-review :host github :repo "ag91/code-review" :ref "68e5f55")
+  :ensure (code-review :host github :repo "ag91/code-review")
   :defer t
   :after (magit forge)
   :preface
