@@ -46,6 +46,10 @@
             :to-equal (car treesit-extra-load-path)))
   (it "keeps slacko's workspace emoji images in the cache dir"
     (expect (file-in-directory-p slacko-emoji-cache-directory doom-cache-dir)
+            :to-be-truthy))
+  ;; its default, user-emacs-directory, put agent/ at the config root
+  (it "keeps shell-maker's prompt histories in the state dir"
+    (expect (file-in-directory-p shell-maker-root-path doom-state-dir)
             :to-be-truthy)))
 
 (describe "switch-frame hook machinery"

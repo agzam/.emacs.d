@@ -78,6 +78,9 @@
       gptel-crowdsourced-prompts-file (concat doom-cache-dir "gptel-crowdsourced-prompts.csv")
       eca-server-install-path (concat doom-data-dir "eca/eca")
       eca-server-version-file-path (concat doom-data-dir "eca/eca-version")
+      ;; shell-maker keeps each shell's prompt history in ROOT/NAME/history
+      ;; (agent-shell's is agent/history)
+      shell-maker-root-path (concat doom-state-dir "shell-maker/")
       ;; search module: tldr pages default under user-emacs-directory;
       ;; so do slacko's extracted-token cache (secret-bearing - ai-module
       ;; token-cache precedent) and its workspace emoji images

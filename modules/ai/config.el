@@ -1,8 +1,8 @@
 ;;; modules/ai/config.el -*- lexical-binding: t; -*-
 
 ;; Ported from doom.d modules/custom/ai.  Dropped: whisper, gptel-quick,
-;; ob-gptel, llm-tool-collection, ragmacs, shell-maker/acp/agent-shell,
-;; claude-code (commented out or inert upstream; git-resurrectable).
+;; ob-gptel, llm-tool-collection, ragmacs, claude-code (commented out or
+;; inert upstream; git-resurrectable).
 
 (use-package gptel
   :defer t
@@ -336,6 +336,85 @@
         :desc "reject tool call" "x" #'eca-workspaces-tool-call-reject-next
         ( :prefix ("w" . "workspace")
           :desc "close" "w" #'eca-toggle-workspaces)))
+
+;; The fallback front end when eca misbehaves: Claude Code over ACP.  The agent
+;; reads rules, skills, commands, hooks and MCP servers from ~/.claude and
+;; ~/.claude.json, which the harness's setup.bb writes alongside eca's config.
+(use-package agent-shell
+  :defer t
+  :config
+  (setopt agent-shell-preferred-agent-config 'claude-code
+          ;; no prompt per tool call, as an eca chat starts trusted; the
+          ;; harness hooks in ~/.claude/settings.json still run
+          agent-shell-anthropic-default-session-mode-id "bypassPermissions"
+          ;; a stop goes through at once, as `eca-chat-stop-prompt' does
+          agent-shell-confirm-interrupt nil
+          agent-shell-dot-subdir-function #'agent-shell-data-subdir
+          ;; where `eca-chat-display-buffer-right-a' puts an eca chat
+          agent-shell-display-action '((display-buffer-reuse-window
+                                        display-buffer-in-direction)
+                                       (direction . right)
+                                       (window . root)
+                                       (window-width . 0.4)))
+
+  ;; y, n, p and q there are single-key commands that normal state shadows
+  (evil-set-initial-state 'agent-shell-diff-mode 'emacs)
+
+  ;; The keys of an eca chat: RET writes a newline while typing and sends
+  ;; otherwise, TAB folds a section, M-p/M-n move between sections.  No
+  ;; <return> binding: with none, Emacs reads <return> as RET, which reaches
+  ;; the buttons and links, whose keymaps bind RET only.
+  (map! :map agent-shell-mode-map
+        :i "RET" #'newline
+        :i "s-<return>" #'agent-shell-submit
+        :i "s-RET" #'agent-shell-submit
+        :n "RET" #'agent-shell-submit
+        :n "TAB" #'agent-shell-ui-toggle-fragment
+        :n "<tab>" #'agent-shell-ui-toggle-fragment
+        :n "M-p" #'agent-shell-previous-item
+        :n "M-n" #'agent-shell-next-item
+        :n "zm" #'agent-shell-fold-all
+        :n "zr" #'agent-shell-reveal-all
+        "C-c C-g" #'agent-shell-interrupt
+        "C-c ." #'agent-shell-help-menu
+        :n ",," #'agent-shell-help-menu
+        ( :localleader
+          "m" #'agent-shell-set-session-model
+          "v" #'agent-shell-set-session-thought-level
+          "b" #'agent-shell-cycle-session-mode
+          "f" #'agent-shell-fork
+          "t" #'eca-chat-ghostel-buffers))
+
+  ;; evil-collection's agent-shell setup runs right after this :config and
+  ;; puts the next item on TAB
+  (add-hook! 'evil-collection-setup-hook
+    (defun agent-shell-tab-folds-h (mode &rest _)
+      (when (eq mode 'agent-shell)
+        (map! :map agent-shell-mode-map
+              :n "TAB" #'agent-shell-ui-toggle-fragment
+              :n "<tab>" #'agent-shell-ui-toggle-fragment))))
+
+  ;; The menu takes the key `eca-transient-menu' gives the same action:
+  ;; eca's variant is the thought level here, its agent the session mode.
+  (pcase-dolist (`(,command . ,key)
+                 '((agent-shell-set-session-model . "m")
+                   (agent-shell-set-session-thought-level . "v")
+                   (agent-shell-set-session-mode . "b")
+                   (agent-shell-cycle-session-mode . "B")
+                   (agent-shell-toggle . "o")
+                   (agent-shell-set-session-config-option . "O")
+                   (agent-shell-new-shell . "n")
+                   (agent-shell-interrupt . "s")))
+    (transient-set-suffix-key 'agent-shell-help-menu command key))
+  (seq-reduce (lambda (after suffix)
+                (transient-append-suffix 'agent-shell-help-menu after suffix)
+                (nth 2 suffix))
+              '(("f" "Switch shell" agent-shell-switch-buffer)
+                ("r" "Restart" agent-shell-restart)
+                ("R" "Rename" agent-shell-rename-buffer)
+                ("c" "Clear" agent-shell-clear-buffer)
+                ("i" "Compose prompt" agent-shell-prompt-compose))
+              'agent-shell-new-shell))
 
 (use-package mcp
   :ensure (mcp :host github :repo "lizqwerscott/mcp.el")

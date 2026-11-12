@@ -315,7 +315,8 @@
           :desc "workspaces" "e" #'eca-toggle-workspaces
           "n" #'eca
           "r" #'eca-chat-resume
-          :desc "continue archived eca chat" "a" #'eca-continue-from-file))
+          :desc "continue archived eca chat" "a" #'eca-continue-from-file
+          :desc "agent-shell" "s" #'agent-shell))
 
       ( :prefix ("f" . "files")
         ( :when (modulep! :custom search)
