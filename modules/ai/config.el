@@ -416,6 +416,12 @@
                 ("i" "Compose prompt" agent-shell-prompt-compose))
               'agent-shell-new-shell))
 
+;; Idle sleep stalls agents that work while you are away (autoload/keep-awake.el).
+;; caffeinate is macOS-only, and only eca and agent-shell start agent work.
+(when (eq system-type 'darwin)
+  (after! (:or eca agent-shell)
+    (keep-awake-mode 1)))
+
 (use-package mcp
   :ensure (mcp :host github :repo "lizqwerscott/mcp.el")
   :after gptel

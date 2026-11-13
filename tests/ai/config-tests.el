@@ -7,6 +7,8 @@
                                   "helper.el")))
 (require 'buttercup)
 
+(load-module-file "modules/ai/autoload/keep-awake.el")
+
 ;; gptel is absent from the batch tier, so `modules/ai/config.el' can't be
 ;; loaded; its forms are read and walked as data instead.
 (defvar ai-tests--forms
@@ -42,6 +44,11 @@
   (mapcar (lambda (spec) (cons (car spec) (cdr spec)))
           (ai-tests--unquote
            (plist-get (cddr (ai-tests--ollama-backend)) :models))))
+
+(defun ai-tests--keep-awake-form ()
+  "The top-level form of the ai config that turns `keep-awake-mode' on."
+  (seq-find (lambda (form) (ai-tests--calls-in 'keep-awake-mode form))
+            ai-tests--forms))
 
 (defun ai-tests--local-presets ()
   "Presets pointing at the Ollama backend, as (NAME . PLIST) entries."
@@ -141,6 +148,21 @@
     (expect (member '(advice-add #'gptel-send :around #'gptel-send-show-model-a)
                     (ai-tests--calls 'advice-add))
             :to-be-truthy)))
+
+(describe "keep-awake-mode in ai/config.el"
+  (it "turns on once eca or agent-shell loads on macOS"
+    (spy-on 'keep-awake-mode)
+    (let ((system-type 'darwin))
+      (with-fake-feature 'agent-shell
+        (eval (ai-tests--keep-awake-form) t)))
+    (expect 'keep-awake-mode :to-have-been-called-with 1))
+
+  (it "stays off elsewhere, as caffeinate is macOS-only"
+    (spy-on 'keep-awake-mode)
+    (let ((system-type 'gnu/linux))
+      (with-fake-feature 'agent-shell
+        (eval (ai-tests--keep-awake-form) t)))
+    (expect 'keep-awake-mode :not :to-have-been-called)))
 
 (describe "local gptel presets"
   (it "exist"
