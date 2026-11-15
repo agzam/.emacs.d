@@ -91,7 +91,8 @@ The bare name is what `get-buffer' and friends accept; the printed
     (with-current-buffer buf
       (if buffer-file-name
           (progn
-            (diff-buffer-with-file buf)
+            ;; A remoto buffer remaps the command to the diff against its forge.
+            (funcall (or (command-remapping 'diff-buffer-with-file) #'diff-buffer-with-file) buf)
             (select-window (get-buffer-window "*Diff*")))
         (message "Buffer has no file!")))))
 

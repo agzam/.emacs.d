@@ -250,8 +250,11 @@
 (map! ( :map (prog-mode-map text-mode-map markdown-mode-map)
         :desc "external browser" "C-c C-o"
         (cmd!
-         (let ((git-link-extensions-rendered-plain nil))
-           (git-link-kill :browse)))))
+         ;; A remoto buffer has no local clone for git-link to read.
+         (if (bound-and-true-p remoto-mode)
+             (remoto-browse-url)
+           (let ((git-link-extensions-rendered-plain nil))
+             (git-link-kill :browse))))))
 
 (map! ( :map minibuffer-mode-map
         "M-l" #'sp-forward-slurp-sexp
