@@ -284,6 +284,8 @@
             "C-c C-y" #'eca-chat-tool-call-accept-all
             "C-c !" #'eca-chat-tool-call-accept-all-and-remember
             "C-c C-g" #'eca-chat-stop-prompt
+            "C-c C-k" nil   ; don't accidentally kill the chat
+            :n "gr" nil     ; just don't kill it
             :i "M-RET" #'eca-chat--key-pressed-return
             :i "M-p" #'eca-chat--key-pressed-previous-prompt-history
             :i "M-n" #'eca-chat--key-pressed-next-prompt-history
