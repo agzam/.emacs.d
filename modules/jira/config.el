@@ -57,10 +57,15 @@
             :nv "gr" #'go-jira-board-refresh)))
 
   (after! embark
+    ;; The repo prompt is not for the ticket, so embark must not type the
+    ;; target into it.
+    (setf (alist-get 'go-jira-autopilot-submit embark-target-injection-hooks)
+          '(embark--ignore-target))
     (map! :map go-jira-embark-jira-ticket-map
           (:prefix ("j" . "jira")
            :desc "change status" "s" #'go-jira-change-status
            :desc "assign"        "a" #'go-jira-assign
+           :desc "autopilot"     "A" #'go-jira-autopilot-submit
            :desc "PRs"           "p" #'go-jira-find-pull-requests-on-github
            :desc "popup"         "j" #'go-jira-popup-show
            :desc "open spec"     "o" #'ticket-spec-open

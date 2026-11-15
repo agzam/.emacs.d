@@ -124,5 +124,54 @@
           (go-jira-search-slack-threads)
           (expect searched :to-equal "SAC-7"))))))
 
+(describe "go-jira--autopilot-command"
+  (it "queues the ticket with the script, marked as sent from emacs"
+    (let ((go-jira-autopilot-script "/x/autopilot.bb"))
+      (expect (go-jira--autopilot-command "SAC-1" nil nil)
+              :to-equal '("bb" "/x/autopilot.bb" "submit" "SAC-1" "--by" "emacs"))))
+
+  (it "adds the repo and the force flag when given"
+    (let ((go-jira-autopilot-script "/x/autopilot.bb"))
+      (expect (go-jira--autopilot-command "SAC-1" "qlik-trial/repo-a" t)
+              :to-equal '("bb" "/x/autopilot.bb" "submit" "SAC-1" "--by" "emacs"
+                          "--repo" "qlik-trial/repo-a" "--force")))))
+
+(describe "go-jira--autopilot-repos"
+  (it "lists the directories of each root as org/name and skips plain files"
+    (let* ((root (make-temp-file "autopilot-org" t))
+           (go-jira-autopilot-repo-roots (list root)))
+      (unwind-protect
+          (progn
+            (make-directory (expand-file-name "repo-a" root))
+            (write-region "" nil (expand-file-name "notes.md" root))
+            (expect (go-jira--autopilot-repos)
+                    :to-equal (list (concat (file-name-nondirectory root) "/repo-a"))))
+        (delete-directory root t)))))
+
+(describe "go-jira-autopilot-submit"
+  (it "starts the submit command with the chosen repo"
+    (with-fake-feature 'go-jira
+      (let (started)
+        (cl-letf (((symbol-function 'go-jira--ticket-arg-or-ticket-at-point)
+                   (lambda (_) "SAC-1"))
+                  ((symbol-function 'completing-read)
+                   (lambda (&rest _) "qlik-trial/repo-a"))
+                  ((symbol-function 'make-process)
+                   (lambda (&rest args) (setq started (plist-get args :command)))))
+          (go-jira-autopilot-submit)
+          (expect (last started 2) :to-equal '("--repo" "qlik-trial/repo-a"))))))
+
+  (it "leaves the repo out when the choice is to guess"
+    (with-fake-feature 'go-jira
+      (let (started)
+        (cl-letf (((symbol-function 'go-jira--ticket-arg-or-ticket-at-point)
+                   (lambda (_) "SAC-1"))
+                  ((symbol-function 'completing-read)
+                   (lambda (&rest _) go-jira--autopilot-guess))
+                  ((symbol-function 'make-process)
+                   (lambda (&rest args) (setq started (plist-get args :command)))))
+          (go-jira-autopilot-submit)
+          (expect (member "--repo" started) :to-be nil))))))
+
 (provide 'jira-tests)
 ;;; tests/jira/jira-tests.el ends here

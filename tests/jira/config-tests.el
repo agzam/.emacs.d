@@ -35,6 +35,9 @@
     (expect (cdr (assoc "s" jira)) :to-equal '#'go-jira-change-status)
     (expect (cdr (assoc "j" jira)) :to-equal '#'go-jira-popup-show))
 
+  (it "queues the ticket for the autopilot on j A"
+    (expect (cdr (assoc "A" jira)) :to-equal '#'go-jira-autopilot-submit))
+
   (it "leaves b to the ticket view and the browser"
     (expect (car browse) :to-be nil)
     (expect (cdr browse) :to-have-same-items-as '("b" "o"))))
