@@ -1240,28 +1240,105 @@ The answer lands in a new `gptel-summary-mode' buffer."
 
 ;;;###autoload
 (defun open-gptel (&optional arg)
+  "Switch to the latest gptel chat, or start one from the active region.
+With ARG, or when no chat exists, start a `gptel-agent' session."
   (interactive "P")
-  ;; gptel-mode unbound = gptel never loaded = no chat buffers to find
-  (let ((last-b (unless (or arg (not (boundp 'gptel-mode)))
-                  (thread-last
-                    (buffer-list)
-                    (seq-filter
-                     (lambda (buf)
-                       (and
-                        (buffer-local-value 'gptel-mode buf)
-                        (buffer-file-name buf)
-                        (not (string-match-p
-                              ".*quick.org$"
-                              (buffer-file-name buf))))))
-                    (seq-sort
-                     (lambda (a b)
-                       (string> (buffer-name a) (buffer-name b))))
-                    (seq-first)))))
-    (if last-b
-        (progn
-          (display-buffer last-b)
-          (switch-to-buffer last-b))
-      (call-interactively #'gptel-agent))))
+  (if (use-region-p)
+      (gptel-chat-from-region (region-beginning) (region-end))
+    ;; gptel-mode unbound = gptel never loaded = no chat buffers to find
+    (let ((last-b (unless (or arg (not (boundp 'gptel-mode)))
+                    (thread-last
+                      (buffer-list)
+                      (seq-filter
+                       (lambda (buf)
+                         (and
+                          (buffer-local-value 'gptel-mode buf)
+                          (buffer-file-name buf)
+                          (not (string-match-p
+                                ".*quick.org$"
+                                (buffer-file-name buf))))))
+                      (seq-sort
+                       (lambda (a b)
+                         (string> (buffer-name a) (buffer-name b))))
+                      (seq-first)))))
+      (if last-b
+          (progn
+            (display-buffer last-b)
+            (switch-to-buffer last-b))
+        (call-interactively #'gptel-agent)))))
+
+;;; Chat from region
+
+(defun gptel-region-language ()
+  "Return the Org src block language of this buffer's code, or nil."
+  (when (derived-mode-p 'prog-mode)
+    (replace-regexp-in-string (rx (? "-ts") "-mode" eos) ""
+                              (symbol-name major-mode))))
+
+(defun gptel-region-org (text)
+  "Return TEXT as Org if this buffer holds Org or Markdown, else nil."
+  (cond ((derived-mode-p 'org-mode) text)
+        ((derived-mode-p 'markdown-mode)
+         (condition-case err
+             (progn (require 'prisma)
+                    (prisma-render 'org (prisma-parse 'markdown text)))
+           (error (message "prisma: quoting as-is, conversion failed (%s)"
+                           (error-message-string err))
+                  nil)))))
+
+(defun demote-org-headings (text)
+  "Return Org TEXT with every heading one level deeper."
+  (replace-regexp-in-string (rx bol (+ "*") " ") "*\\&" text))
+
+(defun gptel-region-source (beg end)
+  "Return the file and lines, or else the buffer name, of BEG to END."
+  (if-let* ((file (buffer-file-name (buffer-base-buffer))))
+      (let ((first (line-number-at-pos beg t))
+            ;; a region ending at a line start takes nothing from that line
+            (last (line-number-at-pos
+                   (if (and (< beg end) (save-excursion (goto-char end) (bolp)))
+                       (1- end)
+                     end)
+                   t)))
+        (format "%s:%s" (abbreviate-file-name file)
+                (if (= first last) first (format "%d-%d" first last))))
+    (buffer-name)))
+
+(defun gptel-region-excerpt (beg end)
+  "Return the text from BEG to END as an Org heading title over its body."
+  (require 'org-src)
+  (let* ((text (string-trim-right (buffer-substring-no-properties beg end)))
+         (org (gptel-region-org text))
+         (lang (gptel-region-language)))
+    ;; verbatim, not a file link: gptel-track-media would send the whole file
+    (concat "=" (gptel-region-source beg end) "=\n"
+            (cond (org (demote-org-headings org))
+                  (lang (format "#+begin_src %s\n%s\n#+end_src" lang
+                                (org-escape-code-in-string text)))
+                  (t (format "#+begin_example\n%s\n#+end_example"
+                             (org-escape-code-in-string text))))
+            "\n\n")))
+
+;;;###autoload
+(defun gptel-chat-from-region (beg end)
+  "Start a new gptel chat that quotes the text from BEG to END."
+  (interactive (if (use-region-p)
+                   (list (region-beginning) (region-end))
+                 (user-error "No region to start a chat with")))
+  (require 'gptel)
+  (let ((excerpt (gptel-region-excerpt beg end))
+        (chat (thread-last
+                (default-value 'gptel-backend)
+                (gptel-backend-name)
+                (format "*%s*")
+                (generate-new-buffer-name)
+                (gptel))))
+    (pulse-momentary-highlight-region beg end)
+    (deactivate-mark)
+    (pop-to-buffer chat)
+    (goto-char (point-max))
+    (insert excerpt)
+    (evil-insert-state)))
 
 ;;;###autoload
 (defun gptel-inline-project-chat-buffer (buf)

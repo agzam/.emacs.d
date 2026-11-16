@@ -10,6 +10,11 @@
 ;; let-plist is a lab macro (elisp module); load it first so eager
 ;; macroexpansion of gptel-improve-text resolves cleanly.
 (load-module-file "modules/elisp/autoload/let-plist.el")
+;; The same stub as the other gptel suites, whichever loads first.  Its
+;; accessors inline into the module as it loads, so no spy reaches them.
+(unless (fboundp 'gptel--make-backend)
+  (cl-defstruct (gptel-backend (:constructor gptel--make-backend))
+    name host header protocol stream endpoint key models url request-params curl-args))
 (load-module-file "modules/ai/autoload/gptel.el")
 
 ;; Owned by mcp-hub and gptel, neither installed here; declared so the specs
@@ -1800,7 +1805,233 @@
               ((symbol-function 'gptel-agent)
                (lambda () (interactive) (setq agent-called t))))
       (open-gptel)
-      (expect agent-called :to-be t))))
+      (expect agent-called :to-be t)))
+
+  (it "starts a chat from the active region instead of switching"
+    (spy-on 'gptel-chat-from-region)
+    (cl-letf (((symbol-function 'display-buffer) (lambda (b &rest _) b))
+              ((symbol-function 'switch-to-buffer) (lambda (b) (setq switched b)))
+              ((symbol-function 'gptel-agent)
+               (lambda () (interactive) (setq agent-called t))))
+      (with-current-buffer buf-plain
+        (insert "pick these words")
+        (let ((transient-mark-mode t))
+          (push-mark 6 t t)
+          (goto-char 11)
+          (open-gptel t))))
+    (expect 'gptel-chat-from-region :to-have-been-called-with 6 11)
+    (expect switched :to-be nil)
+    (expect agent-called :to-be nil)))
+
+;; markdown-mode is absent here; a mode that claims it as parent stands in
+(put 'gptel-tests-markdown-mode 'derived-mode-parent 'markdown-mode)
+
+(describe "gptel-region-language"
+  (it "names code after its major mode, tree-sitter or not"
+    (with-temp-buffer
+      (emacs-lisp-mode)
+      (expect (gptel-region-language) :to-equal "emacs-lisp"))
+    (require 'python)
+    (with-temp-buffer
+      ;; set, not run: the mode wants a grammar this machine may lack
+      (setq major-mode 'python-ts-mode)
+      (expect (gptel-region-language) :to-equal "python")))
+
+  (it "gives prose, Org, Markdown and other non-code buffers no language"
+    (dolist (mode '(text-mode fundamental-mode special-mode org-mode))
+      (with-temp-buffer
+        (funcall mode)
+        (expect (gptel-region-language) :to-be nil)))
+    (with-temp-buffer
+      (setq major-mode 'gptel-tests-markdown-mode)
+      (expect (gptel-region-language) :to-be nil))))
+
+(describe "gptel-region-org"
+  (it "passes Org text through"
+    (with-temp-buffer
+      (org-mode)
+      (expect (gptel-region-org "* Head\nbody") :to-equal "* Head\nbody")))
+
+  (it "converts Markdown text to Org through prisma"
+    (spy-on 'prisma-parse :and-return-value 'ast)
+    (spy-on 'prisma-render :and-return-value "* Title")
+    (with-temp-buffer
+      (setq major-mode 'gptel-tests-markdown-mode)
+      (with-fake-feature 'prisma
+        (expect (gptel-region-org "# Title") :to-equal "* Title")))
+    (expect 'prisma-parse :to-have-been-called-with 'markdown "# Title")
+    (expect 'prisma-render :to-have-been-called-with 'org 'ast))
+
+  (it "gives up on Markdown prisma fails to convert, saying why"
+    (spy-on 'prisma-parse :and-call-fake
+            (lambda (&rest _) (error "Prisma: missing tree-sitter grammar(s)")))
+    ;; the interpreter looks up the outer call's function before its args
+    (spy-on 'prisma-render)
+    (spy-on 'message)
+    (with-temp-buffer
+      (setq major-mode 'gptel-tests-markdown-mode)
+      (with-fake-feature 'prisma
+        (expect (gptel-region-org "# Title") :to-be nil)))
+    (expect 'message :to-have-been-called-with
+            "prisma: quoting as-is, conversion failed (%s)"
+            "Prisma: missing tree-sitter grammar(s)"))
+
+  (it "gives code and prose nil"
+    (dolist (mode '(emacs-lisp-mode text-mode))
+      (with-temp-buffer
+        (funcall mode)
+        (expect (gptel-region-org "words") :to-be nil)))))
+
+(describe "demote-org-headings"
+  (it "moves every heading one level down"
+    (expect (demote-org-headings "* A\ntext\n** B\nmore")
+            :to-equal "** A\ntext\n*** B\nmore"))
+
+  (it "leaves bold at a line start, list items and escaped lines alone"
+    (expect (demote-org-headings "*bold* start\n- item\n,* escaped")
+            :to-equal "*bold* start\n- item\n,* escaped")))
+
+(describe "gptel-region-source"
+  :var (buf)
+  (before-each
+    (setq buf (generate-new-buffer "region-src"))
+    (with-current-buffer buf
+      (insert "one\ntwo\nthree\nfour\n")
+      (setq buffer-file-name (expand-file-name "~/proj/notes.txt"))))
+  (after-each
+    (with-current-buffer buf
+      (setq buffer-file-name nil)
+      (set-buffer-modified-p nil))
+    (kill-buffer buf))
+
+  (it "gives the file's short path and the lines the region spans"
+    (with-current-buffer buf
+      (expect (gptel-region-source 5 14) :to-equal "~/proj/notes.txt:2-3")))
+
+  (it "leaves out the line the region stops at the start of"
+    ;; a visual-line selection of lines 2-3 ends at the first char of line 4
+    (with-current-buffer buf
+      (expect (gptel-region-source 5 15) :to-equal "~/proj/notes.txt:2-3")
+      (expect (gptel-region-source 5 9) :to-equal "~/proj/notes.txt:2")))
+
+  (it "counts lines from the top of the file in a narrowed buffer"
+    (with-current-buffer buf
+      (narrow-to-region 9 20)
+      (expect (gptel-region-source 9 14) :to-equal "~/proj/notes.txt:3")))
+
+  (it "takes the file of an indirect buffer's base"
+    (let ((indirect (make-indirect-buffer buf "region-src-indirect")))
+      (unwind-protect
+          (with-current-buffer indirect
+            (expect (gptel-region-source 5 14) :to-equal "~/proj/notes.txt:2-3"))
+        (kill-buffer indirect))))
+
+  (it "names a buffer that visits no file"
+    (with-current-buffer buf
+      (setq buffer-file-name nil)
+      (expect (gptel-region-source 5 14) :to-equal "region-src"))))
+
+(describe "gptel-region-excerpt"
+  (it "puts code in a src block under its source, escaped for Org"
+    (with-temp-buffer
+      (emacs-lisp-mode)
+      (insert "(defun f ()\n* not a heading\n#+end_src\n  1)\n\n\n")
+      (expect (gptel-region-excerpt (point-min) (point-max))
+              :to-equal (concat "=" (buffer-name) "=\n"
+                                "#+begin_src emacs-lisp\n"
+                                "(defun f ()\n,* not a heading\n,#+end_src\n  1)\n"
+                                "#+end_src\n\n"))))
+
+  (it "puts other text in an example block"
+    (with-temp-buffer
+      (text-mode)
+      (insert "plain words")
+      (expect (gptel-region-excerpt (point-min) (point-max))
+              :to-equal (concat "=" (buffer-name) "=\n"
+                                "#+begin_example\nplain words\n#+end_example\n\n"))))
+
+  (it "puts Org text in as it is, its headings under the source"
+    (with-temp-buffer
+      (org-mode)
+      (insert "* Head\nbody\n#+begin_src sh\n,* escaped\n#+end_src\n")
+      (expect (gptel-region-excerpt (point-min) (point-max))
+              :to-equal (concat "=" (buffer-name) "=\n"
+                                "** Head\nbody\n#+begin_src sh\n,* escaped\n#+end_src"
+                                "\n\n"))))
+
+  (it "puts Markdown text in as Org, its headings under the source"
+    (spy-on 'prisma-parse :and-return-value 'ast)
+    (spy-on 'prisma-render :and-return-value "* Title\n\nSome /words/.")
+    (with-temp-buffer
+      (setq major-mode 'gptel-tests-markdown-mode)
+      (insert "# Title\n\nSome _words_.\n")
+      (with-fake-feature 'prisma
+        (expect (gptel-region-excerpt (point-min) (point-max))
+                :to-equal (concat "=" (buffer-name) "=\n"
+                                  "** Title\n\nSome /words/.\n\n"))))
+    (expect 'prisma-parse :to-have-been-called-with
+            'markdown "# Title\n\nSome _words_.")))
+
+(describe "gptel-chat-from-region"
+  :var (src chat named shown insert-in backend)
+  (before-each
+    (setq chat nil named nil shown nil insert-in nil
+          backend (gptel--make-backend :name "Claude-OAuth")
+          src (generate-new-buffer "chat-src"))
+    (with-current-buffer src
+      (emacs-lisp-mode)
+      (insert "(one)\n(two)\n"))
+    (spy-on 'pulse-momentary-highlight-region)
+    (spy-on 'pop-to-buffer :and-call-fake
+            (lambda (b &rest _) (setq shown b) (set-buffer b)))
+    (spy-on 'evil-insert-state :and-call-fake
+            (lambda () (setq insert-in (current-buffer))))
+    ;; gptel opens the named buffer with its prompt prefix typed in
+    (spy-on 'gptel :and-call-fake
+            (lambda (name &rest _)
+              (setq named name
+                    chat (get-buffer-create name))
+              (with-current-buffer chat (insert "* "))
+              chat)))
+  (after-each
+    (kill-buffer src)
+    (when (buffer-live-p chat) (kill-buffer chat)))
+
+  (it "quotes the region in a new chat and leaves point below it"
+    (with-current-buffer src
+      (let ((transient-mark-mode t))
+        (push-mark 1 t t)
+        (goto-char 7)
+        (with-fake-feature 'gptel
+          (cl-progv '(gptel-backend) (list backend)
+            (call-interactively #'gptel-chat-from-region)))))
+    (expect named :to-equal "*Claude-OAuth*")
+    (expect shown :to-be chat)
+    (expect insert-in :to-be chat)
+    (expect (buffer-local-value 'mark-active src) :to-be nil)
+    (with-current-buffer chat
+      (expect (buffer-string)
+              :to-equal (concat "* =chat-src=\n#+begin_src emacs-lisp\n"
+                                "(one)\n#+end_src\n\n"))
+      (expect (point) :to-equal (point-max))))
+
+  (it "picks a fresh name while a chat of that name exists"
+    (let ((old (get-buffer-create "*Claude-OAuth*")))
+      (unwind-protect
+          (with-current-buffer src
+            (with-fake-feature 'gptel
+              (cl-progv '(gptel-backend) (list backend)
+                (gptel-chat-from-region 1 7))))
+        (kill-buffer old)))
+    (expect named :to-equal "*Claude-OAuth*<2>"))
+
+  (it "refuses to start without a region"
+    (with-current-buffer src
+      (let ((transient-mark-mode t))
+        (deactivate-mark)
+        (expect (call-interactively #'gptel-chat-from-region)
+                :to-throw 'user-error)))
+    (expect 'gptel :not :to-have-been-called)))
 
 (describe "gptel-inline-visit-last-chat"
   :var (chat popped)
