@@ -34,6 +34,8 @@
 ;; gptel-backend: bound at all, it makes the merge label call a backend
 ;; accessor on it, so those specs bind it with `cl-progv' instead.
 (defvar gptel-model nil)
+;; valued: a quoted exchange ends on the prompt prefix of the Org chat
+(defvar gptel-prompt-prefix-alist '((org-mode . "* ")))
 (provide 'mcp-hub)
 
 (describe "mcp-servers-from-eca-config"
@@ -1756,72 +1758,81 @@
         (kill-buffer buf))
       (expect aborted :to-be buf))))
 
+(defun gptel-tests--open-gptel (&optional arg)
+  "Run `open-gptel' with ARG; return the buffer it switched to, or `agent'."
+  (let (result)
+    (cl-letf (((symbol-function 'display-buffer) #'ignore)
+              ((symbol-function 'switch-to-buffer)
+               (lambda (b &rest _) (setq result b)))
+              ((symbol-function 'gptel-agent)
+               (lambda () (interactive) (setq result 'agent))))
+      (open-gptel arg))
+    result))
+
 (describe "open-gptel"
-  :var (buf-old buf-new buf-quick buf-plain switched agent-called)
+  :var (old new quick unsaved)
   (before-each
     ;; simulate gptel loaded: the minor-mode var exists with a nil default
     (defvar gptel-mode nil)
-    (setq switched nil agent-called nil)
-    (setq buf-old (generate-new-buffer "gptel-2026-01-01"))
-    (setq buf-new (generate-new-buffer "gptel-2026-02-02"))
-    (setq buf-quick (generate-new-buffer "quick"))
-    (setq buf-plain (generate-new-buffer "plain"))
-    (dolist (pair `((,buf-old . "/tmp/gptel-2026-01-01.org")
-                    (,buf-new . "/tmp/gptel-2026-02-02.org")
-                    (,buf-quick . "/tmp/quick.org")))
-      (with-current-buffer (car pair)
+    (setq old (generate-new-buffer "gptel-2026-01-01.org")
+          new (generate-new-buffer "gptel-2026-02-02.org")
+          quick (generate-new-buffer "quick.org")
+          unsaved (generate-new-buffer "*Claude-OAuth*"))
+    (pcase-dolist (`(,buf . ,file) `((,old . "/tmp/gptel-2026-01-01.org")
+                                     (,new . "/tmp/gptel-2026-02-02.org")
+                                     (,quick . "/tmp/quick.org")
+                                     (,unsaved)))
+      (with-current-buffer buf
         (setq-local gptel-mode t)
-        (setq buffer-file-name (cdr pair)))))
+        (setq buffer-file-name file))))
   (after-each
-    (dolist (b (list buf-old buf-new buf-quick buf-plain))
+    (dolist (b (list old new quick unsaved))
       (with-current-buffer b
         (setq buffer-file-name nil)
         (set-buffer-modified-p nil))
       (kill-buffer b)))
 
-  (it "switches to the lexicographically-latest gptel file buffer"
-    (cl-letf (((symbol-function 'display-buffer) (lambda (b &rest _) b))
-              ((symbol-function 'switch-to-buffer) (lambda (b) (setq switched b)))
-              ((symbol-function 'gptel-agent)
-               (lambda () (interactive) (setq agent-called t))))
-      (open-gptel)
-      (expect switched :to-be buf-new)
-      (expect agent-called :to-be nil)))
+  ;; buried in turn, buffers line up in the buffer list in that order,
+  ;; the first one as the most recently used
 
-  (it "skips quick.org and falls through to gptel-agent with a prefix arg"
-    (cl-letf (((symbol-function 'display-buffer) (lambda (b &rest _) b))
-              ((symbol-function 'switch-to-buffer) (lambda (b) (setq switched b)))
-              ((symbol-function 'gptel-agent)
-               (lambda () (interactive) (setq agent-called t))))
-      (open-gptel t)
-      (expect switched :to-be nil)
-      (expect agent-called :to-be t)))
+  (it "switches to the chat used last, though it has no file yet"
+    (mapc #'bury-buffer-internal (list unsaved new old))
+    (expect (gptel-tests--open-gptel) :to-be unsaved))
 
-  (it "calls gptel-agent when no gptel buffers exist"
-    (dolist (b (list buf-old buf-new))
+  (it "prefers the chat used last over a newer one"
+    (mapc #'bury-buffer-internal (list old unsaved new))
+    (expect (gptel-tests--open-gptel) :to-be old))
+
+  (it "skips quick.org, hidden buffers and indirect clones"
+    (let ((hidden (generate-new-buffer " *gptel-prompt*"))
+          (clone (make-indirect-buffer new "gptel-tests-clone")))
+      (unwind-protect
+          (progn
+            (dolist (b (list hidden clone))
+              (with-current-buffer b (setq-local gptel-mode t)))
+            (mapc #'bury-buffer-internal (list quick hidden clone new old unsaved))
+            (expect (gptel-tests--open-gptel) :to-be new))
+        (kill-buffer clone)
+        (kill-buffer hidden))))
+
+  (it "starts a gptel-agent session with a prefix arg"
+    (expect (gptel-tests--open-gptel t) :to-be 'agent))
+
+  (it "starts a gptel-agent session when no chat exists"
+    (dolist (b (list old new unsaved))
       (with-current-buffer b (setq-local gptel-mode nil)))
-    (cl-letf (((symbol-function 'display-buffer) (lambda (b &rest _) b))
-              ((symbol-function 'switch-to-buffer) (lambda (b) (setq switched b)))
-              ((symbol-function 'gptel-agent)
-               (lambda () (interactive) (setq agent-called t))))
-      (open-gptel)
-      (expect agent-called :to-be t)))
+    (expect (gptel-tests--open-gptel) :to-be 'agent))
 
   (it "starts a chat from the active region instead of switching"
     (spy-on 'gptel-chat-from-region)
-    (cl-letf (((symbol-function 'display-buffer) (lambda (b &rest _) b))
-              ((symbol-function 'switch-to-buffer) (lambda (b) (setq switched b)))
-              ((symbol-function 'gptel-agent)
-               (lambda () (interactive) (setq agent-called t))))
-      (with-current-buffer buf-plain
-        (insert "pick these words")
-        (let ((transient-mark-mode t))
-          (push-mark 6 t t)
-          (goto-char 11)
-          (open-gptel t))))
-    (expect 'gptel-chat-from-region :to-have-been-called-with 6 11)
-    (expect switched :to-be nil)
-    (expect agent-called :to-be nil)))
+    (expect (with-temp-buffer
+              (insert "pick these words")
+              (let ((transient-mark-mode t))
+                (push-mark 6 t t)
+                (goto-char 11)
+                (gptel-tests--open-gptel t)))
+            :to-be nil)
+    (expect 'gptel-chat-from-region :to-have-been-called-with 6 11)))
 
 ;; markdown-mode is absent here; a mode that claims it as parent stands in
 (put 'gptel-tests-markdown-mode 'derived-mode-parent 'markdown-mode)
@@ -1882,63 +1893,21 @@
         (funcall mode)
         (expect (gptel-region-org "words") :to-be nil)))))
 
-(describe "demote-org-headings"
-  (it "moves every heading one level down"
-    (expect (demote-org-headings "* A\ntext\n** B\nmore")
-            :to-equal "** A\ntext\n*** B\nmore"))
-
-  (it "leaves bold at a line start, list items and escaped lines alone"
-    (expect (demote-org-headings "*bold* start\n- item\n,* escaped")
-            :to-equal "*bold* start\n- item\n,* escaped")))
-
-(describe "gptel-region-source"
-  :var (buf)
-  (before-each
-    (setq buf (generate-new-buffer "region-src"))
-    (with-current-buffer buf
-      (insert "one\ntwo\nthree\nfour\n")
-      (setq buffer-file-name (expand-file-name "~/proj/notes.txt"))))
-  (after-each
-    (with-current-buffer buf
-      (setq buffer-file-name nil)
-      (set-buffer-modified-p nil))
-    (kill-buffer buf))
-
-  (it "gives the file's short path and the lines the region spans"
-    (with-current-buffer buf
-      (expect (gptel-region-source 5 14) :to-equal "~/proj/notes.txt:2-3")))
-
-  (it "leaves out the line the region stops at the start of"
-    ;; a visual-line selection of lines 2-3 ends at the first char of line 4
-    (with-current-buffer buf
-      (expect (gptel-region-source 5 15) :to-equal "~/proj/notes.txt:2-3")
-      (expect (gptel-region-source 5 9) :to-equal "~/proj/notes.txt:2")))
-
-  (it "counts lines from the top of the file in a narrowed buffer"
-    (with-current-buffer buf
-      (narrow-to-region 9 20)
-      (expect (gptel-region-source 9 14) :to-equal "~/proj/notes.txt:3")))
-
-  (it "takes the file of an indirect buffer's base"
-    (let ((indirect (make-indirect-buffer buf "region-src-indirect")))
-      (unwind-protect
-          (with-current-buffer indirect
-            (expect (gptel-region-source 5 14) :to-equal "~/proj/notes.txt:2-3"))
-        (kill-buffer indirect))))
-
-  (it "names a buffer that visits no file"
-    (with-current-buffer buf
-      (setq buffer-file-name nil)
-      (expect (gptel-region-source 5 14) :to-equal "region-src"))))
-
 (describe "gptel-region-excerpt"
-  (it "puts code in a src block under its source, escaped for Org"
+  :var (file-buf)
+  (after-each
+    (when (buffer-live-p file-buf)
+      (with-current-buffer file-buf
+        (setq buffer-file-name nil)
+        (set-buffer-modified-p nil))
+      (kill-buffer file-buf)))
+
+  (it "puts code in a src block, escaped for Org"
     (with-temp-buffer
       (emacs-lisp-mode)
       (insert "(defun f ()\n* not a heading\n#+end_src\n  1)\n\n\n")
       (expect (gptel-region-excerpt (point-min) (point-max))
-              :to-equal (concat "=" (buffer-name) "=\n"
-                                "#+begin_src emacs-lisp\n"
+              :to-equal (concat "#+begin_src emacs-lisp\n"
                                 "(defun f ()\n,* not a heading\n,#+end_src\n  1)\n"
                                 "#+end_src\n\n"))))
 
@@ -1947,19 +1916,16 @@
       (text-mode)
       (insert "plain words")
       (expect (gptel-region-excerpt (point-min) (point-max))
-              :to-equal (concat "=" (buffer-name) "=\n"
-                                "#+begin_example\nplain words\n#+end_example\n\n"))))
+              :to-equal "#+begin_example\nplain words\n#+end_example\n\n")))
 
-  (it "puts Org text in as it is, its headings under the source"
+  (it "puts Org text in as it is, headings at their own level"
     (with-temp-buffer
       (org-mode)
       (insert "* Head\nbody\n#+begin_src sh\n,* escaped\n#+end_src\n")
       (expect (gptel-region-excerpt (point-min) (point-max))
-              :to-equal (concat "=" (buffer-name) "=\n"
-                                "** Head\nbody\n#+begin_src sh\n,* escaped\n#+end_src"
-                                "\n\n"))))
+              :to-equal "* Head\nbody\n#+begin_src sh\n,* escaped\n#+end_src\n\n")))
 
-  (it "puts Markdown text in as Org, its headings under the source"
+  (it "puts Markdown text in as Org"
     (spy-on 'prisma-parse :and-return-value 'ast)
     (spy-on 'prisma-render :and-return-value "* Title\n\nSome /words/.")
     (with-temp-buffer
@@ -1967,10 +1933,127 @@
       (insert "# Title\n\nSome _words_.\n")
       (with-fake-feature 'prisma
         (expect (gptel-region-excerpt (point-min) (point-max))
-                :to-equal (concat "=" (buffer-name) "=\n"
-                                  "** Title\n\nSome /words/.\n\n"))))
+                :to-equal "* Title\n\nSome /words/.\n\n")))
     (expect 'prisma-parse :to-have-been-called-with
-            'markdown "# Title\n\nSome _words_.")))
+            'markdown "# Title\n\nSome _words_."))
+
+  (it "names neither the buffer nor the file it quotes"
+    ;; spacehammer's edit buffers visit a temp file named after the buffer
+    (setq file-buf (generate-new-buffer "* spacehammer-edit Brave [s-1] *"))
+    (with-current-buffer file-buf
+      (text-mode)
+      (insert "reply text\n")
+      (setq buffer-file-name "/tmp/* spacehammer-edit Brave [s-1] *_1_Brave")
+      (expect (gptel-region-excerpt (point-min) (point-max))
+              :to-equal "#+begin_example\nreply text\n#+end_example\n\n")))
+
+  (it "carries a Markdown exchange over as Org, each part in its role"
+    (spy-on 'prisma-parse :and-call-fake (lambda (_ text) text))
+    (spy-on 'prisma-render :and-call-fake
+            (lambda (_ text) (string-replace "**" "*" text)))
+    (with-temp-buffer
+      (setq major-mode 'gptel-tests-markdown-mode)
+      ;; laid out as gptel writes its reply into a buffer that is not Org
+      (insert "Why **blue**?\n\n"
+              (propertize "``` reasoning\nLight scatters.\n```" 'gptel 'ignore)
+              "\n\n"
+              (propertize "``` tool (Search :q \"sky\")" 'gptel 'ignore)
+              (propertize "\n(:name \"Search\" :args (:q \"sky\"))\n\n* Rayleigh"
+                          'gptel '(tool . "id1"))
+              (propertize "\n```\n" 'gptel 'ignore)
+              "\n"
+              (propertize "It is **Rayleigh** scattering." 'gptel 'response)
+              "\n")
+      (with-fake-feature 'prisma
+        (let ((excerpt (gptel-region-excerpt (point-min) (point-max))))
+          (expect (substring-no-properties excerpt)
+                  :to-equal (concat "Why *blue*?\n\n"
+                                    "#+begin_reasoning\nLight scatters.\n#+end_reasoning\n\n"
+                                    "#+begin_tool (Search :q \"sky\")\n"
+                                    "(:name \"Search\" :args (:q \"sky\"))\n\n,* Rayleigh\n"
+                                    "#+end_tool\n\n"
+                                    "It is *Rayleigh* scattering.\n\n* "))
+          (expect (with-temp-buffer
+                    (insert excerpt)
+                    (mapcar #'car (gptel-region-runs (point-min) (point-max))))
+                  :to-equal '(nil ignore nil ignore (tool . "id1") ignore nil
+                                  response nil))))))
+
+  (it "copies an Org exchange as it is, roles kept"
+    (with-temp-buffer
+      (org-mode)
+      (insert "Why?\n\n#+begin_reasoning\n"
+              (propertize "Light scatters." 'gptel 'ignore)
+              "\n#+end_reasoning\n\n"
+              (propertize "Rayleigh." 'gptel 'response)
+              "\n")
+      (let ((excerpt (gptel-region-excerpt (point-min) (point-max))))
+        (expect (substring-no-properties excerpt)
+                :to-equal (concat "Why?\n\n#+begin_reasoning\nLight scatters.\n"
+                                  "#+end_reasoning\n\nRayleigh.\n\n* "))
+        (expect (mapcar (lambda (word)
+                          (get-text-property (string-search word excerpt) 'gptel excerpt))
+                        '("Why" "Light" "Rayleigh"))
+                :to-equal '(nil ignore response)))))
+
+  (it "opens no prompt after an exchange that ends on the user's text"
+    (with-temp-buffer
+      (org-mode)
+      (insert "Why?\n\n" (propertize "Rayleigh." 'gptel 'response) "\n\nAnd red?\n")
+      (expect (substring-no-properties (gptel-region-excerpt (point-min) (point-max)))
+              :to-equal "Why?\n\nRayleigh.\n\nAnd red?\n\n")))
+
+  (it "quotes a selection that opens with a reply, its roles dropped"
+    (with-temp-buffer
+      (text-mode)
+      (insert (propertize "Rayleigh." 'gptel 'response) "\n\nAnd red?\n")
+      (let ((excerpt (gptel-region-excerpt (point-min) (point-max))))
+        (expect (substring-no-properties excerpt)
+                :to-equal "#+begin_example\nRayleigh.\n\nAnd red?\n#+end_example\n\n")
+        (expect (text-property-not-all 0 (length excerpt) 'gptel nil excerpt)
+                :to-be nil)))))
+
+(describe "gptel-region-runs"
+  (it "splits the text where its gptel property changes"
+    (with-temp-buffer
+      (insert "ask" (propertize "think" 'gptel 'ignore 'face 'bold)
+              (propertize "ing" 'gptel 'ignore) (propertize "say" 'gptel 'response)
+              "\n")
+      (expect (gptel-region-runs (point-min) (point-max))
+              :to-equal '((nil . "ask") (ignore . "thinking") (response . "say")
+                          (nil . "\n")))))
+
+  (it "gives text without properties a single run"
+    (with-temp-buffer
+      (insert "plain")
+      (expect (gptel-region-runs (point-min) (point-max))
+              :to-equal '((nil . "plain"))))))
+
+(describe "gptel-org-fences"
+  (it "turns the fences of a reasoning block into Org ones"
+    (expect (gptel-org-fences "``` reasoning\nhmm\n```" nil)
+            :to-equal '("#+begin_reasoning\nhmm\n#+end_reasoning" . nil)))
+
+  (it "closes the tool block an earlier run opened, then opens the next"
+    (expect (gptel-org-fences "``` tool (Read :path \"a\")" nil)
+            :to-equal '("#+begin_tool (Read :path \"a\")" . tool))
+    (expect (gptel-org-fences "\n```\n``` tool (Read :path \"b\")" 'tool)
+            :to-equal '("\n#+end_tool\n#+begin_tool (Read :path \"b\")" . tool))))
+
+(describe "gptel-fold-blocks"
+  (it "folds the reasoning and tool blocks, not the rest"
+    (with-temp-buffer
+      (org-mode)
+      (insert "Q?\n\n#+begin_reasoning\nthinking\n#+end_reasoning\n\n"
+              "#+begin_tool (Search :q \"x\")\n(:name \"Search\")\n\nfound\n#+end_tool\n\n"
+              "#+begin_src emacs-lisp\n(+ 1 2)\n#+end_src\n")
+      (gptel-fold-blocks)
+      (expect (mapcar (lambda (text)
+                        (goto-char (point-min))
+                        (search-forward text)
+                        (and (invisible-p (1- (point))) t))
+                      '("thinking" "found" "(+ 1 2)" "Q?"))
+              :to-equal '(t t nil nil)))))
 
 (describe "gptel-chat-from-region"
   :var (src chat named shown insert-in backend)
@@ -1986,18 +2069,21 @@
             (lambda (b &rest _) (setq shown b) (set-buffer b)))
     (spy-on 'evil-insert-state :and-call-fake
             (lambda () (setq insert-in (current-buffer))))
-    ;; gptel opens the named buffer with its prompt prefix typed in
+    ;; gptel opens the named buffer in Org with INITIAL typed in, else its
+    ;; prompt prefix
     (spy-on 'gptel :and-call-fake
-            (lambda (name &rest _)
+            (lambda (name &optional _key initial &rest _)
               (setq named name
                     chat (get-buffer-create name))
-              (with-current-buffer chat (insert "* "))
+              (with-current-buffer chat
+                (org-mode)
+                (insert (or initial "* ")))
               chat)))
   (after-each
     (kill-buffer src)
     (when (buffer-live-p chat) (kill-buffer chat)))
 
-  (it "quotes the region in a new chat and leaves point below it"
+  (it "quotes the region in a new chat, no heading over it, point below it"
     (with-current-buffer src
       (let ((transient-mark-mode t))
         (push-mark 1 t t)
@@ -2011,8 +2097,7 @@
     (expect (buffer-local-value 'mark-active src) :to-be nil)
     (with-current-buffer chat
       (expect (buffer-string)
-              :to-equal (concat "* =chat-src=\n#+begin_src emacs-lisp\n"
-                                "(one)\n#+end_src\n\n"))
+              :to-equal "#+begin_src emacs-lisp\n(one)\n#+end_src\n\n")
       (expect (point) :to-equal (point-max))))
 
   (it "picks a fresh name while a chat of that name exists"

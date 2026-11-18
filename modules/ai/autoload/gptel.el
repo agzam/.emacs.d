@@ -1238,34 +1238,32 @@ The answer lands in a new `gptel-summary-mode' buffer."
     (delete-region (point-min) keep-line)
     (evil-insert-state)))
 
+(defun gptel-latest-chat ()
+  "Return the most recently used gptel chat buffer, saved or not."
+  ;; gptel-mode unbound = gptel never loaded = no chat buffers to find
+  (when (boundp 'gptel-mode)
+    (seq-find
+     (lambda (buf)
+       (and (buffer-local-value 'gptel-mode buf)
+            ;; gptel-inline prompts are indirect clones of a chat, and
+            ;; gptel copies each prompt into a hidden buffer
+            (not (buffer-base-buffer buf))
+            (not (string-prefix-p " " (buffer-name buf)))
+            (not (string-suffix-p "quick.org" (or (buffer-file-name buf) "")))))
+     (buffer-list))))
+
 ;;;###autoload
 (defun open-gptel (&optional arg)
-  "Switch to the latest gptel chat, or start one from the active region.
+  "Start a gptel chat from the active region, or switch to the latest chat.
 With ARG, or when no chat exists, start a `gptel-agent' session."
   (interactive "P")
   (if (use-region-p)
       (gptel-chat-from-region (region-beginning) (region-end))
-    ;; gptel-mode unbound = gptel never loaded = no chat buffers to find
-    (let ((last-b (unless (or arg (not (boundp 'gptel-mode)))
-                    (thread-last
-                      (buffer-list)
-                      (seq-filter
-                       (lambda (buf)
-                         (and
-                          (buffer-local-value 'gptel-mode buf)
-                          (buffer-file-name buf)
-                          (not (string-match-p
-                                ".*quick.org$"
-                                (buffer-file-name buf))))))
-                      (seq-sort
-                       (lambda (a b)
-                         (string> (buffer-name a) (buffer-name b))))
-                      (seq-first)))))
-      (if last-b
-          (progn
-            (display-buffer last-b)
-            (switch-to-buffer last-b))
-        (call-interactively #'gptel-agent)))))
+    (if-let* ((chat (and (not arg) (gptel-latest-chat))))
+        (progn
+          (display-buffer chat)
+          (switch-to-buffer chat))
+      (call-interactively #'gptel-agent))))
 
 ;;; Chat from region
 
@@ -1275,49 +1273,124 @@ With ARG, or when no chat exists, start a `gptel-agent' session."
     (replace-regexp-in-string (rx (? "-ts") "-mode" eos) ""
                               (symbol-name major-mode))))
 
+(defun gptel-markdown-to-org (text)
+  "Return Markdown TEXT as Org, or nil when prisma fails to convert it."
+  (condition-case err
+      (progn (require 'prisma)
+             (prisma-render 'org (prisma-parse 'markdown text)))
+    (error (message "prisma: quoting as-is, conversion failed (%s)"
+                    (error-message-string err))
+           nil)))
+
 (defun gptel-region-org (text)
   "Return TEXT as Org if this buffer holds Org or Markdown, else nil."
   (cond ((derived-mode-p 'org-mode) text)
-        ((derived-mode-p 'markdown-mode)
-         (condition-case err
-             (progn (require 'prisma)
-                    (prisma-render 'org (prisma-parse 'markdown text)))
-           (error (message "prisma: quoting as-is, conversion failed (%s)"
-                           (error-message-string err))
-                  nil)))))
+        ((derived-mode-p 'markdown-mode) (gptel-markdown-to-org text))))
 
-(defun demote-org-headings (text)
-  "Return Org TEXT with every heading one level deeper."
-  (replace-regexp-in-string (rx bol (+ "*") " ") "*\\&" text))
+(defun gptel-region-quote (text)
+  "Return TEXT of this buffer as Org: as it is, converted, or in a block."
+  (or (gptel-region-org text)
+      (if-let* ((lang (gptel-region-language)))
+          (format "#+begin_src %s\n%s\n#+end_src" lang
+                  (org-escape-code-in-string text))
+        (format "#+begin_example\n%s\n#+end_example"
+                (org-escape-code-in-string text)))))
 
-(defun gptel-region-source (beg end)
-  "Return the file and lines, or else the buffer name, of BEG to END."
-  (if-let* ((file (buffer-file-name (buffer-base-buffer))))
-      (let ((first (line-number-at-pos beg t))
-            ;; a region ending at a line start takes nothing from that line
-            (last (line-number-at-pos
-                   (if (and (< beg end) (save-excursion (goto-char end) (bolp)))
-                       (1- end)
-                     end)
-                   t)))
-        (format "%s:%s" (abbreviate-file-name file)
-                (if (= first last) first (format "%d-%d" first last))))
-    (buffer-name)))
+(defun gptel-region-runs (beg end)
+  "Return the text from BEG to END as (ROLE . TEXT) runs of one `gptel' value."
+  (let* ((text (buffer-substring beg end))
+         (runs (seq-reduce
+                (pcase-lambda (acc `(,from ,to ,props))
+                  (let ((role (plist-get props 'gptel))
+                        (piece (substring-no-properties text from to)))
+                    (if (and acc (equal role (car (car acc))))
+                        (cons (cons role (concat (cdr (car acc)) piece)) (cdr acc))
+                      (cons (cons role piece) acc))))
+                (or (object-intervals text) (list (list 0 (length text) nil)))
+                nil)))
+    (reverse runs)))
+
+(defun gptel-markdown-run-org (text)
+  "Return Markdown TEXT as Org, keeping the blank lines around it."
+  (if (string-blank-p text)
+      text
+    (let* ((start (string-match-p "[^\n]" text))
+           (end (string-match-p "\n*\\'" text))
+           (core (substring text start end)))
+      (concat (substring text 0 start)
+              (or (gptel-markdown-to-org core) core)
+              (substring text end)))))
+
+(defun gptel-org-fences (text open)
+  "Return TEXT with the fences of gptel's Markdown blocks made Org ones.
+OPEN is the block, `reasoning' or `tool', open where TEXT starts.  The
+value is (ORG . OPEN), with OPEN the block still open where TEXT ends."
+  (pcase-let ((`(,open . ,lines)
+               (seq-reduce
+                (pcase-lambda (`(,open . ,lines) line)
+                  (pcase line
+                    ("``` reasoning"
+                     (cons 'reasoning (cons "#+begin_reasoning" lines)))
+                    ((rx bos "``` tool " (let call (* nonl)) eos)
+                     (cons 'tool (cons (concat "#+begin_tool " call) lines)))
+                    ("```"
+                     (cons nil (cons (if (eq open 'tool) "#+end_tool" "#+end_reasoning")
+                                     lines)))
+                    (_ (cons open (cons line lines)))))
+                (split-string text "\n")
+                (list open))))
+    (cons (string-join (reverse lines) "\n") open)))
+
+(defun gptel-exchange-org (runs)
+  "Return RUNS of a gptel exchange written in Markdown as Org, roles kept."
+  (let ((open-and-pieces
+         (seq-reduce
+          (pcase-lambda (`(,open . ,pieces) `(,role . ,text))
+            (pcase-let ((`(,org . ,next)
+                         (pcase role
+                           ('ignore (gptel-org-fences text open))
+                           (`(tool . ,_) (cons (org-escape-code-in-string text) open))
+                           (_ (cons (gptel-markdown-run-org text) open)))))
+              (cons next (cons (if role (propertize org 'gptel role) org) pieces))))
+          runs
+          (list nil))))
+    (apply #'concat (reverse (cdr open-and-pieces)))))
+
+(defun gptel-region-exchange (runs)
+  "Return RUNS of a gptel exchange in this buffer as Org, roles kept."
+  (if (derived-mode-p 'org-mode)
+      (mapconcat (pcase-lambda (`(,role . ,text))
+                   (if role (propertize text 'gptel role) text))
+                 runs)
+    (gptel-exchange-org runs)))
+
+(defvar gptel-prompt-prefix-alist)
 
 (defun gptel-region-excerpt (beg end)
-  "Return the text from BEG to END as an Org heading title over its body."
+  "Return the text from BEG to END as Org to start a chat with.
+A prompt followed by gptel's replies comes as the conversation to go on
+with, any other text as a quote."
   (require 'org-src)
-  (let* ((text (string-trim-right (buffer-substring-no-properties beg end)))
-         (org (gptel-region-org text))
-         (lang (gptel-region-language)))
-    ;; verbatim, not a file link: gptel-track-media would send the whole file
-    (concat "=" (gptel-region-source beg end) "=\n"
-            (cond (org (demote-org-headings org))
-                  (lang (format "#+begin_src %s\n%s\n#+end_src" lang
-                                (org-escape-code-in-string text)))
-                  (t (format "#+begin_example\n%s\n#+end_example"
-                             (org-escape-code-in-string text))))
-            "\n\n")))
+  (let* ((runs (gptel-region-runs beg end))
+         (roles (thread-last
+                  runs
+                  (seq-remove (lambda (run) (string-blank-p (cdr run))))
+                  (mapcar #'car))))
+    (if (and roles (null (car roles)) (seq-some #'identity roles))
+        (concat (string-trim-right (gptel-region-exchange runs)) "\n\n"
+                ;; a reply ends the turn, so the next prompt opens as in any chat
+                (when (car (last roles))
+                  (alist-get 'org-mode gptel-prompt-prefix-alist)))
+      (concat (gptel-region-quote
+               (string-trim-right (buffer-substring-no-properties beg end)))
+              "\n\n"))))
+
+(defun gptel-fold-blocks ()
+  "Fold the reasoning and tool blocks of this Org chat, as gptel folds its own."
+  (org-block-map
+   (lambda ()
+     (when (looking-at-p (rx (* blank) "#+begin_" (or "reasoning" "tool") word-end))
+       (org-fold-hide-block-toggle t t)))))
 
 ;;;###autoload
 (defun gptel-chat-from-region (beg end)
@@ -1326,18 +1399,18 @@ With ARG, or when no chat exists, start a `gptel-agent' session."
                    (list (region-beginning) (region-end))
                  (user-error "No region to start a chat with")))
   (require 'gptel)
-  (let ((excerpt (gptel-region-excerpt beg end))
-        (chat (thread-last
-                (default-value 'gptel-backend)
-                (gptel-backend-name)
-                (format "*%s*")
-                (generate-new-buffer-name)
-                (gptel))))
+  (let* ((name (thread-last
+                 (default-value 'gptel-backend)
+                 (gptel-backend-name)
+                 (format "*%s*")
+                 (generate-new-buffer-name)))
+         ;; gptel types an initial text in place of its prompt prefix heading
+         (chat (gptel name nil (gptel-region-excerpt beg end))))
     (pulse-momentary-highlight-region beg end)
     (deactivate-mark)
     (pop-to-buffer chat)
+    (gptel-fold-blocks)
     (goto-char (point-max))
-    (insert excerpt)
     (evil-insert-state)))
 
 ;;;###autoload
