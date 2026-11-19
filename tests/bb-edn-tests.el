@@ -80,3 +80,60 @@ reads as the one form Emacs will receive."
         (expect probe :to-match "\"stty cols 80 rows 24; exec \"")
         (expect probe :to-match "\\[\"script\" \"-q\" \"/dev/null\" \"sh\" \"-c\" sized\\]")
         (expect probe :to-match "\\[\"script\" \"-qec\" sized \"/dev/null\"\\]")))))
+
+(defun bb-edn-tests--loc-repo (files)
+  "Make a temp git repo with a copy of bb.edn and FILES, an alist of (PATH . TEXT)."
+  (let* ((dir (file-name-as-directory (make-temp-file "bb-loc" t)))
+         (default-directory dir))
+    (copy-file bb-edn-tests-file "bb.edn")
+    ;; the copy is an .edn file too, and its lines belong to no fixture
+    (write-region "bb.edn\n" nil ".gitignore" nil 'silent)
+    (pcase-dolist (`(,path . ,text) files)
+      (thread-first path expand-file-name file-name-directory (make-directory t))
+      (write-region text nil path nil 'silent))
+    (call-process "git" nil nil nil "init" "-q")
+    dir))
+
+(defun bb-edn-tests--loc (dir)
+  "Standard output of `bb loc' run from the copy of bb.edn in DIR."
+  (let ((default-directory dir))
+    (with-temp-buffer
+      ;; bb's error report quotes the task's format string, and buttercup
+      ;; formats a failure message with the value it got, % signs included
+      (call-process "bb" nil '(t nil) nil "--config" "bb.edn" "loc")
+      (buffer-string))))
+
+(describe "the bb.edn loc task"
+  (it "counts source and tests/ apart, split into blank, comment and code lines"
+    (let ((dir (bb-edn-tests--loc-repo
+                '(("init.el" . ";;; init.el\n\n(setq a 1) ; trailing\n  ;; indented\n(setq b 2)\n")
+                  ("scripts/tool.bb" . "(println 1)\n")
+                  ("tests/init-tests.el" . "(it \"works\")\n\n")
+                  ("README.md" . "# not code\n")))))
+      (unwind-protect
+          (let ((out (bb-edn-tests--loc dir)))
+            (expect out :to-match "^ +files +lines +blank +comment +code$")
+            (expect out :to-match "^source +2 +6 +1 +2 +3$")
+            (expect out :to-match "^tests +1 +2 +1 +0 +1$")
+            (expect out :to-match "^total +3 +8 +2 +2 +4$"))
+        (delete-directory dir t))))
+
+  (it "abbreviates a count of a thousand and more to one decimal and a k"
+    (let ((dir (bb-edn-tests--loc-repo
+                `(("big.el" . ,(apply #'concat (make-list 1000 "(a)\n")))
+                  ("tests/big-tests.el" . ,(apply #'concat (make-list 999 "(a)\n")))))))
+      (unwind-protect
+          (let ((out (bb-edn-tests--loc dir)))
+            (expect out :to-match "^source +1 +1\\.0k +0 +0 +1\\.0k$")
+            (expect out :to-match "^tests +1 +999 +0 +0 +999$")
+            (expect out :to-match "^total +2 +2\\.0k +0 +0 +2\\.0k$"))
+        (delete-directory dir t))))
+
+  (it "skips a tracked file deleted from the work tree"
+    (let ((dir (bb-edn-tests--loc-repo '(("kept.el" . "(a)\n") ("gone.el" . "(b)\n")))))
+      (unwind-protect
+          (let ((default-directory dir))
+            (call-process "git" nil nil nil "add" "-A")
+            (delete-file "gone.el")
+            (expect (bb-edn-tests--loc dir) :to-match "^source +1 +1 +0 +0 +1$"))
+        (delete-directory dir t)))))

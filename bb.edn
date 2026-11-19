@@ -2,6 +2,7 @@
  {:requires ([babashka.fs :as fs]
              [babashka.process :as p]
              [clojure.edn :as edn]
+             [clojure.java.io :as io]
              [clojure.string :as str])
   ;; *file* is cwd-relative under --config; the system property is not
   :init (do (def root (str (fs/parent (fs/canonicalize
@@ -18,6 +19,17 @@
                ;; comp, where the redirect dies on a void native-comp-eln-load-path.
                "--eval" (format "(when (and (featurep 'native-compile) (fboundp 'startup-redirect-eln-cache)) (startup-redirect-eln-cache %s))"
                                 (pr-str (str (fs/path root ".local" ".cache" "eln"))))])
+
+            (defn repo-files
+              "Files under root that git tracks or would track, matching PATTERNS."
+              [& patterns]
+              (->> (apply p/shell {:out :string :dir root}
+                          "git" "ls-files" "-co" "--exclude-standard" patterns)
+                   :out
+                   str/split-lines
+                   (remove str/blank?)
+                   ;; -c lists deleted-but-unstaged files too
+                   (filter (fn [f] (fs/exists? (fs/path root f))))))
 
             (defn emacs-socket-owner
               "Pid of the process holding the default Emacs server socket, or nil.
@@ -170,15 +182,35 @@ not block on a credential prompt)."
                               "--eval" "(let (fresh) (dolist (p '(buttercup parseedn transient mpv subed org-mime visual-fill-column)) (unless (assq p package-alist) (unless fresh (package-refresh-contents) (setq fresh t)) (package-install (cadr (assq p package-archive-contents))))))"]))}
 
   lint {:doc "check-parens over every tracked .el file"
-        :task (let [files (->> (p/shell {:out :string :dir root}
-                                        "git" "ls-files" "-co" "--exclude-standard" "*.el")
-                               :out
-                               str/split-lines
-                               (remove str/blank?)
-                               ;; -c lists deleted-but-unstaged files too
-                               (filter (fn [f] (fs/exists? (fs/path root f)))))]
-                (apply p/shell {:dir root}
-                       (concat emacs-batch ["-l" "scripts/lint.el"] files)))}
+        :task (apply p/shell {:dir root}
+                     (concat emacs-batch ["-l" "scripts/lint.el"] (repo-files "*.el")))}
+
+  loc {:doc "Count lines in the elisp and Clojure files: source, tests/ and total, each split into blank, comment and code"
+       :task (let [kinds [:files :lines :blank :comment :code]
+                   counts (fn [file]
+                            (with-open [r (io/reader (str (fs/path root file)))]
+                              (reduce (fn [acc line]
+                                        (-> acc
+                                            (update :lines inc)
+                                            (update (cond (str/blank? line) :blank
+                                                          (str/starts-with? (str/triml line) ";") :comment
+                                                          :else :code)
+                                                    inc)))
+                                      {:files 1 :lines 0 :blank 0 :comment 0 :code 0}
+                                      (line-seq r))))
+                   sum (fn [files]
+                         (apply merge-with + (zipmap kinds (repeat 0)) (map counts files)))
+                   {test-files true source-files false}
+                   (group-by (fn [f] (str/starts-with? f "tests/"))
+                             (repo-files "*.el" "*.edn" "*.bb" "*.cljs"))
+                   source (sum source-files)
+                   tests (sum test-files)
+                   abbreviate (fn [n] (if (< n 1000) (str n) (format "%.1fk" (/ n 1000.0))))
+                   row (fn [label vals]
+                         (println (apply format "%-6s%8s%8s%8s%8s%8s" label vals)))]
+               (row "" (map name kinds))
+               (doseq [[label n] [["source" source] ["tests" tests] ["total" (merge-with + source tests)]]]
+                 (row label (map (comp abbreviate n) kinds))))}
 
   test {:doc "Run the buttercup suites in tests/"
         :depends [deps]
