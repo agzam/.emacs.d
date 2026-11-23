@@ -1,29 +1,9 @@
-;;; modules/elisp/autoload/misc.el --- time/symbol/info helpers -*- lexical-binding: t; -*-
+;;; modules/elisp/autoload/misc.el --- symbol/info helpers -*- lexical-binding: t; -*-
 ;;; Commentary:
-;; Rot fixed on port: datetime->timestamp passed a raw number to `message'
-;; (wrong-type error) and multiplied `time-convert' ticks whose HZ varies -
-;; float-time math now.  elisp-fully-qualified-name passed a hardcoded
-;; symbol to find-function-library (copy-paste slip) - uses the symbol at
-;; point, falling back to the visited file's stem.
+;; Rot fixed on port: elisp-fully-qualified-name passed a hardcoded symbol to
+;; find-function-library (copy-paste slip) - uses the symbol at point,
+;; falling back to the visited file's stem.
 ;;; Code:
-
-;;;###autoload
-(defun datetime->timestamp (&optional date-string)
-  "Convert DATE-STRING (default: word at point) to Unix milliseconds."
-  (interactive)
-  (let ((date-str (or date-string (word-at-point))))
-    (message "%d" (truncate (* 1000 (float-time (date-to-time date-str)))))))
-
-;;;###autoload
-(defun timestamp->datetime (&optional timestamp)
-  "Convert Unix TIMESTAMP in milliseconds (default: word at point) to a datetime."
-  (interactive)
-  (let ((ts (or timestamp (string-to-number (word-at-point)))))
-    (message "%s"
-             (format-time-string
-              "%Y-%m-%d %H:%M:%S"
-              (seconds-to-time
-               (string-to-number (substring (number-to-string ts) 0 10)))))))
 
 ;;;###autoload
 (defun elisp-fully-qualified-name ()

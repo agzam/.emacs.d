@@ -137,7 +137,8 @@
   (add-to-list 'embark-target-finders 'embark-target-org-block)
   (dolist (finder '(embark-target-markdown-link-at-point
                     embark-target-bug-reference-link-at-point
-                    embark-target-RFC-number-at-point))
+                    embark-target-RFC-number-at-point
+                    embark-target-timestamp-at-point))
     (add-to-list 'embark-target-finders finder))
   ;; Inside-out: what point sits on wins, and the snippet around it is the
   ;; next target to cycle to.  A snippet contains other targets and is
@@ -181,6 +182,13 @@
     :doc "Keymap for Embark RFC number link actions."
     :parent embark-general-map)
   (add-to-list 'embark-keymap-alist '(rfc-number embark-rfc-number-map))
+
+  (defvar-keymap embark-timestamp-map
+    :doc "Embark actions for timestamps."
+    :parent embark-general-map)
+  (add-to-list 'embark-keymap-alist '(timestamp . embark-timestamp-map))
+  ;; embark-org targets org timestamps but gives them no keymap of their own
+  (add-to-list 'embark-keymap-alist '(org-timestamp . embark-timestamp-map))
 
   (map!
    ;; every browseable target answers the same two keys: "b b" opens it
@@ -296,6 +304,12 @@
          ( :prefix ("b" . "browse")
            :desc "rfc-mode" "b" #'browse-rfc-number-at-point
            :desc "browser" "o" #'search-rfc-number-online))
+
+   (:map embark-timestamp-map
+         "RET" #'show-timestamp-in-zones
+         ( :prefix ("t" . "time zones")
+           :desc "popup" "t" #'show-timestamp-in-zones
+           :desc "buffer" "b" #'list-timestamp-in-zones))
 
    (:map
     embark-collect-mode-map

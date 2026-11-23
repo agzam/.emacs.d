@@ -9,26 +9,13 @@
 
 (load-module-file "modules/elisp/autoload/misc.el")
 
-(describe "datetime<->timestamp"
-  ;; round trip cancels the local-TZ dependence of date-to-time
-  (it "round-trips a datetime through milliseconds"
-    (let* ((input "2023-05-21 12:09:31")
-           (ms (datetime->timestamp input)))
-      (expect ms :to-match "\\`[0-9]+\\'")
-      (expect (timestamp->datetime (string-to-number ms))
-              :to-equal input)))
-
-  (it "reads 13-digit millisecond stamps"
-    (let ((out (timestamp->datetime 1684672171000)))
-      (expect out :to-match "\\`[0-9]\\{4\\}-"))))
-
 (describe "elisp-fully-qualified-name"
   (it "derives ns/name from the defining library"
     (with-temp-buffer
-      (insert "datetime->timestamp")
+      (insert "info-copy-node-url")
       (goto-char (point-min))
       (expect (elisp-fully-qualified-name)
-              :to-equal "misc/datetime->timestamp")))
+              :to-equal "misc/info-copy-node-url")))
 
   (it "falls back to the visited file's stem for unknown symbols"
     (let ((file (make-temp-file "myns" nil ".el")))

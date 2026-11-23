@@ -157,7 +157,8 @@
 
 (after! time
   (setopt world-clock-list
-          '(("America/Los_Angeles" "Pacific")
+          '(("UTC" "UTC")
+            ("America/Los_Angeles" "Pacific")
             ("America/Chicago" "Central")
             ("America/New_York" "Eastern")
             ("America/Sao_Paulo" "São Paulo")
