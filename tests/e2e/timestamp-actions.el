@@ -215,6 +215,43 @@ posframe, so the popup text is read from whichever holds it."
       (when-let* ((buf (get-buffer "*timestamp*")))
         (kill-buffer buf)))))
 
+(defvar timestamp-actions-e2e-now-cases
+  '((:label "M-x list-timestamp-in-zones RET with nothing at point lists now"
+     :ext "txt" :text "nothing to read here\n" :search "nothing"))
+  "Cases that call the command from M-x, where no target feeds its prompt.")
+
+(defun timestamp-actions-e2e-now (case)
+  "Call `list-timestamp-in-zones' in CASE's file and take its default with RET.
+With no timestamp at point the default is the current time, so the table
+must head with the minute it ran in."
+  (timestamp-actions-e2e-in-case
+   case
+   (lambda ()
+     (let* ((before (format-time-string "%FT%R%z"))
+            (err (condition-case e
+                     ;; no command loop runs between cases, so a C-u from an
+                     ;; earlier one would still ask for a zone here
+                     (let ((current-prefix-arg nil)
+                           (prefix-arg nil)
+                           (unread-command-events (listify-key-sequence (kbd "RET"))))
+                       (call-interactively #'list-timestamp-in-zones)
+                       nil)
+                   (error e)))
+            (after (format-time-string "%FT%R%z"))
+            (got (when-let* ((buf (get-buffer "*timestamp*")))
+                   (with-current-buffer buf
+                     (car (split-string (buffer-string) "\n")))))
+            (landed (buffer-name (window-buffer (selected-window)))))
+       (when-let* ((buf (get-buffer "*timestamp*")))
+         (kill-buffer buf))
+       (list :label (plist-get case :label)
+             :probe (format "landed=%s" landed)
+             :got got :want before :err err
+             ;; the minute may turn over while the command runs
+             :ok (and (null err)
+                      (member got (list before after))
+                      (equal landed "*timestamp*")))))))
+
 (defun timestamp-actions-e2e-order (case)
   "Report the targets embark offers at CASE's point."
   (timestamp-actions-e2e-in-case
@@ -261,7 +298,9 @@ posframe, so the popup text is read from whichever holds it."
            (mapcar (funcall guarded #'timestamp-actions-e2e-order)
                    timestamp-actions-e2e-order-cases)
            (mapcar (funcall guarded #'timestamp-actions-e2e-act)
-                   timestamp-actions-e2e-cases)))
+                   timestamp-actions-e2e-cases)
+           (mapcar (funcall guarded #'timestamp-actions-e2e-now)
+                   timestamp-actions-e2e-now-cases)))
       (set-time-zone-rule nil))))
 
 (add-to-list 'e2e-scenarios #'timestamp-actions-e2e)

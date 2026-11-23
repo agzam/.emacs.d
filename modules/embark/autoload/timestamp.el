@@ -187,8 +187,10 @@ they say something: outside the current year, and when not zero."
                        rows "\n"))))
 
 (defun read-timestamp-args ()
-  "Read a timestamp, and with a prefix argument the zone it is written in."
-  (let* ((default (car (timestamp-at-point)))
+  "Read a timestamp, and with a prefix argument the zone it is written in.
+The timestamp at point is the default, and the current time without one."
+  (let* ((default (or (car (timestamp-at-point))
+                      (format-time-string "%FT%R%z" (current-time))))
          (string (read-string (format-prompt "Timestamp" default) nil nil default))
          (zones (time--display-world-list)))
     (list string

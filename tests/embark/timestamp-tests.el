@@ -417,6 +417,22 @@ ZONE goes to `parse-timestamp'."
           (expect (read-timestamp-args)
                   :to-equal '("2026-11-23T14:05:00Z" nil))))))
 
+  (it "offers the current time when no timestamp is at point"
+    (timestamp-tests-now (0 0 12 23 11 2026 nil nil t)
+      (unwind-protect
+          (with-temp-buffer
+            (set-time-zone-rule "America/Chicago")
+            (insert "nothing to read here")
+            (cl-letf (((symbol-function 'read-string)
+                       (lambda (_prompt _initial _history default) default)))
+              (let* ((current-prefix-arg nil)
+                     (args (read-timestamp-args)))
+                (expect args :to-equal '("2026-11-23T06:00-0600" nil))
+                ;; the default reads back as the instant it names
+                (expect (timestamp-tests-utc (car args))
+                        :to-equal "2026-11-23T12:00:00.000Z"))))
+        (set-time-zone-rule nil))))
+
   (it "asks for the zone with a prefix argument"
     (let ((world-clock-list timestamp-tests-zones)
           (current-prefix-arg '(4))
