@@ -87,14 +87,32 @@
                                eca--session-chats
                                eca--session-workspace-folders
                                eca--session-last-chat-buffer
+                               eca--session-project-name
                                eca-chat--apply-history-meta
                                eca-chat--kill-empty-welcome-buffer
                                eca-chat-delete
                                eca-chat-resume
-                               eca-chat-open))))
+                               eca-chat-open
+                               eca-chat-mode
+                               eca-chat-title))))
     (list (eca-continue-e2e--equal "eca api the continue path depends on" missing nil)
           (eca-continue-e2e--equal "eca-chat-history-page-size is a real setting"
-                                   (boundp 'eca-chat-history-page-size) t))))
+                                   (boundp 'eca-chat-history-page-size) t)
+          (eca-continue-e2e--equal "chat state the archive reads"
+                                   (seq-remove #'boundp '(eca-chat--id
+                                                          eca-chat--title
+                                                          eca-chat--custom-title
+                                                          eca-chat--selected-model))
+                                   nil))))
+
+;; config.el hooks the archive up, and only a booted config runs config.el.
+(defun eca-continue-e2e--archiving ()
+  "Every finished turn rewrites the chat's archive."
+  (list (eca-continue-e2e--equal "eca-chat-finished-hook archives the chat"
+                                 (and (memq 'eca-archive-chat
+                                            (default-value 'eca-chat-finished-hook))
+                                      t)
+                                 t)))
 
 ;; The key reaches an autoloaded command, and everything else in the module
 ;; arrives with it.  Nothing else here would notice if that stopped being
@@ -148,6 +166,7 @@
           (eca-continue-e2e--autoload)
           (eca-continue-e2e--guards)
           (eca-continue-e2e--folding)
+          (eca-continue-e2e--archiving)
           (eca-continue-e2e--api)
           (eca-continue-e2e--picker)))
 

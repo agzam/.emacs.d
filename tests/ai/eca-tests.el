@@ -65,6 +65,149 @@
     (expect (eca-archive--chat-file-name "proj" "///" "abc12345")
             :to-equal "proj_abc12345.md")))
 
+;; chat/history items shaped like the server's: a stored text starts with a
+;; newline, and tool outputs are a vector of text contents.
+(defun eca-tests--item (role content)
+  "A chat/history item from ROLE carrying CONTENT."
+  (list :chatId "c1" :role role :content content))
+
+(defun eca-tests--prompt (text)
+  "The prompt TEXT as the server stores it."
+  (eca-tests--item "user" (list :type "text" :contentId "u1" :text (concat "\n" text))))
+
+(defun eca-tests--answer (text)
+  "The assistant's answer TEXT."
+  (eca-tests--item "assistant" (list :type "text" :text (concat "\n" text))))
+
+(defun eca-tests--call (name &rest props)
+  "A finished call of tool NAME; PROPS add to its content or override it."
+  (eca-tests--item "assistant" (append props (list :type "toolCalled" :name name :server "eca"))))
+
+(defun eca-tests--output (&rest texts)
+  "Tool outputs holding TEXTS."
+  (apply #'vector (mapcar (lambda (text) (list :type "text" :text text)) texts)))
+
+(describe "eca-archive--prompt"
+  (it "keeps what the user typed and drops what eca stored after it"
+    (expect (eca-archive--prompt
+             (eca-tests--prompt
+              (concat "Fix the parser\nplease\n"
+                      "<editor-state description=\"x\">\n<cursor path=\"/a\"/>\n</editor-state>\n"
+                      "<additionalContext>\nstyle reminder\n</additionalContext>")))
+            :to-equal "Fix the parser\nplease"))
+
+  ;; an attached file can hold anything, its closing tag included
+  (it "drops attached contexts whatever they hold"
+    (expect (eca-archive--prompt
+             (eca-tests--prompt "Look at @a.el\n<contexts description=\"x\">\n</contexts>\n</contexts>"))
+            :to-equal "Look at @a.el"))
+
+  (it "is nil for what tools send in the user role"
+    (dolist (text '("[eca-ghostel] *eca-ghostel: ci* exited 0 after 18.7s. Read it with (eca-ghostel-output \"*eca-ghostel: ci*\")."
+                    "Background job job-1 (`make test`) completed with exit code 0."
+                    "The conversation was compacted/summarized, consider this summary:\nwe fixed it"))
+      (expect (eca-archive--prompt (eca-tests--prompt text)) :to-be nil)))
+
+  (it "is nil for anything but typed user text"
+    (expect (eca-archive--prompt (eca-tests--answer "Done.")) :to-be nil)
+    (expect (eca-archive--prompt (eca-tests--call "grep")) :to-be nil)
+    (expect (eca-archive--prompt (eca-tests--prompt "<editor-state>\n</editor-state>"))
+            :to-be nil)))
+
+(describe "eca-archive--turns"
+  (it "puts each item under the prompt before it"
+    (let ((turns (eca-archive--turns
+                  (list (eca-tests--prompt "one") (eca-tests--answer "a1")
+                        (eca-tests--prompt "two") (eca-tests--call "grep")
+                        (eca-tests--answer "a2")))))
+      (expect (mapcar #'car turns) :to-equal '("one" "two"))
+      (expect (mapcar #'length turns) :to-equal '(2 3))))
+
+  ;; a job report arrives between the tool calls of the turn that started it
+  (it "keeps a tool's message inside the turn it arrived in"
+    (expect (mapcar #'car (eca-archive--turns
+                           (list (eca-tests--prompt "one")
+                                 (eca-tests--prompt "Background job job-2 (`x`) completed with exit code 0.")
+                                 (eca-tests--answer "a1"))))
+            :to-equal '("one")))
+
+  (it "leaves out subagent items and items ahead of the first prompt"
+    (expect (eca-archive--turns
+             (list (eca-tests--answer "orphan")
+                   (eca-tests--prompt "one")
+                   (append (eca-tests--answer "inner") '(:parentChatId "sub"))
+                   (eca-tests--answer "a1")))
+            :to-equal (list (list "one" (eca-tests--answer "a1"))))))
+
+(describe "eca-archive--activity"
+  (it "counts the calls per tool, the most used first"
+    (expect (eca-archive--activity
+             (list (eca-tests--call "grep") (eca-tests--call "read_file")
+                   (eca-tests--call "read_file")))
+            :to-equal "Tools: 3 calls - read_file 2, grep 1"))
+
+  (it "counts neither eca's task list nor a call that is still running"
+    (expect (eca-archive--activity
+             (list (eca-tests--call "task") (eca-tests--call "grep" :type "toolCallRunning")))
+            :to-be nil))
+
+  (it "sums what each file gained and lost, leaving out a failed edit"
+    (expect (eca-archive--activity
+             (list (eca-tests--call "edit_file" :details '(:type "fileChange" :path "/w/a.el"
+                                                           :linesAdded 3 :linesRemoved 1))
+                   (eca-tests--call "edit_file" :details '(:type "fileChange" :path "/w/a.el"
+                                                           :linesAdded 2 :linesRemoved 0))
+                   (eca-tests--call "write_file" :details '(:type "fileChange" :path "/w/b.el"
+                                                            :linesAdded 9 :linesRemoved 0))
+                   (eca-tests--call "edit_file" :error t :outputs (eca-tests--output "no match")
+                                    :details '(:type "fileChange" :path "/w/c.el"
+                                               :linesAdded 1 :linesRemoved 1))))
+            :to-equal (string-join '("Tools: 4 calls - edit_file 3, write_file 1"
+                                     "Changed:"
+                                     "- /w/a.el (+5 -1)"
+                                     "- /w/b.el (+9 -0)"
+                                     "- failed: edit_file: no match")
+                                   "\n")))
+
+  ;; git and shell calls lead their output with an exit code and a header
+  (it "gives a failure the line that says why it failed"
+    (expect (eca-archive--activity
+             (list (eca-tests--call "git" :summary "Git commit: fix" :error t
+                                    :outputs (eca-tests--output
+                                              "Exit code: 128"
+                                              "Stderr:\nfatal: Unable to create 'index.lock': File exists."))))
+            :to-equal (concat "Tools: 1 call - git 1\n"
+                              "- failed: Git commit: fix: fatal: Unable to create 'index.lock': File exists.")))
+
+  (it "names a rejected call"
+    (expect (eca-archive--activity
+             (list (eca-tests--call "shell_command" :type "toolCallRejected"
+                                    :summary "$ docker run x")))
+            :to-equal "Tools: 1 call - shell_command 1\n- rejected: $ docker run x")))
+
+(describe "eca-archive--render"
+  (it "heads each turn with its prompt, sums up its tools, then gives the answers"
+    (expect (eca-archive--render
+             (list (eca-tests--prompt "Fix it")
+                   (eca-tests--item "assistant" '(:type "reasonStarted" :id "r1"))
+                   (eca-tests--item "assistant" '(:type "reasonFinished" :id "r1" :totalTimeMs 0))
+                   (eca-tests--answer "Looking.")
+                   (eca-tests--item "assistant" '(:type "toolCallRun" :name "grep" :server "eca"))
+                   (eca-tests--call "grep")
+                   (eca-tests--answer "Fixed.")
+                   (eca-tests--prompt "Thanks")))
+            :to-equal "# Fix it\n\nTools: 1 call - grep 1\n\nLooking.\n\nFixed.\n\n# Thanks\n"))
+
+  (it "quotes a prompt in full when the heading holds only its first line"
+    (expect (eca-archive--render (list (eca-tests--prompt "First line\n\nsecond line")))
+            :to-equal "# First line\n\n> First line\n> \n> second line\n"))
+
+  (it "cuts a long first line short in the heading"
+    (expect (car (split-string (eca-archive--render
+                                (list (eca-tests--prompt (make-string 200 ?a))))
+                               "\n"))
+            :to-equal (concat "# " (make-string 87 ?a) "..."))))
+
 (describe "eca-chat-buffer-name"
   (it "falls back to Empty chat"
     (expect (eca-chat-buffer-name) :to-equal "eca-chat - Empty chat"))
@@ -258,7 +401,7 @@ the order given, oldest first, so recency is deterministic."
 ;; real symbols exist and still take these shapes, so a rename upstream
 ;; cannot leave these specs passing against a fiction.
 (cl-defstruct (eca--session (:constructor eca-tests--session))
-  id status workspace-folders chats last-chat-buffer)
+  id status workspace-folders chats last-chat-buffer project-name)
 
 (defvar eca--sessions nil)
 (defvar eca-chat-history-page-size 50)
@@ -498,6 +641,84 @@ the order given, oldest first, so recency is deterministic."
     (spy-on 'eca-error)
     (expect (eca-archive--gone '(:id "abcdef1234" :file "/a/chat.md"))
             :not :to-throw)))
+
+;; The chat buffer state `eca-archive-chat' reads, stood in like the session
+;; above and checked against the real eca by the same e2e scenario.
+(define-derived-mode eca-chat-mode fundamental-mode "ECA")
+(defvar-local eca-chat--id nil)
+(defvar-local eca-chat--title nil)
+(defvar-local eca-chat--custom-title nil)
+(defvar-local eca-chat--selected-model nil)
+(defun eca-chat-title () (or eca-chat--custom-title eca-chat--title))
+
+(describe "eca-archive-chat"
+  :var (dir)
+  (before-each
+    (setq dir (file-name-as-directory (make-temp-file "eca-archive" t))))
+  (after-each
+    (delete-directory dir t))
+
+  (defun eca-tests--archive (reply &optional id)
+    "Archive chat ID, titled \"Fix it\", whose `chat/history' answers REPLY.
+REPLY :fail fails the request itself."
+    (with-temp-buffer
+      (eca-chat-mode)
+      (setq-local eca-chat--id (or id "abcdef1234")
+                  eca-chat--title "Fix it"
+                  eca-chat--selected-model "m")
+      (let ((eca-archive-dir dir)
+            (eca--sessions (list :s (eca-tests--session
+                                     :project-name ".proj" :workspace-folders '("/w/")
+                                     :chats (list eca-chat--id (current-buffer))))))
+        (spy-on 'eca-api-request-async :and-call-fake
+                (lambda (_session &rest args)
+                  (if (eq reply :fail)
+                      (funcall (plist-get args :error-callback) "timeout")
+                    (funcall (plist-get args :success-callback) reply))))
+        (eca-archive-chat))))
+
+  (defun eca-tests--read (file)
+    "FILE's contents."
+    (with-temp-buffer (insert-file-contents file) (buffer-string)))
+
+  (it "writes the chat's history under the metadata line"
+    (let ((file (eca-tests--archive
+                 (list :contents (vector (eca-tests--prompt "Fix it")
+                                         (eca-tests--answer "Done."))))))
+      (expect (file-name-nondirectory file) :to-equal "proj__Fix-it_abcdef12.md")
+      (expect (eca-tests--read file)
+              :to-equal (concat "<!-- eca: (:id \"abcdef1234\" :workspace \"/w/\" :model \"m\""
+                                " :project \"proj\" :title \"Fix it\") -->\n\n"
+                                "# Fix it\n\nDone.\n"))))
+
+  ;; a resumed chat's buffer holds only the newest page of its history
+  (it "asks the server for the whole history, not a page of it"
+    (eca-tests--archive (list :contents []))
+    (expect (plist-get (cdr (spy-calls-args-for 'eca-api-request-async 0)) :params)
+            :to-equal '(:chatId "abcdef1234")))
+
+  (it "drops the file the chat had under an earlier title"
+    (let ((old (expand-file-name "proj_abcdef12.md" dir)))
+      (with-temp-file old (insert "old"))
+      (eca-tests--archive (list :contents []))
+      (expect (file-exists-p old) :to-be nil)))
+
+  (it "leaves the archive as it was when the request fails"
+    (let ((file (expand-file-name "proj__Fix-it_abcdef12.md" dir)))
+      (with-temp-file file (insert "earlier turns"))
+      (eca-tests--archive :fail)
+      (expect (eca-tests--read file) :to-equal "earlier turns")))
+
+  (it "leaves the archive as it was when the server cannot find the chat"
+    (let ((file (expand-file-name "proj__Fix-it_abcdef12.md" dir)))
+      (with-temp-file file (insert "earlier turns"))
+      (eca-tests--archive (list :error '(:code "chat_not_found" :message "gone")))
+      (expect (eca-tests--read file) :to-equal "earlier turns")))
+
+  (it "archives neither a subagent chat nor a buffer that is no chat"
+    (expect (eca-tests--archive (list :contents []) "subagent-1") :to-be nil)
+    (expect (with-temp-buffer (eca-archive-chat)) :to-be nil)
+    (expect 'eca-api-request-async :not :to-have-been-called)))
 
 (describe "eca-compact-modeline-icons-h"
   ;; Regression: ECA's trust/elapsed mode-line segments use color emoji

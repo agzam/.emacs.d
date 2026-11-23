@@ -240,52 +240,203 @@ when it slugifies to something non-empty, is inserted for readability."
         (format "%s_%s.md" project id-short)
       (format "%s__%s_%s.md" project slug id-short))))
 
+(defconst eca-archive--context-regexp
+  (rx bol "<" (or "contexts" "changed-contexts" "editor-state" "additionalContext")
+      (any " >"))
+  "Start of a block eca stores after the typed text of a prompt.")
+
+(defconst eca-archive--notice-regexp
+  (rx bos (or "[eca-ghostel] "
+              (seq "Background job job-" (+ digit) " ")
+              "The conversation was compacted/summarized"))
+  "Start of a message that a tool, not the user, sent in the user role.")
+
+(defun eca-archive--prompt (item)
+  "The text the user typed in chat/history ITEM, or nil when ITEM is no prompt."
+  (when-let* (((equal (plist-get item :role) "user"))
+              (content (plist-get item :content))
+              ((equal (plist-get content :type) "text"))
+              (stored (plist-get content :text))
+              (text (string-trim
+                     (substring stored 0 (string-match eca-archive--context-regexp stored))))
+              ((not (string-empty-p text)))
+              ((not (string-match-p eca-archive--notice-regexp text))))
+    text))
+
+(defun eca-archive--turns (items)
+  "Group chat/history ITEMS into turns, each a list (PROMPT ITEM...).
+Subagent items and items ahead of the first prompt are left out."
+  (let* ((own (seq-remove (lambda (item) (plist-get item :parentChatId)) items))
+         (turns (seq-reduce (lambda (turns item)
+                              (if-let* ((prompt (eca-archive--prompt item)))
+                                  (cons (list prompt) turns)
+                                (and turns (cons (cons item (car turns)) (cdr turns)))))
+                            own nil)))
+    (reverse (mapcar #'reverse turns))))
+
+(defun eca-archive--clip (text width)
+  "The first line of TEXT, cut to WIDTH columns."
+  (truncate-string-to-width (car (split-string text "\n")) width nil nil "..."))
+
+(defun eca-archive--tool-calls (events)
+  "The tool calls among EVENTS that finished or were rejected, minus task updates."
+  (seq-filter (lambda (item)
+                (let ((content (plist-get item :content)))
+                  (and (member (plist-get content :type) '("toolCalled" "toolCallRejected"))
+                       (not (equal (list (plist-get content :server) (plist-get content :name))
+                                   '("eca" "task"))))))
+              events))
+
+(defun eca-archive--tool-counts (calls)
+  "A \"NAME COUNT\" string per tool CALLS used, the most used first."
+  (let ((names (mapcar (lambda (call) (plist-get (plist-get call :content) :name)) calls)))
+    (thread-last
+      (seq-uniq names)
+      (mapcar (lambda (name) (cons name (seq-count (lambda (other) (equal other name)) names))))
+      (seq-sort (lambda (a b) (< (cdr b) (cdr a))))
+      (mapcar (pcase-lambda (`(,name . ,count)) (format "%s %d" name count))))))
+
+(defun eca-archive--changed-files (calls)
+  "A \"- PATH (+ADDED -REMOVED)\" line per file the edits among CALLS changed."
+  (let* ((edits (seq-keep (lambda (call)
+                            (let* ((content (plist-get call :content))
+                                   (details (plist-get content :details)))
+                              (and (equal (plist-get content :type) "toolCalled")
+                                   (not (plist-get content :error))
+                                   (equal (plist-get details :type) "fileChange")
+                                   details)))
+                          calls))
+         (sum (lambda (path key)
+                (apply #'+ (seq-keep (lambda (edit)
+                                       (when (equal (plist-get edit :path) path)
+                                         (or (plist-get edit key) 0)))
+                                     edits)))))
+    (mapcar (lambda (path)
+              (format "- %s (+%d -%d)" (abbreviate-file-name path)
+                      (funcall sum path :linesAdded) (funcall sum path :linesRemoved)))
+            (seq-uniq (mapcar (lambda (edit) (plist-get edit :path)) edits)))))
+
+(defun eca-archive--failure-reason (content)
+  "The first line of tool CONTENT's output that says why the call failed.
+Shell and git calls lead with an exit code and a Stdout or Stderr header."
+  (or (seq-find (lambda (line)
+                  (not (string-match-p
+                        (rx bos (or (seq "Exit code: " (+ digit)) "Stdout:" "Stderr:" (* blank)) eos)
+                        line)))
+                (seq-mapcat (lambda (output) (split-string (or (plist-get output :text) "") "\n"))
+                            (plist-get content :outputs)))
+      ""))
+
+(defun eca-archive--failures (calls)
+  "A line per call among CALLS that was rejected or failed."
+  (seq-keep (lambda (call)
+              (let* ((content (plist-get call :content))
+                     (label (or (plist-get content :summary) (plist-get content :name))))
+                (cond ((equal (plist-get content :type) "toolCallRejected")
+                       (format "- rejected: %s" label))
+                      ((plist-get content :error)
+                       (format "- failed: %s: %s" label
+                               (eca-archive--clip (eca-archive--failure-reason content) 100))))))
+            calls))
+
+(defun eca-archive--activity (events)
+  "Lines that sum up the tool calls among EVENTS, or nil when there were none."
+  (when-let* ((calls (eca-archive--tool-calls events)))
+    (string-join
+     (append (list (format "Tools: %d call%s - %s" (length calls)
+                           (if (= 1 (length calls)) "" "s")
+                           (string-join (eca-archive--tool-counts calls) ", ")))
+             (when-let* ((changed (eca-archive--changed-files calls)))
+               (cons "Changed:" changed))
+             (eca-archive--failures calls))
+     "\n")))
+
+(defun eca-archive--answers (events)
+  "The text of each assistant message among EVENTS."
+  (seq-keep (lambda (item)
+              (when-let* (((equal (plist-get item :role) "assistant"))
+                          (content (plist-get item :content))
+                          ((equal (plist-get content :type) "text"))
+                          (text (string-trim (or (plist-get content :text) "")))
+                          ((not (string-empty-p text))))
+                text))
+            events))
+
+(defun eca-archive--render-turn (turn)
+  "Markdown of TURN, a list (PROMPT ITEM...).
+The prompt heads it, quoted in full when the heading cuts it short."
+  (pcase-let* ((`(,prompt . ,events) turn)
+               (heading (eca-archive--clip prompt 90)))
+    (string-join
+     (remq nil (append (list (concat "# " heading)
+                             (unless (equal heading prompt)
+                               (replace-regexp-in-string "^" "> " prompt))
+                             (eca-archive--activity events))
+                       (eca-archive--answers events)))
+     "\n\n")))
+
+(defun eca-archive--render (items)
+  "Markdown transcript of chat/history ITEMS, one heading per prompt."
+  (concat (mapconcat #'eca-archive--render-turn (eca-archive--turns items) "\n\n")
+          "\n"))
+
+(defun eca-archive--write (file meta items)
+  "Write FILE: the metadata line for META, then chat/history ITEMS as Markdown.
+Return FILE, after deleting the files an earlier title left for the chat."
+  (let ((dir (file-name-directory file)))
+    (make-directory dir t)
+    (with-temp-file file
+      (insert (format "<!-- eca: %S -->\n\n" meta) (eca-archive--render items)))
+    (dolist (old (file-expand-wildcards
+                  (expand-file-name (format "*_%s.md" (eca-archive--id-short meta)) dir)))
+      (unless (file-equal-p old file)
+        (ignore-errors (delete-file old))))
+    file))
+
 ;;;###autoload
 (defun eca-archive-chat (&optional buffer)
-  "Write BUFFER's chat transcript to `eca-archive-dir' as Markdown.
-Keeps one file per chat - named after the project, chat title, and
-short chat id - re-saved each finished turn.  When the title changes,
-the previous file for this chat is removed.  Return the file path, or
-nil if BUFFER is not an archivable chat."
+  "Write BUFFER's chat to `eca-archive-dir' as Markdown, from the server history.
+One file per chat, named after its project, title and short id.  The
+history arrives asynchronously, and a failed request leaves the file as
+it was.  Return the file, or nil when BUFFER is no archivable chat."
   (interactive)
   (with-demoted-errors "eca-archive: %S"
     (with-current-buffer (or buffer (current-buffer))
-      (when (and (derived-mode-p 'eca-chat-mode)
-                 (stringp eca-chat--id)
-                 (not (string-prefix-p "subagent-" eca-chat--id)))
-        (let* ((session   (thread-last
-                            eca--sessions
-                            eca-vals
-                            (seq-find (lambda (s)
-                                        (memq (current-buffer)
-                                              (eca-vals (eca--session-chats s)))))))
-               (project   (replace-regexp-in-string
-                           "\\`[.]+" ""
-                           (if session (eca--session-project-name session) "unknown")))
-               (workspace (when session (car (eca--session-workspace-folders session))))
-               (model     (or eca-chat--selected-model "unknown"))
-               (id        eca-chat--id)
-               (id-short  (substring id 0 (min 8 (length id))))
-               (title     (when (or eca-chat--custom-title eca-chat--title)
-                            (substring-no-properties (eca-chat-title))))
-               (dir       (expand-file-name eca-archive-dir))
-               (file      (expand-file-name
-                           (eca-archive--chat-file-name project title id-short) dir))
-               (content   (buffer-substring-no-properties (point-min) (point-max))))
-          (make-directory dir t)
-          (with-temp-file file
-            (insert (format "<!-- eca: %S -->\n\n"
-                            (list :id id :workspace workspace :model model
-                                  :project project :title title)))
-            (insert content))
-          ;; Keep one file per chat: now that FILE exists, drop any stale
-          ;; name for this id (e.g. an earlier untitled save).
-          (dolist (old (file-expand-wildcards
-                        (expand-file-name (format "*_%s.md" id-short) dir)))
-            (unless (file-equal-p old file)
-              (ignore-errors (delete-file old))))
-          (when (called-interactively-p 'interactive)
-            (eca-info "Archived chat to %s" file))
+      (when-let* (((derived-mode-p 'eca-chat-mode))
+                  (id eca-chat--id)
+                  ((stringp id))
+                  ((not (string-prefix-p "subagent-" id)))
+                  (session (seq-find (lambda (s)
+                                       (memq (current-buffer) (eca-vals (eca--session-chats s))))
+                                     (eca-vals eca--sessions))))
+        (let* ((project (replace-regexp-in-string
+                         "\\`[.]+" "" (eca--session-project-name session)))
+               (title (when (or eca-chat--custom-title eca-chat--title)
+                        (substring-no-properties (eca-chat-title))))
+               (meta (list :id id
+                           :workspace (car (eca--session-workspace-folders session))
+                           :model (or eca-chat--selected-model "unknown")
+                           :project project
+                           :title title))
+               (file (expand-file-name
+                      (eca-archive--chat-file-name project title (eca-archive--id-short meta))
+                      (expand-file-name eca-archive-dir)))
+               (report (called-interactively-p 'interactive))
+               (keep (lambda (why)
+                       (message "eca-archive: %s unchanged, chat/history failed: %s" file why))))
+          (eca-api-request-async
+           session
+           :method "chat/history"
+           :params (list :chatId id)
+           :success-callback
+           (lambda (res)
+             (with-demoted-errors "eca-archive: %S"
+               (if-let* ((err (plist-get res :error)))
+                   (funcall keep (plist-get err :message))
+                 (eca-archive--write file meta (plist-get res :contents))
+                 (when report
+                   (eca-info "Archived chat to %s" file)))))
+           :error-callback keep)
           file)))))
 
 (defun eca-archive--read-meta (file)
