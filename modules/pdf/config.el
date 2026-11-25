@@ -220,7 +220,6 @@
   (add-to-list 'major-mode-remap-alist '(pdf-view-mode . emureader-mode))
   (advice-add 'emureader--saveplace-find-file
               :before-while #'emureader-saveplace-skip-foreign-a)
-  (add-hook 'enable-theme-functions #'refresh-emureader-theme-colors-h)
   :config
   (keep-pdf-and-epub-viewers)
   (setq emureader-default-fit #'fit-emureader-page)

@@ -42,15 +42,6 @@ The package adds them on activation and again when it loads."
                      emureader-current-doc-pagecount))))
 
 ;;;###autoload
-(defun refresh-emureader-theme-colors-h (&rest _)
-  "Re-render themed emureader buffers in the colors of the current theme."
-  (seq-do (lambda (buffer)
-            (with-current-buffer buffer
-              (when (bound-and-true-p emureader-themed-mode)
-                (emureader-themed-mode 1))))
-          (match-buffers '(derived-mode . emureader-mode))))
-
-;;;###autoload
 (defun emureader-saveplace-skip-foreign-a (&rest _)
   "Let emureader's save-place reader see only records it wrote.
 It reads saveplace-pdf-view's records as bookmarks and errors on them."

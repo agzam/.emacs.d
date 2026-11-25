@@ -49,13 +49,43 @@
       (format "%S" (seq-difference keys want))
       "every key bound as in pdf-view"))))
 
-(defun emureader-view--corner-rgb ()
-  "The top-left pixel of the page shown in the selected window, as (R G B)."
+(defun emureader-view--pixel-rgb (fx fy)
+  "The pixel at fractions FX, FY of the page in the selected window, as (R G B)."
   (let ((data (plist-get (cdr (overlay-get (emureader-current-doc-overlay) 'display))
                          :data)))
-    (when (string-match "\\`P6\\s-+[0-9]+\\s-+[0-9]+\\s-+[0-9]+\\s-" data)
-      (let ((start (match-end 0)))
+    (when (string-match "\\`P6\\s-+\\([0-9]+\\)\\s-+\\([0-9]+\\)\\s-+[0-9]+\\s-" data)
+      (let* ((w (string-to-number (match-string 1 data)))
+             (h (string-to-number (match-string 2 data)))
+             (index (+ (floor (* fx (1- w))) (* w (floor (* fy (1- h))))))
+             (start (+ (match-end 0) (* 3 index))))
         (mapcar (lambda (i) (aref data (+ start i))) '(0 1 2))))))
+
+(defun emureader-view--dark-case (file)
+  "Open FILE, a page with a red lower half, in a hidden frame with dark colors."
+  (let* ((frame (make-frame '((visibility . nil))))
+         (seen (unwind-protect
+                   (condition-case err
+                       (with-selected-frame frame
+                         (set-face-attribute 'default frame
+                                             :foreground "#bbc2cf" :background "#282c34")
+                         (find-file file)
+                         (redisplay t)
+                         (list :paper (emureader-view--pixel-rgb 0 0)
+                               :red (emureader-view--pixel-rgb 0.5 0.75)))
+                     (error (list :err err)))
+                 (when-let* ((buf (get-file-buffer file)))
+                   (let ((kill-buffer-query-functions nil))
+                     (kill-buffer buf)))
+                 (delete-frame frame t)))
+         (paper (plist-get seen :paper))
+         (red (plist-get seen :red)))
+    (emureader-view--case
+     "under dark colors the paper matches and red stays red"
+     (pcase red
+       (`(,r ,g ,b) (and (equal paper '(40 44 52)) (< (+ g 80) r) (< (+ b 80) r))))
+     (format "paper=%S red=%S" paper red)
+     "paper=(40 44 52) and a red with R well above G and B"
+     (plist-get seen :err))))
 
 (defun emureader-view--theme-rgb (color)
   "COLOR as (R G B) bytes."
@@ -74,9 +104,13 @@
    (t
     (let* ((dir (file-name-as-directory (make-temp-file "emureader-e2e" t)))
            (file (expand-file-name "fixture.pdf" dir))
+           (red (expand-file-name "red.pdf" dir))
            results)
       ;; the sibling pdf-text scenario owns the fixture writer
       (pdf-text-view--make-pdf file '(("one") ("two") ("three")))
+      (cl-letf (((symbol-function 'pdf-text-view--content-stream)
+                 (lambda (_) "1 0 0 rg 0 0 612 396 re f")))
+        (pdf-text-view--make-pdf red '(("red"))))
       (unwind-protect
           (progn
             (find-file file)
@@ -90,7 +124,7 @@
                            (ignore-errors (emureader-current-doc-pagenumber)))
                    "mode=emureader-mode page=1")
                   results)
-            (let ((corner (emureader-view--corner-rgb))
+            (let ((corner (emureader-view--pixel-rgb 0 0))
                   (bg (emureader-view--theme-rgb (face-background 'default nil t))))
               (push (emureader-view--case
                      "the page paper renders in the theme's background"
@@ -154,14 +188,16 @@
                      "q kills the emureader buffer"
                      (not (buffer-live-p buf))
                      (format "live=%s" (buffer-live-p buf)) "live=nil" err)
-                    results)))
+                    results))
+            (push (emureader-view--dark-case red) results))
         (when-let* ((buf (get-file-buffer file)))
           (let ((kill-buffer-query-functions nil))
             (with-current-buffer buf (set-buffer-modified-p nil))
             (kill-buffer buf)))
-        (setq save-place-alist
-              (assoc-delete-all (file-truename file)
-                                (assoc-delete-all file save-place-alist)))
+        (let ((fixtures (list file (file-truename file) red (file-truename red))))
+          (setq save-place-alist
+                (seq-remove (lambda (entry) (member (car entry) fixtures))
+                            save-place-alist)))
         (delete-directory dir t))
       (nreverse results)))))
 

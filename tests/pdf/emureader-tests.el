@@ -10,7 +10,6 @@
 ;; emureader isn't installed in the batch tier.
 (defvar save-place-alist nil)
 (defvar emureader-current-doc-pagecount nil)
-(defvar emureader-themed-mode nil)
 
 (load-module-file "modules/pdf/autoload/emureader.el")
 
@@ -90,30 +89,6 @@
       (cl-letf (((symbol-function 'emureader-current-doc-pagenumber)
                  (lambda (&rest _) 5)))
         (expect (show-emureader-progress) :to-equal "at 50.0%")))))
-
-(describe "refresh-emureader-theme-colors-h"
-  (it "re-renders only the themed emureader buffers"
-    (let ((themed (generate-new-buffer " test-themed-emureader"))
-          (plain (generate-new-buffer " test-plain-emureader"))
-          (other (generate-new-buffer " test-not-emureader"))
-          refreshed)
-      (unwind-protect
-          (progn
-            (with-current-buffer themed
-              (setq major-mode 'emureader-mode)
-              (setq-local emureader-themed-mode t))
-            (with-current-buffer plain
-              (setq major-mode 'emureader-mode)
-              (setq-local emureader-themed-mode nil))
-            (with-current-buffer other
-              (setq-local emureader-themed-mode t))
-            (cl-letf (((symbol-function 'emureader-themed-mode)
-                       (lambda (arg) (push (cons (current-buffer) arg) refreshed))))
-              (refresh-emureader-theme-colors-h 'some-theme))
-            (expect refreshed :to-equal (list (cons themed 1))))
-        (kill-buffer themed)
-        (kill-buffer plain)
-        (kill-buffer other)))))
 
 (describe "emureader-saveplace-skip-foreign-a"
   (let ((file "/tmp/book.pdf"))
