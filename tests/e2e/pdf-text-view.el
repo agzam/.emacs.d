@@ -259,7 +259,9 @@ single loud skip entry."
       (list (pdf-text-view--case
              "pdf-view flow SKIPPED: tty frame (pdf-view-mode requires a window system)"
              t "skip" "skip"))
-    (let* ((borrowed (and (boundp 'e2e-work-dir) e2e-work-dir))
+    ;; pdf-text reads from pdf-view, and the config sends PDFs to emureader.
+    (let* ((major-mode-remap-alist nil)
+           (borrowed (and (boundp 'e2e-work-dir) e2e-work-dir))
            (dir (or borrowed (file-name-as-directory
                               (make-temp-file "pdf-text-e2e" t))))
            (fixture (expand-file-name "pdf-text-fixture.pdf" dir))

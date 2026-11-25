@@ -14,7 +14,7 @@
 
 (setopt completion-cycle-threshold 1
         tab-always-indent 'complete
-        dabbrev-ignored-buffer-modes '(pdf-view-mode dired-mode ghostel-mode))
+        dabbrev-ignored-buffer-modes '(pdf-view-mode emureader-mode dired-mode ghostel-mode))
 
 (add-hook! 'doom-init-modules-hook
   (defun reset-lsp-completion-provider-h ()

@@ -98,7 +98,8 @@
                  "j" #'pdf-view-shrink
                  "0" #'pdf-view-scale-reset)
         "x" #'pdf-view-as-text
-        "n" #'org-noter-transient))
+        "n" #'org-noter-transient
+        "e" #'toggle-emureader))
 
 (use-package hide-mode-line
   ;; The mode-line serves no useful purpose in annotation windows.
@@ -193,7 +194,8 @@
             :n "[[" #'backward-paragraph
             (:localleader
              "t" #'google-translate-posframe-at-point
-             "T" #'translate-at-point-smart))
+             "T" #'translate-at-point-smart
+             "e" #'toggle-emureader))
       (map! :map nov-button-map
             "l" #'evil-forward-char
             "v" #'evil-visual-char
@@ -203,6 +205,64 @@
             "SPC" nil
             :n "i" nil
             "DEL" nil))))
+
+;; emureader, on trial: MuPDF through a dynamic module, which
+;; `emureader-build' compiles on first open.  It takes over PDFs from
+;; pdf-view, nov keeps EPUBs, and `toggle-emureader' switches either way.
+(use-package emureader
+  :ensure (emureader :host github :repo "emacsmirror/emureader"
+                     :files (:defaults "Makefile" ("render" "render/*")))
+  :defer t
+  :init
+  (keep-pdf-and-epub-viewers)
+  (add-to-list 'major-mode-remap-alist '(pdf-view-mode . emureader-mode))
+  (advice-add 'emureader--saveplace-find-file
+              :before-while #'emureader-saveplace-skip-foreign-a)
+  :config
+  (keep-pdf-and-epub-viewers)
+  (setq emureader-default-fit #'fit-emureader-page))
+
+(add-hook! 'evil-collection-setup-hook
+  (defun bind-emureader-keys-h (mode &rest _)
+    "Bind pdf-view's keys in emureader when MODE is emureader.
+evil-collection sets up emureader after this config loads, so its q
+would win over a plain `map!'."
+    (when (eq mode 'emureader)
+      (map! :map emureader-mode-map
+            :n "q" #'kill-current-buffer
+            :n "Q" #'kill-current-buffer
+            :n "J" #'emureader-next-page
+            :n "K" #'emureader-previous-page
+            :n "gj" #'emureader-next-page
+            :n "gk" #'emureader-previous-page
+            :n "<next>" #'emureader-next-page
+            :n "<prior>" #'emureader-previous-page
+            :n "C-d" #'emureader-scroll-down-screen-or-next-page
+            :n "C-f" #'emureader-scroll-down-screen-or-next-page
+            :n "C-e" #'emureader-scroll-down-screen-or-next-page
+            :n "C-u" #'emureader-scroll-up-screen-or-prev-page
+            :n "C-b" #'emureader-scroll-up-screen-or-prev-page
+            :n "C-y" #'emureader-scroll-up-screen-or-prev-page
+            :n "<delete>" #'emureader-scroll-up-screen-or-prev-page
+            :n "0" #'emureader-scroll-left-most
+            :n "P" #'fit-emureader-page
+            :n "zk" #'emureader-enlarge-size
+            :n "zi" #'emureader-enlarge-size
+            :n "zj" #'emureader-shrink-size
+            :n "zo" #'emureader-shrink-size
+            :n "z0" #'emureader-reset-size
+            (:localleader
+             "t" #'emureader-dark-mode
+             "e" #'toggle-emureader
+             "," #'show-emureader-progress
+             (:prefix ("f" . "fit")
+                      "h" #'emureader-fit-to-height
+                      "p" #'fit-emureader-page
+                      "w" #'emureader-fit-to-width)
+             (:prefix ("z" . "zoom")
+                      "k" #'emureader-enlarge-size
+                      "j" #'emureader-shrink-size
+                      "0" #'emureader-reset-size))))))
 
 ;; pdf-text: reflowed companion view, org-derived so the PDF outline folds.
 ;; Autoloads `pdf-view-as-text', which the pdf-view localleader block binds.
