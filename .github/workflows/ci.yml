@@ -15,6 +15,16 @@ jobs:
       matrix:
         emacs-version: ['30.1', '31.1']
     steps:
+      - name: Break on purpose
+        if: matrix.emacs-version == '31.1'
+        run: |
+          echo "::group::Environment"
+          echo "Emacs ${{ matrix.emacs-version }} on ${RUNNER_OS}"
+          echo "::endgroup::"
+          echo "::group::Check the config"
+          echo "modules/git/config.el"
+          echo "::error::This commit breaks CI on purpose"
+          exit 1
       - uses: actions/checkout@v7
       - uses: purcell/setup-emacs@master
         with:
@@ -37,6 +47,7 @@ jobs:
   # than its own: it needs the same boot, and the packages this job just
   # built make its second one cheap.
   smoke:
+    needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
