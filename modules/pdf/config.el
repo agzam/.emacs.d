@@ -220,7 +220,9 @@
               :before-while #'emureader-saveplace-skip-foreign-a)
   :config
   (keep-pdf-and-epub-viewers)
-  (setq emureader-default-fit #'fit-emureader-page))
+  (setq emureader-default-fit #'fit-emureader-page)
+  ;; An evil-collection without its emureader module never runs the hook.
+  (bind-emureader-keys-h 'emureader))
 
 (add-hook! 'evil-collection-setup-hook
   (defun bind-emureader-keys-h (mode &rest _)
