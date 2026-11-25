@@ -30,6 +30,8 @@
                  ("zj" . emureader-shrink-size)
                  ("z0" . emureader-reset-size)
                  ("P" . fit-emureader-page)
+                 ("zm" . emureader-dark-mode)
+                 (,(funcall leader "t") . emureader-themed-mode)
                  (,(funcall leader "e") . toggle-emureader)
                  (,(funcall leader ",") . show-emureader-progress)
                  (,(funcall leader "f p") . fit-emureader-page)
@@ -46,6 +48,18 @@
       (equal keys want)
       (format "%S" (seq-difference keys want))
       "every key bound as in pdf-view"))))
+
+(defun emureader-view--corner-rgb ()
+  "The top-left pixel of the page shown in the selected window, as (R G B)."
+  (let ((data (plist-get (cdr (overlay-get (emureader-current-doc-overlay) 'display))
+                         :data)))
+    (when (string-match "\\`P6\\s-+[0-9]+\\s-+[0-9]+\\s-+[0-9]+\\s-" data)
+      (let ((start (match-end 0)))
+        (mapcar (lambda (i) (aref data (+ start i))) '(0 1 2))))))
+
+(defun emureader-view--theme-rgb (color)
+  "COLOR as (R G B) bytes."
+  (mapcar (lambda (c) (ash c -8)) (color-values color)))
 
 (defun emureader-view-document-cases ()
   "A generated PDF through emureader with real keys; GUI and module only."
@@ -76,6 +90,14 @@
                            (ignore-errors (emureader-current-doc-pagenumber)))
                    "mode=emureader-mode page=1")
                   results)
+            (let ((corner (emureader-view--corner-rgb))
+                  (bg (emureader-view--theme-rgb (face-background 'default nil t))))
+              (push (emureader-view--case
+                     "the page paper renders in the theme's background"
+                     (and emureader-themed-mode (equal corner bg))
+                     (format "themed=%s corner=%S" emureader-themed-mode corner)
+                     (format "themed=t corner=%S" bg))
+                    results))
             (discard-input)
             (let (err)
               (condition-case e (execute-kbd-macro (kbd "J"))

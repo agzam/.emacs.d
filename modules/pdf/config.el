@@ -206,18 +206,21 @@
             :n "i" nil
             "DEL" nil))))
 
-;; emureader, on trial: MuPDF through a dynamic module, which
-;; `emureader-build' compiles on first open.  It takes over PDFs from
-;; pdf-view, nov keeps EPUBs, and `toggle-emureader' switches either way.
+;; emureader: MuPDF through a dynamic module, which `emureader-build'
+;; compiles on first open.  It takes over PDFs from pdf-view, nov keeps
+;; EPUBs, and `toggle-emureader' switches either way.  The fork's
+;; theme-tint branch adds `emureader-themed-mode'.
 (use-package emureader
-  :ensure (emureader :host github :repo "emacsmirror/emureader"
-                     :files (:defaults "Makefile" ("render" "render/*")))
+  :ensure (emureader :host github :repo "agzam/emureader" :branch "theme-tint"
+                     :files (:defaults "Makefile" ("render" "render/*.[ch]")))
   :defer t
+  :hook (emureader-mode . emureader-themed-mode)
   :init
   (keep-pdf-and-epub-viewers)
   (add-to-list 'major-mode-remap-alist '(pdf-view-mode . emureader-mode))
   (advice-add 'emureader--saveplace-find-file
               :before-while #'emureader-saveplace-skip-foreign-a)
+  (add-hook 'enable-theme-functions #'refresh-emureader-theme-colors-h)
   :config
   (keep-pdf-and-epub-viewers)
   (setq emureader-default-fit #'fit-emureader-page)
@@ -253,8 +256,9 @@ would win over a plain `map!'."
             :n "zj" #'emureader-shrink-size
             :n "zo" #'emureader-shrink-size
             :n "z0" #'emureader-reset-size
+            :n "zm" #'emureader-dark-mode
             (:localleader
-             "t" #'emureader-dark-mode
+             "t" #'emureader-themed-mode
              "e" #'toggle-emureader
              "," #'show-emureader-progress
              (:prefix ("f" . "fit")

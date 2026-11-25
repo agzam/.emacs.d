@@ -109,6 +109,8 @@
     (khalendario . "~/GitHub/agzam/khalendario.el")
     (clipimg . "~/GitHub/agzam/clipimg.el")
     (org-edit-indirect . "~/GitHub/agzam/org-edit-indirect.el")
+    ;; fork of MonadicSheep/emureader; its theme-tint branch adds theme colors
+    (emureader . "~/GitHub/agzam/emureader")
     ;; the hammerspoon config IS the spacehammer checkout (doom.d symlinked it)
     (spacehammer . "~/.hammerspoon"))
   "Alist of own packages -> local checkout preferred over the GitHub recipe.")
@@ -116,7 +118,8 @@
 (defvar local-dev-clone-overrides
   ;; :repo where the GitHub repo can't be derived from the checkout dir name,
   ;; :branch where a non-default branch is pinned.
-  '((spacehammer :repo "agzam/spacehammer"))  ; checkout is ~/.hammerspoon
+  '((spacehammer :repo "agzam/spacehammer")  ; checkout is ~/.hammerspoon
+    (emureader :branch "theme-tint"))
   "Per-package (NAME :repo R :branch B) clone overrides for `ensure-local-dev-checkouts'.")
 
 (defun local-checkout-recipe (recipe)
