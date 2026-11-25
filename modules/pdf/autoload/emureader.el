@@ -1,13 +1,13 @@
 ;;; modules/pdf/autoload/emureader.el -*- lexical-binding: t; -*-
 
 ;;;###autoload
-(defun keep-pdf-and-epub-viewers ()
-  "Drop emureader's PDF and EPUB `auto-mode-alist' entries.
-The package adds them on activation and again when it loads."
+(defun keep-pdf-viewer ()
+  "Drop emureader's PDF `auto-mode-alist' entry, so PDFs keep pdf-view's.
+The package adds it on activation and again when it loads."
   (setq auto-mode-alist
         (seq-remove (lambda (entry)
                       (and (eq (cdr entry) 'emureader-mode)
-                           (member (car entry) '("\\.pdf\\'" "\\.epub\\'"))))
+                           (equal (car entry) "\\.pdf\\'")))
                     auto-mode-alist)))
 
 ;;;###autoload
@@ -53,4 +53,4 @@ It reads saveplace-pdf-view's records as bookmarks and errors on them."
   "Ask about the size of FILENAME only if no document viewer opens it."
   (not (memq (let ((case-fold-search t))
                (assoc-default filename auto-mode-alist #'string-match-p))
-             '(emureader-mode pdf-view-mode nov-mode))))
+             '(emureader-mode pdf-view-mode))))

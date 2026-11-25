@@ -5,7 +5,7 @@
 ;; lsp-marksman require (parks with lsp),
 ;; menu-bar-item-set-clock-or-pomodoro (org-pomodoro long-tail).
 ;; translate-at-point-smart lives here now (below); it un-parked with the pdf
-;; module (nov's localleader T), its only consumer.
+;; module (pdf-text's localleader T), its only consumer.
 ;; NOTE Own packages (google-translate, occult, prisma, wiktionary-bro,
 ;; spacehammer) declare GitHub recipes; `local-checkout-recipe' (init.el)
 ;; redirects them to local checkouts on machines that have them -

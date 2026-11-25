@@ -40,9 +40,9 @@
                        want)))
     (list
      (emureader-view--case
-      "a PDF opens in emureader, an EPUB in nov"
-      (and (eq pdf 'emureader-mode) (eq epub 'nov-mode))
-      (format "pdf=%s epub=%s" pdf epub) "pdf=emureader-mode epub=nov-mode")
+      "a PDF and an EPUB open in emureader"
+      (and (eq pdf 'emureader-mode) (eq epub 'emureader-mode))
+      (format "pdf=%s epub=%s" pdf epub) "pdf=emureader-mode epub=emureader-mode")
      (emureader-view--case
       "pdf-view's keys win over evil-collection's in emureader"
       (equal keys want)

@@ -19,8 +19,7 @@
 ;; - calibredb dropped (unused).
 ;; - hide-mode-line added explicitly (Doom pulled it in via :ui; the lab had
 ;;   no consumer until now) for the annotation-list mode-line.
-;; - nov's `jinx-mode-off' -> `jinx-mode-off-h' (writing-module rename);
-;;   `translate-at-point-smart' un-parked into the writing module.
+;; - `translate-at-point-smart' un-parked into the writing module.
 ;; - `org-noter-anchor-to-current-page+' -> `-page' (plus-affix sweep).
 ;; - Doom's `SPC n e' org-noter row is pruned here (its
 ;;   (modulep! :lang org +noter) guard is false - org is a :custom module),
@@ -168,51 +167,9 @@
                #'ignore))
       (apply orig-fn args))))
 
-(use-package nov
-  :defer t
-  :mode ("\\.epub\\'" . nov-mode)
-  :config
-  ;; doom.d set nov-text-width to 100 then clobbered it with t in the same
-  ;; setopt (rot); t (fill the window, paired with visual-line-mode) was the
-  ;; effective value, kept.
-  (setopt nov-variable-pitch nil
-          nov-text-width t)
-  (add-hook! 'nov-mode-hook
-    #'jinx-mode-off-h
-    #'visual-line-mode
-    (defun nov-mode--keys-h ()
-      (map! :map nov-mode-map
-            :n "q" #'nov-back-or-quit
-            "l" #'evil-forward-char
-            "v" #'evil-visual-char
-            "V" #'evil-visual-line
-            "n" #'evil-ex-search-next
-            :n "t" nil
-            "g" nil
-            "SPC" nil
-            :n "i" nil
-            "DEL" nil
-            [remap text-scale-increase] #'nov-text-scale-increase
-            [remap text-scale-decrease] #'nov-text-scale-decrease
-            :n "]]" #'forward-paragraph
-            :n "[[" #'backward-paragraph
-            (:localleader
-             "t" #'google-translate-posframe-at-point
-             "T" #'translate-at-point-smart
-             "e" #'toggle-emureader))
-      (map! :map nov-button-map
-            "l" #'evil-forward-char
-            "v" #'evil-visual-char
-            "V" #'evil-visual-line
-            "n" #'evil-ex-search-next
-            "g" nil
-            "SPC" nil
-            :n "i" nil
-            "DEL" nil))))
-
 ;; emureader: MuPDF through a dynamic module, which `emureader-build'
-;; compiles on first open.  It takes over PDFs from pdf-view, nov keeps
-;; EPUBs, and `toggle-emureader' switches either way.  The fork's
+;; compiles on first open.  It opens EPUBs and takes over PDFs from
+;; pdf-view, which `toggle-emureader' switches back to.  The fork's
 ;; theme-tint branch adds `emureader-themed-mode'.
 (use-package emureader
   :ensure (emureader :host github :repo "agzam/emureader" :branch "theme-tint"
@@ -220,12 +177,12 @@
   :defer t
   :hook (emureader-mode . emureader-themed-mode)
   :init
-  (keep-pdf-and-epub-viewers)
+  (keep-pdf-viewer)
   (add-to-list 'major-mode-remap-alist '(pdf-view-mode . emureader-mode))
   (advice-add 'emureader--saveplace-find-file
               :before-while #'emureader-saveplace-skip-foreign-a)
   :config
-  (keep-pdf-and-epub-viewers)
+  (keep-pdf-viewer)
   (setq emureader-default-fit #'fit-emureader-page)
   ;; An evil-collection without its emureader module never runs the hook.
   (bind-emureader-keys-h 'emureader))

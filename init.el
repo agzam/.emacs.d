@@ -240,7 +240,7 @@ multimedia sits behind web-browsing by affinity, not by need: its
 `media-transient' drives navegosa's media lane at runtime, and both
 sides are deferred, so the position is free.
 pdf trails org and writing: org-noter defers on org, and the
-nov (epub) config rides writing's translate + jinx autoloads.
+pdf-text config rides writing's translate + jinx autoloads.
 papers trails pdf: its citar notes source queries the vulpea db org owns,
 and it opens PDFs through pdf-view.")
 

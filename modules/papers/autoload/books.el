@@ -29,7 +29,7 @@
 (defconst book-document-extensions '("pdf" "epub" "mobi" "fb2" "djvu")
   "Document extensions that count as a work, in order of preference.
 PDF first because pdf-tools restores the reading position and org-noter
-anchors to it; EPUB next, which nov opens.")
+anchors to it; EPUB next, which emureader opens.")
 
 (defconst book-walk-depth 4
   "How many directory levels below `books-directory' hold works.

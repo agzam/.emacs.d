@@ -13,17 +13,14 @@
 
 (load-module-file "modules/pdf/autoload/emureader.el")
 
-(describe "keep-pdf-and-epub-viewers"
-  (it "drops emureader's PDF and EPUB entries and keeps the rest"
+(describe "keep-pdf-viewer"
+  (it "drops emureader's PDF entry and keeps the rest"
     (let ((auto-mode-alist '(("\\.pdf\\'" . emureader-mode)
                              ("\\.epub\\'" . emureader-mode)
-                             ("\\.cbz\\'" . emureader-mode)
-                             ("\\.epub\\'" . nov-mode)
                              ("\\.pdf\\'" . pdf-view-mode))))
-      (keep-pdf-and-epub-viewers)
+      (keep-pdf-viewer)
       (expect auto-mode-alist
-              :to-equal '(("\\.cbz\\'" . emureader-mode)
-                          ("\\.epub\\'" . nov-mode)
+              :to-equal '(("\\.epub\\'" . emureader-mode)
                           ("\\.pdf\\'" . pdf-view-mode))))))
 
 (defun emureader-tests--toggle-from (mode)
