@@ -47,3 +47,10 @@ The package adds them on activation and again when it loads."
 It reads saveplace-pdf-view's records as bookmarks and errors on them."
   (let ((place (cdr (assoc buffer-file-name save-place-alist))))
     (and (vectorp place) (stringp (car-safe (aref place 0))))))
+
+;;;###autoload
+(defun skip-large-file-prompt-for-documents-a (_size _op-type filename &rest _)
+  "Ask about the size of FILENAME only if no document viewer opens it."
+  (not (memq (let ((case-fold-search t))
+               (assoc-default filename auto-mode-alist #'string-match-p))
+             '(emureader-mode pdf-view-mode nov-mode))))

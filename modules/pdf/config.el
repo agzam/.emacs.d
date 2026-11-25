@@ -33,6 +33,10 @@
 ;;   model.  Only the reading-view wiring below stays config-local.
 ;;; Code:
 
+;; Viewers never display the file's bytes, so its size is no reason to ask.
+(advice-add 'abort-if-file-too-large :before-while
+            #'skip-large-file-prompt-for-documents-a)
+
 (use-package pdf-tools
   :ensure (pdf-tools :host github :repo "vedang/pdf-tools"
                      :files (:defaults "README" ("build" "Makefile") ("build" "server")))

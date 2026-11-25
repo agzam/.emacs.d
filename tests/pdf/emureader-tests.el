@@ -117,4 +117,11 @@
           (expect (emureader-saveplace-skip-foreign-a) :to-be nil))
         (setq buffer-file-name nil)))))
 
+(describe "skip-large-file-prompt-for-documents-a"
+  (it "asks only about files no document viewer opens"
+    (let ((auto-mode-alist '(("\\.pdf\\'" . pdf-view-mode)
+                             ("\\.txt\\'" . text-mode))))
+      (expect (skip-large-file-prompt-for-documents-a 1 "open" "SCAN.PDF") :to-be nil)
+      (expect (skip-large-file-prompt-for-documents-a 1 "open" "notes.txt") :to-be t))))
+
 ;;; emureader-tests.el ends here
