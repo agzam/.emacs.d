@@ -340,7 +340,21 @@
           (goto-char (point-max))
           (activate-mark)
           (translate--translate)
-          (expect sent :to-equal "region text"))))))
+          (expect sent :to-equal "region text")))))
+
+  (it "translates the whole page in emureader, unless text was typed"
+    (cl-letf (((symbol-function 'google-translate-buffer)
+               (lambda (&rest _) (setq sent (buffer-string))))
+              ((symbol-function 'current-emureader-page-text)
+               (lambda () "Eran cinco.\n\nY su líder.")))
+      (with-temp-buffer
+        (setq major-mode 'emureader-mode)
+        (let ((translate--field-text nil))
+          (translate--translate)
+          (expect sent :to-equal "Eran cinco.\n\nY su líder."))
+        (let ((translate--field-text "typed"))
+          (translate--translate)
+          (expect sent :to-equal "typed"))))))
 
 (describe "translate-at-point-smart"
   (it "translates the grabbed text via the posframe helper"

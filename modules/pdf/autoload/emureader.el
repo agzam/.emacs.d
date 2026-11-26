@@ -42,6 +42,23 @@ The package adds it on activation and again when it loads."
                      emureader-current-doc-pagecount))))
 
 ;;;###autoload
+(defun current-emureader-page-text ()
+  "Return the text of the page emureader shows, one line per paragraph.
+emureader draws pages as images, so mutool reads the text."
+  (let ((file buffer-file-name)
+        (page (emureader-current-doc-pagenumber))
+        (coding-system-for-read 'utf-8))
+    (with-temp-buffer
+      (unless (zerop (call-process "mutool" nil '(t nil) nil
+                                   "draw" "-q" "-F" "txt" "-O" "dehyphenate"
+                                   "-o" "-" file (number-to-string page)))
+        (error "Could not read page %d of %s with mutool" page file))
+      (let ((paragraphs (split-string (buffer-string) "\n[ \t\f]*\n" t "[ \t\n\f]+")))
+        (mapconcat (lambda (paragraph)
+                     (string-join (split-string paragraph "[ \t]*\n[ \t]*" t) " "))
+                   paragraphs "\n\n")))))
+
+;;;###autoload
 (defun emureader-saveplace-skip-foreign-a (&rest _)
   "Let emureader's save-place reader see only records it wrote.
 It reads saveplace-pdf-view's records as bookmarks and errors on them."

@@ -301,10 +301,13 @@ Transient suspends the menu's keys during the recursive edit."
           (append unread-command-events (listify-key-sequence (kbd "RET"))))))
 
 (defun translate--translate ()
-  "Translate the typed text, else the region, else the word at point."
+  "Translate the typed text, else the region, else the word at point.
+emureader has no text at point, so there the whole page goes."
   (interactive)
   (let ((content (cond (translate--field-text
                         translate--field-text)
+                       ((derived-mode-p 'emureader-mode)
+                        (current-emureader-page-text))
                        ((use-region-p)
                         (buffer-substring
                          (region-beginning)

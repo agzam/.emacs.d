@@ -87,6 +87,39 @@
                  (lambda (&rest _) 5)))
         (expect (show-emureader-progress) :to-equal "at 50.0%")))))
 
+(defun emureader-tests--page-text (output status)
+  "Call `current-emureader-page-text' on page 7 while mutool prints OUTPUT.
+mutool exits with STATUS; return the text and mutool's arguments."
+  (let (args)
+    (with-temp-buffer
+      (setq buffer-file-name "/tmp/book.epub")
+      (unwind-protect
+          (cl-letf (((symbol-function 'emureader-current-doc-pagenumber)
+                     (lambda (&rest _) 7))
+                    ((symbol-function 'call-process)
+                     (lambda (_program _infile _destination _display &rest process-args)
+                       (setq args process-args)
+                       (insert output)
+                       status)))
+            (list :text (current-emureader-page-text) :args args))
+        (setq buffer-file-name nil)))))
+
+(describe "current-emureader-page-text"
+  (it "reads the shown page dehyphenated, each paragraph on one line"
+    (let ((got (emureader-tests--page-text
+                (concat "I\n\n"
+                        "Llegaron al canal \n  por la brecha\nque sube.\n \n"
+                        "Eran cinco.\n\n\f\n")
+                0)))
+      (expect (plist-get got :args)
+              :to-equal '("draw" "-q" "-F" "txt" "-O" "dehyphenate"
+                          "-o" "-" "/tmp/book.epub" "7"))
+      (expect (plist-get got :text)
+              :to-equal "I\n\nLlegaron al canal por la brecha que sube.\n\nEran cinco.")))
+
+  (it "signals when mutool cannot read the page"
+    (expect (emureader-tests--page-text "" 1) :to-throw 'error)))
+
 (describe "emureader-saveplace-skip-foreign-a"
   (let ((file "/tmp/book.pdf"))
     (it "lets emureader read its own record"

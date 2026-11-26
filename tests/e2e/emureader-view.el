@@ -107,7 +107,10 @@
            (red (expand-file-name "red.pdf" dir))
            results)
       ;; the sibling pdf-text scenario owns the fixture writer
-      (pdf-text-view--make-pdf file '(("one") ("two") ("three")))
+      (pdf-text-view--make-pdf
+       file '(("one")
+              ("The second page wraps" "its paragraph, with a hyphen-" "ated word.")
+              ("three")))
       (cl-letf (((symbol-function 'pdf-text-view--content-stream)
                  (lambda (_) "1 0 0 rg 0 0 612 396 re f")))
         (pdf-text-view--make-pdf red '(("red"))))
@@ -160,6 +163,24 @@
                      (format "scale %s -> %s -> %s" fitted zoomed
                              (emureader-current-doc-scale-value))
                      "larger after zk, the same fit after P" err)
+                    results))
+            (let ((want '("auto" "en" "The second page wraps its paragraph, with a hyphenated word."))
+                  sent err)
+              ;; loaded before the stub, which their later load would replace
+              (require 'google-translate)
+              (autoload-do-load (symbol-function 'translate-transient) 'translate-transient)
+              (cl-letf (((symbol-function 'google-translate-translate)
+                         (lambda (src tgt text &rest _) (setq sent (list src tgt text)))))
+                (let ((google-translate-default-source-language "auto")
+                      (google-translate-default-target-language "en"))
+                  (condition-case e (execute-kbd-macro (kbd "SPC x t t RET"))
+                    (error (setq err e)))))
+              (when (bound-and-true-p transient--prefix)
+                (ignore-errors (transient--emergency-exit)))
+              (push (emureader-view--case
+                     "SPC x t t RET translates the whole page, a line per paragraph"
+                     (equal sent want)
+                     (format "%S" sent) (format "%S" want) err)
                     results))
             (let (err)
               (condition-case e
