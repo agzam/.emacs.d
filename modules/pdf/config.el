@@ -220,6 +220,7 @@ would win over a plain `map!'."
             (:localleader
              "t" #'emureader-themed-mode
              "e" #'toggle-emureader
+             "x" #'pdf-view-as-text
              "," #'show-emureader-progress
              (:prefix ("f" . "fit")
                       "h" #'emureader-fit-to-height
@@ -231,7 +232,8 @@ would win over a plain `map!'."
                       "0" #'emureader-reset-size))))))
 
 ;; pdf-text: reflowed companion view, org-derived so the PDF outline folds.
-;; Autoloads `pdf-view-as-text', which the pdf-view localleader block binds.
+;; Autoloads `pdf-view-as-text', which the pdf-view and emureader localleader
+;; blocks bind.
 (use-package pdf-text
   :ensure (pdf-text :host github :repo "agzam/pdf-text")
   :defer t)

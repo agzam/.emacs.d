@@ -8,7 +8,7 @@
 ;; binding that outranks evil-org's, and org folding driven by TAB and
 ;; C-c / with the full config's org hooks live.
 ;;
-;; Two legs.  The companion leg runs in any frame: the buffer is built
+;; Three legs.  The companion leg runs in any frame: the buffer is built
 ;; exactly the way pdf-view-as-text builds it (mode, then insert-pages),
 ;; only the epdfinfo source is canned.  The pdf-view leg needs a
 ;; window-system frame - pdf-view-mode refuses tty frames outright - and
@@ -17,7 +17,8 @@
 ;; round trip against generated fixture PDFs: themed-mode blending on
 ;; open, localleader x / RET / q, companion reuse and mtime staleness,
 ;; pdf-text-sync-mode in both directions, and the no-text-layer refusal
-;; on a scan-like fixture.
+;; on a scan-like fixture.  The emureader leg drives the same reading
+;; flow through emureader, where its module is built.
 
 (require 'cl-lib)
 
@@ -526,9 +527,163 @@ single loud skip entry."
         (unless borrowed (delete-directory dir t)))
       (nreverse results))))
 
+(defun pdf-text-view--emureader-skip (why)
+  "The emureader leg's loud skip entry, saying WHY."
+  (pdf-text-view--case (format "emureader flow SKIPPED: %s" why) t "skip" "skip"))
+
+(defun pdf-text-view--keys (keys)
+  "Press KEYS, returning the error they signal or nil."
+  (condition-case e (progn (execute-kbd-macro (kbd keys)) nil)
+    (error e)))
+
+(defun pdf-text-view-emureader-flow-cases ()
+  "The reading view over emureader, round trip on a generated fixture PDF.
+Needs a window-system frame, emureader's built module and the remap
+that opens PDFs in emureader; elsewhere returns a single loud skip.
+emureader's page turns reach the companion from a timer, hence the waits."
+  (cond
+   ((not (display-graphic-p))
+    (list (pdf-text-view--emureader-skip "tty frame")))
+   ((not (and (require 'emureader nil t) (emureader--module-built-p)))
+    (list (pdf-text-view--emureader-skip "module not built (M-x emureader-build)")))
+   (t
+    (let* ((dir (file-name-as-directory (make-temp-file "pdf-text-emureader" t)))
+           (fixture (expand-file-name "pdf-text-fixture.pdf" dir))
+           results pdf-buf text-buf)
+      (pdf-text-view--make-pdf fixture pdf-text-view--fixture-pages)
+      (unwind-protect
+          (progn
+            (find-file fixture)
+            (delete-other-windows)
+            (setq pdf-buf (current-buffer))
+            (if (not (eq major-mode 'emureader-mode))
+                (push (pdf-text-view--emureader-skip
+                       (format "the PDF opened in %s" major-mode))
+                      results)
+              (redisplay t)
+              (discard-input)
+              (emureader-goto-page 2)
+              (let ((err (pdf-text-view--keys (concat doom-localleader-key " x"))))
+                (setq text-buf (current-buffer))
+                (push (pdf-text-view--case
+                       "localleader x in emureader opens pdf-text on the viewed page"
+                       (and (eq major-mode 'pdf-text-mode)
+                            (eq pdf-text--pdf-buffer pdf-buf)
+                            (eql 2 (pdf-text-page-at-point)))
+                       (format "mode=%s source=%s page=%s" major-mode
+                               (bound-and-true-p pdf-text--pdf-buffer)
+                               (ignore-errors (pdf-text-page-at-point)))
+                       (format "mode=pdf-text-mode source=%s page=2" pdf-buf)
+                       err)
+                      results))
+              (when (eq (buffer-local-value 'major-mode text-buf) 'pdf-text-mode)
+                (with-current-buffer text-buf
+                  (push (pdf-text-view--case
+                         "MuPDF text reflowed: wrap-hyphenated word joined"
+                         (save-excursion
+                           (goto-char (point-min))
+                           (search-forward "modern information retrieval" nil t))
+                         (buffer-substring-no-properties
+                          (point-min) (min 60 (point-max)))
+                         "text containing \"modern information retrieval\"")
+                        results)
+                  (goto-char (pdf-text--page-start 3)))
+                (let ((err (pdf-text-view--keys "RET")))
+                  (accept-process-output nil 0.05)
+                  (push (pdf-text-view--case
+                         "RET turns emureader to the page at point"
+                         (and (eq (current-buffer) pdf-buf)
+                              (eql 3 (emureader-current-doc-pagenumber)))
+                         (format "buffer=%s page=%s" (buffer-name)
+                                 (ignore-errors (emureader-current-doc-pagenumber)))
+                         (format "buffer=%s page=3" (buffer-name pdf-buf))
+                         err)
+                        results))
+                (select-window (get-buffer-window text-buf))
+                (let ((err (pdf-text-view--keys "gg")))
+                  (accept-process-output nil 0.05)
+                  (push (pdf-text-view--case
+                         "sync: point on page 1 turns the emureader window there"
+                         (eql 1 (emureader-current-doc-pagenumber
+                                 (get-buffer-window pdf-buf)))
+                         (format "pdf-page=%s"
+                                 (emureader-current-doc-pagenumber
+                                  (get-buffer-window pdf-buf)))
+                         "emureader on page 1"
+                         err)
+                        results))
+                (let (err)
+                  (condition-case e
+                      (with-selected-window (get-buffer-window pdf-buf)
+                        (emureader-goto-page 2))
+                    (error (setq err e)))
+                  (accept-process-output nil 0.05)
+                  (push (pdf-text-view--case
+                         "sync: turning emureader's page moves point in the companion"
+                         (eql 2 (with-current-buffer text-buf
+                                  (pdf-text-page-at-point)))
+                         (format "text-page=%s"
+                                 (with-current-buffer text-buf
+                                   (pdf-text-page-at-point)))
+                         "companion point on page 2"
+                         err)
+                        results))
+                ;; the idle timer that runs the paint never fires inside a
+                ;; scenario, so the refresh it would call runs directly
+                (with-current-buffer text-buf (pdf-text-follow--refresh))
+                (pcase-let ((`(,overlay ,original ,painted)
+                             (buffer-local-value 'pdf-text-follow--emureader text-buf)))
+                  (push (pdf-text-view--case
+                         "follow paints the sentence into emureader's page image"
+                         (and overlay
+                              (eq (overlay-get overlay 'display) painted)
+                              (not (equal (plist-get (cdr painted) :data)
+                                          (plist-get (cdr original) :data))))
+                         (format "follow=%s painted=%s"
+                                 (buffer-local-value 'pdf-text-follow-mode text-buf)
+                                 (and overlay (eq (overlay-get overlay 'display)
+                                                  painted)))
+                         "follow=t painted=t")
+                        results)
+                  (let ((err (pdf-text-view--keys (concat doom-localleader-key " f"))))
+                    (push (pdf-text-view--case
+                           "localleader f puts emureader's own page image back"
+                           (and overlay
+                                (not (buffer-local-value 'pdf-text-follow-mode text-buf))
+                                (eq (overlay-get overlay 'display) original))
+                           (format "follow=%s original=%s"
+                                   (buffer-local-value 'pdf-text-follow-mode text-buf)
+                                   (and overlay (eq (overlay-get overlay 'display)
+                                                    original)))
+                           "follow=nil original=t"
+                           err)
+                          results)))
+                (let ((kill-buffer-query-functions nil))
+                  (kill-buffer text-buf))
+                (push (pdf-text-view--case
+                       "killing the companion takes the emureader buffer with it"
+                       (and (not (buffer-live-p text-buf))
+                            (not (buffer-live-p pdf-buf)))
+                       (format "text-live=%s pdf-live=%s"
+                               (buffer-live-p text-buf) (buffer-live-p pdf-buf))
+                       "both halves gone")
+                      results))))
+        (dolist (b (list text-buf pdf-buf))
+          (when (buffer-live-p b)
+            (let ((kill-buffer-query-functions nil))
+              (with-current-buffer b (set-buffer-modified-p nil))
+              (kill-buffer b))))
+        (let ((fixtures (list fixture (file-truename fixture))))
+          (setq save-place-alist
+                (seq-remove (lambda (entry) (member (car entry) fixtures))
+                            save-place-alist)))
+        (delete-directory dir t))
+      (nreverse results)))))
+
 (defun pdf-text-view-e2e ()
-  "Companion-buffer leg everywhere; pdf-view leg where a GUI frame allows."
+  "Companion-buffer leg everywhere; pdf-view and emureader legs in GUI frames."
   (append (pdf-text-view-companion-cases)
-          (pdf-text-view-pdf-flow-cases)))
+          (pdf-text-view-pdf-flow-cases)
+          (pdf-text-view-emureader-flow-cases)))
 
 (add-to-list 'e2e-scenarios #'pdf-text-view-e2e)
