@@ -105,6 +105,7 @@
     (wiktionary-bro . "~/GitHub/agzam/wiktionary-bro.el")
     (slacko . "~/GitHub/agzam/slacko.el")
     (transcripto . "~/GitHub/agzam/transcripto.el")
+    (tutor . "~/GitHub/agzam/tutor.el")
     (go-jira . "~/GitHub/agzam/go-jira.el")
     (khalendario . "~/GitHub/agzam/khalendario.el")
     (clipimg . "~/GitHub/agzam/clipimg.el")

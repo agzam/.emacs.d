@@ -174,6 +174,14 @@
       :n "o"  #'ticket-tldr-open-spec
       :n "q"  #'quit-window)
 
+;; Lessons on a selected text, in the language being learned.
+(use-package tutor
+  :ensure (tutor :host github :repo "agzam/tutor.el")
+  :defer t
+  :config
+  ;; evil's normal state owns q; the lesson buffer takes it back
+  (map! :map tutor-mode-map :n "q" #'quit-window))
+
 ;; Karthik's experimental overlay UI for gptel: prompt in a small window,
 ;; response in an overlay at point, chat session routed per project in the
 ;; background.

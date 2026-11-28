@@ -128,6 +128,37 @@
                           :n "o"  #'ticket-tldr-open-spec
                           :n "q"  #'quit-window)))))
 
+(describe "tutor in ai/config.el"
+  :var (form)
+  (before-each
+    (setq form (seq-find (lambda (f)
+                           (and (eq (car-safe f) 'use-package)
+                                (eq (cadr f) 'tutor)))
+                         ai-tests--forms)))
+
+  (it "comes from its GitHub repo and loads on demand"
+    (expect (plist-get (cddr form) :ensure)
+            :to-equal '(tutor :host github :repo "agzam/tutor.el"))
+    (expect (plist-get (cddr form) :defer) :to-be t))
+
+  ;; a private repo: elpaca's own https clone fails where no checkout exists
+  (it "builds from the local checkout that init.el names"
+    (let ((packages (with-temp-buffer
+                      (insert-file-contents
+                       (expand-file-name "init.el" test-config-root))
+                      (goto-char (point-min))
+                      (search-forward "(defvar local-dev-packages")
+                      (goto-char (match-beginning 0))
+                      (ai-tests--unquote (nth 2 (read (current-buffer)))))))
+      (expect (alist-get 'tutor packages)
+              :to-equal "~/GitHub/agzam/tutor.el")))
+
+  ;; evil's normal state owns q; the lesson takes it back in its own map
+  (it "binds q in the lesson buffer's normal state"
+    (expect (car (map-form-groups (use-package-body-forms (cddr form) :config)
+                                  'tutor-mode-map))
+            :to-equal '(:n "q" #'quit-window))))
+
 (describe "eca chat localleader in ai/config.el"
   (let ((keys (lambda ()
                 (map-form-key-pairs
